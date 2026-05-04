@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Query
 import time
 import tempfile
 import os
@@ -10,7 +10,12 @@ from app.schemas import ConvertResponse, ConvertMeta
 router = APIRouter()
 
 @router.post("/convert", response_model=ConvertResponse)
-async def convert_endpoint(file: UploadFile = File(...)):
+@router.post("/v1/convert", response_model=ConvertResponse)
+async def convert_endpoint(
+    file: UploadFile = File(...),
+    engine_type: str = Query("auto", description="Engine type: auto, tesseract, or easyocr")
+):
+    # This function handles both /convert and /v1/convert
     start_time = time.time()
     
     # Save the uploaded file temporarily
@@ -21,7 +26,7 @@ async def convert_endpoint(file: UploadFile = File(...)):
         with os.fdopen(fd, 'wb') as f:
             shutil.copyfileobj(file.file, f)
             
-        markdown_text, meta_info = await convert_service.convert(temp_path)
+        markdown_text, meta_info = await convert_service.convert(temp_path, engine_type=engine_type)
         
         elapsed = int((time.time() - start_time) * 1000)
         meta_info["elapsed_ms"] = elapsed

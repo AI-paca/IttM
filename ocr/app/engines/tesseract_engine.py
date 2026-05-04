@@ -176,64 +176,28 @@ class TesseractEngine(OcrEngine):
     def recognize_with_psm(self, image, psm: int = 6, mode: str = "text_mode") -> dict:
         """
         Runs OCR with specific PSM mode and returns TSV data.
-        
-        PSM modes:
-        - 4: Single column of text of variable sizes
-        - 6: Single uniform block of text
-        - 7: Single text line
-        - 13: Raw line. Treats the image as a single text line
+        Optimized for speed - no preprocessing, direct OCR.
         """
         try:
             import pytesseract
             
-            # Preprocess based on mode
-            if mode == "receipt":
-                processed_img = self._preprocess_for_receipt(image)
-            elif mode == "card":
-                processed_img = self._preprocess_for_card(image)
-            else:
-                # Standard preprocessing
-                gray = image.convert("L")
-                from PIL import ImageOps, ImageFilter
-                gray = ImageOps.autocontrast(gray)
-                gray = gray.filter(ImageFilter.MedianFilter(size=3))
-                processed_img = gray
-
-            # Configure Tesseract
-            base_config = f"--oem 3 --psm {psm}"
-            base_config += " -c preserve_interword_spaces=1"
+            # No preprocessing for maximum speed
+            # Tesseract handles image processing internally
             
-            # Disable dictionaries for better character recognition
-            base_config += " -c load_system_dawg=0"
-            base_config += " -c load_freq_dawg=0"
-            base_config += " -c load_punc_dawg=0"
-            base_config += " -c load_number_dawg=0"
-
-            if mode == "receipt" or mode == "card":
-                base_config += f" -c tessedit_char_whitelist={self.RECEIPT_WHITELIST}"
-
-            # Language selection
-            if mode == "receipt":
-                langs_to_try = ['eng+rus', 'rus+eng', 'rus', 'eng']
-            else:
-                langs_to_try = ['eng+rus', 'eng', 'rus']
-
-            # Run OCR with language fallback
-            for lang in langs_to_try:
-                try:
-                    data = pytesseract.image_to_data(
-                        processed_img, lang=lang, config=base_config,
-                        output_type=pytesseract.Output.DICT
-                    )
-                    return data
-                except Exception as e:
-                    err_str = str(e)
-                    if any(err in err_str for err in ['Failed loading language', 'TesseractNotFoundError', 'TesseractError']):
-                        continue
-                    else:
-                        raise e
+            # Minimal config for speed
+            # OEM 1 = LSTM only (faster than legacy)
+            # PSM 6 = Single uniform block (good default)
+            config = f"--oem 1 --psm {psm}"
             
-            return {}
+            # Run OCR with eng+rus (both languages in one pass)
+            data = pytesseract.image_to_data(
+                image,  # Pass original image directly
+                lang='eng+rus',
+                config=config,
+                output_type=pytesseract.Output.DICT
+            )
+            return data
+            
         except Exception as e:
             print(f"Error in recognize_with_psm: {e}")
             return {}

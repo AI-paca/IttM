@@ -79,10 +79,17 @@ async function execute_conversion_specific(file, strategy) {
             const { run_browser_ocr_low_memory } = await import('./browser-ocr.js');
             const result = await run_browser_ocr_low_memory(file, show_progress);
             render_result(result.markdown, result.meta);
+        } else if (strategy === 'local_tesseract' || strategy === 'local_easyocr') {
+            // Local Python backend with specific engine
+            // Python backend has /v1 prefix for convert endpoint
+            let backendUrl = 'http://127.0.0.1:8000/v1/convert';
+            let engineType = strategy === 'local_tesseract' ? 'tesseract' : 'easyocr';
+            await run_backend_ocr_with_engine(file, backendUrl, engineType);
         } else {
-            let backendUrl = '/api/convert'; // Gateway format
-            if (strategy === 'local_api') {
-                backendUrl = 'http://127.0.0.1:8000/v1/convert';
+            // Gateway API or auto
+            let backendUrl = '/api/convert';
+            if (strategy === 'gateway') {
+                backendUrl = '/api/convert';
             }
             await run_backend_ocr(file, backendUrl);
         }
@@ -93,6 +100,28 @@ async function execute_conversion_specific(file, strategy) {
         btnSubmit.textContent = 'Start Intelligent Extraction';
         hide_progress();
     }
+}
+
+async function run_backend_ocr_with_engine(file, url, engineType) {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('engine_type', engineType);
+    
+    show_progress(`Processing with ${engineType}...`, 50);
+
+    const response = await fetch(url, {
+        method: 'POST',
+        body: formData
+    });
+    
+    if (!response.ok) {
+        throw new Error(`Server error: ${response.status} ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    if (data.error) throw new Error(data.error);
+
+    render_result(data.markdown, data.meta);
 }
 
 async function execute_conversion_with_fallback(file) {

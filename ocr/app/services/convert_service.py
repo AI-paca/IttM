@@ -4,30 +4,31 @@ from PIL import Image
 from app.chunking.vertical import split_vertical, split_by_blank_bands
 from app.chunking.dedupe import dedupe_chunks
 from app.formatting.markdown_formatter import MarkdownFormatter
-from app.engines.tesseract_engine import TesseractEngine
+from app.engines.auto_engine import AutoEngine
 
 
-def _format_card_to_markdown(card_result: dict, card_index: int) -> str:
+def _format_card_to_markdown(card_text: str, card_index: int) -> str:
     """
     Formats a single card OCR result to Markdown.
     """
     lines = []
     lines.append(f"### Товар {card_index + 1}")
     
-    if card_result.get("price"):
-        lines.append(f"**Цена:** {card_result['price']}")
-    
-    if card_result.get("quantity"):
-        lines.append(f"**Количество:** {card_result['quantity']}")
-    
-    if card_result.get("full_text"):
+    if card_text:
         lines.append("\n**Описание:**")
-        lines.append(card_result['full_text'])
+        lines.append(card_text)
     
     return "\n".join(lines)
 
 
-async def convert(path: Path) -> Tuple[str, dict]:
+async def convert(path: Path, engine_type: str = "auto") -> Tuple[str, dict]:
+    """
+    Convert document to markdown using specified OCR engine.
+    
+    Args:
+        path: Path to the document (image or PDF)
+        engine_type: 'auto' (Tesseract first), 'tesseract' (core), or 'easyocr' (high-quality)
+    """
     # 1. Load document (image or pdf)
     images = []
     if path.suffix.lower() == ".pdf":
@@ -46,9 +47,18 @@ async def convert(path: Path) -> Tuple[str, dict]:
     if not images:
         raise ValueError("Could not load image or parsed zero pages.")
 
+    # Initialize engine based on type
+    if engine_type == "tesseract":
+        from app.engines.tesseract_engine import TesseractEngine
+        engine = TesseractEngine()
+    elif engine_type == "easyocr":
+        from app.engines.easyocr_engine import EasyOcrEngine
+        engine = EasyOcrEngine()
+    else:  # auto
+        engine = AutoEngine(prefer_tesseract=True)
+    
     # We will simply process all pages and merge
     all_markdown_parts = []
-    engine = TesseractEngine()
     total_chunks = 0
     cards_found = 0
     
@@ -67,11 +77,11 @@ async def convert(path: Path) -> Tuple[str, dict]:
                 if card_img.size[1] < 50:
                     continue
                 
-                # Use card-aware OCR
-                card_result = engine.recognize_card(card_img)
+                # Use OCR to recognize card
+                card_text = engine.recognize(card_img, mode="text_mode")
                 
                 # Format this card as Markdown
-                card_md = _format_card_to_markdown(card_result, i)
+                card_md = _format_card_to_markdown(card_text, i)
                 page_parts.append(card_md)
             
             all_markdown_parts.append("\n\n".join(page_parts))
@@ -84,14 +94,9 @@ async def convert(path: Path) -> Tuple[str, dict]:
             # Recognize each chunk
             page_texts = []
             for chunk in chunks:
-                # Determine if chunk looks like a card (aspect ratio check)
-                w, h = chunk.size
-                if h > w:  # Tall chunk - likely a card
-                    card_result = engine.recognize_card(chunk)
-                    page_texts.append(card_result.get("full_text", ""))
-                else:
-                    # Regular text block
-                    page_texts.append(engine.recognize(chunk, mode="text_mode", psm=6))
+                # Recognize text using OCR
+                text = engine.recognize(chunk, mode="text_mode")
+                page_texts.append(text)
             
             # Dedupe overlaps
             clean_texts = dedupe_chunks(page_texts)

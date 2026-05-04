@@ -7,15 +7,16 @@ def create_app() -> FastAPI:
     
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"], 
+        allow_origins=["*"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
     
-    app.include_router(convert.router, prefix="/v1")
+    # No prefix - routes are defined with full paths in routers
+    app.include_router(convert.router)
     app.include_router(health.router)
-    app.include_router(probe.router, prefix="/v1")
+    app.include_router(probe.router)
     
     return app
 

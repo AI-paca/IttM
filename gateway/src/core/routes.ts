@@ -7,7 +7,8 @@ export async function route(request: Request, env: Env): Promise<Response> {
   const path = url.pathname;
   const method = request.method;
 
-  if (path === '/api/convert') {
+  // Support both /convert and /api/convert for compatibility
+  if (path === '/api/convert' || path === '/convert') {
     if (method !== 'POST') return method_not_allowed();
     return await OcrClient.convert(request, env);
   }

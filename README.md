@@ -1,16 +1,6 @@
 
 Веб-приложение для конвертации длинных скриншотов экрана в Markdown
 
-## Архитектура
-- **MVP Backend**: Универсальный шлюз (Node/Bun/Python) из папки `gateway` и Python FastAPI OCR (Tesseract).
-- **Frontend**: Vanilla JS интерфейс для загрузки и распознавания.
-
-## Требования
-- python3, pip, venv
-- tesseract-ocr (и установленные языки: rus, eng, chi_sim)
-- poppler-utils / pdf2image (для PDF)
-- nodejs / npm
-
 ## Запуск
 
 ```bash
@@ -23,9 +13,54 @@ bash run.sh
 - **Auto**: Пытается вызвать Gateway API, при ошибке - Local Python, при ошибке - Browser Engine.
 - **Gateway API**: Полный цикл через адаптер Node.js или Bun.
 - **Local Python**: Прямой запрос к локальному Python-бекенду.
-- **Browser Engine**: Статический режим через WebAssembly и Canvas с Low-Memory чанками.
+- **Browser Engine**: Сssтатический режим через WebAssembly и Canvas с Low-Memory чанками.
 
----
+
+## Архитектура проекта
+
+- **MVP Backend**: Универсальный шлюз (Node/Bun/Python) из папки `gateway` и Python FastAPI OCR (Tesseract).
+- **Frontend**: Vanilla JS интерфейс для загрузки и распознавания.
+
+```mermaid
+graph TD
+    Client["Web Client (Browser)"]
+    
+    subgraph Frontend ["Vanilla Frontend"]
+        UI["app.js"]
+        BrowserEngine["Browser OCR / Tesseract.js"]
+    end
+    
+    subgraph Gateway ["Gateway API (Node/Bun)"]
+        Adapter["Node / Bun Adapter"]
+        Core["core/handle.ts + routes.ts"]
+        OCRClient["ocrClient.ts (convert, health, probe, capabilities)"]
+    end
+    
+    subgraph Backend ["Python FastAPI OCR"]
+        FastAPI["app/main.py"]
+        ConvertRouter["Convert Router (v1/convert)"]
+        HealthRouter["Health Router (/health)"]
+        ProbeRouter["Probe Router (v1/probe)"]
+        Service["Convert Service (convert_service.py)"]
+        TesseractEngine["Tesseract Engine (active)"]
+        AvailableEngines["Other: EasyOCR, Auto, Stub"]
+    end
+    
+    Client -->|Static HTML JS| UI
+    UI -->|Static mode GitHub Pages| BrowserEngine
+    UI -->|Diagnostics Convert| Adapter
+    
+    Adapter --> Core
+    Core --> OCRClient
+    OCRClient -->|REST Proxy to /v1/*| FastAPI
+    
+    FastAPI --> ConvertRouter
+    FastAPI --> HealthRouter
+    FastAPI --> ProbeRouter
+    ConvertRouter --> Service
+    Service --> TesseractEngine
+    Service -.->|available alternatives| AvailableEngines
+```
 
 <details>
 <summary>Задания курса</summary>

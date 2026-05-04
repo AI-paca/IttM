@@ -15,9 +15,9 @@ export class OcrClient {
         duplex: 'half'
       });
     } catch (e: any) {
-      return new Response(JSON.stringify({ error: "Gateway to Python fetch error: " + e.message }), { 
-        status: 502, 
-        headers: { 'content-type': 'application/json' } 
+      return new Response(JSON.stringify({ error: "Gateway to Python fetch error: " + e.message }), {
+        status: 502,
+        headers: { 'content-type': 'application/json' }
       });
     }
   }

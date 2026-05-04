@@ -1,7 +1,66 @@
 
-Веб-приложение для конвертации длинных скриншотов экрана и PDF в Markdown.
+Веб-приложение для конвертации длинных скриншотов экрана в Markdown
 
----
+## Запуск
+
+```bash
+bash run.sh
+```
+
+*(Сервер запустится на :3000)*
+
+## Выбор Стратегий (в UI)
+- **Auto**: Пытается вызвать Gateway API, при ошибке - Local Python, при ошибке - Browser Engine.
+- **Gateway API**: Полный цикл через адаптер Node.js или Bun.
+- **Local Python**: Прямой запрос к локальному Python-бекенду.
+- **Browser Engine**: Сssтатический режим через WebAssembly и Canvas с Low-Memory чанками.
+
+
+## Архитектура проекта
+
+- **MVP Backend**: Универсальный шлюз (Node/Bun/Python) из папки `gateway` и Python FastAPI OCR (Tesseract).
+- **Frontend**: Vanilla JS интерфейс для загрузки и распознавания.
+
+```mermaid
+graph TD
+    Client["Web Client (Browser)"]
+    
+    subgraph Frontend ["Vanilla Frontend"]
+        UI["app.js"]
+        BrowserEngine["Browser OCR / Tesseract.js"]
+    end
+    
+    subgraph Gateway ["Gateway API (Node/Bun)"]
+        Adapter["Node / Bun Adapter"]
+        Core["core/handle.ts + routes.ts"]
+        OCRClient["ocrClient.ts (convert, health, probe, capabilities)"]
+    end
+    
+    subgraph Backend ["Python FastAPI OCR"]
+        FastAPI["app/main.py"]
+        ConvertRouter["Convert Router (v1/convert)"]
+        HealthRouter["Health Router (/health)"]
+        ProbeRouter["Probe Router (v1/probe)"]
+        Service["Convert Service (convert_service.py)"]
+        TesseractEngine["Tesseract Engine (active)"]
+        AvailableEngines["Other: EasyOCR, Auto, Stub"]
+    end
+    
+    Client -->|Static HTML JS| UI
+    UI -->|Static mode GitHub Pages| BrowserEngine
+    UI -->|Diagnostics Convert| Adapter
+    
+    Adapter --> Core
+    Core --> OCRClient
+    OCRClient -->|REST Proxy to /v1/*| FastAPI
+    
+    FastAPI --> ConvertRouter
+    FastAPI --> HealthRouter
+    FastAPI --> ProbeRouter
+    ConvertRouter --> Service
+    Service --> TesseractEngine
+    Service -.->|available alternatives| AvailableEngines
+```
 
 <details>
 <summary>Задания курса</summary>
@@ -27,12 +86,13 @@
       <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">README структурирован (цель, функционал, стек, планы), комментарии учтены и внесены правки</td>
     </tr>
     <tr>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Рабочее веб-приложение — UI + backend с REST API</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">01.05.2026</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Код есть, но не запускается или не работает</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Приложение запускается и выполняет базовую функцию</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Код структурирован (разделение логики, читаемость)</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Есть инструкции запуска + обработка ошибок + минимальная архитектура</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);
+      ">Рабочее веб-приложение — UI + backend с REST API</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">01.05.2026</td>
+      <td style="background-color: #d4a017; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Код есть, но не запускается или не работает</td>
+      <td style="background-color: #d4a017; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Приложение запускается и выполняет базовую функцию</td>
+      <td style="background-color: #d4a017; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Код структурирован (разделение логики, читаемость)</td>
+      <td style="background-color: #d4a017; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Есть инструкции запуска + обработка ошибок + минимальная архитектура</td>
     </tr>
     <tr>
       <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">CI и базовые проверки</td>

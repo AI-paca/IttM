@@ -3,10 +3,13 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
-build/
-develop-eggs/
+*.egg
+*.egg-info/
 dist/
+build/
+*.egg-info
+.Python
+develop-eggs/
 downloads/
 eggs/
 .eggs/
@@ -16,9 +19,7 @@ parts/
 sdist/
 var/
 wheels/
-*.egg-info/
 .installed.cfg
-*.egg
 MANIFEST
 
 # Python virtual environments
@@ -39,6 +40,14 @@ ocr/__pycache__/
 ocr/app/__pycache__/
 ocr/.tesseract_cache/
 *.traineddata
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.webp
+temp/
+tmp/
+*.log
 
 # Node.js / TypeScript
 node_modules/
@@ -46,6 +55,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+package-lock.json
 
 # Build outputs
 dist/
@@ -74,8 +84,6 @@ web/node_modules/
 *.swp
 *.swo
 *~
-.DS_Store
-Thumbs.db
 
 # OS
 .DS_Store
@@ -87,26 +95,18 @@ ehthumbs.db
 Thumbs.db
 
 # Logs
-*.log
 logs/
 *.log.*
 
 # Temp files
-tmp/
-temp/
 *.tmp
 *.bak
 *.cache
 
 # Test artifacts
-.pytest_cache/
-htmlcov/
 .coverage
 *.cover
 probes/actual*.json
-
-# Future features (optional - uncomment to ignore)
-# future_features/
 
 # Model files (large files should use Git LFS)
 *.onnx

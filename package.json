@@ -1,0 +1,15 @@
+{
+  "name": "ocr-gateway",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "bash run.sh",
+    "start:node": "tsx gateway/src/adapters/node.ts",
+    "build": "echo 'No build required for pure python + vanilla JS wrapper'"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.0.2",
+    "tsx": "^4.7.1",
+    "concurrently": "^8.2.2"
+  }
+}

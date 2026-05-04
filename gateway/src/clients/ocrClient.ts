@@ -7,7 +7,11 @@ export class OcrClient {
       const contentType = req.headers.get('content-type');
       if (contentType) headers.set('content-type', contentType);
 
-      return await fetch(`${env.OCR_URL}/v1/convert`, {
+      const url = new URL(req.url);
+      const queryParams = url.searchParams.toString();
+      const targetUrl = `${env.OCR_URL}/v1/convert${queryParams ? '?' + queryParams : ''}`;
+
+      return await fetch(targetUrl, {
         method: 'POST',
         headers,
         body: req.body,

@@ -105,11 +105,13 @@ async function execute_conversion_specific(file, strategy) {
 async function run_backend_ocr_with_engine(file, url, engineType) {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('engine_type', engineType);
     
     show_progress(`Processing with ${engineType}...`, 50);
 
-    const response = await fetch(url, {
+    const fullUrl = new URL(url, window.location.origin);
+    fullUrl.searchParams.append('engine_type', engineType);
+
+    const response = await fetch(fullUrl.toString(), {
         method: 'POST',
         body: formData
     });

@@ -41,16 +41,10 @@ export PORT=$GW_PORT
 
 if command -v bun &> /dev/null; then
     echo "Bun found! Starting Gateway via Bun adapter on port $PORT..."
-    # No package installation required for Bun (runs TypeScript natively without node_modules)
     bun run gateway/src/adapters/bun.ts &
 else
-    echo "Bun not found. Checking for tsx/node..."
-    if ! command -v tsx &> /dev/null; then
-        echo "Installing Node.js dependencies for fallback..."
-        npm install
-    fi
-    echo "Starting Node adapter on port $PORT..."
-    npx tsx gateway/src/adapters/node.ts &
+    echo "Bun not found. Please install Bun to run the Gateway."
+    echo "Fallback: If you want to use Node.js, run 'npx tsx gateway/src/adapters/node.ts'"
 fi
 GATEWAY_PID=$!
 

@@ -2,9 +2,9 @@
   "name": "ocr-gateway",
   "version": "1.0.0",
   "scripts": {
-    "dev": "bash run.sh",
-    "start:node": "tsx gateway/src/adapters/node.ts",
-    "build": "echo 'No build required for pure python + vanilla JS wrapper'"
+    "start": "npx -y serve web -p 3000",
+    "dev": "npx -y serve web -p 3000",
+    "build": "echo 'No build required'"
   },
   "dependencies": {},
   "devDependencies": {

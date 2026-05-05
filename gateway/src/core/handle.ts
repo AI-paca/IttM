@@ -17,16 +17,22 @@ export async function handle(request: Request, env: Env): Promise<Response> {
 
   // Static files serving fallback (for basic adapter usage without Vite)
   let staticPath = url.pathname === '/' ? '/index.html' : url.pathname;
-  const filePath = path.join(process.cwd(), 'web', staticPath);
+  let filePath = path.join(process.cwd(), 'dist', staticPath);
 
   try {
+    if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+      // Fallback for SPA (if user requests a path like /configure)
+      filePath = path.join(process.cwd(), 'dist', 'index.html');
+    }
+
     if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
       const ext = path.extname(filePath);
       const contentTypes: Record<string, string> = {
         '.html': 'text/html',
         '.css': 'text/css',
         '.js': 'application/javascript',
-        '.png': 'image/png'
+        '.png': 'image/png',
+        '.svg': 'image/svg+xml'
       };
       const contentType = contentTypes[ext] || 'application/octet-stream';
       const fileContent = fs.readFileSync(filePath);

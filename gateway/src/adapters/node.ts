@@ -10,7 +10,7 @@ export function read_node_env(): Env {
 }
 
 export async function to_web_request(req: http.IncomingMessage): Promise<Request> {
-  const urlStr = \`http://\${req.headers.host || 'localhost'}\${req.url || '/'}\`;
+  const urlStr = `http://${req.headers.host || 'localhost'}${req.url || '/'}`;
   const url = new URL(urlStr);
   const controller = new AbortController();
   req.on('aborted', () => controller.abort());
@@ -71,7 +71,7 @@ export function start_node() {
   });
 
   server.listen(parseInt(env.PORT), '0.0.0.0', () => {
-    console.log(\`Node adapter running on port \${env.PORT} (Fallback mode)\`);
+    console.log(`Node adapter running on port ${env.PORT} (Fallback mode)`);
   });
 }
 

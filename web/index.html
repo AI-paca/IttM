@@ -1,107 +1,13 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Modern OCR Gateway Pipeline</title>
-    <link rel="stylesheet" href="./styles.css">
-    <!-- Fallback Tesseract.js for static mode -->
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-</head>
-<body>
-    <div class="background-grid"></div>
-    <div class="container">
-        <header class="app-header">
-            <div class="brand">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h14a2 2 0 0 0 2-2V7.5L14.5 2H6a2 2 0 0 0-2 2v4"/><polyline points="14 2 14 8 20 8"/><path d="M10.4 12.6a2 2 0 1 1 3 3L8 21l-4 1 1-4Z"/></svg>
-                <h1>Cognitive OCR</h1>
-            </div>
-            <button id="btn-probe" class="btn btn-outline" title="Probes all strategies to see what capabilities are alive">System Diagnostics</button>
-        </header>
-
-        <section class="strategy-section group">
-            <h3>Execution Strategy</h3>
-            <p class="description">Select how the image is processed</p>
-            <div class="toggle-group" id="strategy-toggles">
-                <label class="toggle active">
-                    <input type="radio" name="strategy" value="auto" checked>
-                    <span class="label-text">Auto (Fallback)</span>
-                    <span class="subtext">Robust default</span>
-                </label>
-                <label class="toggle">
-                    <input type="radio" name="strategy" value="gateway">
-                    <span class="label-text">Gateway API</span>
-                    <span class="subtext">Bun/Node + Python</span>
-                </label>
-                <label class="toggle">
-                    <input type="radio" name="strategy" value="local_tesseract">
-                    <span class="label-text">Local Tesseract</span>
-                    <span class="subtext">Core / Lightweight</span>
-                </label>
-                <label class="toggle">
-                    <input type="radio" name="strategy" value="local_easyocr">
-                    <span class="label-text">Local EasyOCR</span>
-                    <span class="subtext">High Quality / Neural</span>
-                </label>
-                <label class="toggle">
-                    <input type="radio" name="strategy" value="browser">
-                    <span class="label-text">Browser Engine</span>
-                    <span class="subtext">Static / Low Memory</span>
-                </label>
-            </div>
-        </section>
-        
-        <main class="main-content">
-            <section class="upload-section card">
-                <form id="upload-form">
-                    <div class="drop-zone" id="drop-zone">
-                        <div class="drop-icon">
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                        </div>
-                        <p class="drop-text">Drag and drop your scanned document here</p>
-                        <p class="drop-subtext">Supports PNG, JPG, WebP, PDF</p>
-                        <input type="file" id="file-input" name="file" accept="image/*,.pdf" required>
-                    </div>
-                    <button type="submit" id="btn-submit" class="btn btn-primary w-full" disabled>Start Intelligent Extraction</button>
-                    <!-- Progress bar for browser chunking -->
-                    <div id="progress-container" style="display: none; margin-top: 1rem;">
-                        <div class="progress-info">
-                            <span id="progress-text">Processing...</span>
-                            <span id="progress-percent">0%</span>
-                        </div>
-                        <div class="progress-track">
-                            <div class="progress-fill" id="progress-fill"></div>
-                        </div>
-                    </div>
-                </form>
-            </section>
-
-            <section class="result-section card" id="result-section" style="display: none;">
-                <div class="result-header">
-                    <h3>Extracted Markdown</h3>
-                    <button id="btn-copy" class="btn btn-icon">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                        <span>Copy</span>
-                    </button>
-                </div>
-                <div class="meta-info" id="meta-info"></div>
-                <div class="pre-container">
-                    <pre><code id="markdown-output"></code></pre>
-                </div>
-            </section>
-        </main>
-
-        <section id="probe-results" class="card mt-4" style="display: none;">
-            <div class="result-header">
-                <h3>System Capabilities & Diagnostics</h3>
-            </div>
-            <div class="pre-container">
-                <pre><code id="probe-output"></code></pre>
-            </div>
-        </section>
-    </div>
-
-    <!-- Core Pipeline Logic -->
-    <script src="./app.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Text Extractor UI</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>
+

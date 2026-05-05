@@ -35,6 +35,15 @@ PYTHON_PID=$!
 # Wait for python to be ready
 sleep 2
 
+echo "Building frontend resources..."
+if command -v bun &> /dev/null; then
+    bun install
+    bun run build
+else
+    npm install
+    npm run build
+fi
+
 # 2. Start Gateway
 echo "Starting Gateway..."
 export PORT=$GW_PORT
@@ -43,8 +52,7 @@ if command -v bun &> /dev/null; then
     echo "Bun found! Starting Gateway via Bun adapter on port $PORT..."
     bun run gateway/src/adapters/bun.ts &
 else
-    echo "Bun not found. Please install Bun to run the Gateway."
-    echo "Fallback: If you want to use Node.js, run 'npx tsx gateway/src/adapters/node.ts'"
+    echo "Bun not found. Please install Bun to run the local Gateway."
 fi
 GATEWAY_PID=$!
 

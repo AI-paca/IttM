@@ -213,6 +213,9 @@ export default function App() {
          if (!response.ok) {
             let err = '';
             try { err = await response.text(); } catch (e) {}
+            if (response.status === 503) {
+                 throw new Error(`Gemini сейчас перегружен (503 Service Unavailable). Пожалуйста, подождите пару минут или смените модель на OpenRouter.`);
+            }
             throw new Error(`Gemini error: ${response.status} ${err}`);
          }
          const data = await response.json();
@@ -351,17 +354,45 @@ export default function App() {
                   }}
                   title={appState !== 'upload' ? 'Новый скриншот' : ''}
                 >
-                    <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold shadow-sm">TE</div>
-                    <div className="flex flex-col min-w-0 justify-center">
-                        <h1 className={`font-bold tracking-tight text-gray-900 dark:text-gray-100 leading-none truncate ${appState === 'upload' ? 'text-xl' : 'text-lg hidden sm:block'}`}>
-                            Text Extractor
-                        </h1>
-                        {appState !== 'upload' && file && (
-                            <span className="text-[11px] text-gray-500 dark:text-gray-400 font-semibold truncate max-w-[140px] md:max-w-[200px] mt-0.5 leading-none">
-                                {file.name}
-                            </span>
-                        )}
-                    </div>
+                  <AnimatePresence mode="popLayout" initial={false}>
+                    {appState === 'upload' ? (
+                      <motion.div 
+                        key="logo-view"
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, scale: 0.8 }}
+                        transition={{ duration: 0.3 }}
+                        className="flex items-center gap-3"
+                      >
+                         <div className="w-9 h-9 md:w-10 md:h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold shadow-sm">TE</div>
+                         <div className="flex flex-col min-w-0 justify-center">
+                             <h1 className="font-bold tracking-tight text-gray-900 dark:text-gray-100 leading-none truncate text-xl">
+                                 Text Extractor
+                             </h1>
+                         </div>
+                      </motion.div>
+                    ) : (
+                      <motion.div 
+                        key="file-view"
+                        layoutId="file-upload-zone"
+                        className="flex items-center gap-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700/50 rounded-xl md:rounded-2xl p-1.5 shadow-sm pr-3 md:pr-4 group"
+                        transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
+                      >
+                         <div className="w-8 h-8 md:w-9 md:h-9 bg-blue-50 dark:bg-blue-900/30 rounded-lg md:rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400 relative overflow-hidden shrink-0">
+                             <FileText className="w-4 h-4 md:w-4 md:h-4 group-hover:opacity-0 transition-opacity duration-300" />
+                             <RefreshCw className="w-4 h-4 absolute inset-0 m-auto opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                         </div>
+                         <div className="flex flex-col min-w-0 justify-center mt-0.5 md:mt-0">
+                             <span className="text-[12px] md:text-[13px] font-bold text-gray-900 dark:text-gray-100 truncate max-w-[120px] md:max-w-[200px] leading-tight group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                                 {file?.name}
+                             </span>
+                             <span className="text-[10px] text-gray-500 dark:text-gray-400 font-medium truncate leading-none mt-0.5">
+                                 Заменить файл
+                             </span>
+                         </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
 
                 {/* Source Selection Strip & Config Button */}
@@ -392,69 +423,55 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <main className="flex-1 flex flex-col items-center px-4 py-8 w-full max-w-7xl mx-auto relative z-10">
-        <div className="w-full max-w-[800px] flex flex-col gap-6 transition-all duration-500 flex-1">
+      <main className="flex-1 flex flex-col items-center px-4 md:px-8 py-6 md:py-8 w-full max-w-7xl mx-auto relative z-10 overflow-x-hidden">
+        <div className="w-full max-w-[800px] flex flex-col transition-all duration-500 flex-1">
           
-          {appState === 'upload' && (
-            <div
-              className={`relative flex flex-col items-center justify-center w-full min-h-[300px] md:min-h-[400px] rounded-2xl border-3 border-dashed transition-colors duration-200 cursor-pointer ${
-                isDragging ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-blue-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-              }`}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <input
-                type="file"
-                ref={fileInputRef}
-                className="hidden"
-                accept="image/*,application/pdf"
-                onChange={handleFileChange}
-              />
-              <div className="flex flex-col items-center text-center p-6 pointer-events-none">
-                <UploadCloud className={`w-16 h-16 mb-4 ${isDragging ? 'text-blue-600' : 'text-gray-400 dark:text-gray-500'}`} />
-                <h2 className="text-xl md:text-2xl font-medium text-gray-800 dark:text-gray-100 mb-2">
-                  Перетащите документ или выберите файл
-                </h2>
-                <p className="text-gray-500 dark:text-gray-400 text-sm md:text-base">
-                  Поддерживаются изображения (PNG, JPG) и PDF документы
-                </p>
-              </div>
-            </div>
-          )}
+          <AnimatePresence mode="popLayout">
+            {appState === 'upload' && (
+              <motion.div
+                key="upload-zone"
+                layoutId="file-upload-zone"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className={`w-full min-h-[300px] md:min-h-[400px] rounded-[2.5rem] mt-4 md:mt-12 border-3 border-dashed relative flex flex-col items-center justify-center overflow-hidden cursor-pointer transition-colors duration-200 ${
+                  isDragging ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-blue-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                }`}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  className="hidden"
+                  accept="image/*,application/pdf"
+                  onChange={handleFileChange}
+                />
+                <div className="flex flex-col items-center text-center p-6 pointer-events-none">
+                  <UploadCloud className={`w-16 h-16 mb-4 ${isDragging ? 'text-blue-600' : 'text-gray-400 dark:text-gray-500'}`} />
+                  <h2 className="text-xl md:text-2xl font-medium text-gray-800 dark:text-gray-100 mb-2">
+                    Перетащите документ или выберите файл
+                  </h2>
+                  <p className="text-gray-500 dark:text-gray-400 text-sm md:text-base">
+                    Поддерживаются изображения (PNG, JPG) и PDF документы
+                  </p>
+                </div>
+              </motion.div>
+            )}
+
+
+          </AnimatePresence>
 
           {appState === 'configure' && (
-            <div className="flex-1 w-full flex flex-col items-center animate-in fade-in duration-500 pt-4 sm:pt-10">
-              <div className="absolute top-2 left-2 md:top-8 md:left-0 z-20">
-                  <div className="relative group w-[70px] sm:w-[120px] aspect-square bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-sm flex flex-col items-center justify-center p-2 sm:p-3 transition-all hover:border-blue-300 dark:hover:border-blue-700 mx-auto md:mx-0">
-                      <div className="p-1.5 sm:p-3 bg-blue-50 dark:bg-blue-900/30 rounded-xl mb-1 sm:mb-2 flex items-center justify-center">
-                          <FileText className="w-5 h-5 sm:w-8 sm:h-8 text-blue-600 dark:text-blue-400" />
-                      </div>
-                      <span className="text-[7px] sm:text-[10px] font-medium text-gray-600 dark:text-gray-400 truncate w-full text-center px-1" title={file?.name}>
-                          {file?.name || 'screenshot.png'}
-                      </span>
-                      <button
-                          onClick={handleReplaceFile}
-                          className="absolute -top-2 -right-2 w-6 h-6 sm:w-7 sm:h-7 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full flex items-center justify-center shadow-md text-gray-400 dark:text-gray-300 hover:text-red-500 dark:hover:text-red-400 transition-all opacity-0 group-hover:opacity-100 scale-90 group-hover:scale-100"
-                          title="Заменить файл"
-                      >
-                          <RefreshCw className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                      </button>
-                      <div className="absolute -bottom-2 px-1.5 py-0.5 bg-green-500 text-white text-[5px] sm:text-[8px] font-bold rounded-full uppercase tracking-wider shadow-sm">
-                          Ready
-                      </div>
-                  </div>
-              </div>
-
-              <div className="flex-1" />
-
-              <div className="w-full max-w-[400px] mt-auto flex justify-center z-20 pt-20 pb-8">
+            <div className="flex-1 w-full flex flex-col justify-end animate-in fade-in duration-500 pb-4 sm:pb-8 mt-2 sm:mt-4">
+              <div className="w-full">
                   <button
                       onClick={handleStartExtraction}
-                      className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white text-xl font-bold rounded-2xl shadow-xl shadow-blue-500/20 transition-all active:scale-[0.98] focus:outline-none focus:ring-4 focus:ring-blue-500/50 flex items-center justify-center gap-3 group"
+                      className="w-full py-4 sm:py-5 bg-blue-600 hover:bg-blue-700 text-white text-lg sm:text-xl font-bold rounded-2xl md:rounded-3xl shadow-xl shadow-blue-500/20 transition-all active:scale-[0.98] focus:outline-none focus:ring-4 focus:ring-blue-500/50 flex items-center justify-center gap-3 group"
                   >
-                      <FileText className="w-6 h-6 outline-none bg-blue-500/50 p-1.5 rounded-lg group-hover:scale-110 transition-transform hidden sm:block backdrop-blur-sm" />
+                      <FileText className="w-7 h-7 sm:w-8 sm:h-8 outline-none bg-blue-500/50 p-1.5 rounded-lg group-hover:scale-110 transition-transform hidden sm:block backdrop-blur-sm" />
                       Получить текст
                   </button>
               </div>
@@ -462,13 +479,13 @@ export default function App() {
           )}
 
           {appState === 'loading' && (
-            <div className="flex flex-col items-center w-full mt-4 md:mt-8 animate-in fade-in duration-500">
+            <div className="flex flex-col w-full animate-in fade-in duration-500">
               <div className="flex items-center gap-3 mb-10">
                 <div className="w-6 h-6 border-4 border-blue-100 dark:border-blue-900 border-t-blue-600 dark:border-t-blue-400 rounded-full animate-spin"></div>
                 <h2 className="text-lg font-semibold text-gray-700 dark:text-gray-200">{extractionProgress}</h2>
               </div>
               
-              <div className="w-full max-w-[750px] space-y-6">
+              <div className="w-full space-y-6">
                 <div className="h-8 bg-gray-200 dark:bg-gray-800 rounded-md w-3/4 animate-pulse"></div>
                 <div className="space-y-4">
                   <div className="h-4 bg-gray-200 dark:bg-gray-800 rounded w-full animate-pulse"></div>
@@ -480,9 +497,9 @@ export default function App() {
           )}
 
           {appState === 'reading' && (
-            <div className="w-full flex justify-center animate-in fade-in duration-700 pb-20">
-              <article className="w-full max-w-[750px] text-gray-900 dark:text-gray-100">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 sm:mb-10 px-4 md:px-0">
+            <div className="w-full animate-in fade-in duration-700 pb-20 px-0 sm:px-6 md:px-0">
+              <article className="w-full text-gray-900 dark:text-gray-100">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
                   <h1 className="text-2xl sm:text-3xl font-bold leading-tight tracking-tight text-gray-950 dark:text-gray-50">
                     Извлеченный текст
                   </h1>
@@ -508,12 +525,12 @@ export default function App() {
                   </div>
                 </div>
                 
-                <div className="text-[17px] sm:text-[18px] leading-[1.7] sm:leading-[1.8] space-y-[24px] sm:space-y-[28px] text-gray-800 dark:text-gray-300 selection:bg-blue-100 dark:selection:bg-blue-900 pb-32 md:pb-12 px-4 md:px-0 whitespace-pre-wrap">
+                <div className="text-[17px] sm:text-[18px] leading-[1.7] sm:leading-[1.8] space-y-[24px] sm:space-y-[28px] text-gray-800 dark:text-gray-300 selection:bg-blue-100 dark:selection:bg-blue-900 pb-32 md:pb-12 whitespace-pre-wrap font-sans">
                   {extractedText}
                 </div>
                 
                 <div className="fixed bottom-0 left-0 right-0 p-4 pb-6 bg-gradient-to-t from-gray-50 dark:from-gray-950 via-gray-50/95 dark:via-gray-950/95 to-transparent md:static md:bg-none md:p-0 md:mt-16 md:flex md:flex-row items-center md:border-t md:border-gray-100 dark:md:border-gray-800 md:pt-8 z-30">
-                   <div className="flex gap-3 max-w-[750px] mx-auto w-full px-0 md:px-0">
+                   <div className="flex gap-3 max-w-[800px] mx-auto w-full px-0 md:px-0">
                       <button
                         onClick={() => {
                             setAppState('upload');
@@ -661,7 +678,7 @@ export default function App() {
                                            onChange={(e) => {
                                                const prov = e.target.value as 'gemini' | 'openrouter';
                                                setLlmProvider(prov);
-                                               if (prov === 'gemini') setLlmModel('gemini-2.5-flash');
+                                               if (prov === 'gemini') setLlmModel('gemini-2.0-flash');
                                                else setLlmModel('baidu/qianfan-ocr-fast:free');
                                            }}
                                            className="p-2 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-lg text-sm text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-blue-500 transition-all"

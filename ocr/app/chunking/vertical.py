@@ -3,6 +3,29 @@ import numpy as np
 from PIL import Image
 
 
+def remove_white_borders(image: Image.Image, bg_threshold: int = 240) -> Image.Image:
+    """
+    Crops out empty white borders from the image to help horizontal projection
+    when there's content on one side and empty space on the other.
+    """
+    if image.mode != "L":
+        gray = image.convert("L")
+    else:
+        gray = image
+    img_arr = np.array(gray)
+    mask = img_arr < bg_threshold
+    coords = np.argwhere(mask)
+    if coords.size == 0:
+        return image
+    y_min, x_min = coords.min(axis=0)
+    y_max, x_max = coords.max(axis=0)
+    pad = 10
+    x_min = max(0, x_min - pad)
+    y_min = max(0, y_min - pad)
+    x_max = min(image.size[0], x_max + pad)
+    y_max = min(image.size[1], y_max + pad)
+    return image.crop((x_min, y_min, x_max, y_max))
+
 def find_blank_horizontal_bands(image: Image.Image, min_gap: int = 10) -> list:
     """
     Finds empty horizontal bands (rows with little to no content) between cards.
@@ -112,6 +135,7 @@ def split_vertical(image: Image.Image, chunk_height: int = 1600, overlap: int = 
     Falls back to fixed sizing with overlap if no blank bands found.
     """
     try:
+        image = remove_white_borders(image)
         width, height = image.size
         if height <= chunk_height:
             return [image]

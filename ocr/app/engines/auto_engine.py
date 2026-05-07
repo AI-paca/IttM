@@ -1,38 +1,35 @@
 from app.engines.base import OcrEngine
 
 class AutoEngine(OcrEngine):
-    """Auto-fallback engine that tries Tesseract first (core), then EasyOCR (optional high-quality)."""
+    """Auto-fallback engine that tries Tesseract first (core), then Easy OCR (optional high-quality)."""
     
     def __init__(self, prefer_tesseract: bool = True):
-        """
-        Initialize auto engine.
-        
-        Args:
-            prefer_tesseract: If True, use Tesseract as primary (core), EasyOCR as fallback.
-                            If False, use EasyOCR as primary (high-quality mode).
-        """
         from app.engines.stub_engine import StubEngine
         from app.engines.tesseract_engine import TesseractEngine
         from app.engines.easyocr_engine import EasyOcrEngine
         
         self.tesseract = TesseractEngine()
-        self.easyocr = EasyOcrEngine()
+        self.easy = EasyOcrEngine()
         self.stub = StubEngine()
         
+        # Build priority queue
+        engines = []
         if prefer_tesseract:
-            self.active_engine = self.tesseract if self.tesseract.available() else (self.easyocr if self.easyocr.available() else self.stub)
+            engines = [self.tesseract, self.easy, self.stub]
         else:
-            self.active_engine = self.easyocr if self.easyocr.available() else (self.tesseract if self.tesseract.available() else self.stub)
+            engines = [self.easy, self.tesseract, self.stub]
+            
+        self.active_engine = next((e for e in engines if e.available()), self.stub)
 
     def recognize(self, image, mode: str = "text_mode", psm: int = 6) -> str:
         return self.active_engine.recognize(image, mode=mode, psm=psm)
 
     def available(self) -> bool:
-        return self.tesseract.available() or self.easyocr.available()
+        return self.tesseract.available() or self.easy.available()
 
     def info(self) -> dict:
         info = self.active_engine.info()
         info["strategy"] = "auto_fallback"
         info["tesseract_available"] = self.tesseract.available()
-        info["easyocr_available"] = self.easyocr.available()
+        info["easyocr_available"] = self.easy.available()
         return info

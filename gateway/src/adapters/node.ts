@@ -1,19 +1,19 @@
-import * as http from 'http';
-import { handle } from '../core/handle';
-import { Env } from '../domain/types';
+import * as http from "http";
+import { handle } from "../core/handle";
+import { Env } from "../domain/types";
 
 export function read_node_env(): Env {
   return {
-    PORT: process.env.PORT || '3000',
-    OCR_URL: process.env.OCR_URL || 'http://127.0.0.1:8000'
+    PORT: process.env.PORT || "3000",
+    OCR_URL: process.env.OCR_URL || "http://127.0.0.1:8000",
   };
 }
 
 export async function to_web_request(req: http.IncomingMessage): Promise<Request> {
-  const urlStr = \`http://\${req.headers.host || 'localhost'}\${req.url || '/'}\`;
+  const urlStr = `http://${req.headers.host || "localhost"}${req.url || "/"}`;
   const url = new URL(urlStr);
   const controller = new AbortController();
-  req.on('aborted', () => controller.abort());
+  req.on("aborted", () => controller.abort());
 
   const init: RequestInit = {
     method: req.method,
@@ -21,17 +21,17 @@ export async function to_web_request(req: http.IncomingMessage): Promise<Request
     signal: controller.signal,
   };
 
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
+  if (req.method !== "GET" && req.method !== "HEAD") {
     const stream = new ReadableStream({
       start(controller) {
-        req.on('data', chunk => controller.enqueue(chunk));
-        req.on('end', () => controller.close());
-        req.on('error', err => controller.error(err));
-      }
+        req.on("data", (chunk) => controller.enqueue(chunk));
+        req.on("end", () => controller.close());
+        req.on("error", (err) => controller.error(err));
+      },
     });
     init.body = stream;
     // Node 18+ requires duplex: 'half' for Request streaming body
-    (init as any).duplex = 'half';
+    (init as any).duplex = "half";
   }
 
   return new Request(url, init);
@@ -70,8 +70,8 @@ export function start_node() {
     }
   });
 
-  server.listen(parseInt(env.PORT), '0.0.0.0', () => {
-    console.log(\`Node adapter running on port \${env.PORT} (Fallback mode)\`);
+  server.listen(parseInt(env.PORT), "0.0.0.0", () => {
+    console.log(`Node adapter running on port ${env.PORT} (Fallback mode)`);
   });
 }
 

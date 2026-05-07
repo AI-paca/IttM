@@ -18,39 +18,46 @@ while lsof -Pi :$GW_PORT -sTCP:LISTEN -t >/dev/null ; do
 done
 
 # 1. Start Python OCR Service in background
-echo "Starting Python OCR Service on port $PY_PORT..."
-export OCR_URL="http://127.0.0.1:$PY_PORT"
-
+echo "[RUNNER] Checking for Python environment..."
 if [ ! -d "ocr/.venv" ]; then
-    echo "Creating virtual environment..."
+    echo "[RUNNER] Creating virtual environment..."
     python3 -m venv ocr/.venv
 fi
 
-echo "Installing Python dependencies..."
-ocr/.venv/bin/pip install -r ocr/requirements.txt
+echo "[RUNNER] Installing Python dependencies..."
+ocr/.venv/bin/pip install -r ocr/requirements.txt | grep -v "already satisfied"
 
-ocr/.venv/bin/python -m uvicorn app.main:app --app-dir ocr --port $PY_PORT &
+echo "[RUNNER] Starting Python OCR Service on port $PY_PORT with DEBUG logs..."
+export OCR_URL="http://127.0.0.1:$PY_PORT"
+ocr/.venv/bin/python -m uvicorn app.main:app --app-dir ocr --port $PY_PORT --log-level debug &
 PYTHON_PID=$!
 
 # Wait for python to be ready
-sleep 2
+echo "[RUNNER] Waiting for Python service to warm up..."
+sleep 3
+
+echo "[RUNNER] Building frontend resources..."
+if command -v bun &> /dev/null; then
+    echo "[RUNNER] Using Bun for install/build..."
+    bun install > /dev/null
+    bun run build
+else
+    echo "[RUNNER] Using NPM for install/build..."
+    npm install > /dev/null
+    npm run build
+fi
 
 # 2. Start Gateway
-echo "Starting Gateway..."
+echo "[RUNNER] Starting Gateway..."
 export PORT=$GW_PORT
 
 if command -v bun &> /dev/null; then
-    echo "Bun found! Starting Gateway via Bun adapter on port $PORT..."
-    # No package installation required for Bun (runs TypeScript natively without node_modules)
+    echo "[RUNNER] Bun found! Starting Gateway via Bun adapter on port $PORT..."
     bun run gateway/src/adapters/bun.ts &
 else
-    echo "Bun not found. Checking for tsx/node..."
-    if ! command -v tsx &> /dev/null; then
-        echo "Installing Node.js dependencies for fallback..."
-        npm install
-    fi
-    echo "Starting Node adapter on port $PORT..."
-    npx tsx gateway/src/adapters/node.ts &
+    echo "[RUNNER] Bun not found. Starting Gateway via Node adapter..."
+    export NODE_ENV=production
+    node gateway/src/adapters/node.ts &
 fi
 GATEWAY_PID=$!
 

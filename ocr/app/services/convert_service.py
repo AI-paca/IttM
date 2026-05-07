@@ -1,6 +1,10 @@
 from pathlib import Path
 from typing import Tuple
 from PIL import Image
+
+# Disable maximum image pixel limit for long screenshots
+Image.MAX_IMAGE_PIXELS = None
+
 from app.chunking.vertical import split_vertical, split_by_blank_bands
 from app.chunking.dedupe import dedupe_chunks
 from app.formatting.markdown_formatter import MarkdownFormatter
@@ -9,16 +13,9 @@ from app.engines.auto_engine import AutoEngine
 
 def _format_card_to_markdown(card_text: str, card_index: int) -> str:
     """
-    Formats a single card OCR result to Markdown.
+    Formats a single chunk OCR result to Markdown.
     """
-    lines = []
-    lines.append(f"### Товар {card_index + 1}")
-    
-    if card_text:
-        lines.append("\n**Описание:**")
-        lines.append(card_text)
-    
-    return "\n".join(lines)
+    return card_text.strip()
 
 
 async def convert(path: Path, engine_type: str = "auto") -> Tuple[str, dict]:
@@ -39,8 +36,16 @@ async def convert(path: Path, engine_type: str = "auto") -> Tuple[str, dict]:
             raise ValueError(f"Failed to process PDF: {str(e)}")
     else:
         try:
-            images = [Image.open(path)]
-            images[0].load()  # verify image works
+            img = Image.open(path)
+            img.load()  # verify image works
+            if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
+                # Apply white background for transparent images
+                img = img.convert("RGBA")
+                bg = Image.new("RGB", img.size, (255, 255, 255))
+                bg.paste(img, mask=img.split()[3])
+                images = [bg]
+            else:
+                images = [img.convert("RGB")]
         except Exception as e:
             raise ValueError(f"Could not load image: {str(e)}")
 
@@ -54,6 +59,8 @@ async def convert(path: Path, engine_type: str = "auto") -> Tuple[str, dict]:
     elif engine_type == "easyocr":
         from app.engines.easyocr_engine import EasyOcrEngine
         engine = EasyOcrEngine()
+        if not engine.available():
+            raise ValueError(f"EasyOCR is not installed or initialization failed: {engine.info().get('init_error')}")
     else:  # auto
         engine = AutoEngine(prefer_tesseract=True)
     

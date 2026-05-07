@@ -1,6 +1,6 @@
-import { Env } from '../domain/types';
-import { method_not_allowed, not_found, json_response } from './handle';
-import { OcrClient } from '../clients/ocrClient';
+import { Env } from "../domain/types";
+import { method_not_allowed, not_found, json_response } from "./handle";
+import { OcrClient } from "../clients/ocrClient";
 
 export async function route(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -8,23 +8,38 @@ export async function route(request: Request, env: Env): Promise<Response> {
   const method = request.method;
 
   // Support both /convert and /api/convert for compatibility
-  if (path === '/api/convert' || path === '/convert') {
-    if (method !== 'POST') return method_not_allowed();
+  if (path === "/api/convert" || path === "/convert") {
+    if (method !== "POST") return method_not_allowed();
     return await OcrClient.convert(request, env);
   }
 
-  if (path === '/api/health') {
-    if (method !== 'GET') return method_not_allowed();
+  if (path === "/api/health") {
+    if (method !== "GET") return method_not_allowed();
     return await OcrClient.health(env);
   }
 
-  if (path === '/api/capabilities') {
-    if (method !== 'GET') return method_not_allowed();
+  if (path === "/api/capabilities") {
+    if (method !== "GET") return method_not_allowed();
     return await OcrClient.capabilities(env);
   }
 
-  if (path === '/api/probe') {
-    if (method !== 'POST') return method_not_allowed();
+  if (path === "/api/diagnostics") {
+    if (method !== "GET") return method_not_allowed();
+    return await OcrClient.diagnostics(env);
+  }
+
+  if (path === "/api/install-easyocr") {
+    if (method !== "POST") return method_not_allowed();
+    return await OcrClient.installEasy(env);
+  }
+
+  if (path === "/api/install-light") {
+    if (method !== "POST") return method_not_allowed();
+    return await OcrClient.installLight(env);
+  }
+
+  if (path === "/api/probe") {
+    if (method !== "POST") return method_not_allowed();
     return await OcrClient.probe(request, env);
   }
 

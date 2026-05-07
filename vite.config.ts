@@ -6,6 +6,7 @@ import { defineConfig, loadEnv } from "vite";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "");
   return {
+    base: "/IttM/", // Добавьте это (название вашего репозитория)
     root: "web",
     plugins: [react(), tailwindcss()],
     define: {

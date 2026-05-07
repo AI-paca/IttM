@@ -28,7 +28,11 @@ class EasyOcrEngine(OcrEngine):
         if self._reader is None:
             try:
                 import easyocr
-                self._reader = easyocr.Reader(self.languages, gpu=False)
+                import torch
+                # Support CUDA (NVIDIA) and MPS (Apple Silicon), ROCm is handled as CUDA in some PyTorch builds or has separate checks
+                # easyocr just takes gpu=True/False
+                use_gpu = torch.cuda.is_available() or (hasattr(torch.backends, 'mps') and torch.backends.mps.is_available())
+                self._reader = easyocr.Reader(self.languages, gpu=use_gpu)
                 self._available = True
             except Exception as e:
                 self._init_error = str(e)
@@ -102,9 +106,18 @@ class EasyOcrEngine(OcrEngine):
 
     def info(self) -> dict:
         """Return engine information."""
+        gpu_status = "unknown"
+        if self._reader is not None:
+             try:
+                 import torch
+                 gpu_status = "active" if torch.cuda.is_available() or (hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()) else "inactive"
+             except:
+                 gpu_status = "error_detecting"
+                 
         return {
             "engine": "easyocr",
             "languages": self.languages,
             "available": self.available(),
+            "gpu": gpu_status,
             "init_error": self._init_error
         }

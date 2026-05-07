@@ -18,6 +18,12 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(probe.router)
     
+    try:
+        from app.routers import install
+        app.include_router(install.router)
+    except:
+        pass
+    
     return app
 
 app = create_app()

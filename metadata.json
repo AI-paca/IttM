@@ -1,6 +1,0 @@
-{
-  "name": "Text Extractor UI",
-  "description": "A UI for uploading files and extracting text from local and global sources.",
-  "requestFramePermissions": [],
-  "majorCapabilities": []
-}

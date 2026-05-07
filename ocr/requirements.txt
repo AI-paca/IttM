@@ -3,7 +3,11 @@ uvicorn
 python-multipart
 pillow
 pytesseract
-easyocr
 numpy
 pdf2image
 opencv-python-headless
+psutil
+torch
+torchvision
+easyocr
+pynvml

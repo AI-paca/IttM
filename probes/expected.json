@@ -1,4 +1,0 @@
-{
-"required_tokens": ["OCR", "PROBE", "12345"],
-"optional_tokens": ["item", "MARKDOWN"]
-}

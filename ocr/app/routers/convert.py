@@ -15,6 +15,7 @@ async def convert_endpoint(
     file: UploadFile = File(...),
     engine_type: str = Query("auto", description="Engine type: auto, tesseract, or easyocr")
 ):
+    print(f"[CONVERT] Received request: {file.filename} (content_type={file.content_type}), engine={engine_type}")
     # This function handles both /convert and /v1/convert
     start_time = time.time()
     
@@ -36,6 +37,8 @@ async def convert_endpoint(
             meta=ConvertMeta(**meta_info)
         )
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if temp_path.exists():

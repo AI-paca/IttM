@@ -1,0 +1,23 @@
+services:
+  ocr:
+    build:
+      context: ./ocr
+      dockerfile: ../ocr.Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway.Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - OCR_URL=http://ocr:8000
+    depends_on:
+      - ocr
+    restart: unless-stopped

@@ -48,7 +48,10 @@ def find_blank_horizontal_bands(image: Image.Image, min_gap: int = 10) -> list:
     with np.errstate(divide='ignore', invalid='ignore'):
         sigma_b_squared = (mu_t * omega - mu)**2 / (omega * (1 - omega))
         
-    optimal_threshold = np.nanargmax(sigma_b_squared)
+    if np.isnan(sigma_b_squared).all():
+        optimal_threshold = 128
+    else:
+        optimal_threshold = np.nanargmax(sigma_b_squared)
     
     # Text is dark pixels on white background
     binary = img_arr < optimal_threshold

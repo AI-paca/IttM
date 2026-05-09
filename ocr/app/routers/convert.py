@@ -36,10 +36,14 @@ async def convert_endpoint(
             markdown=markdown_text,
             meta=ConvertMeta(**meta_info)
         )
+    except ValueError as ve:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
     finally:
         if temp_path.exists():
             os.remove(temp_path)

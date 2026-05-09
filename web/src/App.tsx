@@ -501,7 +501,7 @@ export default function App() {
           setAppState((prev) => (prev !== "reading" ? "reading" : prev));
         };
 
-        if (selectedSource === "browser") {
+        const runBrowserFallback = async () => {
           if (file.type === "application/pdf") {
             const md = await processPdfIntelligently(
               file,
@@ -521,9 +521,9 @@ export default function App() {
               lastExtractedPage,
               setTotalPdfPages,
             );
-            result = { markdown: md };
+            return { markdown: md };
           } else {
-            result = await runBrowserOcrLowMemory(
+            return await runBrowserOcrLowMemory(
               file,
               (text) => {
                 if (active.current) setExtractionProgress(text);
@@ -533,8 +533,18 @@ export default function App() {
               },
             );
           }
-        } else if (selectedSource === "local_tess" || selectedSource === "local_easy") {
-          const engineType = selectedSource === "local_tess" ? "tesseract" : "easyocr";
+        };
+
+        let effectiveSource = selectedSource;
+        if (effectiveSource === "auto" && diagnostics && (!diagnostics.backend || diagnostics.error)) {
+          console.log("[OCR] Backend is offline, auto-switching to browser source");
+          effectiveSource = "browser";
+        }
+
+        if (effectiveSource === "browser") {
+          result = await runBrowserFallback();
+        } else if (effectiveSource === "local_tess" || effectiveSource === "local_easy") {
+          const engineType = effectiveSource === "local_tess" ? "tesseract" : "easyocr";
 
           const url = new URL(window.location.origin + "/api/convert");
           url.searchParams.append("engine_type", engineType);
@@ -561,7 +571,7 @@ export default function App() {
             result = await executeBackendOcr(file, url.toString(), active);
             handleChunk(result.markdown || "");
           }
-        } else if (selectedSource === "llm") {
+        } else if (effectiveSource === "llm") {
           result = await executeLlmOcr(
             file,
             active,
@@ -569,24 +579,16 @@ export default function App() {
             lastExtractedPage,
             setTotalPdfPages,
           );
-        } else if (selectedSource === "gateway" || selectedSource === "auto") {
+        } else if (effectiveSource === "gateway" || effectiveSource === "auto") {
           const url = "/api/convert";
           try {
             result = await executeBackendOcr(file, url, active);
             handleChunk(result.markdown || "");
           } catch (err: any) {
-            if (selectedSource === "auto") {
+            if (effectiveSource === "auto") {
               if (active.current)
                 setExtractionProgress("Gateway недоступен, выполняем локально (WASM)...");
-              result = await runBrowserOcrLowMemory(
-                file,
-                (text) => {
-                  if (active.current) setExtractionProgress(text);
-                },
-                (chunk) => {
-                  handleChunk(chunk);
-                },
-              );
+              result = await runBrowserFallback();
             } else {
               throw err;
             }

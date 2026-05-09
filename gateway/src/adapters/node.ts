@@ -63,10 +63,10 @@ export function start_node() {
       const webReq = await to_web_request(req);
       const webRes = await handle(webReq, env);
       await send_web_response(res, webRes);
-    } catch (err) {
-      console.error("Node Adapter Error:", err);
+    } catch (err: any) {
+      console.error("Node Adapter Catch-All Error:", err.stack || err);
       res.statusCode = 500;
-      res.end("Internal Server Error");
+      res.end(`Internal Server Error in Gateway: ${err.message}`);
     }
   });
 

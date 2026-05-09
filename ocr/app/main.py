@@ -21,7 +21,7 @@ def create_app() -> FastAPI:
     try:
         from app.routers import install
         app.include_router(install.router)
-    except:
+    except ImportError:
         pass
     
     return app

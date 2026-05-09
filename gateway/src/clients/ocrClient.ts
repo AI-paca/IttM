@@ -1,4 +1,4 @@
-import { Env, ConvertResult, CapabilityReport, ProbeRequest, ProbeReport } from "../domain/types";
+import { Env } from "../domain/types";
 
 export class OcrClient {
   static async convert(req: Request, env: Env): Promise<Response> {
@@ -20,7 +20,9 @@ export class OcrClient {
       });
     } catch (e: any) {
       return new Response(
-        JSON.stringify({ error: "Gateway to Python fetch error: " + e.message }),
+        JSON.stringify({
+          error: "Gateway to Python fetch error: " + e.message,
+        }),
         {
           status: 502,
           headers: { "content-type": "application/json" },
@@ -33,10 +35,13 @@ export class OcrClient {
     try {
       return await fetch(`${env.OCR_URL}/health`, { method: "GET" });
     } catch (e: any) {
-      return new Response(JSON.stringify({ error: "Python Backend Unreachable: " + e.message }), {
-        status: 502,
-        headers: { "content-type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ error: "Python Backend Unreachable: " + e.message }),
+        {
+          status: 502,
+          headers: { "content-type": "application/json" },
+        },
+      );
     }
   }
 
@@ -80,7 +85,9 @@ export class OcrClient {
 
   static async installEasy(env: Env): Promise<Response> {
     try {
-      return await fetch(`${env.OCR_URL}/v1/install-easyocr`, { method: "POST" });
+      return await fetch(`${env.OCR_URL}/v1/install-easyocr`, {
+        method: "POST",
+      });
     } catch (e: any) {
       return new Response(JSON.stringify({ error: e.message }), {
         status: 502,

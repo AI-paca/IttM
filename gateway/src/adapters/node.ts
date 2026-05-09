@@ -1,4 +1,6 @@
 import * as http from "http";
+import * as path from "path";
+import { fileURLToPath } from "url";
 import { handle } from "../core/handle";
 import { Env } from "../domain/types";
 
@@ -9,7 +11,9 @@ export function read_node_env(): Env {
   };
 }
 
-export async function to_web_request(req: http.IncomingMessage): Promise<Request> {
+export async function to_web_request(
+  req: http.IncomingMessage,
+): Promise<Request> {
   const urlStr = `http://${req.headers.host || "localhost"}${req.url || "/"}`;
   const url = new URL(urlStr);
   const controller = new AbortController();
@@ -37,7 +41,10 @@ export async function to_web_request(req: http.IncomingMessage): Promise<Request
   return new Request(url, init);
 }
 
-export async function send_web_response(res: http.ServerResponse, webRes: Response) {
+export async function send_web_response(
+  res: http.ServerResponse,
+  webRes: Response,
+) {
   res.statusCode = webRes.status;
   res.statusMessage = webRes.statusText;
 
@@ -75,7 +82,10 @@ export function start_node() {
   });
 }
 
-// Automatically start if runs as main script
-if (require.main === module) {
+const isMainModule = process.argv[1]
+  ? path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  : false;
+
+if (isMainModule) {
   start_node();
 }

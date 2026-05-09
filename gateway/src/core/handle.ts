@@ -68,7 +68,10 @@ export function json_response(data: any, status: number = 200): Response {
   });
 }
 
-export function error_response(message: string, status: number = 500): Response {
+export function error_response(
+  message: string,
+  status: number = 500,
+): Response {
   return new Response(JSON.stringify({ error: message }), {
     status,
     headers: { "Content-Type": "application/json" },

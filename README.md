@@ -1,4 +1,3 @@
-
 Веб-приложение для конвертации длинных скриншотов экрана в Markdown
 
 ## [Запуск](https://ai-paca.github.io/IttM/)
@@ -6,35 +5,90 @@
 ```bash
 bash run.sh
 ```
-*(Сервер запустится на :3000)*
+
+_(Сервер запустится на :3000)_
+
+Если `3000` или `8000` заняты, локальные скрипты выбирают ближайшие свободные host-порты и печатают итоговые URL.
+
+### Режимы запуска
+
+- **GitHub Pages**: статический frontend, распознавание через browser OCR и LLM/API-режимы при доступности.
+- **Bun local**: легкий gateway adapter без тяжелого Node-сервера.
+- **Node gateway**: основной production-friendly режим для Cloud Run, AI Studio, canvas/hosted-сред и локального `node`.
+- **Local Python OCR**: FastAPI backend с Tesseract/EasyOCR за gateway.
+- **Hybrid local+node/bun**: frontend/gateway локально, OCR backend отдельно через `OCR_URL`.
+
+## CI и базовые проверки
+
+Локально:
+
+```bash
+bash debug.sh
+```
+
+Быстро без Docker/act:
+
+```bash
+bash debug.sh --no-docker --no-act
+```
+
+Полная очистка Docker-кэшей включается только явно:
+
+```bash
+bash debug.sh --clean
+```
+
+Если Docker спотыкается из-за корпоративного firewall/daemon state, `debug.sh` вызывает `scripts/notify-docker-restart.sh`: он подает звук, показывает уведомление и ждёт ручного рестарта Docker.
+
+Docker Compose не требует свободных `3000`/`8000`: `debug.sh` выставляет `GATEWAY_HOST_PORT` и `OCR_HOST_PORT` динамически. Для ручного запуска можно задать их явно:
+
+```bash
+GATEWAY_HOST_PORT=3001 OCR_HOST_PORT=8001 docker compose up --build
+```
+
+Основные команды, которые повторяет GitHub Actions:
+
+```bash
+npm ci
+npm run format:check
+npm run lint
+npm test
+npm run build
+python -m pip install -r ocr/requirements-ci.txt
+python -m pytest ocr/tests -q
+RUN_OCR_QUALITY=1 python -m pytest ocr/tests/test_ocr_quality.py -q
+npm run test:ocr:browser
+```
+
+Workflow `.github/workflows/tests.yml` содержит быстрые frontend/gateway/Python проверки и отдельный тяжелый OCR quality job с `chi_sim+eng+rus`, Tesseract language packs и Noto CJK fonts.
 
 ## Выбор Стратегий (в UI)
+
 - **Auto**: Пытается вызвать Gateway API, при ошибке - Local Python, при ошибке - Browser Engine.
 - **Gateway API**: Полный цикл через адаптер Node.js или Bun.
 - **Local Python**: Прямой запрос к локальному Python-бекенду.
-- **Browser Engine**: Сssтатический режим через WebAssembly и Canvas с Low-Memory чанками.
-
+- **Browser Engine**: Статический режим через Tesseract.js/WebAssembly и Canvas с diagnostics-based профилем ресурсов.
 
 ## Архитектура проекта
 
-- **MVP Backend**: Универсальный шлюз (Node/Bun/Python) из папки `gateway` и Python FastAPI OCR (Tesseract).
-- **Frontend**: Vanilla JS интерфейс для загрузки и распознавания.
+- **MVP Backend**: Универсальный шлюз (Node/Bun) из папки `gateway` и Python FastAPI OCR (Tesseract/EasyOCR).
+- **Frontend**: React + Vite интерфейс для загрузки, выбора OCR-движка, прогресса и чтения результата.
 
 ```mermaid
 graph TD
     Client["Web Client (Browser)"]
-    
-    subgraph Frontend ["Vanilla Frontend"]
-        UI["app.js"]
-        BrowserEngine["Browser OCR / Tesseract.js"]
+
+    subgraph Frontend ["React/Vite Frontend"]
+        UI["App.tsx + OCR helpers"]
+        BrowserEngine["Browser OCR / Tesseract.js chi_sim+eng+rus"]
     end
-    
+
     subgraph Gateway ["Gateway API (Node/Bun)"]
         Adapter["Node / Bun Adapter"]
         Core["core/handle.ts + routes.ts"]
         OCRClient["ocrClient.ts (convert, health, probe, capabilities)"]
     end
-    
+
     subgraph Backend ["Python FastAPI OCR"]
         FastAPI["app/main.py"]
         ConvertRouter["Convert Router (v1/convert)"]
@@ -44,15 +98,15 @@ graph TD
         TesseractEngine["Tesseract Engine (active)"]
         AvailableEngines["Other: EasyOCR, Auto, Stub"]
     end
-    
-    Client -->|Static HTML JS| UI
+
+    Client -->|React/Vite bundle| UI
     UI -->|Static mode GitHub Pages| BrowserEngine
     UI -->|Diagnostics Convert| Adapter
-    
+
     Adapter --> Core
     Core --> OCRClient
     OCRClient -->|REST Proxy to /v1/*| FastAPI
-    
+
     FastAPI --> ConvertRouter
     FastAPI --> HealthRouter
     FastAPI --> ProbeRouter
@@ -60,6 +114,10 @@ graph TD
     Service --> TesseractEngine
     Service -.->|available alternatives| AvailableEngines
 ```
+
+## Аудит кода
+
+Короткий обзор плюсов, минусов, рисков и сделанных исправлений: [`docs/code-review.md`](docs/code-review.md).
 
 <details>
 <summary>Задания курса</summary>
@@ -90,15 +148,15 @@ graph TD
       <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">01.05.2026</td>
       <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Код есть, но не запускается или не работает</td>
       <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Приложение запускается и выполняет базовую функцию</td>
-      <td style="background-color: #d4a017; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Код структурирован (разделение логики, читаемость)</td>
-      <td style="background-color: #d4a017; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Есть инструкции запуска + обработка ошибок + минимальная архитектура</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Код структурирован (разделение логики, читаемость)</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Есть инструкции запуска + обработка ошибок + минимальная архитектура</td>
     </tr>
     <tr>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">CI и базовые проверки</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">08.05.2026</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">CI есть, но работает нестабильно</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">CI запускается и выполняет хотя бы одну проверку</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Добавлены линтеры/форматирование</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">CI и базовые проверки</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">08.05.2026</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">CI есть, но работает нестабильно</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">CI запускается и выполняет хотя бы одну проверку</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Добавлены линтеры/форматирование</td>
       <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">CI блокирует merge при ошибках + понятная структура pipeline</td>
     </tr>
     <tr>
@@ -110,12 +168,12 @@ graph TD
       <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Минимизированный образ + инструкции запуска</td>
     </tr>
     <tr>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Тестирование</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">22.05.2026</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Тесты есть, но не работают</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Есть рабочие тесты</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Покрыт основной функционал</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Несколько типов тестов + интеграция в CI</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Тестирование</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">22.05.2026</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Тесты есть, но не работают</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Есть рабочие тесты</td>
+      <td style="background-color: #d4a017; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Покрыт основной функционал</td>
+      <td style="background-color: #d4a017; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Несколько типов тестов + интеграция в CI</td>
     </tr>
     <tr>
       <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Статический анализ безопасности</td>
@@ -145,6 +203,7 @@ graph TD
 </table>
 
 **Правила курса:**
+
 - Оценка за ДЗ: 0–10 баллов
 - За каждую полную неделю опоздания −1 балл
 - Для оценки 9–10 требуются дополнительные задания и устный экзамен
@@ -163,15 +222,15 @@ graph TD
 <details>
 <summary>Управление зависимостями по языкам</summary>
 
-| Язык | Файл зависимостей | Инструмент |
-|------|-------------------|------------|
-| Python | `requirements.txt` | pip |
-| JavaScript / Node.js | `package.json` | npm / yarn |
-| PHP | `composer.json` | Composer |
-| Ruby | `Gemfile` | Bundler |
-| Java / Kotlin | `pom.xml` / `build.gradle` | Maven / Gradle |
-| Rust | `Cargo.toml` | Cargo |
-| Go | `go.mod` | Go Modules |
+| Язык                 | Файл зависимостей          | Инструмент     |
+| -------------------- | -------------------------- | -------------- |
+| Python               | `requirements.txt`         | pip            |
+| JavaScript / Node.js | `package.json`             | npm / yarn     |
+| PHP                  | `composer.json`            | Composer       |
+| Ruby                 | `Gemfile`                  | Bundler        |
+| Java / Kotlin        | `pom.xml` / `build.gradle` | Maven / Gradle |
+| Rust                 | `Cargo.toml`               | Cargo          |
+| Go                   | `go.mod`                   | Go Modules     |
 
 </details>
 </details>

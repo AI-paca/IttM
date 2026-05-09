@@ -35,7 +35,13 @@ export async function route(request: Request, env: Env): Promise<Response> {
 
   if (path === "/api/install-light") {
     if (method !== "POST") return method_not_allowed();
-    return await OcrClient.installLight(env);
+    return json_response(
+      {
+        error:
+          "install-light is not implemented in this build. Use documented dependencies or /api/install-easyocr.",
+      },
+      501,
+    );
   }
 
   if (path === "/api/probe") {

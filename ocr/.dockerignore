@@ -1,0 +1,9 @@
+.venv
+__pycache__
+app/__pycache__
+tests/__pycache__
+tests/fixtures
+.pytest_cache
+*.py[cod]
+*.log
+*.tmp

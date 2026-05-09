@@ -31,7 +31,7 @@ async def convert(path: Path, engine_type: str = "auto") -> Tuple[str, dict]:
     if path.suffix.lower() == ".pdf":
         try:
             from pdf2image import convert_from_path
-            images = convert_from_path(str(path))
+            images = convert_from_path(str(path), dpi=300, fmt="png")
         except Exception as e:
             raise ValueError(f"Failed to process PDF: {str(e)}")
     else:
@@ -70,6 +70,12 @@ async def convert(path: Path, engine_type: str = "auto") -> Tuple[str, dict]:
     cards_found = 0
     
     for page_num, main_image in enumerate(images):
+        width, height = main_image.size
+        if height <= 1600 or (width > 0 and height / width <= 1.8):
+            total_chunks += 1
+            all_markdown_parts.append(engine.recognize(main_image, mode="text_mode"))
+            continue
+
         # 2. Try card-aware chunking first (split by blank bands between cards)
         cards = split_by_blank_bands(main_image)
         

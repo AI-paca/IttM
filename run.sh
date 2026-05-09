@@ -2,20 +2,39 @@
 # Independent lightweight runner avoiding hard Node dependency if Bun is present
 
 echo "Searching for free ports..."
-PY_PORT="8000"
-while lsof -Pi :$PY_PORT -sTCP:LISTEN -t >/dev/null ; do
-    PY_PORT=$((PY_PORT+1))
-done
+find_free_port() {
+    local preferred="$1"
+    python3 - "$preferred" <<'PY'
+import socket
+import sys
 
-GW_PORT="3000"
-while lsof -Pi :$GW_PORT -sTCP:LISTEN -t >/dev/null ; do
-    if [ "$GW_PORT" == "3000" ]; then 
-        # Don't increment if inside a managed environment where PORT must be 3000
-        # AI Studio proxy needs 3000 mostly
-        break; 
-    fi
-    GW_PORT=$((GW_PORT+1))
-done
+preferred = int(sys.argv[1])
+
+
+def can_bind(port: int) -> bool:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("127.0.0.1", port))
+    except OSError:
+        return False
+    finally:
+        sock.close()
+    return True
+
+
+for candidate in list(range(preferred, preferred + 100)) + list(range(49152, 61000)):
+    if can_bind(candidate):
+        print(candidate)
+        sys.exit(0)
+
+print(f"No free port found near {preferred}", file=sys.stderr)
+sys.exit(1)
+PY
+}
+
+PY_PORT="${PY_PORT:-$(find_free_port 8000)}"
+GW_PORT="${PORT:-${GW_PORT:-$(find_free_port 3000)}}"
 
 # 1. Start Python OCR Service in background
 echo "[RUNNER] Checking for Python environment..."
@@ -43,7 +62,7 @@ if command -v bun &> /dev/null; then
     bun run build
 else
     echo "[RUNNER] Using NPM for install/build..."
-    npm install > /dev/null
+    npm ci > /dev/null
     npm run build
 fi
 
@@ -64,7 +83,7 @@ GATEWAY_PID=$!
 echo "======================================"
 echo "SERVICES ARE RUNNING"
 echo "Gateway: http://localhost:$GW_PORT"
-echo "Python API: http://localhost:$PY_PORT/v1/health"
+echo "Python API: http://localhost:$PY_PORT/health"
 echo "======================================"
 
 # Cleanup on exit

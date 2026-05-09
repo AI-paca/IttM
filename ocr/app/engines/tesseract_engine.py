@@ -19,6 +19,24 @@ class TesseractEngine(OcrEngine):
         "абвгдеёжзийклмнопрстуфхцчшщъыьэюя"
         "0123456789.,:-%₽$()[]/+ "
     )
+    BASE_LANGUAGES = ("eng", "rus")
+    OPTIONAL_LANGUAGES = ("chi_sim",)
+
+    @staticmethod
+    def installed_languages() -> list:
+        try:
+            import pytesseract
+
+            return pytesseract.get_languages(config="")
+        except Exception:
+            return []
+
+    @classmethod
+    def ocr_language_string(cls) -> str:
+        installed = set(cls.installed_languages())
+        languages = [lang for lang in cls.OPTIONAL_LANGUAGES if lang in installed]
+        languages.extend(lang for lang in cls.BASE_LANGUAGES if lang in installed)
+        return "+".join(languages or ["eng"])
 
     @staticmethod
     def crop_garbage_zones(image: Image.Image, left_percent: float = 0.15, right_percent: float = 0.20) -> Image.Image:
@@ -189,10 +207,10 @@ class TesseractEngine(OcrEngine):
             # PSM 6 = Single uniform block (good default)
             config = f"--oem 1 --psm {psm}"
             
-            # Run OCR with eng+rus (both languages in one pass)
+            lang = self.ocr_language_string()
             data = pytesseract.image_to_data(
                 image,  # Pass original image directly
-                lang='eng+rus',
+                lang=lang,
                 config=config,
                 output_type=pytesseract.Output.DICT
             )
@@ -202,12 +220,39 @@ class TesseractEngine(OcrEngine):
             print(f"Error in recognize_with_psm: {e}")
             return {}
 
+    def recognize_to_string(self, image, psm: int = 6) -> str:
+        """
+        Runs Tesseract's plain text mode.
+
+        TSV confidence filtering is useful for product cards, but it is too
+        aggressive for mixed-script OCR because CJK tokens often get low or
+        differently shaped confidence data. Plain text mode keeps those tokens.
+        """
+        try:
+            import pytesseract
+
+            config = f"--oem 1 --psm {psm}"
+            text = pytesseract.image_to_string(
+                image,
+                lang=self.ocr_language_string(),
+                config=config,
+            )
+            return text.strip()
+        except Exception as e:
+            print(f"Error in recognize_to_string: {e}")
+            return ""
+
     def recognize(self, image, mode: str = "text_mode", psm: int = 6) -> str:
         """
         Main recognition method.
         Uses TSV output with confidence filtering for cleaner results.
         """
         try:
+            if mode == "text_mode":
+                text = self.recognize_to_string(image, psm)
+                if text:
+                    return text
+
             data = self.recognize_with_psm(image, psm, mode)
             
             if not data:
@@ -269,8 +314,13 @@ class TesseractEngine(OcrEngine):
             import pytesseract
             pytesseract.get_tesseract_version()
             return True
-        except:
+        except Exception:
             return False
 
     def info(self) -> dict:
-        return {"engine": "tesseract", "device": "cpu", "langs": "eng,rus"}
+        return {
+            "engine": "tesseract",
+            "device": "cpu",
+            "langs": self.ocr_language_string(),
+            "installed_langs": self.installed_languages(),
+        }

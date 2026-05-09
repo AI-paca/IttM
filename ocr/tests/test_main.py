@@ -6,19 +6,22 @@ from PIL import Image
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from app.main import app
+from app.services import convert_service
 
 client = TestClient(app)
 
 def test_probe():
     response = client.post("/probe", json={"modes": ["all"], "engines": ["auto"]})
-    # Status should be 200 and return a probe report
-    if response.status_code == 200:
-        json_data = response.json()
-        assert "cases" in json_data
-    else:
-        # If it fails, that's fine if Tesseract isn't immediately ready in some envs, 
-        # but the endpoint exists.
-        assert response.status_code in [200, 400, 500]
+    assert response.status_code == 200
+    json_data = response.json()
+    assert json_data["ok"] is True
+    assert "cases" in json_data
+
+
+def test_probe_v1_alias():
+    response = client.post("/v1/probe", json={"modes": ["all"], "engines": ["auto"]})
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
 
 def test_health():
     response = client.get("/health")
@@ -26,6 +29,13 @@ def test_health():
     json_data = response.json()
     assert json_data["ok"] is True
     assert json_data["service"] == "Python OCR Service"
+
+
+def test_readiness():
+    response = client.get("/readiness")
+    assert response.status_code == 200
+    assert response.json()["ready"] is True
+
 
 def test_convert_invalid_pdf():
     # Sending a broken pdf
@@ -47,8 +57,21 @@ def test_convert_invalid_image():
     assert response.status_code == 400
     assert "Could not load image" in response.json()["detail"]
 
-def test_convert_auto():
-    # Create a small dummy image for testing OCR endpoint
+
+def test_convert_uses_service_contract(monkeypatch):
+    async def fake_convert(path, engine_type="auto"):
+        assert path.exists()
+        assert engine_type == "auto"
+        return "FAKE OCR MARKDOWN", {
+            "engine": "fake",
+            "chunks": 1,
+            "cards_found": 0,
+            "pages": 1,
+            "elapsed_ms": 0,
+        }
+
+    monkeypatch.setattr(convert_service, "convert", fake_convert)
+
     img = Image.new('RGB', (100, 30), color = (255, 255, 255))
     img_bytes = io.BytesIO()
     img.save(img_bytes, format='PNG')
@@ -60,7 +83,6 @@ def test_convert_auto():
     )
     assert response.status_code == 200
     json_data = response.json()
-    
-    # Text might be empty for a blank image, but it should return 200 OK and correct structure
-    assert "markdown" in json_data
-    assert "meta" in json_data
+    assert json_data["markdown"] == "FAKE OCR MARKDOWN"
+    assert json_data["meta"]["engine"] == "fake"
+    assert json_data["meta"]["chunks"] == 1

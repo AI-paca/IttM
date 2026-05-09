@@ -2,7 +2,7 @@ FROM node:22-slim AS builder
 
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm ci --no-audit --no-fund --fetch-retries=2 --fetch-retry-maxtimeout=20000 --fetch-timeout=30000
 COPY . .
 RUN npm run build
 

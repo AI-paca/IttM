@@ -18,14 +18,46 @@ import {
   DownloadCloud,
   Activity,
 } from "lucide-react";
-import { motion, AnimatePresence, useScroll, useMotionValueEvent } from "motion/react";
-import { runBrowserOcrLowMemory } from "./lib/browser-ocr";
-import { processPdfIntelligently, cropWhiteBorders } from "./lib/pdf-parser";
+import {
+  motion,
+  AnimatePresence,
+  useScroll,
+  useMotionValueEvent,
+} from "motion/react";
+import { processPdfIntelligently } from "./lib/pdf-parser";
+import {
+  buildApiUrl,
+  executeBackendOcr,
+  noticeFromError,
+  requestApiJson,
+} from "./ocr/api-client";
+import {
+  createBrowserOcrProfile,
+  releaseBrowserOcrCache,
+  runBrowserOcrLowMemory,
+} from "./ocr/browser-engine";
+import {
+  base64JpegToFile,
+  getBrowserDiagnostics,
+  isSupportedOcrFile,
+} from "./ocr/file-utils";
+import { executeLlmOcr } from "./ocr/llm-client";
+import type {
+  AppDiagnostics,
+  AppState,
+  BackendDiagnostics,
+  BackendGpuInfo,
+  LlmProvider,
+  OcrResult,
+  SourceType,
+} from "./ocr/types";
 
-type AppState = "upload" | "configure" | "loading" | "reading";
-type SourceType = "auto" | "gateway" | "browser" | "local_tess" | "local_easy" | "llm";
-
-const SOURCES: { id: SourceType; label: string; desc: string; icon: any }[] = [
+const SOURCES: {
+  id: SourceType;
+  label: string;
+  desc: string;
+  icon: React.ReactNode;
+}[] = [
   {
     id: "auto",
     label: "Auto (Fallback)",
@@ -64,23 +96,31 @@ const SOURCES: { id: SourceType; label: string; desc: string; icon: any }[] = [
   },
 ];
 
-const toBase64 = (file: File) =>
-  new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve((reader.result as string).split(",")[1]);
-    reader.onerror = (error) => reject(error);
-  });
-
 function setCookie(k: string, v: string) {
+  if (typeof document === "undefined") return;
   document.cookie = `${k}=${v}; path=/; max-age=31536000`;
 }
 function getCookie(k: string) {
+  if (typeof document === "undefined") return null;
   const match = document.cookie.match(new RegExp("(^| )" + k + "=([^;]+)"));
   return match ? match[2] : null;
 }
 function delCookie(k: string) {
+  if (typeof document === "undefined") return;
   document.cookie = `${k}=; path=/; max-age=0`;
+}
+
+function getSavedSource(): SourceType {
+  const savedRemember = getCookie("text-extractor-remember");
+  const savedSource = getCookie("text-extractor-source");
+  if (
+    savedRemember === "true" &&
+    savedSource &&
+    SOURCES.find((s) => s.id === savedSource)
+  ) {
+    return savedSource as SourceType;
+  }
+  return "auto";
 }
 
 export default function App() {
@@ -88,24 +128,33 @@ export default function App() {
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
-  const [selectedSource, setSelectedSource] = useState<SourceType>("auto");
+  const [selectedSource, setSelectedSource] = useState<SourceType>(() =>
+    getSavedSource(),
+  );
 
   const [pingUrl, setPingUrl] = useState("");
-  const [rememberChoice, setRememberChoice] = useState(false);
+  const [rememberChoice, setRememberChoice] = useState(
+    () => getCookie("text-extractor-remember") === "true",
+  );
   const [showHeader, setShowHeader] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [extractedText, setExtractedText] = useState("");
   const [isExtracting, setIsExtracting] = useState(false);
-  const [extractionProgress, setExtractionProgress] = useState("Достаём текст из скриншота...");
+  const [extractionProgress, setExtractionProgress] = useState(
+    "Достаём текст из скриншота...",
+  );
 
-  const [llmProvider, setLlmProvider] = useState<"gemini" | "openrouter">("gemini");
+  const [llmProvider, setLlmProvider] = useState<LlmProvider>("gemini");
   const [llmModel, setLlmModel] = useState("gemini-2.5-flash-lite");
   const [llmKey, setLlmKey] = useState("");
 
   const [themeMode, setThemeMode] = useState<"light" | "dark" | "auto">(() => {
     if (typeof window !== "undefined") {
-      return (localStorage.getItem("theme-mode") as any) || "auto";
+      const saved = localStorage.getItem("theme-mode");
+      return saved === "light" || saved === "dark" || saved === "auto"
+        ? saved
+        : "auto";
     }
     return "auto";
   });
@@ -113,35 +162,34 @@ export default function App() {
   const [easyOcrInstalling, setEasyOcrInstalling] = useState(false);
   const [lastExtractedPage, setLastExtractedPage] = useState(1);
   const [totalPdfPages, setTotalPdfPages] = useState<number | null>(null);
-  const [diagnostics, setDiagnostics] = useState<any>(null);
+  const [diagnostics, setDiagnostics] = useState<AppDiagnostics | null>(null);
+  const [notice, setNotice] = useState<{
+    message: string;
+    tone: "error" | "success";
+  } | null>(null);
+
+  const showNotice = (message: string, tone: "error" | "success" = "error") => {
+    setNotice({ message, tone });
+    window.setTimeout(() => {
+      setNotice((current) => (current?.message === message ? null : current));
+    }, 6000);
+  };
 
   useEffect(() => {
-    // browser info
-    const browserInfo = {
-      // @ts-ignore
-      memory: navigator.deviceMemory || "Unknown",
-      cores: navigator.hardwareConcurrency || "Unknown",
-    };
+    const browserInfo = getBrowserDiagnostics();
 
-    fetch("/api/diagnostics")
-      .then((r) => r.json())
+    requestApiJson<BackendDiagnostics>("/api/diagnostics", "Diagnostics")
       .then((data) => {
         setDiagnostics({ backend: data, browser: browserInfo });
       })
-      .catch((e) => {
-        setDiagnostics({ backend: null, browser: browserInfo, error: "Backend uncreachable" });
+      .catch((error) => {
+        const normalized = noticeFromError(error);
+        setDiagnostics({
+          backend: null,
+          browser: browserInfo,
+          error: normalized.message,
+        });
       });
-  }, []);
-
-  useEffect(() => {
-    const savedSource = getCookie("text-extractor-source");
-    const savedRemember = getCookie("text-extractor-remember");
-    if (savedRemember === "true") {
-      setRememberChoice(true);
-      if (savedSource && SOURCES.find((s) => s.id === savedSource)) {
-        setSelectedSource(savedSource as SourceType);
-      }
-    }
   }, []);
 
   useEffect(() => {
@@ -152,7 +200,8 @@ export default function App() {
     if (themeMode === "dark") applyDark();
     else if (themeMode === "light") applyLight();
     else {
-      if (window.matchMedia("(prefers-color-scheme: dark)").matches) applyDark();
+      if (window.matchMedia("(prefers-color-scheme: dark)").matches)
+        applyDark();
       else applyLight();
     }
   }, [themeMode]);
@@ -193,6 +242,7 @@ export default function App() {
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error("Failed to copy", err);
+      showNotice("Не удалось скопировать текст в буфер обмена.");
     }
   };
 
@@ -213,12 +263,15 @@ export default function App() {
     setIsDragging(false);
   };
 
-  const handleDrop = (e: DragEvent<HTMLDivElement>, autoStart: boolean = false) => {
+  const handleDrop = (
+    e: DragEvent<HTMLDivElement>,
+    autoStart: boolean = false,
+  ) => {
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const droppedFile = e.dataTransfer.files[0];
-      if (droppedFile.type.startsWith("image/") || droppedFile.type === "application/pdf") {
+      if (isSupportedOcrFile(droppedFile)) {
         setFile(droppedFile);
         if (autoStart) {
           setLastExtractedPage(1);
@@ -229,6 +282,8 @@ export default function App() {
         } else {
           setAppState("configure");
         }
+      } else {
+        showNotice("Поддерживаются только изображения и PDF.");
       }
     }
   };
@@ -236,216 +291,13 @@ export default function App() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const selected = e.target.files[0];
-      if (selected.type.startsWith("image/") || selected.type === "application/pdf") {
+      if (isSupportedOcrFile(selected)) {
         setFile(selected);
         setAppState("configure");
+      } else {
+        showNotice("Поддерживаются только изображения и PDF.");
       }
     }
-  };
-
-  const handleReplaceFile = () => {
-    setFile(null);
-    setAppState("upload");
-  };
-
-  const executeBackendOcr = async (
-    targetFile: File,
-    url: string,
-    activeContent: { current: boolean },
-  ) => {
-    const formData = new FormData();
-    formData.append("file", targetFile);
-    if (activeContent.current) setExtractionProgress("Отправка на сервер...");
-
-    const response = await fetch(url, { method: "POST", body: formData });
-
-    if (!response.ok) {
-      throw new Error(`Server error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    if (data.error) throw new Error(data.error);
-
-    return data;
-  };
-
-  const executeLlmOcrForImage = async (
-    b64: string,
-    mimeType: string,
-    activeContent: { current: boolean },
-  ) => {
-    if (!llmKey) throw new Error("API ключ не указан");
-    const key = llmKey.trim();
-    const model = llmModel.trim();
-
-    if (llmProvider === "gemini") {
-      if (activeContent.current) setExtractionProgress("Запрос к Gemini...");
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
-      const payload = {
-        contents: [
-          {
-            parts: [
-              {
-                text: "Extract all text from this image/document. Output only the extracted text, nothing else, no markdown fences if not necessary.",
-              },
-              { inlineData: { mimeType, data: b64 } },
-            ],
-          },
-        ],
-      };
-      let response;
-      try {
-        response = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-      } catch (e: any) {
-        throw new Error(
-          "Network error: Failed to fetch (check your connection or API key constraints)",
-        );
-      }
-
-      if (!response.ok) {
-        let err = "";
-        try {
-          err = await response.text();
-        } catch (e) {
-          console.debug("Error body read failed", e);
-        }
-        if (response.status === 503) {
-          throw new Error(
-            `Gemini сейчас перегружен (503 Service Unavailable). Пожалуйста, подождите пару минут или смените модель на OpenRouter.`,
-          );
-        }
-        throw new Error(`Gemini error: ${response.status} ${err}`);
-      }
-      const data = await response.json();
-      if (data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-        return { markdown: data.candidates[0].content.parts[0].text };
-      }
-      if (data?.candidates?.[0]?.finishReason) {
-        throw new Error(`Заблокировано: ${data.candidates[0].finishReason}`);
-      }
-      throw new Error("Пустой ответ от Gemini (или неправильный формат)");
-    } else {
-      if (activeContent.current) setExtractionProgress("Запрос к OpenRouter...");
-      const url = `https://openrouter.ai/api/v1/chat/completions`;
-      const payload = {
-        model: model,
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: "Extract all text from this image/document. Output only the extracted text, nothing else, no markdown fences if not necessary.",
-              },
-              {
-                type: "image_url",
-                image_url: { url: `data:${mimeType};base64,${b64}` },
-              },
-            ],
-          },
-        ],
-      };
-      let response;
-      try {
-        response = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${key}`,
-          },
-          body: JSON.stringify(payload),
-        });
-      } catch (e: any) {
-        throw new Error("Network error: Failed to fetch from OpenRouter");
-      }
-
-      if (!response.ok) {
-        let err = "";
-        try {
-          err = await response.text();
-        } catch (e) {
-          console.debug("Error body read failed", e);
-        }
-        throw new Error(`OpenRouter error: ${response.status} ${err}`);
-      }
-      const data = await response.json();
-      if (data?.choices?.[0]?.message?.content) {
-        return { markdown: data.choices[0].message.content };
-      }
-      throw new Error("Пустой ответ от OpenRouter");
-    }
-  };
-
-  const executeLlmOcr = async (
-    targetFile: File,
-    activeContent: { current: boolean },
-    onChunk?: (text: string, pageIdx?: number) => void,
-    startPage: number = 1,
-    onTotalPages?: (total: number) => void,
-  ) => {
-    if (activeContent.current) setExtractionProgress("Подготовка файла...");
-
-    if (targetFile.type === "application/pdf") {
-      const md = await processPdfIntelligently(
-        targetFile,
-        (msg) => {
-          if (activeContent.current) setExtractionProgress(msg);
-        },
-        async (b64) => {
-          const res = await executeLlmOcrForImage(b64, "image/jpeg", activeContent);
-          return res.markdown;
-        },
-        (chunk, pageIdx) => {
-          if (onChunk) onChunk(chunk, pageIdx);
-        },
-        startPage,
-        onTotalPages,
-      );
-      return { markdown: md };
-    }
-
-    // Process image
-    const md = await new Promise<string>((resolve, reject) => {
-      const img = new Image();
-      const url = URL.createObjectURL(targetFile);
-      img.onload = () => {
-        URL.revokeObjectURL(url);
-        const canvas = document.createElement("canvas");
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext("2d", { willReadFrequently: true });
-        if (!ctx) {
-          toBase64(targetFile)
-            .then((b64) => {
-              executeLlmOcrForImage(b64, targetFile.type || "image/jpeg", activeContent)
-                .then((r) => {
-                  if (onChunk) onChunk(r.markdown);
-                  resolve(r.markdown);
-                })
-                .catch(reject);
-            })
-            .catch(reject);
-          return;
-        }
-        ctx.drawImage(img, 0, 0);
-        const croppedCanvas = cropWhiteBorders(canvas);
-        const b64 = croppedCanvas.toDataURL("image/jpeg", 0.9).split(",")[1];
-        executeLlmOcrForImage(b64, "image/jpeg", activeContent)
-          .then((r) => {
-            if (onChunk) onChunk(r.markdown);
-            resolve(r.markdown);
-          })
-          .catch(reject);
-      };
-      img.onerror = reject;
-      img.src = url;
-    });
-
-    return { markdown: md };
   };
 
   const [triggerCount, setTriggerCount] = useState(0);
@@ -469,6 +321,7 @@ export default function App() {
   const handleCancelExtraction = () => {
     activeExtractRef.current.current = false;
     setIsExtracting(false);
+    void releaseBrowserOcrCache();
     if (!extractedText) {
       setAppState("configure");
     }
@@ -481,14 +334,25 @@ export default function App() {
     activeExtractRef.current = active;
 
     const runExtract = async () => {
-      console.log("[OCR] Started runExtract. Source:", selectedSource, "File:", file.name);
+      console.log(
+        "[OCR] Started runExtract. Source:",
+        selectedSource,
+        "File:",
+        file.name,
+      );
       setIsExtracting(true);
       try {
-        let result: any = null;
+        let result: OcrResult | null = null;
         let progressiveText = lastExtractedPage > 1 ? extractedText || "" : "";
+        const browserProfile = createBrowserOcrProfile(diagnostics);
 
         const handleChunk = (chunk: string, pageIndex?: number) => {
-          console.log("[OCR] handleChunk called. Chunk length:", chunk.length, "Page:", pageIndex);
+          console.log(
+            "[OCR] handleChunk called. Chunk length:",
+            chunk.length,
+            "Page:",
+            pageIndex,
+          );
           if (!active.current) {
             console.log("[OCR] handleChunk ignored (active is false)");
             return;
@@ -509,17 +373,21 @@ export default function App() {
                 if (active.current) setExtractionProgress(msg);
               },
               async (b64) => {
-                const res = await fetch(`data:image/jpeg;base64,${b64}`);
-                const blob = await res.blob();
-                const tempFile = new File([blob], "page.jpg", { type: "image/jpeg" });
-                const ocrRes = await runBrowserOcrLowMemory(tempFile, (text) => {
-                  if (active.current) setExtractionProgress(text);
-                });
+                const tempFile = await base64JpegToFile(b64);
+                const ocrRes = await runBrowserOcrLowMemory(
+                  tempFile,
+                  (text) => {
+                    if (active.current) setExtractionProgress(text);
+                  },
+                  undefined,
+                  browserProfile,
+                );
                 return ocrRes.markdown;
               },
               handleChunk,
               lastExtractedPage,
               setTotalPdfPages,
+              { renderScale: browserProfile.pdfRenderScale },
             );
             return { markdown: md };
           } else {
@@ -531,23 +399,34 @@ export default function App() {
               (chunk) => {
                 handleChunk(chunk);
               },
+              browserProfile,
             );
           }
         };
 
         let effectiveSource = selectedSource;
-        if (effectiveSource === "auto" && diagnostics && (!diagnostics.backend || diagnostics.error)) {
-          console.log("[OCR] Backend is offline, auto-switching to browser source");
+        if (
+          effectiveSource === "auto" &&
+          diagnostics &&
+          (!diagnostics.backend || diagnostics.error)
+        ) {
+          console.log(
+            "[OCR] Backend is offline, auto-switching to browser source",
+          );
           effectiveSource = "browser";
         }
 
         if (effectiveSource === "browser") {
           result = await runBrowserFallback();
-        } else if (effectiveSource === "local_tess" || effectiveSource === "local_easy") {
-          const engineType = effectiveSource === "local_tess" ? "tesseract" : "easyocr";
-
-          const url = new URL(window.location.origin + "/api/convert");
-          url.searchParams.append("engine_type", engineType);
+        } else if (
+          effectiveSource === "local_tess" ||
+          effectiveSource === "local_easy"
+        ) {
+          const engineType =
+            effectiveSource === "local_tess" ? "tesseract" : "easyocr";
+          const url = buildApiUrl("", "/api/convert", {
+            engine_type: engineType,
+          });
 
           if (file.type === "application/pdf") {
             const md = await processPdfIntelligently(
@@ -556,38 +435,61 @@ export default function App() {
                 if (active.current) setExtractionProgress(msg);
               },
               async (b64) => {
-                const res = await fetch(`data:image/jpeg;base64,${b64}`);
-                const blob = await res.blob();
-                const tempFile = new File([blob], "page.jpg", { type: "image/jpeg" });
-                const ocrRes = await executeBackendOcr(tempFile, url.toString(), active);
+                const tempFile = await base64JpegToFile(b64);
+                const ocrRes = await executeBackendOcr(
+                  tempFile,
+                  url,
+                  active,
+                  (text) => {
+                    if (active.current) setExtractionProgress(text);
+                  },
+                );
                 return ocrRes.markdown;
               },
               handleChunk,
               lastExtractedPage,
               setTotalPdfPages,
+              { renderScale: browserProfile.pdfRenderScale },
             );
             result = { markdown: md };
           } else {
-            result = await executeBackendOcr(file, url.toString(), active);
+            result = await executeBackendOcr(file, url, active, (text) => {
+              if (active.current) setExtractionProgress(text);
+            });
             handleChunk(result.markdown || "");
           }
         } else if (effectiveSource === "llm") {
           result = await executeLlmOcr(
             file,
+            { provider: llmProvider, model: llmModel, key: llmKey },
             active,
+            (text) => {
+              if (active.current) setExtractionProgress(text);
+            },
             handleChunk,
             lastExtractedPage,
             setTotalPdfPages,
+            browserProfile.pdfRenderScale,
           );
-        } else if (effectiveSource === "gateway" || effectiveSource === "auto") {
-          const url = "/api/convert";
+        } else if (
+          effectiveSource === "gateway" ||
+          effectiveSource === "auto"
+        ) {
+          const url = buildApiUrl(
+            effectiveSource === "gateway" ? pingUrl : "",
+            "/api/convert",
+          );
           try {
-            result = await executeBackendOcr(file, url, active);
+            result = await executeBackendOcr(file, url, active, (text) => {
+              if (active.current) setExtractionProgress(text);
+            });
             handleChunk(result.markdown || "");
           } catch (err: any) {
             if (effectiveSource === "auto") {
               if (active.current)
-                setExtractionProgress("Gateway недоступен, выполняем локально (WASM)...");
+                setExtractionProgress(
+                  "Gateway недоступен, выполняем локально (WASM)...",
+                );
               result = await runBrowserFallback();
             } else {
               throw err;
@@ -598,18 +500,26 @@ export default function App() {
         if (active.current) {
           setAppState("reading");
           if (!progressiveText) {
-            console.log("[OCR] No chunks detected, using final result markdown");
-            setExtractedText(result?.markdown || "Не удалось распознать текст.");
+            console.log(
+              "[OCR] No chunks detected, using final result markdown",
+            );
+            setExtractedText(
+              result?.markdown || "Не удалось распознать текст.",
+            );
           }
         }
       } catch (error: any) {
         console.error("[OCR] Extraction failed:", error);
+        const normalized = noticeFromError(error);
         if (active.current) {
           if (extractedText || appState === "reading") {
-            setExtractedText((prev) => prev + `\n\n[Прервано из-за ошибки: ${error.message}]`);
+            setExtractedText(
+              (prev) =>
+                prev + `\n\n[Прервано из-за ошибки: ${normalized.message}]`,
+            );
+            showNotice(normalized.message);
           } else {
-            console.error("[OCR] Alerting user:", error.message);
-            alert("Ошибка извлечения: " + error.message);
+            showNotice(`Ошибка извлечения: ${normalized.message}`);
             setAppState("configure");
           }
         }
@@ -646,6 +556,34 @@ export default function App() {
         if (appState !== "upload") handleDrop(e, true);
       }}
     >
+      <AnimatePresence>
+        {notice && (
+          <motion.div
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+            className={`fixed top-4 left-1/2 z-[120] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 rounded-2xl border px-4 py-3 shadow-xl backdrop-blur-xl ${
+              notice.tone === "success"
+                ? "border-green-200 bg-green-50/95 text-green-800 dark:border-green-800 dark:bg-green-900/90 dark:text-green-100"
+                : "border-red-200 bg-red-50/95 text-red-800 dark:border-red-800 dark:bg-red-950/90 dark:text-red-100"
+            }`}
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex-1 text-sm font-semibold leading-5">
+                {notice.message}
+              </div>
+              <button
+                onClick={() => setNotice(null)}
+                className="rounded-lg p-1 opacity-70 transition-opacity hover:opacity-100"
+                title="Закрыть"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Global Drag Overlay */}
       <AnimatePresence>
         {isDragging && appState !== "upload" && (
@@ -660,8 +598,12 @@ export default function App() {
                 <UploadCloud className="w-10 h-10" />
               </div>
               <div className="text-center">
-                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Бросьте для замены</h3>
-                <p className="text-gray-500 dark:text-gray-400 mt-1">Файл будет заменен и обработан сразу</p>
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
+                  Бросьте для замены
+                </h3>
+                <p className="text-gray-500 dark:text-gray-400 mt-1">
+                  Файл будет заменен и обработан сразу
+                </p>
               </div>
             </div>
           </motion.div>
@@ -749,7 +691,10 @@ export default function App() {
               <div className="flex items-center gap-2 ml-auto overflow-hidden">
                 {appState !== "upload" && (
                   <div className="hidden sm:flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth">
-                    <button onClick={() => handleSourceSelect("auto")} className={btnClass("auto")}>
+                    <button
+                      onClick={() => handleSourceSelect("auto")}
+                      className={btnClass("auto")}
+                    >
                       Auto
                     </button>
                     <button
@@ -829,7 +774,8 @@ export default function App() {
                 {diagnostics && (
                   <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm flex flex-col gap-3 transition-colors delay-100">
                     <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 flex items-center gap-2">
-                      <Activity className="w-4 h-4 text-blue-500" /> Diagnostics & Limits
+                      <Activity className="w-4 h-4 text-blue-500" /> Diagnostics
+                      & Limits
                     </h3>
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-gray-600 dark:text-gray-400">
                       <div className="flex flex-col bg-gray-50 dark:bg-gray-900 p-2.5 rounded-lg border border-gray-100 dark:border-gray-700/50">
@@ -857,19 +803,23 @@ export default function App() {
                             <span className="font-semibold text-blue-800 dark:text-blue-200 mb-0.5">
                               Backend System
                             </span>
-                            {diagnostics.backend.system} / {diagnostics.backend.cpu_cores} Cores
+                            {diagnostics.backend.system} /{" "}
+                            {diagnostics.backend.cpu_cores} Cores
                           </div>
-                          {diagnostics.backend.gpus && diagnostics.backend.gpus.length > 0 ? (
+                          {diagnostics.backend.gpus &&
+                          diagnostics.backend.gpus.length > 0 ? (
                             <div className="col-span-2 sm:col-span-4 flex gap-2 flex-wrap mt-1">
-                              {diagnostics.backend.gpus.map((g: any, i: number) => (
-                                <div
-                                  key={i}
-                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-100 dark:border-indigo-900/50 font-medium text-xs text-indigo-700 dark:text-indigo-300"
-                                >
-                                  <Cpu className="w-3.5 h-3.5" />
-                                  {g.name} {g.version && `(v${g.version})`}
-                                </div>
-                              ))}
+                              {diagnostics.backend.gpus.map(
+                                (g: BackendGpuInfo, i: number) => (
+                                  <div
+                                    key={i}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-100 dark:border-indigo-900/50 font-medium text-xs text-indigo-700 dark:text-indigo-300"
+                                  >
+                                    <Cpu className="w-3.5 h-3.5" />
+                                    {g.name} {g.version && `(v${g.version})`}
+                                  </div>
+                                ),
+                              )}
                             </div>
                           ) : (
                             <div className="col-span-2 sm:col-span-4 flex gap-2 flex-wrap mt-1">
@@ -1008,7 +958,8 @@ export default function App() {
                       className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all shadow-md active:scale-95"
                     >
                       <RefreshCw className="w-5 h-5" />
-                      Продолжить со страницы {lastExtractedPage} из {totalPdfPages}
+                      Продолжить со страницы {lastExtractedPage} из{" "}
+                      {totalPdfPages}
                     </button>
                   </div>
                 ) : (
@@ -1043,7 +994,8 @@ export default function App() {
                     >
                       {copied ? (
                         <>
-                          <Check className="w-5 h-5 flex-shrink-0" /> Скопировано
+                          <Check className="w-5 h-5 flex-shrink-0" />{" "}
+                          Скопировано
                         </>
                       ) : (
                         <>
@@ -1093,7 +1045,9 @@ export default function App() {
                       Local & Browser
                     </h3>
                     {SOURCES.filter((s) =>
-                      ["auto", "browser", "local_tess", "local_easy"].includes(s.id),
+                      ["auto", "browser", "local_tess", "local_easy"].includes(
+                        s.id,
+                      ),
                     ).map((src) => (
                       <button
                         key={src.id}
@@ -1133,22 +1087,36 @@ export default function App() {
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setEasyOcrInstalling(true);
-                                  fetch("/api/install-easyocr", { method: "POST" })
-                                    .then((r) => r.json())
+                                  requestApiJson<{
+                                    status?: string;
+                                    message?: string;
+                                    error?: string;
+                                  }>(
+                                    "/api/install-easyocr",
+                                    "EasyOCR install",
+                                    {
+                                      method: "POST",
+                                    },
+                                  )
                                     .then((d) => {
                                       if (
                                         d.status === "already_installed" ||
                                         d.status === "installed"
                                       ) {
-                                        alert("EasyOCR установлен/найден! Можно использовать.");
+                                        showNotice(
+                                          "EasyOCR установлен/найден. Можно использовать.",
+                                          "success",
+                                        );
                                       } else {
-                                        alert("Ошибка: " + d.message);
+                                        showNotice(
+                                          `EasyOCR: ${d.message || d.error || "не удалось установить"}`,
+                                        );
                                       }
                                       setEasyOcrInstalling(false);
                                     })
-                                    .catch(() => {
-                                      alert(
-                                        "Ошибка соединения с бэкендом (убедитесь что run.sh работает)",
+                                    .catch((error) => {
+                                      showNotice(
+                                        noticeFromError(error).message,
                                       );
                                       setEasyOcrInstalling(false);
                                     });
@@ -1178,7 +1146,9 @@ export default function App() {
                     <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-1">
                       API & Cloud
                     </h3>
-                    {SOURCES.filter((s) => ["gateway", "llm"].includes(s.id)).map((src) => (
+                    {SOURCES.filter((s) =>
+                      ["gateway", "llm"].includes(s.id),
+                    ).map((src) => (
                       <button
                         key={src.id}
                         onClick={() => handleSourceSelect(src.id as SourceType)}
@@ -1236,9 +1206,12 @@ export default function App() {
                           <select
                             value={llmProvider}
                             onChange={(e) => {
-                              const prov = e.target.value as "gemini" | "openrouter";
+                              const prov = e.target.value as
+                                | "gemini"
+                                | "openrouter";
                               setLlmProvider(prov);
-                              if (prov === "gemini") setLlmModel("gemini-2.5-flash-lite");
+                              if (prov === "gemini")
+                                setLlmModel("gemini-2.5-flash-lite");
                               else setLlmModel("baidu/qianfan-ocr-fast:free");
                             }}
                             className="p-2 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-lg text-sm text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-blue-500 transition-all"
@@ -1273,7 +1246,8 @@ export default function App() {
                             <button
                               onClick={async () => {
                                 try {
-                                  const text = await navigator.clipboard.readText();
+                                  const text =
+                                    await navigator.clipboard.readText();
                                   setLlmKey(text);
                                 } catch (e) {
                                   console.debug("Clipboard read failed", e);
@@ -1312,7 +1286,11 @@ export default function App() {
                         stroke="currentColor"
                         strokeWidth={3}
                       >
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M5 13l4 4L19 7"
+                        />
                       </svg>
                     </div>
                     <span className="text-[14px] font-semibold text-gray-700 dark:text-gray-300 select-none group-hover:text-gray-900 dark:group-hover:text-gray-100 transition-colors">

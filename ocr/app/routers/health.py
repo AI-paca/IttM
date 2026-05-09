@@ -40,7 +40,7 @@ def diagnostics_endpoint():
         memory_gb = round(mem.total / (1024**3), 2)
         used_gb = round(mem.used / (1024**3), 2)
         cpu_cores = psutil.cpu_count(logical=True)
-    except:
+    except Exception:
         memory_gb = 0
         used_gb = 0
         cpu_cores = 0
@@ -81,7 +81,7 @@ def diagnostics_endpoint():
             gpus.append({"type": "dml", "name": "DirectML", "version": "ORT"})
         if "TensorrtExecutionProvider" in providers:
             gpus.append({"type": "tensorrt", "name": "Nvidia TensorRT", "version": "ORT"})
-    except:
+    except Exception:
         pass
 
     # If no GPUs detected via torch/ort but pynvml might see something
@@ -97,7 +97,7 @@ def diagnostics_endpoint():
                     name = name.decode("utf-8")
                 gpus.append({"type": "nvml", "name": f"NVIDIA {name} (NVML)", "version": "detected"})
             pynvml.nvmlShutdown()
-        except:
+        except Exception:
             pass
 
     return {

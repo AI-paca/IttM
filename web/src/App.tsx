@@ -926,12 +926,8 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="text-[17px] sm:text-[18px] leading-[1.7] sm:leading-[1.8] space-y-[24px] sm:space-y-[28px] text-gray-800 dark:text-gray-300 selection:bg-blue-100 dark:selection:bg-blue-900 pb-12 whitespace-pre-wrap font-sans">
-                  {extractedText}
-                </div>
-
                 {isExtracting && (
-                  <div className="flex flex-col sm:flex-row items-center gap-4 py-6 justify-center">
+                  <div className="flex flex-col sm:flex-row items-center gap-4 py-6 mb-6 justify-center border-b border-gray-100 dark:border-gray-800">
                     <div className="flex items-center gap-3 text-blue-600 dark:text-blue-400">
                       <div className="w-5 h-5 border-2 border-blue-200 dark:border-blue-900 border-t-blue-600 dark:border-t-blue-400 rounded-full animate-spin" />
                       <span className="font-medium text-sm animate-pulse">
@@ -947,6 +943,10 @@ export default function App() {
                     </button>
                   </div>
                 )}
+
+                <div className="text-[17px] sm:text-[18px] leading-[1.7] sm:leading-[1.8] space-y-[24px] sm:space-y-[28px] text-gray-800 dark:text-gray-300 selection:bg-blue-100 dark:selection:bg-blue-900 pb-12 whitespace-pre-wrap font-sans">
+                  {extractedText}
+                </div>
 
                 {file?.type === "application/pdf" &&
                 totalPdfPages &&

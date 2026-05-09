@@ -15,24 +15,45 @@ export async function handle(request: Request, env: Env): Promise<Response> {
     }
   }
 
-  // Static files serving fallback (for basic adapter usage without Vite)
-  const staticPath = url.pathname === "/" ? "/index.html" : url.pathname;
-  let filePath = path.join(process.cwd(), "dist", staticPath);
+  // Static files serving fallback (for basic adapter usage without Vite).
+  // Accept GitHub Pages-prefixed builds locally too, e.g. /IttM/assets/app.js.
+  const distRoot = path.resolve(process.cwd(), "dist");
+  let pathname = decodeURIComponent(url.pathname);
+  if (pathname === "/IttM") pathname = "/";
+  if (pathname.startsWith("/IttM/")) pathname = pathname.slice("/IttM".length);
+
+  const staticPath =
+    pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+  const isAssetRequest = path.extname(staticPath) !== "";
+  let filePath = path.resolve(distRoot, staticPath);
 
   try {
     if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+      if (isAssetRequest) return not_found();
       // Fallback for SPA (if user requests a path like /configure)
-      filePath = path.join(process.cwd(), "dist", "index.html");
+      filePath = path.join(distRoot, "index.html");
+    }
+
+    if (!filePath.startsWith(distRoot + path.sep) && filePath !== distRoot) {
+      return not_found();
     }
 
     if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-      const ext = path.extname(filePath);
+      const ext = path.extname(filePath).toLowerCase();
       const contentTypes: Record<string, string> = {
-        ".html": "text/html",
-        ".css": "text/css",
+        ".html": "text/html; charset=utf-8",
+        ".css": "text/css; charset=utf-8",
         ".js": "application/javascript",
+        ".mjs": "application/javascript",
+        ".json": "application/json",
+        ".map": "application/json",
         ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
         ".svg": "image/svg+xml",
+        ".ico": "image/x-icon",
+        ".wasm": "application/wasm",
       };
       const contentType = contentTypes[ext] || "application/octet-stream";
       const fileContent = fs.readFileSync(filePath);

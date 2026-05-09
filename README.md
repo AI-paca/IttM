@@ -10,10 +10,24 @@ _(Сервер запустится на :3000)_
 
 Если `3000` или `8000` заняты, локальные скрипты выбирают ближайшие свободные host-порты и печатают итоговые URL.
 
+Для GitHub Pages сборка использует `VITE_BASE_PATH=/IttM/`; локальный `run.sh` собирает bundle с `VITE_BASE_PATH=/`, чтобы assets грузились с localhost без префикса репозитория.
+
+`run.sh` рассчитан на слабую VPS: по умолчанию ставит только легкие runtime-зависимости из `ocr/requirements-light.txt`, не запускает тесты, не трогает Docker и не ставит PyTorch/EasyOCR. Тяжелый OCR включается отдельно через кнопку установки в UI или явно:
+
+```bash
+INSTALL_EASYOCR=1 bash run.sh
+```
+
+Если `dist/` уже собран, `run.sh` переиспользует его для быстрого рестарта. Для пересборки frontend:
+
+```bash
+FORCE_BUILD=1 bash run.sh
+```
+
 ### Режимы запуска
 
 - **GitHub Pages**: статический frontend, распознавание через browser OCR и LLM/API-режимы при доступности.
-- **Bun local**: легкий gateway adapter без тяжелого Node-сервера.
+- **Bun local**: легкий gateway adapter без тяжелого Node-сервера; обычный `run.sh` не гоняет тесты и не ставит EasyOCR/PyTorch.
 - **Node gateway**: основной production-friendly режим для Cloud Run, AI Studio, canvas/hosted-сред и локального `node`.
 - **Local Python OCR**: FastAPI backend с Tesseract/EasyOCR за gateway.
 - **Hybrid local+node/bun**: frontend/gateway локально, OCR backend отдельно через `OCR_URL`.
@@ -71,53 +85,93 @@ Workflow `.github/workflows/tests.yml` содержит быстрые frontend/
 
 ## Архитектура проекта
 
-- **MVP Backend**: Универсальный шлюз (Node/Bun) из папки `gateway` и Python FastAPI OCR (Tesseract/EasyOCR).
-- **Frontend**: React + Vite интерфейс для загрузки, выбора OCR-движка, прогресса и чтения результата.
+- **Frontend**: React + Vite приложение из `web/`. В `App.tsx` оставлен основной UI, а OCR/API/PDF/file logic вынесены в `web/src/ocr/*` и `web/src/lib/*`.
+- **Runtime modes**: один UI работает как статический GitHub Pages bundle, через Bun/Node gateway, через Docker Compose или гибридно с внешним `OCR_URL`.
+- **Local run profile**: `run.sh` предпочитает Bun, ставит легкий Python runtime из `ocr/requirements-light.txt`, ищет свободные порты и переиспользует готовый `dist/`; Node/npm fallback включается только если Bun не найден.
+- **Gateway**: Node/Bun adapter вызывает общий `gateway/src/core/handle.ts`; он раздает `dist`, понимает локальный `/` и Pages-префикс `/IttM/`, а `/api/*` проксирует в Python OCR backend.
+- **Backend OCR**: FastAPI сервис в `ocr/app` отвечает за `/health`, `/diagnostics`, `/v1/convert`, `/v1/probe`, capabilities/install routes и OCR через Tesseract/Auto/Stub engines; EasyOCR остается optional install, чтобы не утяжелять дефолтный запуск.
+- **Fallbacks**: Auto mode пробует gateway/backend, затем browser OCR. GitHub Pages без backend остается рабочим через Tesseract.js и LLM/API режимы.
 
 ```mermaid
-graph TD
-    Client["Web Client (Browser)"]
+flowchart LR
+    Browser["Browser"]
 
-    subgraph Frontend ["React/Vite Frontend"]
-        UI["App.tsx + OCR helpers"]
-        BrowserEngine["Browser OCR / Tesseract.js chi_sim+eng+rus"]
+    subgraph Entry ["Entry points"]
+        Pages["GitHub Pages\nstatic /IttM/"]
+        Run["run.sh\nBun preferred\nlight deps"]
+        Compose["docker compose\nGateway + OCR"]
+        Hybrid["Hybrid\nexternal OCR_URL"]
     end
 
-    subgraph Gateway ["Gateway API (Node/Bun)"]
-        Adapter["Node / Bun Adapter"]
-        Core["core/handle.ts + routes.ts"]
-        OCRClient["ocrClient.ts (convert, health, probe, capabilities)"]
+    subgraph Web ["web/ React + Vite"]
+        App["App.tsx\nUI/state"]
+        Files["file-utils + pdf-text\nvalidate, render, merge"]
+        BrowserOCR["browser-engine\nTesseract.js cache/profile"]
+        ApiClient["api-client\nclean errors + gateway URL"]
+        LlmClient["llm-client\nGemini/OpenRouter"]
     end
 
-    subgraph Backend ["Python FastAPI OCR"]
+    subgraph Gateway ["gateway/ Bun or Node"]
+        Adapter["adapter\nbun.ts or node.ts"]
+        Static["static dist\nSPA fallback"]
+        Routes["/api/* routes\nconvert, health, diagnostics, probe"]
+        Proxy["ocrClient\nproxy to OCR_URL"]
+    end
+
+    subgraph OCR ["ocr/ FastAPI backend"]
         FastAPI["app/main.py"]
-        ConvertRouter["Convert Router (v1/convert)"]
-        HealthRouter["Health Router (/health)"]
-        ProbeRouter["Probe Router (v1/probe)"]
-        Service["Convert Service (convert_service.py)"]
-        TesseractEngine["Tesseract Engine (active)"]
-        AvailableEngines["Other: EasyOCR, Auto, Stub"]
+        Routers["routers\nhealth, convert, probe, install"]
+        Convert["convert_service\nimages/PDF to Markdown"]
+        Engines["engines\nTesseract, Auto, Stub\nEasyOCR optional"]
+        Markdown["formatter + chunking\nMarkdown output"]
     end
 
-    Client -->|React/Vite bundle| UI
-    UI -->|Static mode GitHub Pages| BrowserEngine
-    UI -->|Diagnostics Convert| Adapter
+    subgraph APIs ["External APIs"]
+        Gemini["Google Gemini"]
+        OpenRouter["OpenRouter"]
+    end
 
-    Adapter --> Core
-    Core --> OCRClient
-    OCRClient -->|REST Proxy to /v1/*| FastAPI
+    Pages --> Browser
+    Run --> Adapter
+    Compose --> Adapter
+    Compose --> FastAPI
+    Hybrid -.-> Proxy
 
-    FastAPI --> ConvertRouter
-    FastAPI --> HealthRouter
-    FastAPI --> ProbeRouter
-    ConvertRouter --> Service
-    Service --> TesseractEngine
-    Service -.->|available alternatives| AvailableEngines
+    Adapter --> Static
+    Static --> Browser
+    Browser --> App
+
+    App --> Files
+    App --> ApiClient
+    App --> BrowserOCR
+    App --> LlmClient
+
+    ApiClient -->|/api/*| Static
+    Static --> Routes
+    Routes --> Proxy
+    Proxy -->|/v1/* + health + diagnostics| FastAPI
+
+    FastAPI --> Routers
+    Routers --> Convert
+    Convert --> Engines
+    Convert --> Markdown
+
+    LlmClient --> Gemini
+    LlmClient --> OpenRouter
+    App -.->|Auto fallback| BrowserOCR
+
+    classDef entry fill:#eef6ff,stroke:#4f8cc9,color:#0f172a
+    classDef web fill:#eefcf3,stroke:#2f9e62,color:#0f172a
+    classDef gateway fill:#fff8e6,stroke:#d19700,color:#0f172a
+    classDef backend fill:#f4efff,stroke:#8b5cf6,color:#0f172a
+    classDef external fill:#f7f7f7,stroke:#8b949e,color:#0f172a
+
+    class Pages,Run,Compose,Hybrid entry
+    class App,Files,BrowserOCR,ApiClient,LlmClient web
+    class Adapter,Static,Routes,Proxy gateway
+    class FastAPI,Routers,Convert,Engines,Markdown backend
+    class Gemini,OpenRouter external
 ```
-
-## Аудит кода
-
-Короткий обзор плюсов, минусов, рисков и сделанных исправлений: [`docs/code-review.md`](docs/code-review.md).
 
 <details>
 <summary>Задания курса</summary>
@@ -222,15 +276,15 @@ graph TD
 <details>
 <summary>Управление зависимостями по языкам</summary>
 
-| Язык                 | Файл зависимостей          | Инструмент     |
-| -------------------- | -------------------------- | -------------- |
-| Python               | `requirements.txt`         | pip            |
-| JavaScript / Node.js | `package.json`             | npm / yarn     |
-| PHP                  | `composer.json`            | Composer       |
-| Ruby                 | `Gemfile`                  | Bundler        |
-| Java / Kotlin        | `pom.xml` / `build.gradle` | Maven / Gradle |
-| Rust                 | `Cargo.toml`               | Cargo          |
-| Go                   | `go.mod`                   | Go Modules     |
+| Язык                 | Файл зависимостей                                                                                             | Инструмент     |
+| -------------------- | ------------------------------------------------------------------------------------------------------------- | -------------- |
+| Python               | `requirements-light.txt` для `run.sh`, `requirements-ci.txt` для проверок, `requirements.txt` для полного OCR | pip            |
+| JavaScript / Node.js | `package.json`                                                                                                | npm / yarn     |
+| PHP                  | `composer.json`                                                                                               | Composer       |
+| Ruby                 | `Gemfile`                                                                                                     | Bundler        |
+| Java / Kotlin        | `pom.xml` / `build.gradle`                                                                                    | Maven / Gradle |
+| Rust                 | `Cargo.toml`                                                                                                  | Cargo          |
+| Go                   | `go.mod`                                                                                                      | Go Modules     |
 
 </details>
 </details>

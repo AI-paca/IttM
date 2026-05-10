@@ -31,10 +31,24 @@ def test_health():
     assert json_data["service"] == "Python OCR Service"
 
 
+def test_health_v1_alias():
+    response = client.get("/v1/health")
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+
+
 def test_readiness():
     response = client.get("/readiness")
     assert response.status_code == 200
     assert response.json()["ready"] is True
+
+
+def test_diagnostics_v1_alias():
+    response = client.get("/v1/diagnostics")
+    assert response.status_code == 200
+    json_data = response.json()
+    assert "python_version" in json_data
+    assert "cpu_cores" in json_data
 
 
 def test_convert_invalid_pdf():

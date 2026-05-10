@@ -12,12 +12,9 @@ services:
   gateway:
     build:
       context: .
-      dockerfile: gateway.Dockerfile
+      dockerfile: nginx.Dockerfile
     ports:
       - "${GATEWAY_HOST_BIND:-127.0.0.1}:${GATEWAY_HOST_PORT:-3000}:3000"
-    environment:
-      - PORT=3000
-      - OCR_URL=http://ocr:8000
     depends_on:
       - ocr
     restart: unless-stopped

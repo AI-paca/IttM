@@ -8,11 +8,13 @@ router = APIRouter()
 
 
 @router.get("/health", response_model=HealthResponse)
+@router.get("/v1/health", response_model=HealthResponse)
 def health_endpoint():
     return HealthResponse(ok=True, service="Python OCR Service")
 
 
 @router.get("/readiness")
+@router.get("/v1/readiness")
 def readiness_endpoint():
     # If a real engine check was needed to be 'ready'
     # For now, it's just basic service readiness
@@ -39,6 +41,7 @@ def capabilities_endpoint():
 
 
 @router.get("/diagnostics")
+@router.get("/v1/diagnostics")
 def diagnostics_endpoint():
     try:
         import psutil

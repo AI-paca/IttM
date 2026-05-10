@@ -172,6 +172,71 @@ export async function requestApiJson<T>(
   return readJsonOrThrow<T>(response, source);
 }
 
+interface ImportMetaWithEnv extends ImportMeta {
+  env?: Record<string, string | undefined>;
+}
+
+export interface BackendGatewayCandidate {
+  label: string;
+  baseUrl: string;
+}
+
+function envValue(name: string): string {
+  return ((import.meta as ImportMetaWithEnv).env?.[name] ?? "").trim();
+}
+
+export function parseGatewayUrlList(raw: string): string[] {
+  const seen = new Set<string>();
+  const urls: string[] = [];
+
+  for (const candidate of raw.split(/[\n,]+/)) {
+    const trimmed = candidate.trim().replace(/\/+$/, "");
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    urls.push(trimmed);
+  }
+
+  return urls;
+}
+
+export function configuredCloudGatewayUrls(): string[] {
+  return parseGatewayUrlList(envValue("VITE_CLOUD_OCR_URLS"));
+}
+
+export function buildBackendGatewayCandidates({
+  customBaseUrl = "",
+  includeCloud = true,
+  includeLocal = true,
+  cloudBaseUrls = configuredCloudGatewayUrls(),
+}: {
+  customBaseUrl?: string;
+  includeCloud?: boolean;
+  includeLocal?: boolean;
+  cloudBaseUrls?: string[];
+} = {}): BackendGatewayCandidate[] {
+  const candidates: BackendGatewayCandidate[] = [];
+  const seen = new Set<string>();
+
+  const add = (label: string, baseUrl: string) => {
+    const normalized = baseUrl.trim().replace(/\/+$/, "");
+    const key = normalized || "__local__";
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push({ label, baseUrl: normalized });
+  };
+
+  if (includeCloud) {
+    cloudBaseUrls.forEach((baseUrl, index) => {
+      add(index === 0 ? "Cloud OCR" : `Cloud OCR ${index + 1}`, baseUrl);
+    });
+  }
+
+  if (customBaseUrl.trim()) add("Custom Gateway", customBaseUrl);
+  if (includeLocal) add("Local Gateway", "");
+
+  return candidates;
+}
+
 export function buildApiUrl(
   baseUrl: string,
   route: string,
@@ -209,6 +274,38 @@ export function buildApiUrl(
       url.searchParams.set(key, value);
   }
   return url.toString();
+}
+
+export async function executeBackendOcrWithFallback(
+  targetFile: File,
+  candidates: BackendGatewayCandidate[],
+  activeContent: { current: boolean },
+  onProgress?: ProgressSink,
+  params?: Record<string, string>,
+): Promise<OcrResult> {
+  let lastError: unknown = new PlatformError({
+    message: "Нет доступных OCR gateway endpoint-ов.",
+    source: "OCR API",
+  });
+
+  for (const candidate of candidates) {
+    if (!activeContent.current) break;
+
+    const url = buildApiUrl(candidate.baseUrl, "/api/convert", params);
+    try {
+      onProgress?.(`Пробуем ${candidate.label}...`);
+      return await executeBackendOcr(
+        targetFile,
+        url,
+        activeContent,
+        onProgress,
+      );
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError;
 }
 
 export async function executeBackendOcr(

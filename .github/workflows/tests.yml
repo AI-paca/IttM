@@ -64,6 +64,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Build Nginx gateway Docker image
+        run: docker build -f nginx.Dockerfile -t ittm-nginx-ci .
+
   python:
     runs-on: ubuntu-latest
     needs: [linters]

@@ -4,7 +4,7 @@ import { imageFileToCroppedBase64 } from "./file-utils";
 import type { LlmProvider, OcrResult, ProgressSink } from "./types";
 
 const OCR_PROMPT =
-  "Extract all text from this image/document. Output only the extracted text, nothing else, no markdown fences if not necessary.";
+  "Extract all text from this image/document. Preserve tables as Markdown tables. Output only the extracted content, no markdown fences.";
 
 export interface LlmSettings {
   provider: LlmProvider;

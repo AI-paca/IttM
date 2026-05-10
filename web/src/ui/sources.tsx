@@ -13,13 +13,13 @@ export const SOURCES: SourceOption[] = [
   {
     id: "auto",
     label: "Auto (Fallback)",
-    desc: "Gateway -> Browser fallback",
+    desc: "Cloud -> Local -> Browser",
     icon: <Wand2 className="w-4 h-4" />,
   },
   {
     id: "gateway",
     label: "Gateway API",
-    desc: "Online / Node+Bun backend",
+    desc: "Nginx / custom gateway",
     icon: <Cloud className="w-4 h-4" />,
   },
   {

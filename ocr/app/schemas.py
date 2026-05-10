@@ -6,6 +6,9 @@ from pydantic import BaseModel
 class ConvertMeta(BaseModel):
     engine: str
     chunks: int
+    cards_found: int = 0
+    tables_found: int = 0
+    table_cells: int = 0
     pages: int
     elapsed_ms: int
 

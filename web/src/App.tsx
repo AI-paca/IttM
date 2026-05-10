@@ -51,6 +51,45 @@ function getSavedSource(): SourceType {
   return "auto";
 }
 
+function extensionFromMime(type: string): string {
+  if (type === "image/jpeg") return "jpg";
+  if (type === "image/webp") return "webp";
+  if (type === "application/pdf") return "pdf";
+  return "png";
+}
+
+function namedClipboardFile(file: File): File {
+  if (file.name) return file;
+
+  const extension = extensionFromMime(file.type);
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return new File([file], `clipboard-${timestamp}.${extension}`, {
+    type: file.type,
+  });
+}
+
+function fileFromClipboard(event: ClipboardEvent): File | null {
+  const clipboardData = event.clipboardData;
+  if (!clipboardData) return null;
+
+  for (const item of Array.from(clipboardData.items)) {
+    if (item.kind !== "file") continue;
+
+    const file = item.getAsFile();
+    if (file && isSupportedOcrFile(file)) {
+      return namedClipboardFile(file);
+    }
+  }
+
+  for (const file of Array.from(clipboardData.files)) {
+    if (isSupportedOcrFile(file)) {
+      return namedClipboardFile(file);
+    }
+  }
+
+  return null;
+}
+
 export default function App() {
   const [appState, setAppState] = useState<AppState>("upload");
   const [file, setFile] = useState<File | null>(null);
@@ -184,6 +223,24 @@ export default function App() {
     setIsDragging(false);
   };
 
+  const acceptFile = (selected: File, autoStart: boolean = false) => {
+    if (!isSupportedOcrFile(selected)) {
+      showNotice("Поддерживаются только изображения и PDF.");
+      return;
+    }
+
+    setFile(selected);
+    if (autoStart) {
+      setLastExtractedPage(1);
+      setTotalPdfPages(null);
+      setExtractedText("");
+      setAppState("loading");
+      setTriggerCount((prev) => prev + 1);
+    } else {
+      setAppState("configure");
+    }
+  };
+
   const handleDrop = (
     e: DragEvent<HTMLDivElement>,
     autoStart: boolean = false,
@@ -191,35 +248,30 @@ export default function App() {
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const droppedFile = e.dataTransfer.files[0];
-      if (isSupportedOcrFile(droppedFile)) {
-        setFile(droppedFile);
-        if (autoStart) {
-          setLastExtractedPage(1);
-          setTotalPdfPages(null);
-          setExtractedText("");
-          setAppState("loading");
-          setTriggerCount((prev) => prev + 1);
-        } else {
-          setAppState("configure");
-        }
-      } else {
-        showNotice("Поддерживаются только изображения и PDF.");
-      }
+      acceptFile(e.dataTransfer.files[0], autoStart);
     }
   };
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const selected = e.target.files[0];
-      if (isSupportedOcrFile(selected)) {
-        setFile(selected);
-        setAppState("configure");
-      } else {
-        showNotice("Поддерживаются только изображения и PDF.");
-      }
+      acceptFile(e.target.files[0]);
     }
   };
+
+  useEffect(() => {
+    const handlePaste = (event: ClipboardEvent) => {
+      const pastedFile = fileFromClipboard(event);
+      if (!pastedFile) return;
+
+      event.preventDefault();
+      setIsDragging(false);
+      acceptFile(pastedFile, true);
+    };
+
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleNewFile = () => {
     setAppState("upload");

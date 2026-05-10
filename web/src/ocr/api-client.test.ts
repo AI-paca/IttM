@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildApiUrl, parsePlatformError, readJsonOrThrow } from "./api-client";
+import {
+  buildApiUrl,
+  buildBackendGatewayCandidates,
+  parseGatewayUrlList,
+  parsePlatformError,
+  readJsonOrThrow,
+} from "./api-client";
 
 test("parsePlatformError extracts FastAPI detail from JSON", async () => {
   const response = new Response(
@@ -64,5 +70,31 @@ test("buildApiUrl supports relative and custom gateway URLs", () => {
       engine_type: "easyocr",
     }),
     "https://example.com/api/convert?engine_type=easyocr",
+  );
+});
+
+test("parseGatewayUrlList handles comma/newline lists and dedupes", () => {
+  assert.deepEqual(
+    parseGatewayUrlList("https://edge.example/api,\n https://local.example/ "),
+    ["https://edge.example/api", "https://local.example"],
+  );
+  assert.deepEqual(
+    parseGatewayUrlList(" https://edge.example/ , https://edge.example"),
+    ["https://edge.example"],
+  );
+});
+
+test("buildBackendGatewayCandidates orders cloud, custom and local fallback", () => {
+  assert.deepEqual(
+    buildBackendGatewayCandidates({
+      cloudBaseUrls: ["https://edge.example"],
+      customBaseUrl: "https://custom.example/",
+      includeLocal: true,
+    }),
+    [
+      { label: "Cloud OCR", baseUrl: "https://edge.example" },
+      { label: "Custom Gateway", baseUrl: "https://custom.example" },
+      { label: "Local Gateway", baseUrl: "" },
+    ],
   );
 });

@@ -107,16 +107,18 @@ flowchart TB
         Strategy -->|calls externally| Llm
     end
 
-    subgraph Gateway["Gateway: Bun or Node"]
+    subgraph Gateway["Gateway"]
         direction TB
-        MainHandle["Main Request Handler"]
-        Routes["API Router (/api/*)"]
-        Static["Static Server<br/>(dist/ + SPA fallback)"]
-        Proxy["ocrClient (Proxy)"]
+        Runtime["Bun or Node<br/>adapter"]
+        MainHandle["core/handle.ts<br/>API dispatch"]
+        Static["static serving<br/>dist + SPA fallback"]
+        Routes["routes.ts<br/>/api/*"]
+        Proxy["ocrClient.ts"]
 
-        MainHandle -->|if /api/*| Routes
-        MainHandle -->|else| Static
-        Routes -->|/api/convert| Proxy
+        Runtime -->|API| MainHandle
+        Runtime -->|static| Static
+        MainHandle --> Routes
+        Routes --> Proxy
     end
 
     subgraph Python["Python OCR: FastAPI"]
@@ -136,9 +138,10 @@ flowchart TB
     %% External Connections
     User -->|Interacts with| UI
     Strategy -->|Fallback execution| BrowserOcr
-    Strategy -->|Network Request| MainHandle
+    Strategy -->|Network Request| Runtime
     Proxy -->|POST /convert| Api
     Llm --> External
+    Pdf ~~~ Runtime
 
     %% Return flow
     Markdown -->|JSON Response| Proxy
@@ -158,9 +161,13 @@ web/src/
 ├─ ocr/browser-engine.ts    # оркестрация browser OCR без глобального progress state
 ├─ ocr/browser-profile.ts   # профиль ресурсов: языки, лимиты изображения, render scale
 ├─ ocr/browser-image-preprocessor.ts
-│                           # resize изображений, Web Worker/OffscreenCanvas fallback
+│                           # resize изображений, worker/OffscreenCanvas/main-thread fallback
+├─ ocr/image-resize.worker.ts
+│                           # тяжелый resize изображения вне main thread
 ├─ ocr/tesseract-worker-session.ts
-│                           # lifecycle Tesseract.js worker lease/cache
+│                           # lifecycle Tesseract.js worker lease/cache, isolated progress
+├─ ocr/tesseract-recognize-input.ts
+│                           # адаптер входа для Tesseract.js в browser/Node test runtime
 ├─ ocr/llm-client.ts        # прямые запросы Gemini/OpenRouter
 ├─ ocr/file-utils.ts        # проверка файлов, browser diagnostics, image helpers
 ├─ ocr/pdf-text.ts          # слияние native PDF text и OCR-слоя
@@ -169,9 +176,9 @@ web/src/
 
 ```text
 gateway/src/
-├─ adapters/bun.ts          # Bun runtime adapter
+├─ adapters/bun.ts          # Bun runtime adapter + static fallback service
 ├─ adapters/node.ts         # Node runtime adapter + express.static для dist/
-├─ core/handle.ts           # API dispatch, без файловой статики
+├─ core/handle.ts           # API-only dispatch, без файловой статики
 ├─ core/http.ts             # JSON/HTTP response helpers
 ├─ core/routes.ts           # /api/* маршруты
 ├─ services/staticFiles.ts  # Bun/static fallback, /IttM/ prefix, SPA fallback
@@ -187,6 +194,19 @@ ocr/app/
 ├─ engines/*                # OcrEngine, Tesseract, EasyOCR, Auto, Stub
 ├─ chunking/*               # разрезание длинных изображений и дедупликация
 └─ formatting/*             # финальный Markdown
+```
+
+```text
+CI/config:
+├─ .github/workflows/tests.yml
+│                           # mandatory linters gate, Dockerized Python tests, OCR quality
+├─ eslint.config.js         # ESLint + Prettier plugin для web/gateway TS
+├─ package.json             # npm scripts, frontend/gateway deps
+├─ ocr/.flake8              # flake8 правила для Python OCR
+├─ ocr/pyproject.toml       # Black/Ruff/isort конфигурация
+├─ ocr/requirements-ci.txt  # Python CI deps: pytest, flake8, black, ruff
+├─ ocr.Dockerfile           # стабильная OCR среда с Tesseract/lang packs/fonts
+└─ gateway.Dockerfile       # production Node gateway image
 ```
 
 </details>

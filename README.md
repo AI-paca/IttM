@@ -76,102 +76,107 @@ npm run test:ocr:browser
 
 Workflow `.github/workflows/tests.yml` содержит быстрые frontend/gateway/Python проверки и отдельный тяжелый OCR quality job с `chi_sim+eng+rus`, Tesseract language packs и Noto CJK fonts.
 
-## Выбор Стратегий (в UI)
+## Выбор стратегий OCR (в UI)
 
-- **Auto**: Пытается вызвать Gateway API, при ошибке - Local Python, при ошибке - Browser Engine.
-- **Gateway API**: Полный цикл через адаптер Node.js или Bun.
-- **Local Python**: Прямой запрос к локальному Python-бекенду.
-- **Browser Engine**: Статический режим через Tesseract.js/WebAssembly и Canvas с diagnostics-based профилем ресурсов.
+Выбор OCR - это часть логики браузерного UI, а не отдельный сервис.
+
+- **Auto**: если diagnostics уже видит offline backend, сразу выбирает browser OCR; иначе пробует `/api/convert` и при ошибке переключается на browser OCR.
+- **Gateway / Local Tesseract / Local EasyOCR**: все идут через `/api/convert`; локальные режимы только добавляют `engine_type=tesseract|easyocr`.
+- **Browser Engine**: полностью работает в браузере через PDF.js/Canvas и Tesseract.js WASM.
+- **LLM Cloud API**: браузер напрямую вызывает Gemini или OpenRouter по ключу пользователя.
 
 ## Архитектура проекта
 
-- **Frontend**: React + Vite приложение из `web/`. В `App.tsx` оставлен основной UI, а OCR/API/PDF/file logic вынесены в `web/src/ocr/*` и `web/src/lib/*`.
-- **Runtime modes**: один UI работает как статический GitHub Pages bundle, через Bun/Node gateway, через Docker Compose или гибридно с внешним `OCR_URL`.
-- **Local run profile**: `run.sh` предпочитает Bun, ставит легкий Python runtime из `ocr/requirements-light.txt`, ищет свободные порты и переиспользует готовый `dist/`; Node/npm fallback включается только если Bun не найден.
-- **Gateway**: Node/Bun adapter вызывает общий `gateway/src/core/handle.ts`; он раздает `dist`, понимает локальный `/` и Pages-префикс `/IttM/`, а `/api/*` проксирует в Python OCR backend.
-- **Backend OCR**: FastAPI сервис в `ocr/app` отвечает за `/health`, `/diagnostics`, `/v1/convert`, `/v1/probe`, capabilities/install routes и OCR через Tesseract/Auto/Stub engines; EasyOCR остается optional install, чтобы не утяжелять дефолтный запуск.
-- **Fallbacks**: Auto mode пробует gateway/backend, затем browser OCR. GitHub Pages без backend остается рабочим через Tesseract.js и LLM/API режимы.
+Архитектура держится на трех runtime-границах: браузер, gateway и Python OCR. Gateway - единственная публичная серверная точка входа; Python OCR спрятан за `OCR_URL`. `auto` - это политика выбора внутри UI, а не отдельный backend-компонент.
 
 ```mermaid
-flowchart LR
-    Browser["Browser"]
+flowchart TB
+    User["User"]
 
-    subgraph Entry ["Entry points"]
-        Pages["GitHub Pages\nstatic /IttM/"]
-        Run["run.sh\nBun preferred\nlight deps"]
-        Compose["docker compose\nGateway + OCR"]
-        Hybrid["Hybrid\nexternal OCR_URL"]
+    subgraph Browser["Browser"]
+        direction TB
+        UI["React UI<br/>upload / settings / result"]
+        Strategy["OCR strategy<br/>auto / gateway / local / browser / llm"]
+        Pdf["PDF & image prep<br/>PDF.js + Canvas"]
+        BrowserOcr["Browser OCR<br/>Tesseract.js WASM"]
+        Llm["LLM client<br/>Gemini / OpenRouter"]
+
+        UI --> Strategy
+        Strategy --> Pdf
+        Strategy --> BrowserOcr
+        Pdf --> BrowserOcr
+        Strategy --> Llm
     end
 
-    subgraph Web ["web/ React + Vite"]
-        App["App.tsx\nUI/state"]
-        Files["file-utils + pdf-text\nvalidate, render, merge"]
-        BrowserOCR["browser-engine\nTesseract.js cache/profile"]
-        ApiClient["api-client\nclean errors + gateway URL"]
-        LlmClient["llm-client\nGemini/OpenRouter"]
+    subgraph Gateway["Gateway: Bun or Node"]
+        direction TB
+        Static["serves dist/<br/>SPA fallback + /IttM/"]
+        Routes["/api/* routes"]
+        Proxy["OCR proxy<br/>passes body to OCR_URL"]
+
+        Static --> Routes
+        Routes --> Proxy
     end
 
-    subgraph Gateway ["gateway/ Bun or Node"]
-        Adapter["adapter\nbun.ts or node.ts"]
-        Static["static dist\nSPA fallback"]
-        Routes["/api/* routes\nconvert, health, diagnostics, probe"]
-        Proxy["ocrClient\nproxy to OCR_URL"]
+    subgraph Python["Python OCR: FastAPI"]
+        direction TB
+        Api["/v1/convert<br/>/health / diagnostics / probe"]
+        Convert["Convert service<br/>load file, split long images/PDF"]
+        Engines["OCR engines<br/>Auto / Tesseract / EasyOCR"]
+        Markdown["Markdown response<br/>{ markdown, meta }"]
+
+        Api --> Convert
+        Convert --> Engines
+        Engines --> Markdown
     end
 
-    subgraph OCR ["ocr/ FastAPI backend"]
-        FastAPI["app/main.py"]
-        Routers["routers\nhealth, convert, probe, install"]
-        Convert["convert_service\nimages/PDF to Markdown"]
-        Engines["engines\nTesseract, Auto, Stub\nEasyOCR optional"]
-        Markdown["formatter + chunking\nMarkdown output"]
-    end
+    External["External LLM APIs"]
 
-    subgraph APIs ["External APIs"]
-        Gemini["Google Gemini"]
-        OpenRouter["OpenRouter"]
-    end
-
-    Pages --> Browser
-    Run --> Adapter
-    Compose --> Adapter
-    Compose --> FastAPI
-    Hybrid -.-> Proxy
-
-    Adapter --> Static
-    Static --> Browser
-    Browser --> App
-
-    App --> Files
-    App --> ApiClient
-    App --> BrowserOCR
-    App --> LlmClient
-
-    ApiClient -->|/api/*| Static
-    Static --> Routes
-    Routes --> Proxy
-    Proxy -->|/v1/* + health + diagnostics| FastAPI
-
-    FastAPI --> Routers
-    Routers --> Convert
-    Convert --> Engines
-    Convert --> Markdown
-
-    LlmClient --> Gemini
-    LlmClient --> OpenRouter
-    App -.->|Auto fallback| BrowserOCR
-
-    classDef entry fill:#eef6ff,stroke:#4f8cc9,color:#0f172a
-    classDef web fill:#eefcf3,stroke:#2f9e62,color:#0f172a
-    classDef gateway fill:#fff8e6,stroke:#d19700,color:#0f172a
-    classDef backend fill:#f4efff,stroke:#8b5cf6,color:#0f172a
-    classDef external fill:#f7f7f7,stroke:#8b949e,color:#0f172a
-
-    class Pages,Run,Compose,Hybrid entry
-    class App,Files,BrowserOCR,ApiClient,LlmClient web
-    class Adapter,Static,Routes,Proxy gateway
-    class FastAPI,Routers,Convert,Engines,Markdown backend
-    class Gemini,OpenRouter external
+    User --> UI
+    Strategy -->|/api/convert| Routes
+    Proxy --> Api
+    Markdown -->|markdown + meta| UI
+    Llm --> External
+    BrowserOcr -.->|fallback| UI
 ```
+
+<details>
+<summary>Границы файлов</summary>
+
+```text
+web/src/
+├─ App.tsx                  # верхний state: файл, режим OCR, diagnostics, theme
+├─ ui/*                     # только UI-поверхности: header, sidebar, upload, loading, reading
+├─ ocr/use-extraction.ts    # выбор OCR-пути, fallback, cancel/resume
+├─ ocr/api-client.ts        # /api запросы, custom gateway URL, нормализация ошибок
+├─ ocr/browser-engine.ts    # Tesseract.js WASM worker и профиль ресурсов
+├─ ocr/llm-client.ts        # прямые запросы Gemini/OpenRouter
+├─ ocr/file-utils.ts        # проверка файлов, browser diagnostics, image helpers
+├─ ocr/pdf-text.ts          # слияние native PDF text и OCR-слоя
+└─ lib/pdf-parser.ts        # PDF.js: чтение текста, рендер страниц в Canvas
+```
+
+```text
+gateway/src/
+├─ adapters/bun.ts          # Bun runtime adapter
+├─ adapters/node.ts         # Node runtime adapter
+├─ core/handle.ts           # static dist/, SPA fallback, /IttM/ prefix
+├─ core/routes.ts           # /api/* маршруты
+└─ clients/ocrClient.ts     # proxy в Python OCR по OCR_URL
+```
+
+```text
+ocr/app/
+├─ main.py                  # FastAPI app и подключение routers
+├─ routers/*                # health, diagnostics, convert, probe, install
+├─ services/convert_service.py
+│                           # загрузка файла, split/dedupe, выбор engine
+├─ engines/*                # OcrEngine, Tesseract, EasyOCR, Auto, Stub
+├─ chunking/*               # разрезание длинных изображений и дедупликация
+└─ formatting/*             # финальный Markdown
+```
+
+</details>
 
 <details>
 <summary>Задания курса</summary>

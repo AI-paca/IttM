@@ -7,9 +7,12 @@ CLEAN=0
 RUN_DOCKER=1
 RUN_ACT=1
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DOCKER_NOTIFY_SCRIPT="$SCRIPT_DIR/scripts/notify-docker-restart.sh"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DOCKER_NOTIFY_SCRIPT="$SCRIPT_DIR/notify-docker-restart.sh"
 OCR_HOST_PORT_LOCKED=0
 GATEWAY_HOST_PORT_LOCKED=0
+
+cd "$PROJECT_ROOT"
 
 if [ -n "${OCR_HOST_PORT:-}" ]; then
   OCR_HOST_PORT_LOCKED=1
@@ -31,7 +34,7 @@ for arg in "$@"; do
       ;;
     *)
       echo "Unknown option: $arg"
-      echo "Usage: bash debug.sh [--clean] [--no-docker] [--no-act]"
+      echo "Usage: bash scripts/debug.sh [--clean] [--no-docker] [--no-act]"
       exit 2
       ;;
   esac
@@ -41,8 +44,8 @@ trap 'echo -e "\a"; command -v notify-send &> /dev/null && notify-send -u critic
 
 call_for_docker_restart() {
   local reason="$1"
-  if [ -x "$DOCKER_NOTIFY_SCRIPT" ]; then
-    "$DOCKER_NOTIFY_SCRIPT" "$reason"
+  if [ -f "$DOCKER_NOTIFY_SCRIPT" ]; then
+    bash "$DOCKER_NOTIFY_SCRIPT" "$reason"
   else
     printf '\a'
     echo "$reason"
@@ -205,7 +208,7 @@ prepare_browser_tessdata() {
   done
 
   if [ "$RUN_DOCKER" -eq 1 ]; then
-    local target="$SCRIPT_DIR/.cache/tessdata"
+    local target="$PROJECT_ROOT/.cache/tessdata"
     mkdir -p "$target"
     if ! has_tessdata "$target"; then
       run_docker_step "copy eng traineddata from OCR container" docker compose cp ocr:/usr/share/tesseract-ocr/5/tessdata/eng.traineddata "$target/"

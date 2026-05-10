@@ -8,6 +8,7 @@ import {
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import type { ThemeMode } from "../types/app.types";
 import type { LlmProvider, SourceType } from "../ocr/types";
 import { SOURCES } from "./sources";
 
@@ -20,7 +21,7 @@ interface SettingsSidebarProps {
   pingUrl: string;
   rememberChoice: boolean;
   selectedSource: SourceType;
-  themeMode: "light" | "dark" | "auto";
+  themeMode: ThemeMode;
   onClose: () => void;
   onInstallEasyOcr: () => void;
   onRememberChange: (checked: boolean) => void;
@@ -29,7 +30,7 @@ interface SettingsSidebarProps {
   setLlmModel: Dispatch<SetStateAction<string>>;
   setLlmProvider: Dispatch<SetStateAction<LlmProvider>>;
   setPingUrl: Dispatch<SetStateAction<string>>;
-  setThemeMode: Dispatch<SetStateAction<"light" | "dark" | "auto">>;
+  setThemeMode: Dispatch<SetStateAction<ThemeMode>>;
 }
 
 export function SettingsSidebar({

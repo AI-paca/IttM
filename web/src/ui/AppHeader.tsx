@@ -1,7 +1,8 @@
 import type { DragEvent } from "react";
 import { FileText, RefreshCw, Settings } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import type { AppState, SourceType } from "../ocr/types";
+import type { AppState } from "../types/app.types";
+import type { SourceType } from "../ocr/types";
 import { SOURCES } from "./sources";
 
 interface AppHeaderProps {

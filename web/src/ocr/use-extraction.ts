@@ -17,11 +17,11 @@ import { base64JpegToFile } from "./file-utils";
 import { executeLlmOcr } from "./llm-client";
 import type {
   AppDiagnostics,
-  AppState,
   LlmProvider,
   OcrResult,
   SourceType,
 } from "./types";
+import type { AppState } from "../types/app.types";
 
 interface UseOcrExtractionArgs {
   appState: AppState;

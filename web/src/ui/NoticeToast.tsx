@@ -1,10 +1,8 @@
 import { X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import type { Notice } from "../types/app.types";
 
-export interface Notice {
-  message: string;
-  tone: "error" | "success";
-}
+export type { Notice } from "../types/app.types";
 
 interface NoticeToastProps {
   notice: Notice | null;

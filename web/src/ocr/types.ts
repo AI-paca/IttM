@@ -1,4 +1,4 @@
-export type AppState = "upload" | "configure" | "loading" | "reading";
+export type { AppState } from "../types/app.types";
 export type SourceType =
   | "auto"
   | "gateway"

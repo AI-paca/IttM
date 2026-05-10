@@ -1,21 +1,25 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import path from "path";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig, loadEnv } from "vite";
 
+const webRoot = fileURLToPath(new URL(".", import.meta.url));
+const repoRoot = path.resolve(webRoot, "..");
+
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, ".", "");
+  const env = loadEnv(mode, repoRoot, "");
   const base = env.VITE_BASE_PATH || "/";
   return {
     base,
-    root: "web",
+    root: webRoot,
     plugins: [react(), tailwindcss()],
     define: {
       "process.env.GEMINI_API_KEY": JSON.stringify(env.GEMINI_API_KEY),
     },
     resolve: {
       alias: {
-        "@": path.resolve(__dirname, "./web/src"),
+        "@": path.resolve(webRoot, "src"),
       },
     },
     server: {
@@ -30,7 +34,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
-      outDir: "../dist",
+      outDir: path.resolve(repoRoot, "dist"),
       emptyOutDir: true,
     },
   };

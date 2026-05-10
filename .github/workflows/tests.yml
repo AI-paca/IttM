@@ -30,7 +30,7 @@ jobs:
         run: npx eslint .
 
       - name: TypeScript typecheck
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Build OCR Docker image
         run: docker build -f ocr.Dockerfile -t ittm-ocr-ci ./ocr

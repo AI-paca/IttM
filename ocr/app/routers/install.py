@@ -1,8 +1,10 @@
-from fastapi import APIRouter
 import subprocess
 import sys
 
+from fastapi import APIRouter
+
 router = APIRouter()
+
 
 @router.post("/install-easyocr")
 @router.post("/v1/install-easyocr")
@@ -11,10 +13,11 @@ async def install_easyocr():
         # Check if already installed
         try:
             import easyocr
+
             return {"status": "already_installed"}
         except ImportError:
             pass
-            
+
         result = subprocess.run(
             [sys.executable, "-m", "pip", "install", "easyocr", "torch", "torchvision"],
             capture_output=True,

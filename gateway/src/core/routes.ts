@@ -1,6 +1,6 @@
 import { Env } from "../domain/types";
-import { method_not_allowed, not_found, json_response } from "./handle";
 import { OcrClient } from "../clients/ocrClient";
+import { json_response, method_not_allowed, not_found } from "./http";
 
 export async function route(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);

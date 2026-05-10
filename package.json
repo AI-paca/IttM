@@ -15,7 +15,9 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
+    "express": "^5.2.1",
     "lucide-react": "^0.546.0",
+    "mime-types": "^3.0.2",
     "motion": "^12.23.24",
     "pdfjs-dist": "^5.7.284",
     "react": "^19.0.1",
@@ -24,9 +26,11 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.14",
+    "@types/express": "^5.0.6",
+    "@types/mime-types": "^3.0.1",
+    "@types/node": "^22.14.0",
     "@typescript-eslint/eslint-plugin": "^8.59.2",
     "@typescript-eslint/parser": "^8.59.2",
-    "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.4",
     "autoprefixer": "^10.4.21",
     "dotenv": "^17.2.3",

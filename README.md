@@ -93,37 +93,38 @@ Workflow `.github/workflows/tests.yml` содержит быстрые frontend/
 flowchart TB
     User["User"]
 
-    subgraph Browser["Browser"]
+    subgraph Browser["Browser (React + Vite)"]
         direction TB
-        UI["React UI<br/>upload / settings / result"]
-        Strategy["OCR strategy<br/>auto / gateway / local / browser / llm"]
-        Pdf["PDF & image prep<br/>PDF.js + Canvas"]
-        BrowserOcr["Browser OCR<br/>Tesseract.js WASM"]
-        Llm["LLM client<br/>Gemini / OpenRouter"]
+        UI["React UI (App.tsx)<br/>upload / settings / state"]
+        Strategy["use-extraction.ts<br/>(Extraction Strategy)"]
+        Pdf["pdf-parser.ts<br/>(Render PDF pages to Canvas)"]
+        BrowserOcr["browser-engine.ts<br/>(Tesseract.js WASM)"]
+        Llm["llm-client.ts<br/>(Gemini / OpenRouter API)"]
 
-        UI --> Strategy
-        Strategy --> Pdf
-        Strategy --> BrowserOcr
-        Pdf --> BrowserOcr
-        Strategy --> Llm
+        UI -->|triggers| Strategy
+        Strategy -->|reads| Pdf
+        Strategy -->|calls locally| BrowserOcr
+        Strategy -->|calls externally| Llm
     end
 
     subgraph Gateway["Gateway: Bun or Node"]
         direction TB
-        Static["serves dist/<br/>SPA fallback + /IttM/"]
-        Routes["/api/* routes"]
-        Proxy["OCR proxy<br/>passes body to OCR_URL"]
+        MainHandle["Main Request Handler"]
+        Routes["API Router (/api/*)"]
+        Static["Static Server<br/>(dist/ + SPA fallback)"]
+        Proxy["ocrClient (Proxy)"]
 
-        Static --> Routes
-        Routes --> Proxy
+        MainHandle -->|if /api/*| Routes
+        MainHandle -->|else| Static
+        Routes -->|/api/convert| Proxy
     end
 
     subgraph Python["Python OCR: FastAPI"]
         direction TB
-        Api["/v1/convert<br/>/health / diagnostics / probe"]
-        Convert["Convert service<br/>load file, split long images/PDF"]
-        Engines["OCR engines<br/>Auto / Tesseract / EasyOCR"]
-        Markdown["Markdown response<br/>{ markdown, meta }"]
+        Api["FastAPI Routers<br/>/convert, /health, /probe"]
+        Convert["convert_service.py<br/>(Chunking & orchestration)"]
+        Engines["BaseEngine inheritors<br/>(Auto, Tesseract, EasyOCR)"]
+        Markdown["markdown_formatter.py"]
 
         Api --> Convert
         Convert --> Engines
@@ -132,12 +133,17 @@ flowchart TB
 
     External["External LLM APIs"]
 
-    User --> UI
-    Strategy -->|/api/convert| Routes
-    Proxy --> Api
-    Markdown -->|markdown + meta| UI
+    %% External Connections
+    User -->|Interacts with| UI
+    Strategy -->|Fallback execution| BrowserOcr
+    Strategy -->|Network Request| MainHandle
+    Proxy -->|POST /convert| Api
     Llm --> External
-    BrowserOcr -.->|fallback| UI
+
+    %% Return flow
+    Markdown -->|JSON Response| Proxy
+    Proxy -->|Passes backward| Strategy
+    Strategy -->|Updates State| UI
 ```
 
 <details>
@@ -149,7 +155,12 @@ web/src/
 ├─ ui/*                     # только UI-поверхности: header, sidebar, upload, loading, reading
 ├─ ocr/use-extraction.ts    # выбор OCR-пути, fallback, cancel/resume
 ├─ ocr/api-client.ts        # /api запросы, custom gateway URL, нормализация ошибок
-├─ ocr/browser-engine.ts    # Tesseract.js WASM worker и профиль ресурсов
+├─ ocr/browser-engine.ts    # оркестрация browser OCR без глобального progress state
+├─ ocr/browser-profile.ts   # профиль ресурсов: языки, лимиты изображения, render scale
+├─ ocr/browser-image-preprocessor.ts
+│                           # resize изображений, Web Worker/OffscreenCanvas fallback
+├─ ocr/tesseract-worker-session.ts
+│                           # lifecycle Tesseract.js worker lease/cache
 ├─ ocr/llm-client.ts        # прямые запросы Gemini/OpenRouter
 ├─ ocr/file-utils.ts        # проверка файлов, browser diagnostics, image helpers
 ├─ ocr/pdf-text.ts          # слияние native PDF text и OCR-слоя
@@ -159,9 +170,11 @@ web/src/
 ```text
 gateway/src/
 ├─ adapters/bun.ts          # Bun runtime adapter
-├─ adapters/node.ts         # Node runtime adapter
-├─ core/handle.ts           # static dist/, SPA fallback, /IttM/ prefix
+├─ adapters/node.ts         # Node runtime adapter + express.static для dist/
+├─ core/handle.ts           # API dispatch, без файловой статики
+├─ core/http.ts             # JSON/HTTP response helpers
 ├─ core/routes.ts           # /api/* маршруты
+├─ services/staticFiles.ts  # Bun/static fallback, /IttM/ prefix, SPA fallback
 └─ clients/ocrClient.ts     # proxy в Python OCR по OCR_URL
 ```
 

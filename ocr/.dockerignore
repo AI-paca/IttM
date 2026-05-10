@@ -2,8 +2,9 @@
 __pycache__
 app/__pycache__
 tests/__pycache__
-tests/fixtures
-.pytest_cache
 *.py[cod]
+.pytest_cache
+.tesseract_cache
+tests/fixtures
 *.log
 *.tmp

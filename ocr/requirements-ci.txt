@@ -1,4 +1,6 @@
+black
 fastapi
+flake8
 httpx
 numpy
 opencv-python-headless
@@ -7,4 +9,5 @@ pillow
 pytest
 python-multipart
 pytesseract
+ruff
 uvicorn

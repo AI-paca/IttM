@@ -1,11 +1,8 @@
 import os
-import sys
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from app.engines.tesseract_engine import TesseractEngine
 from app.main import app
@@ -48,7 +45,9 @@ def _assert_tesseract_languages():
 def _assert_tokens(markdown: str, source: str):
     compact = _compact(markdown)
     missing = [token for token in EXPECTED_TOKENS if token not in compact]
-    assert not missing, f"{source} missed tokens {missing}\nExpected source text:\n{QUALITY_TEXT}\nOCR output:\n{markdown}"
+    assert (
+        not missing
+    ), f"{source} missed tokens {missing}\nExpected source text:\n{QUALITY_TEXT}\nOCR output:\n{markdown}"
 
 
 @pytest.mark.parametrize(

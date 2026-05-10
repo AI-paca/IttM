@@ -1,5 +1,6 @@
 from app.engines.base import OcrEngine
 
+
 class StubEngine(OcrEngine):
     def recognize(self, image) -> str:
         # Stub logic. Normally would just return stub text.

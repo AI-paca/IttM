@@ -238,7 +238,10 @@ if [ "$RUN_DOCKER" -eq 1 ]; then
   run_docker_step "docker compose up -d" docker compose up -d
   wait_for_ocr_service
 
-  echo "--- Pytest inside OCR container ---"
+  echo "--- Python lint and tests inside OCR container ---"
+  run_docker_step "docker compose exec ocr flake8" docker compose exec -T ocr python -m flake8 .
+  run_docker_step "docker compose exec ocr black check" docker compose exec -T ocr python -m black --check .
+  run_docker_step "docker compose exec ocr ruff check" docker compose exec -T ocr python -m ruff check .
   run_docker_step "docker compose exec ocr pytest" docker compose exec -T ocr pytest tests/ -q
 fi
 

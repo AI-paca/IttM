@@ -154,9 +154,13 @@ flowchart TB
 
 ```text
 web/src/
-├─ App.tsx                  # верхний state: файл, режим OCR, diagnostics, theme
-├─ ui/*                     # только UI-поверхности: header, sidebar, upload, loading, reading
-├─ ocr/use-extraction.ts    # выбор OCR-пути, fallback, cancel/resume
+├─ App.tsx                  # верхний state: файл, режим OCR, diagnostics, theme, drag/drop
+├─ main.tsx                 # browser entrypoint
+├─ index.css                # глобальные токены темы и layout
+├─ ui/*                     # UI-поверхности: header, panels, sidebar, drag overlay, toast
+├─ ui/sources.tsx           # описания OCR-источников для настроек и статусов
+├─ ocr/types.ts             # общие browser OCR/strategy типы
+├─ ocr/use-extraction.ts    # выбор OCR-пути, fallback, cancel/resume, LLM/API/browser flow
 ├─ ocr/api-client.ts        # /api запросы, custom gateway URL, нормализация ошибок
 ├─ ocr/browser-engine.ts    # оркестрация browser OCR без глобального progress state
 ├─ ocr/browser-profile.ts   # профиль ресурсов: языки, лимиты изображения, render scale
@@ -171,26 +175,33 @@ web/src/
 ├─ ocr/llm-client.ts        # прямые запросы Gemini/OpenRouter
 ├─ ocr/file-utils.ts        # проверка файлов, browser diagnostics, image helpers
 ├─ ocr/pdf-text.ts          # слияние native PDF text и OCR-слоя
-└─ lib/pdf-parser.ts        # PDF.js: чтение текста, рендер страниц в Canvas
+├─ lib/pdf-parser.ts        # PDF.js: чтение текста, рендер страниц в Canvas
+├─ lib/browser-ocr.ts       # совместимый re-export browser OCR API
+└─ **/*.test.ts             # unit/browser OCR тесты рядом с проверяемым кодом
 ```
 
 ```text
 gateway/src/
 ├─ adapters/bun.ts          # Bun runtime adapter + static fallback service
 ├─ adapters/node.ts         # Node runtime adapter + express.static для dist/
+├─ domain/types.ts          # общие gateway-типы для API и OCR proxy
 ├─ core/handle.ts           # API-only dispatch, без файловой статики
 ├─ core/http.ts             # JSON/HTTP response helpers
 ├─ core/routes.ts           # /api/* маршруты
 ├─ services/staticFiles.ts  # Bun/static fallback, /IttM/ prefix, SPA fallback
-└─ clients/ocrClient.ts     # proxy в Python OCR по OCR_URL
+├─ clients/ocrClient.ts     # proxy в Python OCR по OCR_URL
+└─ **/*.test.ts             # unit-тесты adapter/core/static serving
 ```
 
 ```text
 ocr/app/
 ├─ main.py                  # FastAPI app и подключение routers
+├─ schemas.py               # Pydantic-модели ответов convert/probe/install
 ├─ routers/*                # health, diagnostics, convert, probe, install
 ├─ services/convert_service.py
 │                           # загрузка файла, split/dedupe, выбор engine
+├─ services/probe_service.py
+│                           # проверка доступности Tesseract/EasyOCR и языковых пакетов
 ├─ engines/*                # OcrEngine, Tesseract, EasyOCR, Auto, Stub
 ├─ chunking/*               # разрезание длинных изображений и дедупликация
 └─ formatting/*             # финальный Markdown
@@ -198,15 +209,26 @@ ocr/app/
 
 ```text
 CI/config:
+├─ run.sh                   # локальный быстрый запуск: dist reuse, light deps, свободные порты
+├─ debug.sh                 # локальная проверка: npm/Python/Docker/act с опциональной очисткой
 ├─ .github/workflows/tests.yml
 │                           # mandatory linters gate, Dockerized Python tests, OCR quality
+├─ .github/workflows/static.yml
+│                           # сборка и публикация GitHub Pages
+├─ edge/cloudflare-worker.ts
+│                           # edge adapter для статического frontend и API proxy
 ├─ eslint.config.js         # ESLint + Prettier plugin для web/gateway TS
 ├─ package.json             # npm scripts, frontend/gateway deps
+├─ vite.config.ts           # Vite base path, aliases, build/test настройки
+├─ tsconfig.json            # TypeScript project config
 ├─ ocr/.flake8              # flake8 правила для Python OCR
 ├─ ocr/pyproject.toml       # Black/Ruff/isort конфигурация
 ├─ ocr/requirements-ci.txt  # Python CI deps: pytest, flake8, black, ruff
 ├─ ocr.Dockerfile           # стабильная OCR среда с Tesseract/lang packs/fonts
-└─ gateway.Dockerfile       # production Node gateway image
+├─ gateway.Dockerfile       # production Node gateway image
+├─ nginx.Dockerfile         # статическая раздача frontend через nginx
+├─ nginx.conf               # SPA fallback и cache headers для nginx
+└─ docker-compose.yml       # локальная связка gateway + OCR
 ```
 
 </details>

@@ -100,11 +100,13 @@ logs/
 *.tmp
 *.bak
 *.cache
+.cache/
 
 # Test artifacts
 .coverage
 *.cover
 probes/actual*.json
+ocr/tests/fixtures/
 
 # Model files (large files should use Git LFS)
 *.onnx

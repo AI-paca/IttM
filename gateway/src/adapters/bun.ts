@@ -1,5 +1,6 @@
-import { handle } from "../core/handle";
+import { handle, isGatewayApiRequest } from "../core/handle";
 import { Env } from "../domain/types";
+import { serveStaticFile } from "../services/staticFiles";
 
 export function read_bun_env(): Env {
   // @ts-ignore
@@ -22,7 +23,11 @@ export function start_bun() {
         port,
         idleTimeout: 255,
         fetch(request: Request) {
-          return handle(request, env);
+          const url = new URL(request.url);
+          if (isGatewayApiRequest(url.pathname)) {
+            return handle(request, env);
+          }
+          return serveStaticFile(request);
         },
       });
 

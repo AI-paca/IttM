@@ -11,3 +11,5 @@ torch
 torchvision
 easyocr
 pynvml
+pytest
+httpx

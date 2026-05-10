@@ -1,0 +1,15 @@
+.git
+.github
+.pytest_cache
+.venv
+ocr/.venv
+ocr/tests/fixtures
+node_modules
+dist
+build
+logs
+*.log
+*.tmp
+*.bak
+__pycache__
+*.py[cod]

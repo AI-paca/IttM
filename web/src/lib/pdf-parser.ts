@@ -1,6 +1,16 @@
 import * as pdfjsLib from "pdfjs-dist";
+import { mergeNativeAndOcrText } from "../ocr/pdf-text";
 // Configure worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+
+export interface PdfProcessingOptions {
+  renderScale?: number;
+}
+
+interface PdfTextItem {
+  str?: string;
+  hasEOL?: boolean;
+}
 
 export async function processPdfIntelligently(
   file: File,
@@ -9,6 +19,7 @@ export async function processPdfIntelligently(
   onChunkExtracted?: (text: string, pageIdx?: number) => void,
   startPage: number = 1,
   onTotalPages?: (total: number) => void,
+  options: PdfProcessingOptions = {},
 ): Promise<string> {
   onProgress("Загрузка PDF...");
   const arrayBuffer = await file.arrayBuffer();
@@ -21,68 +32,65 @@ export async function processPdfIntelligently(
     onProgress(`Обработка страницы ${i} из ${numPages}...`);
     const page = await pdf.getPage(i);
 
-    // 1. Try to extract native text
+    // 1. Extract native PDF text if it exists.
     const textContent = await page.getTextContent();
     let nativeText = "";
 
-    for (const item of textContent.items as any[]) {
-      nativeText += item.str + (item.hasEOL ? "\n" : " ");
+    for (const item of textContent.items as PdfTextItem[]) {
+      nativeText += `${item.str ?? ""}${item.hasEOL ? "\n" : " "}`;
     }
-    // Clean up multiple spaces but keep newlines
     nativeText = nativeText
       .replace(/[ \t]+/g, " ")
       .replace(/\n[ \t]+/g, "\n")
       .trim();
 
-    // 2. Render to canvas to get image base64, and crop empty regions
-    const viewport = page.getViewport({ scale: 1.5 }); // Good resolution
+    // 2. Always render the page too: many PDFs contain both native text and image-only regions.
+    const viewport = page.getViewport({ scale: options.renderScale ?? 1.5 });
     const canvas = document.createElement("canvas");
     canvas.width = viewport.width;
     canvas.height = viewport.height;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    let pageText = nativeText;
 
     if (ctx) {
       await page.render({ canvasContext: ctx, viewport } as any).promise;
 
-      // Smart crop: remove white borders
       const croppedCanvas = cropWhiteBorders(canvas);
 
-      // If native text is long enough, we trust it over OCR.
-      if (nativeText.length > 50) {
-        markdownParts.push(nativeText);
-        if (onChunkExtracted) onChunkExtracted(nativeText + "\n\n---\n\n", i);
-      } else {
-        // Scanned PDF, needs OCR
-        onProgress(`Распознавание скана страницы ${i}...`);
-        const b64 = await new Promise<string>((resolve, reject) => {
-          croppedCanvas.toBlob(
-            (blob) => {
-              if (!blob) return reject("Canvas is empty");
-              const reader = new FileReader();
-              reader.readAsDataURL(blob);
-              reader.onloadend = () => {
-                const res = reader.result as string;
-                resolve(res.split(",")[1]);
-              };
-              reader.onerror = reject;
-            },
-            "image/jpeg",
-            0.9,
-          );
-        });
+      onProgress(
+        nativeText
+          ? `Проверка изображения на странице ${i}...`
+          : `Распознавание скана страницы ${i}...`,
+      );
+      const b64 = await new Promise<string>((resolve, reject) => {
+        croppedCanvas.toBlob(
+          (blob) => {
+            if (!blob)
+              return reject(new Error("Canvas вернул пустую PDF-страницу."));
+            const reader = new FileReader();
+            reader.readAsDataURL(blob);
+            reader.onloadend = () => {
+              const res = reader.result as string;
+              const base64 = res.split(",")[1];
+              if (!base64)
+                reject(new Error("Не удалось сериализовать PDF-страницу."));
+              else resolve(base64);
+            };
+            reader.onerror = () =>
+              reject(reader.error ?? new Error("Ошибка чтения PDF-страницы."));
+          },
+          "image/jpeg",
+          0.9,
+        );
+      });
 
-        const ocrText = await processImageCallback(b64);
-        if (ocrText.trim()) {
-          markdownParts.push(ocrText);
-          if (onChunkExtracted) onChunkExtracted(ocrText + "\n\n---\n\n", i);
-        }
-      }
-    } else {
-      // fallback if canvas fails
-      if (nativeText.trim()) {
-        markdownParts.push(nativeText);
-        if (onChunkExtracted) onChunkExtracted(nativeText + "\n\n---\n\n", i);
-      }
+      const ocrText = await processImageCallback(b64);
+      pageText = mergeNativeAndOcrText(nativeText, ocrText);
+    }
+
+    if (pageText.trim()) {
+      markdownParts.push(pageText);
+      onChunkExtracted?.(`${pageText}\n\n---\n\n`, i);
     }
   }
 
@@ -109,7 +117,11 @@ export function cropWhiteBorders(canvas: HTMLCanvasElement): HTMLCanvasElement {
   topLoop: for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const idx = (y * width + x) * 4;
-      if (data[idx] < threshold || data[idx + 1] < threshold || data[idx + 2] < threshold) {
+      if (
+        data[idx] < threshold ||
+        data[idx + 1] < threshold ||
+        data[idx + 2] < threshold
+      ) {
         top = y;
         break topLoop;
       }
@@ -120,7 +132,11 @@ export function cropWhiteBorders(canvas: HTMLCanvasElement): HTMLCanvasElement {
   bottomLoop: for (let y = height - 1; y >= 0; y--) {
     for (let x = 0; x < width; x++) {
       const idx = (y * width + x) * 4;
-      if (data[idx] < threshold || data[idx + 1] < threshold || data[idx + 2] < threshold) {
+      if (
+        data[idx] < threshold ||
+        data[idx + 1] < threshold ||
+        data[idx + 2] < threshold
+      ) {
         bottom = y;
         break bottomLoop;
       }
@@ -131,7 +147,11 @@ export function cropWhiteBorders(canvas: HTMLCanvasElement): HTMLCanvasElement {
   leftLoop: for (let x = 0; x < width; x++) {
     for (let y = top; y <= bottom; y++) {
       const idx = (y * width + x) * 4;
-      if (data[idx] < threshold || data[idx + 1] < threshold || data[idx + 2] < threshold) {
+      if (
+        data[idx] < threshold ||
+        data[idx + 1] < threshold ||
+        data[idx + 2] < threshold
+      ) {
         left = x;
         break leftLoop;
       }
@@ -142,7 +162,11 @@ export function cropWhiteBorders(canvas: HTMLCanvasElement): HTMLCanvasElement {
   rightLoop: for (let x = width - 1; x >= 0; x--) {
     for (let y = top; y <= bottom; y++) {
       const idx = (y * width + x) * 4;
-      if (data[idx] < threshold || data[idx + 1] < threshold || data[idx + 2] < threshold) {
+      if (
+        data[idx] < threshold ||
+        data[idx + 1] < threshold ||
+        data[idx + 2] < threshold
+      ) {
         right = x;
         break rightLoop;
       }
@@ -166,7 +190,17 @@ export function cropWhiteBorders(canvas: HTMLCanvasElement): HTMLCanvasElement {
   croppedCanvas.height = cropHeight;
   const croppedCtx = croppedCanvas.getContext("2d");
   if (croppedCtx) {
-    croppedCtx.drawImage(canvas, left, top, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+    croppedCtx.drawImage(
+      canvas,
+      left,
+      top,
+      cropWidth,
+      cropHeight,
+      0,
+      0,
+      cropWidth,
+      cropHeight,
+    );
     return croppedCanvas;
   }
 

@@ -1,0 +1,13 @@
+black
+fastapi
+flake8
+httpx
+numpy
+opencv-python-headless
+pdf2image
+pillow
+pytest
+python-multipart
+pytesseract
+ruff
+uvicorn

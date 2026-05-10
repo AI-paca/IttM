@@ -1,4 +1,3 @@
-import type { Dispatch, SetStateAction } from "react";
 import {
   Check,
   ClipboardPaste,
@@ -8,51 +7,40 @@ import {
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import type { ThemeMode } from "../types/app.types";
+import type { EngineControls } from "./layout/engine-controls.types";
 import type { LlmProvider, SourceType } from "../ocr/types";
 import { SOURCES } from "./sources";
 
 interface SettingsSidebarProps {
-  easyOcrInstalling: boolean;
+  controls: EngineControls;
   isOpen: boolean;
-  llmKey: string;
-  llmModel: string;
-  llmProvider: LlmProvider;
-  pingUrl: string;
-  rememberChoice: boolean;
-  selectedSource: SourceType;
-  themeMode: ThemeMode;
   onClose: () => void;
-  onInstallEasyOcr: () => void;
-  onRememberChange: (checked: boolean) => void;
-  onSourceSelect: (source: SourceType) => void;
-  setLlmKey: Dispatch<SetStateAction<string>>;
-  setLlmModel: Dispatch<SetStateAction<string>>;
-  setLlmProvider: Dispatch<SetStateAction<LlmProvider>>;
-  setPingUrl: Dispatch<SetStateAction<string>>;
-  setThemeMode: Dispatch<SetStateAction<ThemeMode>>;
 }
 
 export function SettingsSidebar({
-  easyOcrInstalling,
+  controls,
   isOpen,
-  llmKey,
-  llmModel,
-  llmProvider,
-  pingUrl,
-  rememberChoice,
-  selectedSource,
-  themeMode,
   onClose,
-  onInstallEasyOcr,
-  onRememberChange,
-  onSourceSelect,
-  setLlmKey,
-  setLlmModel,
-  setLlmProvider,
-  setPingUrl,
-  setThemeMode,
 }: SettingsSidebarProps) {
+  const {
+    easyOcrInstalling,
+    llmKey,
+    llmModel,
+    llmProvider,
+    pingUrl,
+    rememberChoice,
+    selectedSource,
+    themeMode,
+    onInstallEasyOcr,
+    onRememberChange,
+    onSourceSelect,
+    setLlmKey,
+    setLlmModel,
+    setLlmProvider,
+    setPingUrl,
+    setThemeMode,
+  } = controls;
+
   return (
     <AnimatePresence>
       {isOpen && (

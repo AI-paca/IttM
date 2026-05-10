@@ -1,4 +1,4 @@
-import { useOcrApp } from "../ocr/ocr-context";
+import { useOcrShell } from "../ocr/ocr-context";
 import { DragOverlay } from "./DragOverlay";
 import { NavigationArea } from "./layout/NavigationArea";
 import { NoticeToast } from "./NoticeToast";
@@ -6,7 +6,7 @@ import { OcrWorkspace } from "./workspace/OcrWorkspace";
 
 export function AppShell() {
   const { appState, closeNotice, dragHandlers, isDragging, notice } =
-    useOcrApp();
+    useOcrShell();
 
   return (
     <div

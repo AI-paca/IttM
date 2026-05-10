@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import type { ChangeEvent, DragEvent, RefObject } from "react";
+import type { ChangeEvent, Context, DragEvent, RefObject } from "react";
 import type { AppDiagnostics } from "./types";
 import type { AppState, Notice } from "../types/app.types";
 import type { EngineControls } from "../ui/layout/engine-controls.types";
@@ -10,12 +10,28 @@ export interface DragHandlers {
   onDrop: (event: DragEvent<HTMLDivElement>, autoStart?: boolean) => void;
 }
 
-export interface OcrContextValue {
+export interface OcrShellContextValue {
+  appState: AppState;
+  dragHandlers: DragHandlers;
+  isDragging: boolean;
+  notice: Notice | null;
+  closeNotice: () => void;
+}
+
+export interface NavigationAreaContextValue {
+  appState: AppState;
+  dragHandlers: DragHandlers;
+  file: File | null;
+  isDragging: boolean;
+  showHeader: boolean;
+  onNewFile: () => void;
+}
+
+export interface OcrWorkspaceContextValue {
   appState: AppState;
   copied: boolean;
   diagnostics: AppDiagnostics | null;
   dragHandlers: DragHandlers;
-  engineControls: EngineControls;
   extractedText: string;
   extractionProgress: string;
   file: File | null;
@@ -23,10 +39,7 @@ export interface OcrContextValue {
   isDragging: boolean;
   isExtracting: boolean;
   lastExtractedPage: number;
-  notice: Notice | null;
-  showHeader: boolean;
   totalPdfPages: number | null;
-  closeNotice: () => void;
   onCancelExtraction: () => void;
   onCopy: () => Promise<void>;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
@@ -35,12 +48,33 @@ export interface OcrContextValue {
   onStartExtraction: () => void;
 }
 
-export const OcrContext = createContext<OcrContextValue | null>(null);
+export const OcrShellContext = createContext<OcrShellContextValue | null>(null);
+export const NavigationAreaContext =
+  createContext<NavigationAreaContextValue | null>(null);
+export const EngineControlsContext = createContext<EngineControls | null>(null);
+export const OcrWorkspaceContext =
+  createContext<OcrWorkspaceContextValue | null>(null);
 
-export function useOcrApp() {
-  const context = useContext(OcrContext);
-  if (!context) {
-    throw new Error("useOcrApp must be used inside OcrProvider");
+function useRequiredContext<T>(context: Context<T | null>, hookName: string) {
+  const value = useContext(context);
+  if (!value) {
+    throw new Error(`${hookName} must be used inside OcrProvider`);
   }
-  return context;
+  return value;
+}
+
+export function useOcrShell() {
+  return useRequiredContext(OcrShellContext, "useOcrShell");
+}
+
+export function useNavigationArea() {
+  return useRequiredContext(NavigationAreaContext, "useNavigationArea");
+}
+
+export function useEngineControls() {
+  return useRequiredContext(EngineControlsContext, "useEngineControls");
+}
+
+export function useOcrWorkspace() {
+  return useRequiredContext(OcrWorkspaceContext, "useOcrWorkspace");
 }

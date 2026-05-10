@@ -1,19 +1,13 @@
 import { useState } from "react";
-import { useOcrApp } from "../../ocr/ocr-context";
+import { useEngineControls, useNavigationArea } from "../../ocr/ocr-context";
 import { AppHeader } from "../AppHeader";
 import { SettingsSidebar } from "../SettingsSidebar";
 
 export function NavigationArea() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const {
-    appState,
-    dragHandlers,
-    engineControls,
-    file,
-    isDragging,
-    onNewFile,
-    showHeader,
-  } = useOcrApp();
+  const { appState, dragHandlers, file, isDragging, onNewFile, showHeader } =
+    useNavigationArea();
+  const engineControls = useEngineControls();
 
   return (
     <>
@@ -32,24 +26,9 @@ export function NavigationArea() {
       />
 
       <SettingsSidebar
-        easyOcrInstalling={engineControls.easyOcrInstalling}
+        controls={engineControls}
         isOpen={sidebarOpen}
-        llmKey={engineControls.llmKey}
-        llmModel={engineControls.llmModel}
-        llmProvider={engineControls.llmProvider}
-        pingUrl={engineControls.pingUrl}
-        rememberChoice={engineControls.rememberChoice}
-        selectedSource={engineControls.selectedSource}
-        themeMode={engineControls.themeMode}
         onClose={() => setSidebarOpen(false)}
-        onInstallEasyOcr={engineControls.onInstallEasyOcr}
-        onRememberChange={engineControls.onRememberChange}
-        onSourceSelect={engineControls.onSourceSelect}
-        setLlmKey={engineControls.setLlmKey}
-        setLlmModel={engineControls.setLlmModel}
-        setLlmProvider={engineControls.setLlmProvider}
-        setPingUrl={engineControls.setPingUrl}
-        setThemeMode={engineControls.setThemeMode}
       />
     </>
   );

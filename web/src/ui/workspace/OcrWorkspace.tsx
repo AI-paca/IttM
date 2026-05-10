@@ -1,5 +1,5 @@
 import { AnimatePresence } from "motion/react";
-import { useOcrApp } from "../../ocr/ocr-context";
+import { useOcrWorkspace } from "../../ocr/ocr-context";
 import { ConfigurePanel } from "../ConfigurePanel";
 import { LoadingPanel } from "../LoadingPanel";
 import { ReadingPanel } from "../ReadingPanel";
@@ -25,7 +25,7 @@ export function OcrWorkspace() {
     onResumeExtraction,
     onStartExtraction,
     totalPdfPages,
-  } = useOcrApp();
+  } = useOcrWorkspace();
 
   return (
     <main className="flex-1 flex flex-col items-center px-4 md:px-8 py-6 md:py-8 w-full max-w-7xl mx-auto relative z-10 overflow-x-hidden">

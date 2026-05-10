@@ -16,8 +16,17 @@ import type {
   SourceType,
 } from "./types";
 import { useOcrExtraction } from "./use-extraction";
-import { OcrContext } from "./ocr-context";
-import type { OcrContextValue } from "./ocr-context";
+import {
+  EngineControlsContext,
+  NavigationAreaContext,
+  OcrShellContext,
+  OcrWorkspaceContext,
+} from "./ocr-context";
+import type {
+  NavigationAreaContextValue,
+  OcrShellContextValue,
+  OcrWorkspaceContextValue,
+} from "./ocr-context";
 import type { EngineControls } from "../ui/layout/engine-controls.types";
 import { SOURCES } from "../ui/sources";
 
@@ -349,6 +358,8 @@ export function OcrProvider({ children }: { children: ReactNode }) {
     showNotice,
   });
 
+  const closeNotice = useCallback(() => setNotice(null), []);
+
   const dragHandlers = useMemo(
     () => ({
       onDragOver: handleDragOver,
@@ -392,13 +403,35 @@ export function OcrProvider({ children }: { children: ReactNode }) {
     ],
   );
 
-  const value = useMemo<OcrContextValue>(
+  const shellValue = useMemo<OcrShellContextValue>(
+    () => ({
+      appState,
+      dragHandlers,
+      isDragging,
+      notice,
+      closeNotice,
+    }),
+    [appState, closeNotice, dragHandlers, isDragging, notice],
+  );
+
+  const navigationValue = useMemo<NavigationAreaContextValue>(
+    () => ({
+      appState,
+      dragHandlers,
+      file,
+      isDragging,
+      showHeader,
+      onNewFile: handleNewFile,
+    }),
+    [appState, dragHandlers, file, handleNewFile, isDragging, showHeader],
+  );
+
+  const workspaceValue = useMemo<OcrWorkspaceContextValue>(
     () => ({
       appState,
       copied,
       diagnostics,
       dragHandlers,
-      engineControls,
       extractedText,
       extractionProgress,
       file,
@@ -406,10 +439,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       isDragging,
       isExtracting,
       lastExtractedPage,
-      notice,
-      showHeader,
       totalPdfPages,
-      closeNotice: () => setNotice(null),
       onCancelExtraction: cancelExtraction,
       onCopy: handleCopy,
       onFileChange: handleFileChange,
@@ -423,7 +453,6 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       copied,
       diagnostics,
       dragHandlers,
-      engineControls,
       extractedText,
       extractionProgress,
       file,
@@ -435,11 +464,19 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       isDragging,
       isExtracting,
       lastExtractedPage,
-      notice,
-      showHeader,
       totalPdfPages,
     ],
   );
 
-  return <OcrContext.Provider value={value}>{children}</OcrContext.Provider>;
+  return (
+    <OcrShellContext.Provider value={shellValue}>
+      <EngineControlsContext.Provider value={engineControls}>
+        <NavigationAreaContext.Provider value={navigationValue}>
+          <OcrWorkspaceContext.Provider value={workspaceValue}>
+            {children}
+          </OcrWorkspaceContext.Provider>
+        </NavigationAreaContext.Provider>
+      </EngineControlsContext.Provider>
+    </OcrShellContext.Provider>
+  );
 }

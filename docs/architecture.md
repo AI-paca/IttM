@@ -79,7 +79,8 @@ web/src/
 │                           # рабочая область загрузки, настройки, чтения и прогресса
 ├─ ui/*                     # UI-поверхности: panels, sidebar, drag overlay, toast
 ├─ ui/sources.tsx           # описания OCR-источников для настроек и статусов
-├─ ocr/OcrContext.tsx       # состояние приложения и контракты действий OCR
+├─ ocr/OcrContext.tsx       # provider состояния приложения и действий OCR
+├─ ocr/ocr-context.ts       # узкие context-контракты: shell, navigation, engine, workspace
 ├─ ocr/types.ts             # общие browser OCR/strategy типы
 ├─ ocr/use-extraction.ts    # выбор OCR-пути, fallback, cancel/resume, LLM/API/browser flow
 ├─ ocr/api-client.ts        # /api запросы, custom gateway URL, нормализация ошибок

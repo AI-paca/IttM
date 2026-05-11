@@ -25,6 +25,9 @@ class AutoEngine(OcrEngine):
     def recognize(self, image, mode: str = "text_mode", psm: int = 6) -> str:
         return self.active_engine.recognize(image, mode=mode, psm=psm)
 
+    def recognize_words(self, image, psm: int = 6, min_conf: int = 20) -> list[dict]:
+        return self.active_engine.recognize_words(image, psm=psm, min_conf=min_conf)
+
     def available(self) -> bool:
         return self.tesseract.available() or self.easy.available()
 

@@ -104,6 +104,36 @@ class EasyOcrEngine(OcrEngine):
             print(f"EasyOCR recognition error: {e}")
             return ""
 
+    def recognize_words(self, image, psm: int = 6, min_conf: int = 20) -> list[dict]:
+        reader = self._get_reader()
+        if reader is None:
+            return []
+
+        try:
+            import numpy as np
+
+            min_conf_ratio = min_conf / 100
+            result = reader.readtext(np.array(image))
+            words = []
+            for bbox, text, conf in result:
+                if conf < min_conf_ratio or not text.strip():
+                    continue
+
+                xs = [point[0] for point in bbox]
+                ys = [point[1] for point in bbox]
+                words.append(
+                    {
+                        "text": text.strip(),
+                        "bbox": (int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))),
+                        "conf": float(conf * 100),
+                    }
+                )
+
+            return words
+        except Exception as e:
+            print(f"EasyOCR word recognition error: {e}")
+            return []
+
     def available(self) -> bool:
         """Check if EasyOCR is available."""
         if self._reader is None:

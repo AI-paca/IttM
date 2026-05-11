@@ -41,6 +41,13 @@ class TesseractEngine(OcrEngine):
         return "+".join(languages or ["eng"])
 
     @staticmethod
+    def _parse_confidence(conf) -> float:
+        try:
+            return float(conf)
+        except (TypeError, ValueError):
+            return -1.0
+
+    @staticmethod
     def crop_garbage_zones(image: Image.Image, left_percent: float = 0.15, right_percent: float = 0.20) -> Image.Image:
         """
         Crops garbage zones from product card image.
@@ -74,7 +81,7 @@ class TesseractEngine(OcrEngine):
         valid_tokens = []
 
         for i in range(len(data["text"])):
-            conf = data["conf"][i]
+            conf = TesseractEngine._parse_confidence(data["conf"][i])
             text = data["text"][i].strip()
 
             # Skip empty text
@@ -248,6 +255,40 @@ class TesseractEngine(OcrEngine):
         except Exception as e:
             print(f"Error in recognize_to_string: {e}")
             return ""
+
+    def recognize_words(self, image, psm: int = 6, min_conf: int = 20) -> list[dict]:
+        data = self.recognize_with_psm(image, psm=psm, mode="table")
+        if not data:
+            return []
+
+        words = []
+        for index, raw_text in enumerate(data.get("text", [])):
+            text = raw_text.strip()
+            if not text:
+                continue
+
+            conf = self._parse_confidence(data["conf"][index])
+            if conf == -1:
+                continue
+            if conf < min_conf and not re.match(r"^\d+[.,]?\d*$", text):
+                continue
+
+            left = int(data["left"][index])
+            top = int(data["top"][index])
+            width = int(data["width"][index])
+            height = int(data["height"][index])
+            if width <= 0 or height <= 0:
+                continue
+
+            words.append(
+                {
+                    "text": text,
+                    "bbox": (left, top, left + width, top + height),
+                    "conf": conf,
+                }
+            )
+
+        return words
 
     def recognize(self, image, mode: str = "text_mode", psm: int = 6) -> str:
         """

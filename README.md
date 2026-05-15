@@ -32,7 +32,8 @@ FORCE_BUILD=1 bash run.sh
 - **Local Python OCR**: FastAPI backend с Tesseract/EasyOCR за gateway.
 - **Hybrid local+node/bun**: frontend/gateway локально, OCR backend отдельно через `OCR_URL`.
 
-## CI и базовые проверки
+<details>
+<summary>CI и базовые проверки</summary>
 
 Локально:
 
@@ -75,6 +76,8 @@ npm run test:ocr:browser
 ```
 
 Workflow `.github/workflows/tests.yml` содержит быстрые frontend/gateway/Python проверки и отдельный тяжелый OCR quality job с `chi_sim+eng+rus`, Tesseract language packs и Noto CJK fonts.
+
+</details>
 
 ## Выбор стратегий OCR (в UI)
 

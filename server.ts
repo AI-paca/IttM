@@ -6,14 +6,10 @@ import express, {
 import * as http from "http";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { handle, isGatewayApiRequest } from "../core/handle";
-import { error_response } from "../core/http";
-import { Env } from "../domain/types";
-import {
-  defaultDistRoot,
-  isStaticAssetPath,
-  stripStaticBasePath,
-} from "../services/staticFiles";
+import { handle, isGatewayApiRequest } from "./gateway/src/core/handle";
+import { error_response } from "./gateway/src/core/http";
+import { Env } from "./gateway/src/domain/types";
+import { defaultDistRoot } from "./gateway/src/services/staticFiles";
 
 export function read_node_env(): Env {
   return {
@@ -74,76 +70,82 @@ export async function send_web_response(
   res.end();
 }
 
-function sendNotFoundJson(res: ExpressResponse) {
-  res.status(404);
-  res.type("application/json");
-  res.send(JSON.stringify({ error: "Not Found" }));
-}
-
 function apiMiddleware(env: Env) {
   return async (
     req: ExpressRequest,
     res: ExpressResponse,
     next: NextFunction,
   ) => {
+    // Make sure we only catch API routes
     if (!isGatewayApiRequest(req.path)) {
       next();
       return;
     }
 
+    const startedAt = Date.now();
+    console.log(`[gateway] ${req.method} ${req.originalUrl}`);
+
     try {
       const webReq = await to_web_request(req);
       const webRes = await handle(webReq, env);
       await send_web_response(res, webRes);
+      console.log(
+        `[gateway] ${req.method} ${req.originalUrl} -> ${webRes.status} (${Date.now() - startedAt}ms)`,
+      );
     } catch (err: any) {
-      console.error("Node Adapter API Error:", err.stack || err);
+      console.error("API Error:", err.stack || err);
       const response = error_response("Internal Server Error in Gateway", 500);
       await send_web_response(res, response);
+      console.log(
+        `[gateway] ${req.method} ${req.originalUrl} -> 500 (${Date.now() - startedAt}ms)`,
+      );
     }
   };
 }
 
-function spaFallback(distRoot: string) {
-  return (req: ExpressRequest, res: ExpressResponse) => {
-    if (req.method !== "GET" && req.method !== "HEAD") {
-      sendNotFoundJson(res);
-      return;
-    }
-
-    const pathname = stripStaticBasePath(req.path);
-    if (isStaticAssetPath(pathname)) {
-      sendNotFoundJson(res);
-      return;
-    }
-
-    res.sendFile(path.join(distRoot, "index.html"), (err) => {
-      if (err) sendNotFoundJson(res);
-    });
-  };
-}
-
-export function create_node_app(env: Env, options: { distRoot?: string } = {}) {
+async function startServer(): Promise<http.Server> {
   const app = express();
-  const distRoot = path.resolve(options.distRoot ?? defaultDistRoot());
-  const staticOptions = {
-    fallthrough: true,
-    index: "index.html",
-  };
-
-  app.use(apiMiddleware(env));
-  app.use("/IttM", express.static(distRoot, staticOptions));
-  app.use(express.static(distRoot, staticOptions));
-  app.use(spaFallback(distRoot));
-
-  return app;
-}
-
-export function start_node() {
   const env = read_node_env();
-  const app = create_node_app(env);
+  const PORT = parseInt(env.PORT);
 
-  app.listen(parseInt(env.PORT), "0.0.0.0", () => {
-    console.log(`Node adapter running on port ${env.PORT} (Fallback mode)`);
+  // API routes first
+  app.use(apiMiddleware(env));
+
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
+    const vite = await createViteServer({
+      configFile: "web/vite.config.ts",
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    // Production static serving
+    const distPath = path.resolve(defaultDistRoot());
+    app.use("/IttM", express.static(distPath, { fallthrough: true }));
+    app.use(express.static(distPath, { index: "index.html" }));
+    app.use((req: ExpressRequest, res: ExpressResponse) => {
+      if (req.method !== "GET" && req.method !== "HEAD") {
+        res.status(404).json({ error: "Not Found" });
+        return;
+      }
+
+      res.sendFile(path.join(distPath, "index.html"), (err) => {
+        if (err) res.status(404).json({ error: "Not Found" });
+      });
+    });
+  }
+
+  return await new Promise<http.Server>((resolve, reject) => {
+    const server = app.listen(PORT, "0.0.0.0");
+    server.once("error", reject);
+    server.once("listening", () => {
+      console.log(
+        `Universal Entry Point (server.ts) running on http://localhost:${PORT}`,
+      );
+      resolve(server);
+    });
   });
 }
 
@@ -152,5 +154,8 @@ const isMainModule = process.argv[1]
   : false;
 
 if (isMainModule) {
-  start_node();
+  startServer().catch((err) => {
+    console.error("Error starting server:", err);
+    process.exit(1);
+  });
 }

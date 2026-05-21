@@ -4,8 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --config web/vite.config.ts --port=3000 --host=0.0.0.0",
-    "build": "vite build --config web/vite.config.ts",
+    "dev": "tsx server.ts",
+    "build": "npm run build:web && npm run build:server",
+    "build:web": "vite build --config web/vite.config.ts",
+    "build:server": "esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.js",
     "preview": "vite preview --config web/vite.config.ts",
     "clean": "rm -rf dist",
     "debug": "bash scripts/debug.sh",
@@ -14,7 +16,8 @@
     "test": "node --import tsx --test web/src/**/*.test.ts gateway/src/**/*.test.ts",
     "test:ocr:browser": "node --import tsx --test web/src/**/*.ocr-test.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "start": "NODE_ENV=production node dist/server.js"
   },
   "dependencies": {
     "express": "^5.2.1",
@@ -36,6 +39,7 @@
     "@vitejs/plugin-react": "^5.0.4",
     "autoprefixer": "^10.4.21",
     "dotenv": "^17.2.3",
+    "esbuild": "^0.28.0",
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.5",

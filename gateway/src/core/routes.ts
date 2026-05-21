@@ -33,6 +33,11 @@ export async function route(request: Request, env: Env): Promise<Response> {
     return await OcrClient.installEasy(env);
   }
 
+  if (path === "/api/install-easyocr/status") {
+    if (method !== "GET") return method_not_allowed();
+    return await OcrClient.installEasyStatus(env);
+  }
+
   if (path === "/api/install-light") {
     if (method !== "POST") return method_not_allowed();
     return json_response(

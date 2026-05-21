@@ -82,7 +82,9 @@ def _line_bounded_segments(lines: tuple[int, ...], limit: int, max_span: int) ->
     return segments
 
 
-def _recognize_scaled_words(engine, image: Image.Image, *, scale: int = 3, psm: int = 6, min_conf: int = 0) -> list[dict]:
+def _recognize_scaled_words(
+    engine, image: Image.Image, *, scale: int = 3, psm: int = 6, min_conf: int = 0
+) -> list[dict]:
     recognize_words = getattr(engine, "recognize_words", None)
     if not callable(recognize_words):
         return []
@@ -118,7 +120,9 @@ def _merge_wide_table_left_strip_words(engine, image: Image.Image, table, words:
     if left_limit <= 1:
         return words
 
-    left_words = _recognize_scaled_words(engine, image.crop((0, 0, left_limit, image.size[1])), scale=3, psm=6, min_conf=0)
+    left_words = _recognize_scaled_words(
+        engine, image.crop((0, 0, left_limit, image.size[1])), scale=3, psm=6, min_conf=0
+    )
     if len(left_words) < 10:
         return words
 

@@ -2,6 +2,8 @@
 .github
 .pytest_cache
 .venv
+.python-env
+.cache
 ocr/.venv
 ocr/tests/fixtures
 node_modules

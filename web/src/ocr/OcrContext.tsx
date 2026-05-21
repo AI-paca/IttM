@@ -129,6 +129,8 @@ export function OcrProvider({ children }: { children: ReactNode }) {
     return "auto";
   });
   const [easyOcrInstalling, setEasyOcrInstalling] = useState(false);
+  const [easyOcrInstallMessage, setEasyOcrInstallMessage] = useState("");
+  const [easyOcrInstallProgress, setEasyOcrInstallProgress] = useState(0);
   const [lastExtractedPage, setLastExtractedPage] = useState(1);
   const [totalPdfPages, setTotalPdfPages] = useState<number | null>(null);
   const [diagnostics, setDiagnostics] = useState<AppDiagnostics | null>(null);
@@ -310,31 +312,59 @@ export function OcrProvider({ children }: { children: ReactNode }) {
     setTriggerCount((prev) => prev + 1);
   }, []);
 
-  const handleInstallEasyOcr = useCallback(() => {
+  const handleInstallEasyOcr = useCallback(async () => {
     setEasyOcrInstalling(true);
-    requestApiJson<{
+    setEasyOcrInstallMessage("Запускаем установку EasyOCR...");
+    setEasyOcrInstallProgress(3);
+
+    type InstallStatus = {
       status?: string;
+      phase?: string;
       message?: string;
       error?: string;
-    }>("/api/install-easyocr", "EasyOCR install", {
-      method: "POST",
-    })
-      .then((d) => {
-        if (d.status === "already_installed" || d.status === "installed") {
+      progress?: number;
+      logs?: string[];
+    };
+
+    try {
+      await requestApiJson<InstallStatus>(
+        "/api/install-easyocr",
+        "EasyOCR install",
+        {
+          method: "POST",
+        },
+      );
+
+      for (;;) {
+        const status = await requestApiJson<InstallStatus>(
+          "/api/install-easyocr/status",
+          "EasyOCR install status",
+        );
+        const message =
+          status.message || status.error || "Установка EasyOCR выполняется...";
+        setEasyOcrInstallMessage(message);
+        setEasyOcrInstallProgress(status.progress ?? 5);
+
+        if (status.status === "installed") {
           showNotice(
             "EasyOCR установлен/найден. Можно использовать.",
             "success",
           );
-        } else {
-          showNotice(
-            `EasyOCR: ${d.message || d.error || "не удалось установить"}`,
-          );
+          break;
         }
-      })
-      .catch((error) => {
-        showNotice(noticeFromError(error).message);
-      })
-      .finally(() => setEasyOcrInstalling(false));
+
+        if (status.status === "error") {
+          showNotice(`EasyOCR: ${message}`);
+          break;
+        }
+
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      }
+    } catch (error) {
+      showNotice(noticeFromError(error).message);
+    } finally {
+      setEasyOcrInstalling(false);
+    }
   }, [showNotice]);
 
   const { cancelExtraction } = useOcrExtraction({
@@ -371,6 +401,8 @@ export function OcrProvider({ children }: { children: ReactNode }) {
 
   const engineControls = useMemo<EngineControls>(
     () => ({
+      easyOcrInstallMessage,
+      easyOcrInstallProgress,
       easyOcrInstalling,
       llmKey,
       llmModel,
@@ -390,6 +422,8 @@ export function OcrProvider({ children }: { children: ReactNode }) {
     }),
     [
       easyOcrInstalling,
+      easyOcrInstallMessage,
+      easyOcrInstallProgress,
       handleInstallEasyOcr,
       handleRememberChange,
       handleSourceSelect,

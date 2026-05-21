@@ -28,7 +28,7 @@ def capabilities_endpoint():
         from app.engines.tesseract_engine import TesseractEngine
 
         tess = TesseractEngine()
-        easy = EasyOcrEngine()
+        easy = EasyOcrEngine(download_enabled=False)
 
         return {
             "engines": [

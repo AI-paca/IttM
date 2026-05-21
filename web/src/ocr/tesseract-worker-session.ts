@@ -17,6 +17,9 @@ interface TesseractWorkerOptions {
   langPath?: string;
   cachePath?: string;
   gzip?: boolean;
+  workerPath?: string;
+  corePath?: string;
+  workerBlobURL?: boolean;
   logger?: (message: TesseractLoggerMessage) => void;
 }
 
@@ -36,6 +39,29 @@ async function createTesseractWorker(
     oem,
     options as Parameters<typeof createWorker>[2],
   )) as unknown as TesseractWorkerLike;
+}
+
+function appBaseUrl(): string {
+  const meta = import.meta as ImportMeta & { env?: { BASE_URL?: string } };
+  const base = meta.env?.BASE_URL || "/";
+  if (!base || base === "./") return "/";
+  return base.endsWith("/") ? base : `${base}/`;
+}
+
+function localTesseractAssetUrl(fileName = ""): string {
+  return `${appBaseUrl()}vendor/tesseract/${fileName}`;
+}
+
+function browserTesseractOptions(): Partial<TesseractWorkerOptions> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  return {
+    workerPath: localTesseractAssetUrl("worker.min.js"),
+    corePath: localTesseractAssetUrl(),
+    workerBlobURL: false,
+  };
 }
 
 function cacheKey(profile: BrowserOcrProfile): string {
@@ -61,6 +87,7 @@ class BrowserOcrWorkerSession {
     this.key = cacheKey(profile);
     this.progressSink = onProgress;
     this.workerPromise = createWorkerFn(profile.languages, 1, {
+      ...browserTesseractOptions(),
       ...(profile.langPath ? { langPath: profile.langPath } : {}),
       ...(profile.cachePath ? { cachePath: profile.cachePath } : {}),
       ...(profile.gzip !== undefined ? { gzip: profile.gzip } : {}),

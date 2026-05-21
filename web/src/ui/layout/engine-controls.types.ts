@@ -3,6 +3,8 @@ import type { ThemeMode } from "../../types/app.types";
 import type { LlmProvider, SourceType } from "../../ocr/types";
 
 export interface EngineControlsState {
+  easyOcrInstallMessage: string;
+  easyOcrInstallProgress: number;
   easyOcrInstalling: boolean;
   llmKey: string;
   llmModel: string;

@@ -190,7 +190,9 @@ def _grid_line_masks(binary: np.ndarray):
     return horizontal, vertical
 
 
-def _cell_line_hints_from_contours(table_grid: np.ndarray, local_width: int, local_height: int) -> tuple[list[int], list[int]]:
+def _cell_line_hints_from_contours(
+    table_grid: np.ndarray, local_width: int, local_height: int
+) -> tuple[list[int], list[int]]:
     """
     Use contour holes inside the connected grid as additional cell-boundary hints.
 
@@ -255,7 +257,9 @@ def detect_table_layouts(image: Image.Image, min_cells: int = 4) -> list[TableLa
     horizontal, vertical = _grid_line_masks(binary)
     grid = _build_grid_mask(horizontal, vertical)
 
-    contour_grid = cv2.morphologyEx(grid, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7)), iterations=2)
+    contour_grid = cv2.morphologyEx(
+        grid, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7)), iterations=2
+    )
     contours, _ = cv2.findContours(contour_grid, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     image_area = width * height
     tables: list[TableLayout] = []
@@ -389,7 +393,8 @@ def logical_table_layout(image: Image.Image, table: TableLayout, min_major_cover
     last_line = int(table.x_lines[-1]) if table.x_lines else width - 1
     right_edge = (
         last_line
-        if table.x_lines and (last_line >= width - edge_tolerance or line_coverages.get(last_line, 0.0) >= min_major_coverage)
+        if table.x_lines
+        and (last_line >= width - edge_tolerance or line_coverages.get(last_line, 0.0) >= min_major_coverage)
         else width - 1
     )
 
@@ -865,9 +870,15 @@ def _normalize_curriculum_index(text: str, name_cell: str = "") -> str:
     combined = f"{raw} {name_cell}".lower()
     if "дисциплин" in combined and "модул" in combined and (len(compact) <= 24 or "блок" in combined):
         return "Б1"
-    if "обязательн" in combined and (not compact or "част" in combined or compact.lower() in {"si0", "s10", "510", "610", "51o", "61o"}):
+    if "обязательн" in combined and (
+        not compact or "част" in combined or compact.lower() in {"si0", "s10", "510", "610", "51o", "61o"}
+    ):
         return "Б1.О"
-    if "част" in combined and "образователь" in combined and ("форм" in combined or "фор" in combined or "участ" in combined):
+    if (
+        "част" in combined
+        and "образователь" in combined
+        and ("форм" in combined or "фор" in combined or "участ" in combined)
+    ):
         return "Б1.В"
 
     if not compact:

@@ -11,7 +11,7 @@ class EasyOcrEngine(OcrEngine):
     EasyOCR uses deep learning models for text detection and recognition.
     """
 
-    def __init__(self, languages=None):
+    def __init__(self, languages=None, download_enabled: bool = True):
         """
         Initialize EasyOCR engine.
 
@@ -21,6 +21,7 @@ class EasyOcrEngine(OcrEngine):
         if languages is None:
             languages = ["en", "ru"]
         self.languages = languages
+        self.download_enabled = download_enabled
         self._reader = None
         self._available = False
         self._init_error = None
@@ -37,7 +38,11 @@ class EasyOcrEngine(OcrEngine):
                 use_gpu = torch.cuda.is_available() or (
                     hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
                 )
-                self._reader = easyocr.Reader(self.languages, gpu=use_gpu)
+                self._reader = easyocr.Reader(
+                    self.languages,
+                    gpu=use_gpu,
+                    download_enabled=self.download_enabled,
+                )
                 self._available = True
             except Exception as e:
                 self._init_error = str(e)

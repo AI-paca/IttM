@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   buildApiUrl,
   buildBackendGatewayCandidates,
+  buildOllamaGenerateUrl,
+  isOllamaBaseUrl,
   parseGatewayUrlList,
   parsePlatformError,
   readJsonOrThrow,
@@ -70,6 +72,23 @@ test("buildApiUrl supports relative and custom gateway URLs", () => {
       engine_type: "easyocr",
     }),
     "https://example.com/api/convert?engine_type=easyocr",
+  );
+});
+
+test("Ollama helpers detect and build direct generate endpoints", () => {
+  assert.equal(isOllamaBaseUrl("http://localhost:11434"), true);
+  assert.equal(isOllamaBaseUrl("https://edge.example"), false);
+  assert.equal(
+    buildOllamaGenerateUrl("http://localhost:11434"),
+    "http://localhost:11434/api/generate",
+  );
+  assert.equal(
+    buildOllamaGenerateUrl("http://localhost:11434/api"),
+    "http://localhost:11434/api/generate",
+  );
+  assert.equal(
+    buildOllamaGenerateUrl("http://localhost:11434/api/generate"),
+    "http://localhost:11434/api/generate",
   );
 });
 

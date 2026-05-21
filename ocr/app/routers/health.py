@@ -1,4 +1,5 @@
 import platform
+import shutil
 
 from fastapi import APIRouter
 
@@ -16,9 +17,23 @@ def health_endpoint():
 @router.get("/readiness")
 @router.get("/v1/readiness")
 def readiness_endpoint():
-    # If a real engine check was needed to be 'ready'
-    # For now, it's just basic service readiness
-    return {"ready": True}
+    checks = {
+        "tesseract": shutil.which("tesseract") is not None,
+        "pdftoppm": shutil.which("pdftoppm") is not None,
+        "pytesseract": _module_available("pytesseract"),
+        "pdf2image": _module_available("pdf2image"),
+        "opencv": _module_available("cv2"),
+    }
+
+    return {"ready": all(checks.values()), "checks": checks}
+
+
+def _module_available(name: str) -> bool:
+    try:
+        __import__(name)
+        return True
+    except Exception:
+        return False
 
 
 @router.get("/v1/capabilities")
@@ -57,9 +72,14 @@ def diagnostics_endpoint():
 
     gpus = []
     gpu_error = None
+    torch_error = None
+    torch_available = False
+    easyocr_available = _module_available("easyocr")
+
     try:
         import torch
 
+        torch_available = True
         try:
             if torch.cuda.is_available():
                 hip_version = getattr(torch.version, "hip", None)
@@ -79,9 +99,9 @@ def diagnostics_endpoint():
         except Exception as e:
             gpu_error = f"Torch GPU check failed: {str(e)}"
     except ImportError:
-        gpu_error = "Torch not installed"
+        gpu_error = None
     except Exception as e:
-        gpu_error = f"Torch import failed: {str(e)}"
+        torch_error = f"Torch import failed: {str(e)}"
 
     try:
         import onnxruntime as ort
@@ -120,5 +140,8 @@ def diagnostics_endpoint():
         "memory_used_gb": used_gb,
         "gpus": gpus,
         "gpu_error": gpu_error,
+        "torch_error": torch_error,
+        "torch_available": torch_available,
+        "easyocr_available": easyocr_available,
         "cpu_cores": cpu_cores,
     }

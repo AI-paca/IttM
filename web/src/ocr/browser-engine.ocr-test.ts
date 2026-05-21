@@ -95,6 +95,8 @@ test(
             maxDimension: 5000,
             pdfRenderScale: 1.5,
             reason: "ci-strict-multilingual",
+            preprocessingProfile: "browser_tesseract_raw",
+            imagePreprocessing: ["browser_resize"],
             langPath: tessdataPath,
             cachePath: resolve(".cache/tesseract-js"),
             gzip: false,

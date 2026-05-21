@@ -1,10 +1,12 @@
+import os
 import subprocess
 import sys
 import threading
 from collections import deque
 from dataclasses import dataclass, field
 
-from fastapi import APIRouter
+from fastapi import APIRouter, status
+from fastapi.responses import JSONResponse
 
 router = APIRouter()
 
@@ -159,6 +161,19 @@ def _run_install_job():
 @router.post("/v1/install-easyocr")
 async def install_easyocr():
     global _worker
+    if os.environ.get("DISABLE_RUNTIME_EASYOCR_INSTALL") == "1":
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "status": "disabled",
+                "message": (
+                    "Runtime EasyOCR install is disabled for this environment. "
+                    "Install full OCR dependencies before starting the service, "
+                    "or restart with INSTALL_EASYOCR=1 for local setup."
+                ),
+            },
+        )
+
     already_running = False
     with _job_lock:
         if _job.status == "running":

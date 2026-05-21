@@ -11,6 +11,8 @@ function profile(): BrowserOcrProfile {
     maxDimension: 1000,
     pdfRenderScale: 1,
     reason: "unit-test",
+    preprocessingProfile: "browser_tesseract_raw",
+    imagePreprocessing: ["browser_resize"],
   };
 }
 

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 
+from app.pipeline_config import resolve_pipeline_profile
 from app.schemas import ConvertResponse, ConvertMeta
 from app.services import convert_service
 
@@ -17,6 +18,7 @@ router = APIRouter()
 async def convert_endpoint(
     file: UploadFile = File(...),
     engine_type: str = Query("auto", description="Engine type: auto, tesseract, or easyocr"),
+    pipeline_profile: str | None = Query(None, description="High-level OCR pipeline profile name"),
 ):
     print(f"[CONVERT] Received request: {file.filename} (content_type={file.content_type}), engine={engine_type}")
     # This function handles both /convert and /v1/convert
@@ -30,7 +32,12 @@ async def convert_endpoint(
         with os.fdopen(fd, "wb") as f:
             shutil.copyfileobj(file.file, f)
 
-        markdown_text, meta_info = await convert_service.convert(temp_path, engine_type=engine_type)
+        pipeline = resolve_pipeline_profile(engine_type, pipeline_profile)
+        markdown_text, meta_info = await convert_service.convert(
+            temp_path,
+            engine_type=engine_type,
+            pipeline_profile=pipeline,
+        )
 
         elapsed = int((time.time() - start_time) * 1000)
         meta_info["elapsed_ms"] = elapsed

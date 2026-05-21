@@ -7,6 +7,7 @@ from app.chunking.dedupe import dedupe_chunks
 from app.chunking.vertical import (
     analyze_document_layout,
     erase_table_lines_for_ocr,
+    LayoutRegion,
     logical_table_layout,
     split_by_blank_bands,
     split_vertical,
@@ -16,6 +17,8 @@ from app.chunking.vertical import (
 )
 from app.engines.auto_engine import AutoEngine
 from app.formatting.markdown_formatter import MarkdownFormatter
+from app.pipeline_config import OcrPipelineProfile, resolve_pipeline_profile
+from app.preprocessing import OcrPreprocessingPipeline
 
 # Disable maximum image pixel limit for long screenshots
 Image.MAX_IMAGE_PIXELS = None
@@ -175,7 +178,11 @@ def _recognize_table_words(engine, image: Image.Image, table, *, single_pass: bo
     return words
 
 
-async def convert(path: Path, engine_type: str = "auto") -> Tuple[str, dict]:
+async def convert(
+    path: Path,
+    engine_type: str = "auto",
+    pipeline_profile: OcrPipelineProfile | None = None,
+) -> Tuple[str, dict]:
     """
     Convert document to markdown using specified OCR engine.
 
@@ -183,6 +190,9 @@ async def convert(path: Path, engine_type: str = "auto") -> Tuple[str, dict]:
         path: Path to the document (image or PDF)
         engine_type: 'auto' (Tesseract first), 'tesseract' (core), or 'easyocr' (high-quality)
     """
+    profile = pipeline_profile or resolve_pipeline_profile(engine_type)
+    image_pipeline = OcrPreprocessingPipeline.from_step_names(profile.image_preprocessing)
+
     # 1. Load document (image or pdf)
     images = []
     if path.suffix.lower() == ".pdf":
@@ -201,9 +211,9 @@ async def convert(path: Path, engine_type: str = "auto") -> Tuple[str, dict]:
                 img = img.convert("RGBA")
                 bg = Image.new("RGB", img.size, (255, 255, 255))
                 bg.paste(img, mask=img.split()[3])
-                images = [bg]
+                images = [image_pipeline.apply(bg)]
             else:
-                images = [img.convert("RGB")]
+                images = [image_pipeline.apply(img.convert("RGB"))]
         except Exception as e:
             raise ValueError(f"Could not load image: {str(e)}")
 
@@ -233,7 +243,11 @@ async def convert(path: Path, engine_type: str = "auto") -> Tuple[str, dict]:
 
     for main_image in images:
         page_parts = []
-        regions = analyze_document_layout(main_image)
+        regions = (
+            analyze_document_layout(main_image)
+            if "table_layout" in profile.layout_analysis
+            else [LayoutRegion(kind="image", image=main_image, bbox=(0, 0, *main_image.size))]
+        )
 
         for region in regions:
             if region.kind == "table" and region.table is not None:
@@ -281,6 +295,9 @@ async def convert(path: Path, engine_type: str = "auto") -> Tuple[str, dict]:
         "tables_found": tables_found,
         "table_cells": table_cells,
         "pages": len(images),
+        "pipeline": profile.name,
+        "preprocess_steps": list(profile.image_preprocessing),
+        "layout_steps": list(profile.layout_analysis),
         "elapsed_ms": 0,  # to be overwritten in router
     }
 

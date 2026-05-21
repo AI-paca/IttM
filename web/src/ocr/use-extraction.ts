@@ -16,6 +16,10 @@ import {
 } from "./browser-engine";
 import { base64JpegToFile } from "./file-utils";
 import { executeLlmOcr, executeOllamaOcr } from "./llm-client";
+import {
+  backendPipelineParams,
+  browserPipelineProfileForSource,
+} from "./pipeline-config";
 import type {
   AppDiagnostics,
   LlmProvider,
@@ -103,7 +107,10 @@ export function useOcrExtraction({
       try {
         let result: OcrResult | null = null;
         let progressiveText = lastExtractedPage > 1 ? extractedText || "" : "";
-        const browserProfile = createBrowserOcrProfile(diagnostics);
+        const browserProfile = createBrowserOcrProfile(
+          diagnostics,
+          browserPipelineProfileForSource("browser"),
+        );
 
         const handleChunk = (chunk: string, pageIndex?: number) => {
           console.log(
@@ -187,6 +194,7 @@ export function useOcrExtraction({
             effectiveSource === "local_tess" ? "tesseract" : "easyocr";
           const url = buildApiUrl("", "/api/convert", {
             engine_type: engineType,
+            ...(backendPipelineParams(effectiveSource) || {}),
           });
 
           result = await executeBackendOcr(file, url, active, (text) => {
@@ -223,10 +231,19 @@ export function useOcrExtraction({
             if (file.type !== "application/pdf")
               handleChunk(result.markdown || "");
           } else {
-            const url = buildApiUrl(pingUrl, "/api/convert");
-            result = await executeBackendOcr(file, url, active, (text) => {
-              if (active.current) setExtractionProgress(text);
-            });
+            const gatewayUrl = buildApiUrl(
+              pingUrl,
+              "/api/convert",
+              backendPipelineParams("gateway"),
+            );
+            result = await executeBackendOcr(
+              file,
+              gatewayUrl,
+              active,
+              (text) => {
+                if (active.current) setExtractionProgress(text);
+              },
+            );
             handleChunk(result.markdown || "");
           }
         } else if (effectiveSource === "auto") {
@@ -238,6 +255,7 @@ export function useOcrExtraction({
               (text) => {
                 if (active.current) setExtractionProgress(text);
               },
+              backendPipelineParams("auto"),
             );
             handleChunk(result.markdown || "");
           } catch {

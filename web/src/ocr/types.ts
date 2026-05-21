@@ -32,6 +32,9 @@ export interface BackendDiagnostics {
   cpu_cores?: number;
   gpus?: BackendGpuInfo[];
   gpu_error?: string | null;
+  torch_error?: string | null;
+  torch_available?: boolean;
+  easyocr_available?: boolean;
   error?: string;
 }
 

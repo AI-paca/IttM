@@ -3,6 +3,9 @@ services:
     build:
       context: ./ocr
       dockerfile: ../docker/ocr.Dockerfile
+      args:
+        OCR_REQUIREMENTS: "${OCR_REQUIREMENTS:-requirements-ci.txt}"
+        OCR_CONTAINER_PORT: "${OCR_HOST_PORT:-8000}"
     network_mode: host
     command:
       - uvicorn
@@ -13,6 +16,16 @@ services:
       - "${OCR_HOST_PORT:-8000}"
     environment:
       - PORT=${OCR_HOST_PORT:-8000}
+      - DISABLE_RUNTIME_EASYOCR_INSTALL=${DISABLE_RUNTIME_EASYOCR_INSTALL:-0}
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import json, os, urllib.request; port=os.environ.get(''PORT'', ''8000''); data=json.load(urllib.request.urlopen(f''http://127.0.0.1:{port}/readiness'', timeout=2)); raise SystemExit(0 if data.get(''ready'') else 1)"',
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
     restart: unless-stopped
 
   gateway:
@@ -27,7 +40,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      - ocr
+      ocr:
+        condition: service_healthy
     restart: unless-stopped
 
   nginx:

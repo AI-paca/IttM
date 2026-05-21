@@ -41,7 +41,15 @@ def test_health_v1_alias():
 def test_readiness():
     response = client.get("/readiness")
     assert response.status_code == 200
-    assert response.json()["ready"] is True
+    json_data = response.json()
+    assert isinstance(json_data["ready"], bool)
+    assert set(json_data["checks"]) >= {
+        "tesseract",
+        "pdftoppm",
+        "pytesseract",
+        "pdf2image",
+        "opencv",
+    }
 
 
 def test_diagnostics_v1_alias():
@@ -50,6 +58,9 @@ def test_diagnostics_v1_alias():
     json_data = response.json()
     assert "python_version" in json_data
     assert "cpu_cores" in json_data
+    assert "torch_available" in json_data
+    assert "easyocr_available" in json_data
+    assert "torch_error" in json_data
 
 
 def test_easyocr_install_uses_supported_pip_progress_mode():
@@ -58,6 +69,53 @@ def test_easyocr_install_uses_supported_pip_progress_mode():
     assert command[command.index("--progress-bar") + 1] == "on"
     assert "easyocr" in command
     assert "torch" in command
+
+
+def _reset_install_job():
+    install._worker = None
+    with install._job_lock:
+        install._job.status = "idle"
+        install._job.phase = "idle"
+        install._job.message = "EasyOCR is not being installed."
+        install._job.progress = 0
+        install._job.logs.clear()
+
+
+def test_install_easyocr_disabled_by_runtime_flag(monkeypatch):
+    _reset_install_job()
+    monkeypatch.setenv("DISABLE_RUNTIME_EASYOCR_INSTALL", "1")
+
+    response = client.post("/v1/install-easyocr")
+
+    assert response.status_code == 409
+    assert response.json()["status"] == "disabled"
+
+
+def test_install_easyocr_starts_background_worker(monkeypatch):
+    _reset_install_job()
+    monkeypatch.delenv("DISABLE_RUNTIME_EASYOCR_INSTALL", raising=False)
+    started = []
+
+    class FakeThread:
+        def __init__(self, target, daemon=False):
+            self.target = target
+            self.daemon = daemon
+
+        def start(self):
+            started.append((self.target, self.daemon))
+
+    monkeypatch.setattr(install.threading, "Thread", FakeThread)
+
+    try:
+        response = client.post("/v1/install-easyocr")
+        payload = response.json()
+
+        assert response.status_code == 200
+        assert payload["status"] == "running"
+        assert payload["phase"] == "starting"
+        assert started == [(install._run_install_job, True)]
+    finally:
+        _reset_install_job()
 
 
 def test_convert_invalid_pdf():
@@ -79,9 +137,10 @@ def test_convert_invalid_image():
 
 
 def test_convert_uses_service_contract(monkeypatch):
-    async def fake_convert(path, engine_type="auto"):
+    async def fake_convert(path, engine_type="auto", pipeline_profile=None):
         assert path.exists()
         assert engine_type == "auto"
+        assert pipeline_profile is not None
         return "FAKE OCR MARKDOWN", {
             "engine": "fake",
             "chunks": 1,

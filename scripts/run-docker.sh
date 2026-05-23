@@ -13,14 +13,14 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 export GATEWAY_HOST_BIND="${GATEWAY_HOST_BIND:-127.0.0.1}"
+export GATEWAY_INTERNAL_PORT="${GATEWAY_INTERNAL_PORT:-3000}"
+export NGINX_INTERNAL_PORT="${NGINX_INTERNAL_PORT:-80}"
+export OCR_INTERNAL_PORT="${OCR_INTERNAL_PORT:-8000}"
+export OCR_REQUIREMENTS="${OCR_REQUIREMENTS:-requirements-light.txt}"
 GATEWAY_HOST_PORT_LOCKED=0
-OCR_HOST_PORT_LOCKED=0
 BUILD_IMAGES_NO_BUILD=0
 if [ -n "${GATEWAY_HOST_PORT:-}" ]; then
     GATEWAY_HOST_PORT_LOCKED=1
-fi
-if [ -n "${OCR_HOST_PORT:-}" ]; then
-    OCR_HOST_PORT_LOCKED=1
 fi
 
 find_free_port() {
@@ -58,11 +58,7 @@ PY
 }
 
 current_gateway_port() {
-    docker compose port nginx 80 2>/dev/null | awk -F: 'NF > 1 { print $NF; exit }'
-}
-
-current_ocr_port() {
-    docker compose exec -T ocr sh -c 'printf "%s" "${PORT:-}"' 2>/dev/null || true
+    docker compose port nginx "$NGINX_INTERNAL_PORT" 2>/dev/null | awk -F: 'NF > 1 { print $NF; exit }' || true
 }
 
 if [ "$GATEWAY_HOST_PORT_LOCKED" -eq 0 ]; then
@@ -72,19 +68,9 @@ if [ "$GATEWAY_HOST_PORT_LOCKED" -eq 0 ]; then
     fi
 fi
 export GATEWAY_HOST_PORT
-if [ "$OCR_HOST_PORT_LOCKED" -eq 0 ]; then
-    OCR_HOST_PORT="$(current_ocr_port)"
-    if [ -z "$OCR_HOST_PORT" ]; then
-        OCR_HOST_PORT="$(find_free_port 8000 0.0.0.0)"
-    fi
-fi
-export OCR_HOST_PORT
 
 if [ "$GATEWAY_HOST_PORT_LOCKED" -eq 0 ] && [ "$GATEWAY_HOST_PORT" != "3000" ]; then
     echo "[RUNNER] Port 3000 zanyat, Docker Web app budet na http://localhost:$GATEWAY_HOST_PORT"
-fi
-if [ "$OCR_HOST_PORT_LOCKED" -eq 0 ] && [ "$OCR_HOST_PORT" != "8000" ]; then
-    echo "[RUNNER] Port 8000 zanyat, Docker OCR budet na host port $OCR_HOST_PORT"
 fi
 
 wait_for_gateway() {
@@ -121,9 +107,9 @@ create_gateway_fallback_image() {
     docker cp dist "$container_id:/dist"
     docker commit \
         --change "WORKDIR /" \
-        --change "ENV PORT=3000" \
+        --change "ENV PORT=$GATEWAY_INTERNAL_PORT" \
         --change "ENV NODE_ENV=production" \
-        --change "EXPOSE 3000" \
+        --change "EXPOSE $GATEWAY_INTERNAL_PORT" \
         --change 'CMD ["node", "dist/server.js"]' \
         "$container_id" ittm-gateway:latest >/dev/null
     docker rm -f "$container_id" >/dev/null
@@ -165,7 +151,7 @@ build_images() {
         return 0
     fi
 
-    if [ "${FULL_DOCKER_BUILD:-0}" != "1" ] && [ "${REBUILD:-0}" != "1" ] && has_local_compose_images; then
+    if [ "${FAST_DOCKER_RESTART:-0}" = "1" ] && [ "$OCR_REQUIREMENTS" = "requirements-light.txt" ] && [ "${FULL_DOCKER_BUILD:-0}" != "1" ] && [ "${REBUILD:-0}" != "1" ] && has_local_compose_images; then
         echo "[RUNNER] Lokalnye ittm-* images naideni."
         echo "[RUNNER] Obnovlyayu gateway/nginx iz lokalnoy sborki bez obrashcheniya k Docker Hub."
         refresh_fallback_images
@@ -186,7 +172,7 @@ build_images() {
     local gateway_status=${PIPESTATUS[0]}
     set -e
     if [ "$gateway_status" -ne 0 ]; then
-        if is_registry_error "$log_file" && has_local_compose_images; then
+        if is_registry_error "$log_file" && [ "$OCR_REQUIREMENTS" = "requirements-light.txt" ] && has_local_compose_images; then
             echo "[RUNNER] Setevoy sboy pri sborke gateway. Peresobirayu fallback images lokalno."
             refresh_fallback_images
             rm -f "$log_file"
@@ -208,7 +194,7 @@ build_images() {
         return 0
     fi
 
-    if is_registry_error "$log_file" && has_local_compose_images; then
+    if is_registry_error "$log_file" && [ "$OCR_REQUIREMENTS" = "requirements-light.txt" ] && has_local_compose_images; then
         echo "[RUNNER] Docker/npm registry nedostupen, no lokalnye ittm-* images est."
         refresh_nginx_fallback_image
         echo "[RUNNER] Podnimayu stack bez rebuild: docker compose up -d --no-build"
@@ -231,7 +217,7 @@ echo "DOCKER SERVISY ZAPUSHCHENY:"
 echo "Web app: http://localhost:$GATEWAY_HOST_PORT"
 echo "Health:  http://localhost:$GATEWAY_HOST_PORT/api/health"
 echo "Gateway is private inside Docker; use the Web app URL above."
-echo "OCR backend for gateway: http://host.docker.internal:$OCR_HOST_PORT"
+echo "OCR backend is private inside Docker at http://ocr:$OCR_INTERNAL_PORT"
 echo "======================================"
 echo "[RUNNER] Dlya prosmotra logov ispolzuyte:"
 echo "docker compose logs -f"

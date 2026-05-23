@@ -9,7 +9,7 @@
 ## 🎯 Цель проекта и Стек
 
 - **Суть:** Утилита рассчитывалась на то, чтобы «сожрать» длинный скриншот (корзину Amazon, чек, длинный лонгрид или огромный учебный план с сеткой расписания), выцепить оттуда весь текст вместе со структурой (таблицами, абзацами) и пересдать её нейросетевому агенту в чат в виде аккуратного Markdown.
-- **Стек:** React 18 / TS / Tailwind. Бэкенд — Python (FastAPI, Tesseract/EasyOCR). Инфраструктура (план) — Nginx, Docker.
+- **Стек:** React 19 / TypeScript / Tailwind. Gateway — Express (`server.ts`). OCR backend — Python (FastAPI, Tesseract/EasyOCR). Инфраструктура — Nginx и Docker Compose.
 
 ## 🚀 Roadmap (План развития)
 
@@ -22,147 +22,39 @@ gantt
     section База & Архитектура
     Репозиторий, README, Структура      :done, phase1, 2026-04-20, 2026-05-01
     Рабочее веб-приложение (UI + API)   :done, phase2, 2026-04-25, 2026-05-01
+    Архитектура и границы файлов        :done, arch, 2026-05-22, 1d
 
     section CI/CD & Тестирование
-    Базовые проверки (Линтеры, CI)      :active, phase3, 2026-05-02, 2026-05-08
-    Генеративные стресс-тесты (Canvas)  :active, cv_test, 2026-05-05, 2026-05-15
-    Внедрение Layout Analysis (OpenCV)  :         cv_layout, after cv_test, 5d
+    Базовые проверки (Линтеры, CI)      :done, phase3, 2026-05-02, 2026-05-08
+    OCR/table layout тесты              :done, cv_layout, 2026-05-05, 2026-05-15
+    Генеративные стресс-тесты (Canvas)  :active, cv_test, 2026-05-15, 5d
 
     section Инфраструктура
-    Смерть локального Gateway (Bun)     :         docker1, 2026-05-10, 2d
-    Внедрение Nginx & Docker Compose    :         docker2, after docker1, 5d
-    SAST (Безопасность и лимиты ОЗУ)    :         sast, after docker2, 5d
+    Nginx + Gateway + OCR Compose       :active, docker2, 2026-05-10, 5d
+    Docker image/start validation       :active, docker_check, after docker2, 3d
+    SAST (Безопасность и лимиты ОЗУ)    :         sast, after docker_check, 5d
 
     section Финал
     SCA (Уязвимости зависимостей)       :         sca, 2026-05-25, 5d
     Финальная документация и защита     :         docs, 2026-06-01, 5d
 ```
 
-## Таблица успеваемости и дедлайны
-
-<table style="width:100%; border-collapse: collapse; margin-top: 12px;">
-  <thead>
-    <tr>
-      <th style="padding: 12px; text-align: left; border: 1px solid rgba(0,0,0,0.2);">Задание</th>
-      <th style="padding: 12px; text-align: left; border: 1px solid rgba(0,0,0,0.2);">Дедлайн</th>
-      <th style="padding: 12px; text-align: left; border: 1px solid rgba(0,0,0,0.2);">4/10</th>
-      <th style="padding: 12px; text-align: left; border: 1px solid rgba(0,0,0,0.2);">6/10</th>
-      <th style="padding: 12px; text-align: left; border: 1px solid rgba(0,0,0,0.2);">8/10</th>
-      <th style="padding: 12px; text-align: left; border: 1px solid rgba(0,0,0,0.2);">10/10</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Репозиторий и описание проекта</td>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">01.05.2026</td>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Есть репозиторий и README, но описание формальное/очень слабое</td>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Есть PR + README с понятной идеей проекта</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Есть ≥3 осмысленных комментария + студент отвечает на них</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">README структурирован (цель, функционал, стек, планы), комментарии учтены и внесены правки</td>
-    </tr>
-    <tr>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Рабочее веб-приложение — UI + backend с REST API</td>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">01.05.2026</td>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Код есть, но не запускается или не работает</td>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Приложение запускается и выполняет базовую функцию</td>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Код структурирован (разделение логики, читаемость)</td>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Есть инструкции запуска + обработка ошибок + минимальная архитектура</td>
-    </tr>
-    <tr>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">CI и базовые проверки</td>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">08.05.2026</td>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">CI есть, но работает нестабильно</td>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">CI запускается и выполняет хотя бы одну проверку</td>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Добавлены линтеры/форматирование</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">CI блокирует merge при ошибках + понятная структура pipeline</td>
-    </tr>
-    <tr>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Контейнеризация</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">15.05.2026</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Dockerfile есть, но не собирается</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Контейнер собирается и приложение запускается</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Корректная структура Dockerfile (слои, зависимости)</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Минимизированный образ + инструкции запуска</td>
-    </tr>
-    <tr>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Тестирование</td>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">22.05.2026</td>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Тесты есть, но не работают</td>
-      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Есть рабочие тесты</td>
-      <td style="background-color: #d4a017; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Покрыт основной функционал</td>
-      <td style="background-color: #d4a017; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Несколько типов тестов + интеграция в CI</td>
-    </tr>
-    <tr>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Статический анализ безопасности</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">29.05.2026</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Инструмент подключен формально</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Анализ запускается и показывает результаты</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Найденные проблемы исправлены</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Интеграция в CI + осмысленный разбор issues</td>
-    </tr>
-    <tr>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Композиционный анализ (SCA)</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">05.06.2026</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Инструмент запущен без понимания</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Получен SBOM или отчет</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Найдены и объяснены уязвимости</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Предложены или применены способы устранения</td>
-    </tr>
-    <tr>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Отчетность и документация</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">05.06.2026</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Отчет есть, но поверхностный</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Описаны основные этапы разработки</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Структурированный документ с примерами</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Полноценная документация уровня «передать другому разработчику»</td>
-    </tr>
-  </tbody>
-</table>
-
----
-
 ## План работ (сопоставление проблем с тасками)
 
-### Домашка 1: Репозиторий и описание проекта
-
-- **Текущее состояние:** Создан `ARCHITECTURE.md`, есть базовая Mermaid-схема.
-- **План:** Добавить раздел Roadmap. Ответы на пулл-реквесты.
-
-### Домашка 2: Ядро (Рабочее веб-приложение + архитектура OCR)
-
-Это самый объемный пласт технических изменений.
-
-**1. Проблема: "Слепое" разрезание картинок (`ocr/app/chunking/vertical.py`)**
-
-- **[✅ Решено] Внедрить `OpenCV`** (поиск контуров `cv2.findContours`) для определения границ таблиц и изолированного парсинга ячеек (Продвинутый Layout Analysis). На выходе собирается настоящий Markdown с синтаксисом таблиц (`| Предмет | Часы |`) без принудительного переключения на LLM.
-
-**3. Проблема: Управление трафиком (Edge / Локальный Gateway) и Vendor Lock-in**
-
-- **[✅ Решено Частично]** Архитектура корректно разделена на Бэкенд и Gateway. Есть динамический поиск портов (fallback на свободные при конфликтах).
-- **[❌ Ожидает исправления]** Убрать самописный шлюз на Node/Bun (`handle.ts`), который плохо раздает файлы, и перейти на классический `Nginx` внутри Docker. Он будет элегантно и быстро раздавать React-статику и проксировать `/api`. При выходе в интернет накрыть это `Cloudflare Workers`.
+Ниже только незакрытые пункты. Таблица дедлайнов и критериев вынесена в `docs/course_tasks.md`.
 
 ### Домашка 3: CI и базовые проверки
 
-- **[❌ Ожидает исправления]** Настроить branch protection: документально запретить мержить в `main` код, не прошедший линтеры и тесты (требует настроек репозитория Github).
+- **[❌ Ожидает настройки в GitHub]** Включить branch protection для `main`: запретить merge без успешных checks из `.github/workflows/tests.yml`.
 
 ### Домашка 4: Контейнеризация
 
-- **[✅ Решено Частично]** Скрипт-оркестратор `run.sh` пока существует как мощный комбайн (Выполняет роли пакетного менеджера, сборщика Vite и демона), но `ocr.Dockerfile` уже успешно собирается в CI (`tests.yml`).
-
-**Рефакторинг `run.sh` и упрощение запуска:**
-
-- Убрать из скрипта роли сборщика и пакетного менеджера.
-- Перенести большую часть текущей локальной логики (установки `venv`, скачивание зависимостей `apt`, настройка портов, компиляция Node) в `docker-compose.yml`.
-- Корневой `run.sh` обрезается до минимума и используется исключительно как точка входа для сборки и запуска Docker-контейнеров (`docker-compose up --build -d`). В финале запуск должен сводиться к однострочному вызову через `curl`.
-
-- **[❌ Ожидает исправления]** Оптимизация слоев (Multi-stage builds), чтобы образ питона не весил 2 Гигабайта.
-- **[❌ Ожидает исправления] Устранение хардкодов портов:** В `gateway/src/adapters/bun.ts`, `node.ts`, `docker-compose.yml` и `gateway/nginx.conf` порты жестко прописаны (`PORT || 3000`, `8000`). Все порты должны пробрасываться через переменные окружения (для стабильности можно поискать свободный порт 3001-3010, так же как и для прокси, как запасное решние с уведомлением, мол, что-то пошло не так)
-- **[❌ Ожидает исправления]** Развертывание `docker-compose.yml`, где будут жить Nginx и Python Backend, полностью устранив сущности локального Bun/Node Gateway.
-- не сломать вход с node (для AI studio) и bun (что бы не разворачивать контейнер внутри уже существующий linux системы в режиме отладке. хотя эти можно принебречь в угодк стаблильности )
+- **[В процессе]** Подтвердить полный `docker compose up --build` для трех сервисов (`nginx`, `gateway`, `ocr`) в среде с рабочим DNS до `deb.debian.org`.
+- **[Ожидает проверки]** Зафиксировать фактический размер Docker-образов и при необходимости ужать OCR-образ без потери Tesseract/lang packs/fonts.
+- **[Ожидает проверки]** Пройти smoke-test после старта контейнеров: `GET /api/health`, загрузка файла через UI, `POST /api/convert`.
 
 ### Домашка 5: Тестирование
 
-- **[✅ Решено Частично] Тесты на новые механики таблиц:** Добавлены проверки OpenCV layout analysis для Markdown-таблиц, шумного сканоподобного фона и пустого листа.
 - **[❌ Ожидает исправления]** Генеративное тестирование изображений (Стресс-тесты): Внедрить тесты, которые генерируют картинки разных форматов (с логарифмическим шагом по разрешению до панорам 10000x10000). Это отловит баги с падением `canvas` / Tesseract при ресайзе гигантских файлов.
 - **[❌ Ожидает исправления] Тестирование Фронтенда ("Стена кода"):** Главная логика фронтенда (`use-extraction.ts` и `llm-client.ts`) не имеет Unit-тестов. Внедрить Vite Test + RTL.
 - **[❌ Ожидает исправления] Тесты UI & Регресс:** Ни один UI компонент не защищен тестами — высокий риск регресса при изменении логики.

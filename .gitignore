@@ -108,6 +108,7 @@ logs/
 *.cover
 probes/actual*.json
 ocr/tests/fixtures/
+testtables/
 
 # Model files (large files should use Git LFS)
 *.onnx

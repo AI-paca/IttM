@@ -219,6 +219,7 @@ if [ "$RUN_DOCKER" -eq 1 ]; then
   fi
 
   echo "--- Docker compose ---"
+  export OCR_REQUIREMENTS="${OCR_REQUIREMENTS:-requirements-ci.txt}"
   assign_compose_ports
   echo "Docker host ports: gateway/nginx http://127.0.0.1:${GATEWAY_HOST_PORT}"
   if [ "$CLEAN" -eq 1 ]; then

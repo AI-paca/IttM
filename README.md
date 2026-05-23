@@ -1,96 +1,122 @@
-Веб-приложение для конвертации длинных скриншотов экрана в Markdown
+# Text Extractor (IttM)
 
-## [Запуск](https://ai-paca.github.io/IttM/)
+Text Extractor конвертирует длинные скриншоты, изображения и PDF-файлы в Markdown. Один кодовый базис запускается в трех формах: локальный Linux/Bun режим, статический Lite-клиент и контейнерный Docker-стек.
+
+Демо: https://ai-paca.github.io/IttM/
+
+## Режимы
+
+| Режим  | Для чего                                                              | Точка входа                    |
+| ------ | --------------------------------------------------------------------- | ------------------------------ |
+| Local  | Linux workstation, bare metal и быстрый локальный OCR без контейнеров | `bash scripts/run-local.sh`    |
+| Lite   | GitHub Pages, слабый VPS со статикой, будущий browser extension UI    | `bash scripts/build-lite.sh`   |
+| Docker | VPS/сервер с изолированными nginx, gateway и OCR                      | `docker compose up --build -d` |
+
+В Docker-режиме наружу публикуется только nginx. Gateway и Python OCR остаются внутри Compose-сети.
+
+## Local
+
+Локальный режим рассчитан на host-систему, где удобнее держать gateway и OCR рядом с пользовательским окружением:
 
 ```bash
-bash run.sh
+bash scripts/run-local.sh
 ```
 
-_(Сервер запустится на :3000)_
+Скрипт:
 
-Если `3000` или `8000` заняты, локальные скрипты выбирают ближайшие свободные host-порты и печатают итоговые URL.
+1. создает `ocr/.venv`, если окружения еще нет;
+2. ставит легкие Python-зависимости при первом запуске;
+3. запускает FastAPI OCR service;
+4. запускает gateway через Bun, а при его отсутствии через Node.js.
 
-Для GitHub Pages сборка использует `VITE_BASE_PATH=/IttM/`; локальный `run.sh` собирает bundle с `VITE_BASE_PATH=/`, чтобы assets грузились с localhost без префикса репозитория.
+Порты по умолчанию:
 
-`run.sh` рассчитан на слабую VPS: по умолчанию ставит только легкие runtime-зависимости из `ocr/requirements-light.txt`, не запускает тесты, не трогает Docker и не ставит PyTorch/EasyOCR. Тяжелый OCR включается отдельно через кнопку установки в UI или явно:
+- web UI и gateway: `http://localhost:3000`;
+- Python OCR API: `http://localhost:8000`.
+
+Если порт занят, local-скрипт выберет свободный и напечатает итоговый URL.
+
+Полные локальные Python-зависимости с EasyOCR ставятся отдельно:
 
 ```bash
-INSTALL_EASYOCR=1 bash run.sh
+INSTALL_EASYOCR=1 bash scripts/install-local-python.sh
 ```
 
-Если `dist/` уже собран, `run.sh` переиспользует его для быстрого рестарта. Для пересборки frontend:
+Если OCR уже запущен отдельно, gateway можно направить на него через `OCR_URL`:
 
 ```bash
-FORCE_BUILD=1 bash run.sh
+OCR_URL=http://127.0.0.1:8000 npm run dev
 ```
 
-### Режимы запуска
-
-- **GitHub Pages**: статический frontend, распознавание через browser OCR и LLM/API-режимы при доступности.
-- **Bun local**: легкий gateway adapter без тяжелого Node-сервера; обычный `run.sh` не гоняет тесты и не ставит EasyOCR/PyTorch.
-- **Node gateway**: основной production-friendly режим для Cloud Run, AI Studio, canvas/hosted-сред и локального `node`.
-- **Local Python OCR**: FastAPI backend с Tesseract/EasyOCR за gateway.
-- **Hybrid local+node/bun**: frontend/gateway локально, OCR backend отдельно через `OCR_URL`.
-
-## CI и базовые проверки
-
-Локально:
+Собранный Node gateway запускается так:
 
 ```bash
-npm run debug
-```
-
-Быстро без Docker/act:
-
-```bash
-npm run debug -- --no-docker --no-act
-```
-
-Полная очистка Docker-кэшей включается только явно:
-
-```bash
-npm run debug -- --clean
-```
-
-Если Docker спотыкается из-за корпоративного firewall/daemon state, `scripts/debug.sh` вызывает `scripts/notify-docker-restart.sh`: он подает звук, показывает уведомление и ждёт ручного рестарта Docker.
-
-Docker Compose не требует свободных `3000`/`8000`: `npm run debug` выставляет `GATEWAY_HOST_PORT` и `OCR_HOST_PORT` динамически. Для ручного запуска можно задать их явно:
-
-```bash
-GATEWAY_HOST_PORT=3001 OCR_HOST_PORT=8001 docker compose up --build
-```
-
-Основные команды, которые повторяет GitHub Actions:
-
-```bash
-npm ci
-npm run format:check
-npm run lint
-npm test
 npm run build
-python -m pip install -r ocr/requirements-ci.txt
-python -m pytest ocr/tests -q
-RUN_OCR_QUALITY=1 python -m pytest ocr/tests/test_ocr_quality.py -q
-npm run test:ocr:browser
+OCR_URL=http://127.0.0.1:8000 npm start
 ```
 
-Workflow `.github/workflows/tests.yml` содержит быстрые frontend/gateway/Python проверки и отдельный тяжелый OCR quality job с `chi_sim+eng+rus`, Tesseract language packs и Noto CJK fonts.
+## Lite
 
-## Выбор стратегий OCR (в UI)
+Lite-сборка содержит браузерный frontend без собственного Docker backend:
 
-Выбор OCR - это часть логики браузерного UI, а не отдельный сервис.
+```bash
+bash scripts/build-lite.sh
+```
 
-- **Auto**: если diagnostics уже видит offline backend, сразу выбирает browser OCR; иначе пробует `/api/convert` и при ошибке переключается на browser OCR.
-- **Gateway / Local Tesseract / Local EasyOCR**: все идут через `/api/convert`; локальные режимы только добавляют `engine_type=tesseract|easyocr`.
-- **Browser Engine**: полностью работает в браузере через PDF.js/Canvas и Tesseract.js WASM.
-- **LLM Cloud API**: браузер напрямую вызывает Gemini или OpenRouter по ключу пользователя.
+Результат лежит в `dist/`. Его можно разместить как статику на GitHub Pages или на слабом VPS. GitHub Pages workflow собирает frontend с `VITE_BASE_PATH=/IttM/`.
+
+Browser OCR и настроенные облачные режимы работают из frontend. Упаковка отдельного browser extension UI пока не добавлена, но Lite-сборка остается его статической основой.
+
+## Docker
+
+Контейнерный стек для VPS и серверного запуска поднимается короткой Compose-командой:
+
+```bash
+docker compose up --build -d
+```
+
+Compose собирает три сервиса:
+
+- `nginx` раздает frontend и проксирует `/api/*`;
+- `gateway` принимает API-запросы и ходит в OCR;
+- `ocr` запускает Python backend с Tesseract и runtime-зависимостями.
+
+По умолчанию приложение открывается на `http://localhost:3000`.
+
+Остановка контейнеров:
+
+```bash
+docker compose down
+```
+
+<details>
+<summary>Docker variables</summary>
+
+Host-порт и bind nginx можно задать прямо для Compose:
+
+```bash
+GATEWAY_HOST_PORT=3001 docker compose up --build -d
+GATEWAY_HOST_BIND=0.0.0.0 GATEWAY_HOST_PORT=80 docker compose up --build -d
+```
+
+| Переменная              | По умолчанию             | Назначение                       |
+| ----------------------- | ------------------------ | -------------------------------- |
+| `GATEWAY_HOST_BIND`     | `127.0.0.1`              | Host-интерфейс для nginx.        |
+| `GATEWAY_HOST_PORT`     | `3000`                   | Host-порт для nginx.             |
+| `NGINX_INTERNAL_PORT`   | `80`                     | Порт nginx внутри Compose.       |
+| `GATEWAY_INTERNAL_PORT` | `3000`                   | Порт gateway внутри Compose.     |
+| `OCR_INTERNAL_PORT`     | `8000`                   | Порт OCR внутри Compose.         |
+| `OCR_REQUIREMENTS`      | `requirements-light.txt` | Requirements-файл для OCR image. |
+
+Docker по умолчанию собирает легкий OCR runtime без предустановленного EasyOCR. `scripts/run-docker.sh` остается Linux helper для автоподбора занятого host-порта и ожидания health endpoint, но не нужен для обычного Compose-запуска:
+
+```bash
+bash scripts/run-docker.sh
+```
+
+</details>
 
 ## Документация
 
-Вторая часть документации (архитектура, задания курса, план и гайдлайны) была вынесена в отдельные файлы для поддержания чистоты:
-
-- **[Архитектура и границы файлов](./docs/architecture.md)**
-- **[План курса и что уже сделано](./docs/COURSE_PLAN.md)**
-- **[Задания курса](./docs/course_tasks.md)**
-- **[Общие требования к коду](./docs/code_guidelines.md)**
-- **[План рефакторинга (`App.tsx`, `run.sh` и т.д.)](./docs/refactoring_plan.md)**
+- [Архитектура проекта](./docs/architecture.md)
+- [Задания курса](./docs/course_tasks.md)

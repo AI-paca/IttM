@@ -225,10 +225,11 @@ if [ "$RUN_DOCKER" -eq 1 ]; then
   if [ "$CLEAN" -eq 1 ]; then
     run_docker_step "docker compose down -v --remove-orphans" docker compose down -v --remove-orphans
     run_docker_step "docker system prune -f --volumes" docker system prune -f --volumes
-    REBUILD=1 run_docker_step "scripts/run-docker.sh rebuild" bash scripts/run-docker.sh
+    run_docker_step "docker compose build --no-cache" docker compose build --no-cache
   else
-    run_docker_step "scripts/run-docker.sh" bash scripts/run-docker.sh
+    run_docker_step "docker compose build" docker compose build
   fi
+  run_docker_step "docker compose up -d" docker compose up -d --force-recreate --remove-orphans
   wait_for_gateway_service
 
   echo "--- Python lint and tests inside OCR container ---"

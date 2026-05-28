@@ -1,122 +1,230 @@
-# Text Extractor (IttM)
+Веб-приложение для конвертации длинных скриншотов в Markdown
 
-Text Extractor конвертирует длинные скриншоты, изображения и PDF-файлы в Markdown. Один кодовый базис запускается в трех формах: локальный Linux/Bun режим, статический Lite-клиент и контейнерный Docker-стек.
+## Быстрый старт
 
-Демо: https://ai-paca.github.io/IttM/
+### Docker
 
-## Режимы
+Windows PowerShell:
 
-| Режим  | Для чего                                                              | Точка входа                    |
-| ------ | --------------------------------------------------------------------- | ------------------------------ |
-| Local  | Linux workstation, bare metal и быстрый локальный OCR без контейнеров | `bash scripts/run-local.sh`    |
-| Lite   | GitHub Pages, слабый VPS со статикой, будущий browser extension UI    | `bash scripts/build-lite.sh`   |
-| Docker | VPS/сервер с изолированными nginx, gateway и OCR                      | `docker compose up --build -d` |
+```powershell
+docker compose up -d; $url = "http://" + (docker compose port nginx 80).Trim(); Start-Process $url; $url
+```
 
-В Docker-режиме наружу публикуется только nginx. Gateway и Python OCR остаются внутри Compose-сети.
+Linux/macOS:
 
-## Local
+```bash
+docker compose up -d && url="http://$(docker compose port nginx 80)" && (xdg-open "$url" >/dev/null 2>&1 || open "$url" >/dev/null 2>&1 || cmd.exe /C start "" "$url" >/dev/null 2>&1 || true) && printf '%s\n' "$url"
+```
+<details>
+<summary>Решение проблем</summary>
+По умолчанию используется порт 3000. Если он занят, адрес переопределяется автоматически, фактический адрес:
 
-Локальный режим рассчитан на host-систему, где удобнее держать gateway и OCR рядом с пользовательским окружением:
+```bash
+docker compose port nginx 80
+```
+Проверить backend через nginx:
+
+```bash
+curl -fsS "http://$(docker compose port nginx 80)/api/health"
+```
+
+Логи:
+```bash
+docker compose logs -f
+```
+
+Если Docker падает на DNS или registry, попробуйте перезапустить Docker daemon:
+```bash
+sudo systemctl restart docker
+```
+</details>
+
+## Функции
+
+- Распознавание текста из изображений, длинных скриншотов и PDF.
+- Вывод результата в Markdown.
+- Browser OCR для lite-сценария без backend OCR.
+- Server OCR через FastAPI backend.
+- LLM-режимы для постобработки результата.
+
+## Режимы работы
+
+| Режим | Целевая среда | Команда | Что запускается |
+| --- | --- | --- | --- |
+| Docker | Win 10/11, Linux, macOS, VPS | `docker compose up -d` | nginx публикуется наружу; gateway и OCR остаются внутри Compose-сети |
+| Local host | Linux workstation | `bash scripts/run-local.sh` | Bun gateway, Python venv, Tesseract и Poppler на host-системе |
+| Lite static | [GitHub Pages](https://ai-paca.github.io/IttM/), статический хостинг, слабый VPS, база для browser extension | `bash scripts/build-lite.sh` | статический frontend в `dist/`, browser OCR и внешние LLM-режимы |
+
+<details>
+<summary>Приватность обработки</summary>
+
+| Режим в UI | Где обрабатывается файл | Что сохраняется приложением | Когда файл уходит наружу |
+| --- | --- | --- | --- |
+| Auto (Fallback) | По очереди: Cloud OCR, Local Gateway, Browser Engine | Выбранный файл держится в памяти вкладки; выбранный режим может храниться в cookie при включенном remember | Когда выбранный fallback дошел до Cloud OCR или custom gateway |
+| Gateway API | Текущий Gateway или указанный endpoint | Gateway не пишет файл в базу; OCR создает временный файл и удаляет его после ответа | Когда endpoint указывает не на ваш локальный Docker/host, а на внешний сервер |
+| Browser Engine | В памяти вкладки браузера | Документ не пишется в базу; `localStorage` хранит только тему интерфейса; браузер может кэшировать OCR-ассеты Tesseract.js | Не уходит из браузера |
+| Local Tesseract | Python OCR API в вашем Docker или Local host | OCR создает временный файл внутри контейнера или системного temp-каталога и удаляет его после ответа | Не уходит на сторонний сервис |
+| Local EasyOCR | Python OCR API в вашем Docker или Local host | OCR создает временный файл; EasyOCR пакеты/модели могут храниться в Docker volume или host-окружении | Не уходит на сторонний сервис |
+| LLM Cloud API | Gemini или OpenRouter | Приложение само не пишет LLM key в `localStorage`, cookie или browser cache; менеджер паролей браузера может предложить сохранить поле по настройкам пользователя | Документ или страницы PDF отправляются во внешний AI API; проект не отвечает за то, что пользователь туда отправил |
+
+</details>
+
+<details>
+<summary>Local host runtime: зависимости и запуск</summary>
+
+Этот режим нужен для host-системы, где OCR-зависимости ставятся напрямую в окружение, без Docker-изоляции.
+
+Версии: Node.js `22`, Python `3.10`, Bun для установки JS-зависимостей.
+
+Зависимости проекта описаны в [package.json](./package.json), [ocr/requirements-light.txt](./ocr/requirements-light.txt) и [docker/ocr.Dockerfile](./docker/ocr.Dockerfile).
+
+Системные OCR-пакеты для Ubuntu/Debian:
+
+```bash
+sudo apt update && sudo apt install -y tesseract-ocr tesseract-ocr-eng tesseract-ocr-rus tesseract-ocr-chi-sim poppler-utils
+```
+
+JS-зависимости:
+
+```bash
+bun install
+```
+
+Python-зависимости:
+
+```bash
+bash scripts/install-local-python.sh
+```
+
+Локальный запуск:
 
 ```bash
 bash scripts/run-local.sh
 ```
 
-Скрипт:
+Адрес frontend/gateway печатается в конце запуска.
 
-1. создает `ocr/.venv`, если окружения еще нет;
-2. ставит легкие Python-зависимости при первом запуске;
-3. запускает FastAPI OCR service;
-4. запускает gateway через Bun, а при его отсутствии через Node.js.
+</details>
 
-Порты по умолчанию:
+## Поддержка
 
-- web UI и gateway: `http://localhost:3000`;
-- Python OCR API: `http://localhost:8000`.
+Баги и предложения лучше оставлять в [Issues](https://github.com/AI-paca/IttM/issues). Готовые исправления - через [Pull Requests](https://github.com/AI-paca/IttM/pulls). Приватные документы в примеры лучше не прикладывать: сделайте обезличенный файл или синтетический скриншот.
 
-Если порт занят, local-скрипт выберет свободный и напечатает итоговый URL.
-
-Полные локальные Python-зависимости с EasyOCR ставятся отдельно:
-
-```bash
-INSTALL_EASYOCR=1 bash scripts/install-local-python.sh
-```
-
-Если OCR уже запущен отдельно, gateway можно направить на него через `OCR_URL`:
-
-```bash
-OCR_URL=http://127.0.0.1:8000 npm run dev
-```
-
-Собранный Node gateway запускается так:
-
-```bash
-npm run build
-OCR_URL=http://127.0.0.1:8000 npm start
-```
-
-## Lite
-
-Lite-сборка содержит браузерный frontend без собственного Docker backend:
-
-```bash
-bash scripts/build-lite.sh
-```
-
-Результат лежит в `dist/`. Его можно разместить как статику на GitHub Pages или на слабом VPS. GitHub Pages workflow собирает frontend с `VITE_BASE_PATH=/IttM/`.
-
-Browser OCR и настроенные облачные режимы работают из frontend. Упаковка отдельного browser extension UI пока не добавлена, но Lite-сборка остается его статической основой.
-
-## Docker
-
-Контейнерный стек для VPS и серверного запуска поднимается короткой Compose-командой:
-
-```bash
-docker compose up --build -d
-```
-
-Compose собирает три сервиса:
-
-- `nginx` раздает frontend и проксирует `/api/*`;
-- `gateway` принимает API-запросы и ходит в OCR;
-- `ocr` запускает Python backend с Tesseract и runtime-зависимостями.
-
-По умолчанию приложение открывается на `http://localhost:3000`.
-
-Остановка контейнеров:
-
-```bash
-docker compose down
-```
+## Документация
 
 <details>
-<summary>Docker variables</summary>
+<summary>Стек и проверки</summary>
 
-Host-порт и bind nginx можно задать прямо для Compose:
+| Слой | Технологии | Чем проверяется |
+| --- | --- | --- |
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS, PDF.js | `npx prettier --check .`, `npx eslint .`, `npm run typecheck`, `npm test`, `npm run build` |
+| Gateway | Node.js 22, Express 5, TypeScript | `npx eslint .`, `npm run typecheck`, `npm test`, `npm run build` |
+| OCR backend | Python 3.10, FastAPI, Uvicorn, Tesseract | `flake8`, `black --check`, `ruff check`, `pytest` |
+| Docker/runtime | Docker Compose, nginx, healthchecks | `docker build`, `docker compose config --quiet`, container healthchecks |
 
-```bash
-GATEWAY_HOST_PORT=3001 docker compose up --build -d
-GATEWAY_HOST_BIND=0.0.0.0 GATEWAY_HOST_PORT=80 docker compose up --build -d
-```
+Архитектура описана в [документации проекта](./docs/architecture.md).
 
-| Переменная              | По умолчанию             | Назначение                       |
-| ----------------------- | ------------------------ | -------------------------------- |
-| `GATEWAY_HOST_BIND`     | `127.0.0.1`              | Host-интерфейс для nginx.        |
-| `GATEWAY_HOST_PORT`     | `3000`                   | Host-порт для nginx.             |
-| `NGINX_INTERNAL_PORT`   | `80`                     | Порт nginx внутри Compose.       |
-| `GATEWAY_INTERNAL_PORT` | `3000`                   | Порт gateway внутри Compose.     |
-| `OCR_INTERNAL_PORT`     | `8000`                   | Порт OCR внутри Compose.         |
-| `OCR_REQUIREMENTS`      | `requirements-light.txt` | Requirements-файл для OCR image. |
+</details>
 
-Docker по умолчанию собирает легкий OCR runtime без предустановленного EasyOCR. `scripts/run-docker.sh` остается Linux helper для автоподбора занятого host-порта и ожидания health endpoint, но не нужен для обычного Compose-запуска:
+<details>
+<summary>Roadmap</summary>
 
-```bash
-bash scripts/run-docker.sh
+Roadmap uses branch slots as the X axis. Color semantics live in the SVG; Mermaid blocks below are short timeline summaries.
+
+![Roadmap](./docs/roadmap.svg)
+
+<details>
+<summary>Roadmap legend</summary>
+
+| Type | Meaning |
+| --- | --- |
+| SVG roadmap | Detailed branch-slot map. Branch names on the X axis are visual slots, not calendar promises. |
+| Mermaid HW/core | Compact course-track summary. Dates are fake slots used only to keep branch blocks readable. |
+| Mermaid development | Compact future/NB summary after the course release track. |
+| Red -> green | HW/core maturity: prototype, integration, validation, release. |
+| Green hatch | Improvement work after a layer already has a stable release shape. |
+| Blue hatch | Future/NB improvements. |
+| Layering | Solid blocks may overlap only inside one release chain; hatched blocks start after a gap and never move the release endpoint. |
+| Source | Built from diffs through `feature/hw2-mvp`, `hw2`, `hw3`, `hw4/ref-docker`, the current worktree diff, and `hw4..engine`. |
+| Red vertical line | Current `hw4/ref-docker` position. |
+| Release boundary | End of the course release track; the right side is future/NB work. |
+
+</details>
+
+<details>
+<summary>Mermaid: HW and core branches</summary>
+
+Neutral Mermaid summary. Colors in the SVG legend are authoritative; this block only compresses the HW/core timeline.
+
+```mermaid
+gantt
+    title IttM HW and core branches
+    dateFormat  YYYY-MM-DD
+    axisFormat  %m-%d
+
+    section UI
+    feature/hw2-mvp -> hw3             :ui_hw, 2026-05-01, 2026-05-22
+    post-hw5 UI update                 :ui_update, 2026-06-05, 2026-06-12
+
+    section Input / source
+    feature/hw2-mvp -> hw3 sources     :input_hw, 2026-05-01, 2026-05-22
+
+    section Gateway API
+    feature/hw2-mvp -> hw3             :api_hw, 2026-05-01, 2026-05-22
+
+    section OCR backend
+    feature/hw2-mvp -> mid-hw4 -> engine :ocr_hw, 2026-05-01, 2026-06-08
+
+    section Launch modes
+    feature/hw2-mvp -> hw4 stable modes :run_modes, 2026-05-01, 2026-05-29
+
+    section CI/CD
+    hw2 Pages workflow                 :ci_pages, 2026-05-08, 2026-05-15
+    hw3 -> hw5 lint/build gate         :ci_hw, 2026-05-18, 2026-06-12
+
+    section Testing
+    mid hw3 -> hw5 test suites         :tests_hw, 2026-05-18, 2026-06-12
+
+    section Security
+    hw6 -> hw7 SAST/SCA/SBOM           :security_hw, 2026-06-12, 2026-06-26
+
+    section Docs
+    late hw3 -> hw8 docs               :docs_hw, 2026-05-19, 2026-07-03
 ```
 
 </details>
 
-## Документация
+<details>
+<summary>Mermaid: development branches</summary>
 
-- [Архитектура проекта](./docs/architecture.md)
-- [Задания курса](./docs/course_tasks.md)
+Pseudo slots for future development branches. These are product ideas, not the course HW timeline.
+
+```mermaid
+%%{init: {"themeVariables": {"activeTaskBkgColor": "#7db8e8", "activeTaskBorderColor": "#dbeeff", "activeTaskTextColor": "#20242a"}}}%%
+gantt
+    title IttM development branches
+    dateFormat  YYYY-MM-DD
+    axisFormat  %m-%d
+
+    section UI
+    browser extension                  :active, dev_ext, 2026-07-08, 4d
+
+    section Input import
+    HTML/canvas                        :active, dev_html, 2026-06-24, 3d
+    AI Studio files                    :active, dev_ai, 2026-06-27, 3d
+
+    section Launch modes
+    Hypr utility C/Rust/Go + UI         :active, dev_hypr_utility, 2026-07-12, 8d
+
+    section Docs
+    development docs                   :active, dev_docs, 2026-06-30, 2026-07-23
+```
+
+</details>
+
+Full course plan: [course plan](./docs/COURSE_PLAN.md).
+
+</details>
+
+
+Подробнее: [архитектура](./docs/architecture.md), [план курса](./docs/COURSE_PLAN.md), [таблица заданий](./docs/course_tasks.md).

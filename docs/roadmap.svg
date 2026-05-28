@@ -1,0 +1,157 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1360" height="590" viewBox="0 0 1360 590" role="img" aria-labelledby="title desc">
+  <title id="title">Roadmap Text Extractor</title>
+  <desc id="desc">Roadmap swimlane built from branch diffs. Solid red to green blocks are release chains. Green hatching marks improvements after a stable shape. Blue hatching marks future and NB improvements.</desc>
+  <defs>
+    <pattern id="green-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
+      <path d="M 0 0 L 0 6" stroke="#95c981" stroke-width="2.2" opacity=".92"/>
+    </pattern>
+    <pattern id="blue-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
+      <path d="M 0 0 L 0 6" stroke="#7db8e8" stroke-width="2.2" opacity=".92"/>
+    </pattern>
+  </defs>
+  <style>
+    text { font-family: Inter, "Segoe UI", Arial, sans-serif; fill: #d7dde5; }
+    .title { font-size: 20px; font-weight: 760; text-anchor: middle; }
+    .note { font-size: 10px; font-weight: 650; fill: #aab4c0; text-anchor: middle; }
+    .axis { font-size: 9.5px; font-weight: 680; fill: #adb7c3; text-anchor: middle; }
+    .lane { font-size: 11px; font-weight: 760; fill: #edf2f7; }
+    .band-a { fill: #303229; opacity: .92; }
+    .band-b { fill: #20262d; opacity: .92; }
+    .future-bg { fill: #233846; opacity: .24; }
+    .tick { stroke: #d8dee6; stroke-width: .7; opacity: .5; }
+    .now { stroke: #ff4d4d; stroke-width: 2; opacity: .94; }
+    .boundary { stroke: #95c981; stroke-width: 1.8; stroke-dasharray: 6 5; opacity: .95; }
+    .seg { rx: 10; ry: 10; stroke: rgba(14,19,25,.62); stroke-width: .65; paint-order: stroke fill; }
+    .p0 { fill: #da7e76; }
+    .p1 { fill: #dc9a70; }
+    .p2 { fill: #d9bd70; }
+    .p3 { fill: #c7cf76; }
+    .p4 { fill: #95c981; }
+    .improve { fill: url(#green-hatch); stroke: #95c981; stroke-width: 1.35; stroke-dasharray: 5 4; }
+    .future { fill: url(#blue-hatch); stroke: #7db8e8; stroke-width: 1.35; stroke-dasharray: 5 4; }
+    .label { font-size: 8.5px; font-weight: 780; fill: #20242a; text-anchor: middle; dominant-baseline: central; }
+    .light { fill: #e9f0f7; }
+    .legend { font-size: 10px; font-weight: 650; fill: #aeb8c4; }
+  </style>
+
+  <text x="680" y="24" class="title">Roadmap Text Extractor (IttM), branch slots</text>
+  <text x="680" y="43" class="note">solid red to green = release chain; green hatch = post-stable improvements; blue hatch = future/NB improvements</text>
+
+  <g id="axis">
+    <line x1="118" y1="58" x2="1328" y2="58" class="tick"/>
+    <line x1="170" y1="58" x2="170" y2="64" class="tick"/><text x="170" y="78" class="axis"><tspan x="170">feature/</tspan><tspan x="170" dy="10">hw2-mvp</tspan></text>
+    <line x1="270" y1="58" x2="270" y2="64" class="tick"/><text x="270" y="83" class="axis">hw2</text>
+    <line x1="370" y1="58" x2="370" y2="64" class="tick"/><text x="370" y="83" class="axis">hw3</text>
+    <line x1="470" y1="58" x2="470" y2="64" class="tick"/><text x="470" y="78" class="axis"><tspan x="470">hw4/</tspan><tspan x="470" dy="10">ref-docker</tspan></text>
+    <line x1="570" y1="58" x2="570" y2="64" class="tick"/><text x="570" y="83" class="axis">engine</text>
+    <line x1="670" y1="58" x2="670" y2="64" class="tick"/><text x="670" y="83" class="axis">hw5</text>
+    <line x1="770" y1="58" x2="770" y2="64" class="tick"/><text x="770" y="83" class="axis">hw6</text>
+    <line x1="870" y1="58" x2="870" y2="64" class="tick"/><text x="870" y="83" class="axis">hw7</text>
+    <line x1="970" y1="58" x2="970" y2="64" class="tick"/><text x="970" y="83" class="axis">hw8</text>
+    <line x1="1080" y1="58" x2="1080" y2="64" class="tick"/><text x="1080" y="78" class="axis"><tspan x="1080">dev/</tspan><tspan x="1080" dy="10">input</tspan></text>
+    <line x1="1190" y1="58" x2="1190" y2="64" class="tick"/><text x="1190" y="78" class="axis"><tspan x="1190">dev/</tspan><tspan x="1190" dy="10">extension</tspan></text>
+    <line x1="1290" y1="58" x2="1290" y2="64" class="tick"/><text x="1290" y="78" class="axis"><tspan x="1290">dev/</tspan><tspan x="1290" dy="10">hypr-util</tspan></text>
+    <line x1="470" y1="58" x2="470" y2="520" class="now"/>
+  </g>
+
+  <g id="bands">
+    <rect x="8" y="96" width="1344" height="42" class="band-a"/>
+    <rect x="8" y="138" width="1344" height="42" class="band-b"/>
+    <rect x="8" y="180" width="1344" height="42" class="band-a"/>
+    <rect x="8" y="222" width="1344" height="42" class="band-b"/>
+    <rect x="8" y="264" width="1344" height="42" class="band-a"/>
+    <rect x="8" y="306" width="1344" height="42" class="band-b"/>
+    <rect x="8" y="348" width="1344" height="42" class="band-a"/>
+    <rect x="8" y="390" width="1344" height="42" class="band-b"/>
+    <rect x="8" y="432" width="1344" height="42" class="band-a"/>
+  </g>
+  <rect x="1028" y="96" width="324" height="378" class="future-bg"/>
+  <line x1="1028" y1="58" x2="1028" y2="520" class="boundary"/>
+  <text x="1068" y="104" class="axis">future / NB</text>
+
+  <g id="lane-labels">
+    <text x="20" y="122" class="lane">UI</text>
+    <text x="20" y="164" class="lane">Input / source</text>
+    <text x="20" y="206" class="lane">Gateway API</text>
+    <text x="20" y="248" class="lane">OCR backend</text>
+    <text x="20" y="290" class="lane">Launch modes</text>
+    <text x="20" y="332" class="lane">CI/CD</text>
+    <text x="20" y="374" class="lane">Testing</text>
+    <text x="20" y="416" class="lane">Security</text>
+    <text x="20" y="458" class="lane">Docs</text>
+  </g>
+
+  <g id="blocks">
+    <rect x="130" y="108" width="82" height="18" class="seg p0"/><text x="171" y="117" class="label">MVP UI</text>
+    <rect x="202" y="108" width="90" height="18" class="seg p1"/><text x="247" y="117" class="label">UI + LLM</text>
+    <rect x="280" y="108" width="108" height="18" class="seg p4"/><text x="334" y="117" class="label">stable UI</text>
+    <rect x="620" y="108" width="80" height="18" class="seg improve"/><text x="660" y="117" class="label light">UI update</text>
+    <rect x="1148" y="108" width="88" height="18" class="seg future"/><text x="1192" y="117" class="label light">extension</text>
+    <rect x="1252" y="108" width="82" height="18" class="seg future"/><text x="1293" y="117" class="label light">Hypr UI</text>
+
+    <rect x="130" y="150" width="82" height="18" class="seg p0"/><text x="171" y="159" class="label">file input</text>
+    <rect x="202" y="150" width="88" height="18" class="seg p1"/><text x="246" y="159" class="label">source UI</text>
+    <rect x="278" y="150" width="86" height="18" class="seg p2"/><text x="321" y="159" class="label">fallback</text>
+    <rect x="352" y="150" width="88" height="18" class="seg p3"/><text x="396" y="159" class="label">gateway</text>
+    <rect x="428" y="150" width="84" height="18" class="seg p4"/><text x="470" y="159" class="label">profiles</text>
+    <rect x="1048" y="150" width="78" height="18" class="seg future"/><text x="1087" y="159" class="label light">HTML</text>
+    <rect x="1118" y="150" width="88" height="18" class="seg future"/><text x="1162" y="159" class="label light">AI files</text>
+
+    <rect x="130" y="192" width="82" height="18" class="seg p0"/><text x="171" y="201" class="label">convert</text>
+    <rect x="202" y="192" width="88" height="18" class="seg p1"/><text x="246" y="201" class="label">adapters</text>
+    <rect x="278" y="192" width="86" height="18" class="seg p2"/><text x="321" y="201" class="label">routes</text>
+    <rect x="352" y="192" width="88" height="18" class="seg p3"/><text x="396" y="201" class="label">errors</text>
+    <rect x="428" y="192" width="84" height="18" class="seg p4"/><text x="470" y="201" class="label">stable API</text>
+
+    <rect x="130" y="234" width="82" height="18" class="seg p0"/><text x="171" y="243" class="label">OCR MVP</text>
+    <rect x="202" y="234" width="88" height="18" class="seg p1"/><text x="246" y="243" class="label">EasyOCR</text>
+    <rect x="278" y="234" width="86" height="18" class="seg p2"/><text x="321" y="243" class="label">fallback</text>
+    <rect x="352" y="234" width="92" height="18" class="seg p4"/><text x="398" y="243" class="label">stable OCR</text>
+    <rect x="462" y="234" width="82" height="18" class="seg improve"/><text x="503" y="243" class="label light">tables</text>
+    <rect x="548" y="234" width="122" height="18" class="seg improve"/><text x="609" y="243" class="label light">pipeline profiles</text>
+
+    <rect x="130" y="276" width="82" height="18" class="seg p0"/><text x="171" y="285" class="label">local run</text>
+    <rect x="202" y="276" width="88" height="18" class="seg p1"/><text x="246" y="285" class="label">build run</text>
+    <rect x="328" y="276" width="70" height="18" class="seg p2"/><text x="363" y="285" class="label">nginx</text>
+    <rect x="386" y="276" width="82" height="18" class="seg p2"/><text x="427" y="285" class="label">Compose</text>
+    <rect x="456" y="276" width="58" height="18" class="seg p3"/><text x="485" y="285" class="label">split</text>
+    <rect x="498" y="276" width="66" height="18" class="seg p4"/><text x="531" y="285" class="label">stable</text>
+    <rect x="1240" y="276" width="94" height="18" class="seg future"/><text x="1287" y="285" class="label light">Hypr utility</text>
+
+    <rect x="202" y="318" width="88" height="18" class="seg p1"/><text x="246" y="327" class="label">Pages CI</text>
+    <rect x="328" y="318" width="82" height="18" class="seg p2"/><text x="369" y="327" class="label">tests.yml</text>
+    <rect x="398" y="318" width="100" height="18" class="seg p3"/><text x="448" y="327" class="label">lint/build gate</text>
+
+    <rect x="328" y="360" width="82" height="18" class="seg p2"/><text x="369" y="369" class="label">API tests</text>
+    <rect x="398" y="360" width="90" height="18" class="seg p3"/><text x="443" y="369" class="label">OCR tests</text>
+    <rect x="476" y="360" width="106" height="18" class="seg p4"/><text x="529" y="369" class="label">browser tests</text>
+    <rect x="590" y="360" width="98" height="18" class="seg improve"/><text x="639" y="369" class="label light">mode smoke</text>
+    <rect x="680" y="360" width="114" height="18" class="seg improve"/><text x="737" y="369" class="label light">regression</text>
+    <rect x="806" y="360" width="118" height="18" class="seg improve"/><text x="865" y="369" class="label light">engine fixtures</text>
+    <rect x="1148" y="360" width="88" height="18" class="seg future"/><text x="1192" y="369" class="label light">ext smoke</text>
+    <rect x="1250" y="360" width="84" height="18" class="seg future"/><text x="1292" y="369" class="label light">Hypr smoke</text>
+
+    <rect x="600" y="402" width="82" height="18" class="seg improve"/><text x="641" y="411" class="label light">limits</text>
+    <rect x="732" y="402" width="88" height="18" class="seg improve"/><text x="776" y="411" class="label light">hw6 SAST</text>
+    <rect x="832" y="402" width="138" height="18" class="seg improve"/><text x="901" y="411" class="label light">hw7 SCA/SBOM</text>
+
+    <rect x="130" y="444" width="82" height="18" class="seg p0"/><text x="171" y="453" class="label">README</text>
+    <rect x="328" y="444" width="82" height="18" class="seg p1"/><text x="369" y="453" class="label">README</text>
+    <rect x="398" y="444" width="90" height="18" class="seg p2"/><text x="443" y="453" class="label">architecture</text>
+    <rect x="476" y="444" width="106" height="18" class="seg p4"/><text x="529" y="453" class="label">launch docs</text>
+    <rect x="590" y="444" width="180" height="18" class="seg improve"/><text x="680" y="453" class="label light">course docs</text>
+    <rect x="832" y="444" width="138" height="18" class="seg improve"/><text x="901" y="453" class="label light">final report</text>
+    <rect x="1048" y="444" width="158" height="18" class="seg future"/><text x="1127" y="453" class="label light">input docs</text>
+    <rect x="1148" y="444" width="88" height="18" class="seg future"/><text x="1192" y="453" class="label light">ext docs</text>
+    <rect x="1250" y="444" width="84" height="18" class="seg future"/><text x="1292" y="453" class="label light">Hypr docs</text>
+  </g>
+
+  <g id="legend">
+    <rect x="70" y="516" width="18" height="10" class="seg p0"/><text x="98" y="525" class="legend">red/orange = prototype and integration</text>
+    <rect x="328" y="516" width="18" height="10" class="seg p4"/><text x="356" y="525" class="legend">green = stable release shape</text>
+    <rect x="548" y="516" width="18" height="10" class="seg improve"/><text x="576" y="525" class="legend">green hatch = post-stable improvement</text>
+    <rect x="806" y="516" width="18" height="10" class="seg future"/><text x="834" y="525" class="legend">blue hatch = future / NB improvement</text>
+    <line x1="1080" y1="521" x2="1116" y2="521" class="boundary"/><text x="1124" y="525" class="legend">course / future boundary</text>
+    <text x="70" y="552" class="legend">Layering rule: solid blocks may overlap only inside one release chain; hatched blocks start after a gap and never move the release endpoint.</text>
+  </g>
+</svg>

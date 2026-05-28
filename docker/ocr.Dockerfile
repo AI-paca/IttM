@@ -25,6 +25,7 @@ COPY requirements*.txt ./
 RUN pip install --no-cache-dir --retries 2 --default-timeout 60 -r "$PYTHON_REQUIREMENTS"
 
 COPY pyproject.toml ./
+COPY .flake8 ./
 COPY app ./app
 COPY tests ./tests
 

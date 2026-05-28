@@ -23,3 +23,5 @@ RUN envsubst '$NGINX_LISTEN_PORT $GATEWAY_HOSTNAME $GATEWAY_INTERNAL_PORT' \
     && nginx -t
 
 EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

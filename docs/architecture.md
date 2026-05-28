@@ -1,6 +1,6 @@
 ## Архитектура проекта
 
-Архитектура держится на четырех границах: React UI, browser-side OCR/LLM стратегии, TypeScript gateway и Python OCR. В local/dev браузер ходит напрямую в `server.ts`; в Docker тот же API проходит через nginx, который раздает `dist/` и проксирует `/api/*` в gateway. Python OCR наружу не публикуется и доступен gateway только через `OCR_URL`.
+Text Extractor разделен на четыре основные части: браузерный интерфейс, стратегии распознавания на стороне браузера, TypeScript gateway и Python OCR-сервис. В локальном режиме `server.ts` одновременно обслуживает API и frontend. В Docker-режиме наружу опубликован только nginx: он раздает собранный frontend и проксирует `/api/*` во внутренний gateway. Python OCR-сервис остается закрытым внутри runtime-сети и доступен gateway по `OCR_URL`.
 
 ```mermaid
 flowchart TB
@@ -22,10 +22,19 @@ flowchart TB
         Strategy --> Llm
     end
 
-    subgraph Ingress["Runtime ingress"]
+    subgraph LocalRuntime["Local runtime"]
         direction TB
-        Nginx["nginx container<br/>static dist + /api proxy"]
-        Server["server.ts<br/>Express API middleware<br/>Vite dev / prod static"]
+        LocalServer["server.ts<br/>Express API + Vite dev/prod static"]
+    end
+
+    subgraph DockerRuntime["Docker runtime"]
+        direction TB
+        Nginx["nginx container<br/>published on host<br/>static dist + /api proxy"]
+        GatewayContainer["gateway container<br/>server.ts + gateway/src<br/>internal: 3000"]
+        OcrContainer["ocr container<br/>FastAPI + Tesseract<br/>internal: 8000"]
+
+        Nginx -->|/api/*| GatewayContainer
+        GatewayContainer -->|OCR_URL| OcrContainer
     end
 
     subgraph Gateway["gateway/src"]
@@ -42,7 +51,7 @@ flowchart TB
 
     subgraph Python["ocr/app: FastAPI OCR"]
         direction TB
-        Api["routers/*<br/>/v1/convert / health / probe / install"]
+        Api["routers/*<br/>convert / health / probe / install"]
         Convert["services/convert_service.py<br/>file loading + orchestration"]
         Chunking["chunking/*<br/>split + dedupe"]
         Engines["engines/*<br/>Auto / Tesseract / EasyOCR / Stub"]
@@ -55,12 +64,15 @@ flowchart TB
     end
 
     External["External APIs<br/>Gemini / OpenRouter / Ollama"]
+    Edge["Cloudflare Worker<br/>optional edge ingress / API proxy"]
 
     User --> App
-    Strategy -->|Docker API| Nginx
-    Nginx --> Server
-    Strategy -. local dev/prod API .-> Server
-    Server --> Handle
+    Strategy -->|Docker /api| Nginx
+    Strategy -. local /api .-> LocalServer
+    Edge -. optional cloud proxy .-> GatewayContainer
+    LocalServer --> Handle
+    GatewayContainer --> Handle
+    OcrContainer --> Api
     Client -->|HTTP OCR_URL| Api
     Llm --> External
 
@@ -68,6 +80,14 @@ flowchart TB
     Client -->|passes result back| Strategy
     Strategy --> Workspace
 ```
+
+Проверенное состояние runtime:
+
+- в Docker наружу публикуется только nginx; host-порт выбирается автоматически из диапазона `3000-3099`, а фактический порт показывает `docker compose port nginx 80`;
+- gateway и OCR остаются внутри Docker-сети;
+- `GET /api/health` через nginx возвращает ответ Python OCR-сервиса;
+- локальный запуск использует те же gateway-маршруты, что и контейнерный запуск;
+- статическая Lite-сборка может работать без серверного OCR и использовать browser OCR или внешние LLM API.
 
 <details>
 <summary>Границы файлов</summary>
@@ -98,13 +118,12 @@ web/src/
 ├─ ocr/tesseract-worker-session.ts
 │                           # lifecycle Tesseract.js worker lease/cache, isolated progress
 ├─ ocr/tesseract-recognize-input.ts
-│                           # адаптер входа для Tesseract.js в browser/Node test runtime
+│                           # адаптер входа для Tesseract.js в browser/Node runtime
 ├─ ocr/llm-client.ts        # прямые запросы Gemini/OpenRouter/Ollama
 ├─ ocr/file-utils.ts        # проверка файлов, browser diagnostics, image helpers
 ├─ ocr/pdf-text.ts          # слияние native PDF text и OCR-слоя
 ├─ lib/pdf-parser.ts        # PDF.js: чтение текста, рендер страниц в Canvas
-├─ lib/browser-ocr.ts       # совместимый re-export browser OCR API
-└─ **/*.test.ts             # unit/browser OCR тесты рядом с проверяемым кодом
+└─ lib/browser-ocr.ts       # совместимый re-export browser OCR API
 ```
 
 ```text
@@ -117,8 +136,7 @@ gateway/
    ├─ core/routes.ts        # /api/* маршруты
    ├─ services/staticFiles.ts
    │                        # static fallback, /IttM/ prefix, SPA fallback helpers
-   ├─ clients/ocrClient.ts  # proxy в Python OCR по OCR_URL
-   └─ **/*.test.ts          # unit-тесты core/static serving
+   └─ clients/ocrClient.ts  # proxy в Python OCR по OCR_URL
 ```
 
 ```text
@@ -136,16 +154,10 @@ ocr/app/
 ```
 
 ```text
-CI/config:
+Runtime/config:
 ├─ server.ts                # Node entrypoint: API middleware, Vite dev, prod static
 ├─ scripts/run-local.sh     # локальный запуск gateway + OCR через host/venv
-├─ scripts/run-docker.sh    # Linux helper над docker compose
 ├─ scripts/build-lite.sh    # статическая Lite-сборка
-├─ scripts/debug.sh         # локальная проверка npm/Python/Docker
-├─ .github/workflows/tests.yml
-│                           # linters, Dockerized Python tests, OCR quality
-├─ .github/workflows/static.yml
-│                           # сборка и публикация GitHub Pages
 ├─ edge/cloudflare-worker.ts
 │                           # edge adapter для статического frontend и API proxy
 ├─ eslint.config.js         # ESLint + Prettier plugin для web/gateway TS
@@ -156,7 +168,9 @@ CI/config:
 ├─ gateway/tsconfig.json    # TypeScript gateway config
 ├─ ocr/.flake8              # flake8 правила для Python OCR
 ├─ ocr/pyproject.toml       # Black/Ruff/isort конфигурация
-├─ ocr/requirements-ci.txt  # Python CI deps: pytest, flake8, black, ruff
+├─ ocr/requirements-light.txt
+│                           # легкие Python-зависимости для OCR runtime
+├─ ocr/requirements.txt     # полный Python runtime с EasyOCR
 ├─ docker/ocr.Dockerfile    # OCR среда с Tesseract/lang packs/fonts
 ├─ docker/gateway.Dockerfile
 │                           # production Node gateway image

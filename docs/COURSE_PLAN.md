@@ -1,42 +1,43 @@
 # Text Extractor (IttM)
 
+## Контекст
+
 Утилита рассчитывалась на то, чтобы «сожрать» длинный скриншот (например, корзину Amazon, чек или сложный учебный план с таблицами и сеткой расписания), полностью скопировать его содержимое и пересдать структуру нейросетевому агенту в чат в виде чистого Markdown.
 
-# План развития проекта (По домашним заданиям)
+**Стек:** React 19 / TypeScript / Tailwind. Gateway — Express (`server.ts`). OCR backend — Python (FastAPI, Tesseract/EasyOCR). Инфраструктура — Nginx и Docker Compose.
 
-В этом документе сопоставлены текущие проблемы кодовой базы с требованиями вашего курса и зафиксированы конкретные технические шаги для их решения, вплоть до оценки 10/10. Лирика и философские отступления убраны — только технический план.
-
-## 🎯 Цель проекта и Стек
-
-- **Суть:** Утилита рассчитывалась на то, чтобы «сожрать» длинный скриншот (корзину Amazon, чек, длинный лонгрид или огромный учебный план с сеткой расписания), выцепить оттуда весь текст вместе со структурой (таблицами, абзацами) и пересдать её нейросетевому агенту в чат в виде аккуратного Markdown.
-- **Стек:** React 19 / TypeScript / Tailwind. Gateway — Express (`server.ts`). OCR backend — Python (FastAPI, Tesseract/EasyOCR). Инфраструктура — Nginx и Docker Compose.
-
-## 🚀 Roadmap (План развития)
+## План работ по курсу
 
 ```mermaid
 gantt
-    title Развитие архитектуры Text Extractor (IttM)
+    title Roadmap Text Extractor (IttM), статус на 2026-05-25
     dateFormat  YYYY-MM-DD
     axisFormat  %m-%d
 
     section База & Архитектура
-    Репозиторий, README, Структура      :done, phase1, 2026-04-20, 2026-05-01
-    Рабочее веб-приложение (UI + API)   :done, phase2, 2026-04-25, 2026-05-01
-    Архитектура и границы файлов        :done, arch, 2026-05-22, 1d
+    Репозиторий и README                :done, repo, 2026-04-20, 2026-04-25
+    Рабочее приложение UI + API         :done, app, 2026-04-25, 2026-05-01
+    Разделение web/gateway/ocr          :done, arch_split, 2026-05-01, 2026-05-10
+    Документирование архитектуры        :done, arch_docs, 2026-05-22, 2026-05-24
 
     section CI/CD & Тестирование
-    Базовые проверки (Линтеры, CI)      :done, phase3, 2026-05-02, 2026-05-08
-    OCR/table layout тесты              :done, cv_layout, 2026-05-05, 2026-05-15
-    Генеративные стресс-тесты (Canvas)  :active, cv_test, 2026-05-15, 5d
+    GitHub Actions quality gate         :done, ci_gate, 2026-05-02, 2026-05-08
+    JS/TS lint, format, typecheck       :done, js_gate, 2026-05-08, 2026-05-12
+    Python lint, format, tests          :done, py_gate, 2026-05-12, 2026-05-24
+    OCR/table layout tests              :done, ocr_tests, 2026-05-12, 2026-05-24
+    Canvas/image bomb stress tests      :active, stress_tests, 2026-05-24, 5d
 
     section Инфраструктура
-    Nginx + Gateway + OCR Compose       :active, docker2, 2026-05-10, 5d
-    Docker image/start validation       :active, docker_check, after docker2, 3d
-    SAST (Безопасность и лимиты ОЗУ)    :         sast, after docker_check, 5d
+    Nginx + Gateway + OCR Compose       :done, compose, 2026-05-10, 2026-05-18
+    Docker healthchecks + smoke test    :done, smoke, 2026-05-18, 2026-05-24
+    Docker DNS troubleshooting note     :done, dns_note, 2026-05-24, 1d
+    Уменьшение размеров Docker images   :active, image_size, 2026-05-24, 4d
+    SAST + лимиты загрузки файлов       :         sast, 2026-05-29, 5d
 
     section Финал
-    SCA (Уязвимости зависимостей)       :         sca, 2026-05-25, 5d
-    Финальная документация и защита     :         docs, 2026-06-01, 5d
+    SCA + Dependabot + SBOM             :         sca, 2026-06-01, 5d
+    Production deployment docs          :active, prod_docs, 2026-05-24, 5d
+    Финальный отчет по SAST/SCA         :         final_report, 2026-06-06, 5d
 ```
 
 ## План работ (сопоставление проблем с тасками)
@@ -49,9 +50,9 @@ gantt
 
 ### Домашка 4: Контейнеризация
 
-- **[В процессе]** Подтвердить полный `docker compose up --build` для трех сервисов (`nginx`, `gateway`, `ocr`) в среде с рабочим DNS до `deb.debian.org`.
-- **[Ожидает проверки]** Зафиксировать фактический размер Docker-образов и при необходимости ужать OCR-образ без потери Tesseract/lang packs/fonts.
-- **[Ожидает проверки]** Пройти smoke-test после старта контейнеров: `GET /api/health`, загрузка файла через UI, `POST /api/convert`.
+- **[✅ Проверено]** Контейнерный запуск идет через `docker compose up -d`; фактический адрес nginx смотрится командой `docker compose port nginx 80`.
+- **[⚠️ Зафиксировано]** В текущей среде `docker compose build` может падать на DNS внутри Docker build network (`Temporary failure resolving 'deb.debian.org'`). В `README.md` оставлена короткая заметка про перезапуск Docker daemon.
+- **[⚠️ Требует оптимизации для 10/10]** Фактические размеры образов: `ittm-ocr` ~1.18 GB, `ittm-gateway` ~612 MB, `ittm-nginx` ~137 MB, `ittm-ocr-ci` ~1.25 GB.
 
 ### Домашка 5: Тестирование
 

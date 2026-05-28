@@ -4,18 +4,38 @@
 set -euo pipefail
 
 ENV_DIR="${PYTHON_ENV_DIR:-ocr/.venv}"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+HOST_PYTHON="${HOST_PYTHON:-${PYTHON_BIN:-}}"
 
 echo "=== Setup Isolation Environment for OCR ==="
 
-if ! command -v python3 >/dev/null 2>&1; then
-    echo "python3 is required but not installed. Aborting."
+if [ -z "$HOST_PYTHON" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+        HOST_PYTHON="python3"
+    elif command -v python >/dev/null 2>&1; then
+        HOST_PYTHON="python"
+    else
+        echo "Python 3.10+ is required but not installed. Aborting."
+        exit 1
+    fi
+fi
+
+if ! command -v "$HOST_PYTHON" >/dev/null 2>&1; then
+    echo "$HOST_PYTHON is required but not installed. Aborting."
+    exit 1
+fi
+
+if ! "$HOST_PYTHON" - <<'PY'
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
+PY
+then
+    echo "Python 3.10+ is required. Selected interpreter is too old: $HOST_PYTHON"
     exit 1
 fi
 
 if [ ! -d "$ENV_DIR" ]; then
     echo "[1/3] Creating virtual environment at $ENV_DIR..."
-    "$PYTHON_BIN" -m venv "$ENV_DIR"
+    "$HOST_PYTHON" -m venv "$ENV_DIR"
 else
     echo "[1/3] Virtual environment $ENV_DIR already exists."
 fi

@@ -15,6 +15,7 @@ Linux/macOS:
 ```bash
 docker compose up -d && url="http://$(docker compose port nginx 80)" && (xdg-open "$url" >/dev/null 2>&1 || open "$url" >/dev/null 2>&1 || cmd.exe /C start "" "$url" >/dev/null 2>&1 || true) && printf '%s\n' "$url"
 ```
+
 <details>
 <summary>Решение проблем</summary>
 По умолчанию используется порт 3000. Если он занят, адрес переопределяется автоматически, фактический адрес:
@@ -22,6 +23,7 @@ docker compose up -d && url="http://$(docker compose port nginx 80)" && (xdg-ope
 ```bash
 docker compose port nginx 80
 ```
+
 Проверить backend через nginx:
 
 ```bash
@@ -29,14 +31,71 @@ curl -fsS "http://$(docker compose port nginx 80)/api/health"
 ```
 
 Логи:
+
 ```bash
 docker compose logs -f
 ```
 
 Если Docker падает на DNS или registry, попробуйте перезапустить Docker daemon:
+
 ```bash
 sudo systemctl restart docker
 ```
+
+</details>
+
+<details>
+<summary>Docker без Compose</summary>
+
+Основной и рекомендуемый путь для полного приложения остается `docker compose up -d`: Compose сам собирает и связывает nginx, gateway и OCR. Если в задании нужны явные команды `docker build` и `docker run`, можно запустить те же сервисы вручную:
+
+```bash
+docker build -f docker/ocr.Dockerfile -t ittm-ocr ./ocr
+docker build -f docker/gateway.Dockerfile -t ittm-gateway .
+docker build -f docker/nginx.Dockerfile -t ittm-nginx .
+```
+
+```bash
+docker network create ittm-net
+docker volume create ittm-ocr-python-packages
+docker volume create ittm-ocr-easyocr-models
+
+docker run -d --name ittm-ocr --network ittm-net \
+  -e PORT=8000 \
+  -e PYTHONPATH=/opt/ittm-python-packages \
+  -e EASY_INSTALL_TARGET=/opt/ittm-python-packages \
+  -e EASYOCR_MODULE_PATH=/models/easyocr \
+  -v ittm-ocr-python-packages:/opt/ittm-python-packages \
+  -v ittm-ocr-easyocr-models:/models/easyocr \
+  ittm-ocr
+
+docker run -d --name ittm-gateway --network ittm-net \
+  -e PORT=3000 \
+  -e OCR_URL=http://ittm-ocr:8000 \
+  ittm-gateway
+
+docker run -d --name ittm-nginx --network ittm-net \
+  -p 127.0.0.1:3000:80 \
+  -e GATEWAY_HOSTNAME=ittm-gateway \
+  -e GATEWAY_INTERNAL_PORT=3000 \
+  ittm-nginx
+```
+
+Проверка:
+
+```bash
+curl -fsS http://127.0.0.1:3000/api/health
+```
+
+CI/test OCR-образ собирается отдельным target'ом, чтобы production OCR-образ не содержал тесты:
+
+```bash
+docker build -f docker/ocr.Dockerfile --target test \
+  --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt \
+  --build-arg OCR_INSTALL_CJK_FONTS=1 \
+  -t ittm-ocr-ci ./ocr
+```
+
 </details>
 
 ## Функции
@@ -49,23 +108,23 @@ sudo systemctl restart docker
 
 ## Режимы работы
 
-| Режим | Целевая среда | Команда | Что запускается |
-| --- | --- | --- | --- |
-| Docker | Win 10/11, Linux, macOS, VPS | `docker compose up -d` | nginx публикуется наружу; gateway и OCR остаются внутри Compose-сети |
-| Local host | Linux workstation | `bash scripts/run-local.sh` | Bun gateway, Python venv, Tesseract и Poppler на host-системе |
-| Lite static | [GitHub Pages](https://ai-paca.github.io/IttM/), статический хостинг, слабый VPS, база для browser extension | `bash scripts/build-lite.sh` | статический frontend в `dist/`, browser OCR и внешние LLM-режимы |
+| Режим       | Целевая среда                                                                                                | Команда                      | Что запускается                                                      |
+| ----------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------- | -------------------------------------------------------------------- |
+| Docker      | Win 10/11, Linux, macOS, VPS                                                                                 | `docker compose up -d`       | nginx публикуется наружу; gateway и OCR остаются внутри Compose-сети |
+| Local host  | Linux workstation                                                                                            | `bash scripts/run-local.sh`  | Bun gateway, Python venv, Tesseract и Poppler на host-системе        |
+| Lite static | [GitHub Pages](https://ai-paca.github.io/IttM/), статический хостинг, слабый VPS, база для browser extension | `bash scripts/build-lite.sh` | статический frontend в `dist/`, browser OCR и внешние LLM-режимы     |
 
 <details>
 <summary>Приватность обработки</summary>
 
-| Режим в UI | Где обрабатывается файл | Что сохраняется приложением | Когда файл уходит наружу |
-| --- | --- | --- | --- |
-| Auto (Fallback) | По очереди: Cloud OCR, Local Gateway, Browser Engine | Выбранный файл держится в памяти вкладки; выбранный режим может храниться в cookie при включенном remember | Когда выбранный fallback дошел до Cloud OCR или custom gateway |
-| Gateway API | Текущий Gateway или указанный endpoint | Gateway не пишет файл в базу; OCR создает временный файл и удаляет его после ответа | Когда endpoint указывает не на ваш локальный Docker/host, а на внешний сервер |
-| Browser Engine | В памяти вкладки браузера | Документ не пишется в базу; `localStorage` хранит только тему интерфейса; браузер может кэшировать OCR-ассеты Tesseract.js | Не уходит из браузера |
-| Local Tesseract | Python OCR API в вашем Docker или Local host | OCR создает временный файл внутри контейнера или системного temp-каталога и удаляет его после ответа | Не уходит на сторонний сервис |
-| Local EasyOCR | Python OCR API в вашем Docker или Local host | OCR создает временный файл; EasyOCR пакеты/модели могут храниться в Docker volume или host-окружении | Не уходит на сторонний сервис |
-| LLM Cloud API | Gemini или OpenRouter | Приложение само не пишет LLM key в `localStorage`, cookie или browser cache; менеджер паролей браузера может предложить сохранить поле по настройкам пользователя | Документ или страницы PDF отправляются во внешний AI API; проект не отвечает за то, что пользователь туда отправил |
+| Режим в UI      | Где обрабатывается файл                              | Что сохраняется приложением                                                                                                                                       | Когда файл уходит наружу                                                                                           |
+| --------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Auto (Fallback) | По очереди: Cloud OCR, Local Gateway, Browser Engine | Выбранный файл держится в памяти вкладки; выбранный режим может храниться в cookie при включенном remember                                                        | Когда выбранный fallback дошел до Cloud OCR или custom gateway                                                     |
+| Gateway API     | Текущий Gateway или указанный endpoint               | Gateway не пишет файл в базу; OCR создает временный файл и удаляет его после ответа                                                                               | Когда endpoint указывает не на ваш локальный Docker/host, а на внешний сервер                                      |
+| Browser Engine  | В памяти вкладки браузера                            | Документ не пишется в базу; `localStorage` хранит только тему интерфейса; браузер может кэшировать OCR-ассеты Tesseract.js                                        | Не уходит из браузера                                                                                              |
+| Local Tesseract | Python OCR API в вашем Docker или Local host         | OCR создает временный файл внутри контейнера или системного temp-каталога и удаляет его после ответа                                                              | Не уходит на сторонний сервис                                                                                      |
+| Local EasyOCR   | Python OCR API в вашем Docker или Local host         | OCR создает временный файл; EasyOCR пакеты/модели могут храниться в Docker volume или host-окружении                                                              | Не уходит на сторонний сервис                                                                                      |
+| LLM Cloud API   | Gemini или OpenRouter                                | Приложение само не пишет LLM key в `localStorage`, cookie или browser cache; менеджер паролей браузера может предложить сохранить поле по настройкам пользователя | Документ или страницы PDF отправляются во внешний AI API; проект не отвечает за то, что пользователь туда отправил |
 
 </details>
 
@@ -115,12 +174,12 @@ bash scripts/run-local.sh
 <details>
 <summary>Стек и проверки</summary>
 
-| Слой | Технологии | Чем проверяется |
-| --- | --- | --- |
-| Frontend | React 19, TypeScript, Vite, Tailwind CSS, PDF.js | `npx prettier --check .`, `npx eslint .`, `npm run typecheck`, `npm test`, `npm run build` |
-| Gateway | Node.js 22, Express 5, TypeScript | `npx eslint .`, `npm run typecheck`, `npm test`, `npm run build` |
-| OCR backend | Python 3.10, FastAPI, Uvicorn, Tesseract | `flake8`, `black --check`, `ruff check`, `pytest` |
-| Docker/runtime | Docker Compose, nginx, healthchecks | `docker build`, `docker compose config --quiet`, container healthchecks |
+| Слой           | Технологии                                       | Чем проверяется                                                                            |
+| -------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| Frontend       | React 19, TypeScript, Vite, Tailwind CSS, PDF.js | `npx prettier --check .`, `npx eslint .`, `npm run typecheck`, `npm test`, `npm run build` |
+| Gateway        | Node.js 22, Express 5, TypeScript                | `npx eslint .`, `npm run typecheck`, `npm test`, `npm run build`                           |
+| OCR backend    | Python 3.10, FastAPI, Uvicorn, Tesseract         | `flake8`, `black --check`, `ruff check`, `pytest`                                          |
+| Docker/runtime | Docker Compose, nginx, healthchecks              | `docker build`, `docker compose config --quiet`, container healthchecks                    |
 
 Архитектура описана в [документации проекта](./docs/architecture.md).
 
@@ -136,18 +195,18 @@ Roadmap uses branch slots as the X axis. Color semantics live in the SVG; Mermai
 <details>
 <summary>Roadmap legend</summary>
 
-| Type | Meaning |
-| --- | --- |
-| SVG roadmap | Detailed branch-slot map. Branch names on the X axis are visual slots, not calendar promises. |
-| Mermaid HW/core | Compact course-track summary. Dates are fake slots used only to keep branch blocks readable. |
-| Mermaid development | Compact future/NB summary after the course release track. |
-| Red -> green | HW/core maturity: prototype, integration, validation, release. |
-| Green hatch | Improvement work after a layer already has a stable release shape. |
-| Blue hatch | Future/NB improvements. |
-| Layering | Solid blocks may overlap only inside one release chain; hatched blocks start after a gap and never move the release endpoint. |
-| Source | Built from diffs through `feature/hw2-mvp`, `hw2`, `hw3`, `hw4/ref-docker`, the current worktree diff, and `hw4..engine`. |
-| Red vertical line | Current `hw4/ref-docker` position. |
-| Release boundary | End of the course release track; the right side is future/NB work. |
+| Type                | Meaning                                                                                                                       |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| SVG roadmap         | Detailed branch-slot map. Branch names on the X axis are visual slots, not calendar promises.                                 |
+| Mermaid HW/core     | Compact course-track summary. Dates are fake slots used only to keep branch blocks readable.                                  |
+| Mermaid development | Compact future/NB summary after the course release track.                                                                     |
+| Red -> green        | HW/core maturity: prototype, integration, validation, release.                                                                |
+| Green hatch         | Improvement work after a layer already has a stable release shape.                                                            |
+| Blue hatch          | Future/NB improvements.                                                                                                       |
+| Layering            | Solid blocks may overlap only inside one release chain; hatched blocks start after a gap and never move the release endpoint. |
+| Source              | Built from diffs through `feature/hw2-mvp`, `hw2`, `hw3`, `hw4/ref-docker`, the current worktree diff, and `hw4..engine`.     |
+| Red vertical line   | Current `hw4/ref-docker` position.                                                                                            |
+| Release boundary    | End of the course release track; the right side is future/NB work.                                                            |
 
 </details>
 
@@ -225,6 +284,5 @@ gantt
 Full course plan: [course plan](./docs/COURSE_PLAN.md).
 
 </details>
-
 
 Подробнее: [архитектура](./docs/architecture.md), [план курса](./docs/COURSE_PLAN.md), [таблица заданий](./docs/course_tasks.md).

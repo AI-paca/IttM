@@ -150,8 +150,11 @@ async function startServer(): Promise<http.Server> {
   });
 }
 
+const importMetaUrl =
+  typeof import.meta.url === "string" ? import.meta.url : "";
 const isMainModule = process.argv[1]
-  ? path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  ? !importMetaUrl ||
+    path.resolve(process.argv[1]) === fileURLToPath(importMetaUrl)
   : false;
 
 if (isMainModule) {

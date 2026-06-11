@@ -1,7 +1,3 @@
-import re
-
-from PIL import Image
-
 from app.engines.base import OcrEngine
 
 
@@ -33,7 +29,8 @@ class EasyOcrEngine(OcrEngine):
                 import easyocr
                 import torch
 
-                # Support CUDA (NVIDIA) and MPS (Apple Silicon), ROCm is handled as CUDA in some PyTorch builds or has separate checks
+                # Support CUDA (NVIDIA) and MPS (Apple Silicon).
+                # Some PyTorch ROCm builds report ROCm devices through CUDA APIs.
                 # easyocr just takes gpu=True/False
                 use_gpu = torch.cuda.is_available() or (
                     hasattr(torch.backends, "mps") and torch.backends.mps.is_available()

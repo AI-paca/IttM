@@ -74,6 +74,17 @@ export function normalizePlatformError(
   if (typeof error === "string") {
     return new PlatformError({ message: error, source });
   }
+  if (error && typeof error === "object") {
+    const message = firstString([
+      (error as Record<string, unknown>).message,
+      (error as Record<string, unknown>).detail,
+      (error as Record<string, unknown>).error,
+      (error as Record<string, unknown>).reason,
+    ]);
+    if (message) {
+      return new PlatformError({ message, source });
+    }
+  }
   return new PlatformError({ message: "Неизвестная ошибка.", source });
 }
 
@@ -172,9 +183,9 @@ export async function requestApiJson<T>(
   return readJsonOrThrow<T>(response, source);
 }
 
-interface ImportMetaWithEnv extends ImportMeta {
+type ImportMetaWithEnv = ImportMeta & {
   env?: Record<string, string | undefined>;
-}
+};
 
 export interface BackendGatewayCandidate {
   label: string;

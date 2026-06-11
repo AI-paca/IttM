@@ -10,9 +10,9 @@ import type { LlmProvider, OcrResult, ProgressSink } from "./types";
 const OCR_PROMPT =
   "Extract all text from this image/document. Preserve tables as Markdown tables. Output only the extracted content, no markdown fences.";
 
-interface ImportMetaWithEnv extends ImportMeta {
+type ImportMetaWithEnv = ImportMeta & {
   env?: Record<string, string | undefined>;
-}
+};
 
 function envValue(name: string): string {
   return ((import.meta as ImportMetaWithEnv).env?.[name] ?? "").trim();

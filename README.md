@@ -1,96 +1,74 @@
-Веб-приложение для конвертации длинных скриншотов экрана в Markdown
+# IttM (Image-to-Text Markdown)
 
-## [Запуск](https://ai-paca.github.io/IttM/)
+[Веб-приложение](https://ai-paca.github.io/IttM/) для конвертации длинных скриншотов и PDF-документов в формат Markdown.
 
-```bash
-bash run.sh
-```
+## Запуск и окружение
 
-_(Сервер запустится на :3000)_
+Для полноценной работы с локальными моделями Tesseract и EasyOCR требуется запуск бэкенда.
 
-Если `3000` или `8000` заняты, локальные скрипты выбирают ближайшие свободные host-порты и печатают итоговые URL.
+### Быстрый старт
 
-Для GitHub Pages сборка использует `VITE_BASE_PATH=/IttM/`; локальный `run.sh` собирает bundle с `VITE_BASE_PATH=/`, чтобы assets грузились с localhost без префикса репозитория.
+#### Docker Compose
 
-`run.sh` рассчитан на слабую VPS: по умолчанию ставит только легкие runtime-зависимости из `ocr/requirements-light.txt`, не запускает тесты, не трогает Docker и не ставит PyTorch/EasyOCR. Тяжелый OCR включается отдельно через кнопку установки в UI или явно:
+- **Windows (PowerShell):**
 
-```bash
-INSTALL_EASYOCR=1 bash run.sh
-```
+  ```powershell
+  docker compose up -d; $url = "http://" + (docker compose port nginx 80).Trim(); Start-Process $url; $url
+  ```
 
-Если `dist/` уже собран, `run.sh` переиспользует его для быстрого рестарта. Для пересборки frontend:
+- **Linux / macOS:**
 
-```bash
-FORCE_BUILD=1 bash run.sh
-```
+  ```bash
+  docker compose up -d && url="http://$(docker compose port nginx 80)" && (xdg-open "$url" || open "$url")
+  ```
 
-### Режимы запуска
+_Для проверки работы API:_ `curl -fsS "http://localhost:3000/api/health"` (замените `3000` на выданный Docker порт, если он отличается).
 
-- **GitHub Pages**: статический frontend, распознавание через browser OCR и LLM/API-режимы при доступности.
-- **Bun local**: легкий gateway adapter без тяжелого Node-сервера; обычный `run.sh` не гоняет тесты и не ставит EasyOCR/PyTorch.
-- **Node gateway**: основной production-friendly режим для Cloud Run, AI Studio, canvas/hosted-сред и локального `node`.
-- **Local Python OCR**: FastAPI backend с Tesseract/EasyOCR за gateway.
-- **Hybrid local+node/bun**: frontend/gateway локально, OCR backend отдельно через `OCR_URL`.
+Подробные команды `docker build` и `docker run` без Compose:
+[ручной запуск Docker](./docs/docker_manual_launch.md).
 
-## CI и базовые проверки
+#### Bare-metal
 
-Локально:
+Сборка и запуск компонентов вне контейнеров (для локального бэкендом требуются Bun, Python 3.10+, Tesseract и Poppler; для статической сборки — Node.js/npm).
 
-```bash
-npm run debug
-```
+1. **Полная версия:**
 
-Быстро без Docker/act:
+   ```bash
+   bash scripts/run-local.sh
+   ```
 
-```bash
-npm run debug -- --no-docker --no-act
-```
+2. **Статический фронтенд (без бэкенда):**
 
-Полная очистка Docker-кэшей включается только явно:
+   Вся обработка происходит на устройстве клиента или через внешние API.
 
-```bash
-npm run debug -- --clean
-```
+   ```bash
+   bash scripts/build-lite.sh
+   ```
 
-Если Docker спотыкается из-за корпоративного firewall/daemon state, `scripts/debug.sh` вызывает `scripts/notify-docker-restart.sh`: он подает звук, показывает уведомление и ждёт ручного рестарта Docker.
+## Текущие ограничения архитектуры
 
-Docker Compose не требует свободных `3000`/`8000`: `npm run debug` выставляет `GATEWAY_HOST_PORT` и `OCR_HOST_PORT` динамически. Для ручного запуска можно задать их явно:
+| Компонент / Роль                    | Локация исполнения        | Поток данных и память                                  | Архитектурные ограничения и узкие места                                                                                                                                                    |
+| ----------------------------------- | ------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Browser OCR** (Edge Engine)       | Изолированно в браузере   | V8 Heap                                                | OOM краши вкладки при `>4000x4000px`. Жесткие квоты памяти WebAssembly/V8. Требует принудительного downscale'а.                                                                            |
+| **PDF Parser** (Extract)            | Main Thread (Client)      | V8 Heap                                                | Извлечение текста синхронно блокирует Event Loop (замораживание UI на средних и тяжелых файлах).                                                                                           |
+| **Gateway API** (Transport)         | Nginx ➔ Node.js (Backend) | ОЗУ Клиента ➔ Stream Nginx/Gateway ➔ `/tmp` Python OCR | Ограничено директивой `client_max_body_size`. Nginx/gateway не буферизуют тело запроса (`proxy_request_buffering off`); Python-бэкенд сохраняет upload во временный файл перед обработкой. |
+| **Local OCR** (Tesseract / EasyOCR) | Python FastAPI (Backend)  | `/tmp` хоста ➔ RAM / VRAM                              | EasyOCR падает на CPU при `<6GB VRAM`. Tesseract создает высокий дисковый I/O из-за постоянного чтения временных файлов.                                                                   |
+| **LLM Cloud API** (External)        | Публичный Провайдер       | V8 Heap ➔ HTTP Payload                                 | Кодирование крупных файлов в Base64 на клиенте забивает ОЗУ и вызывает фризы перед началом сетевого запроса.                                                                               |
 
-```bash
-GATEWAY_HOST_PORT=3001 OCR_HOST_PORT=8001 docker compose up --build
-```
+---
 
-Основные команды, которые повторяет GitHub Actions:
+## Приватность и модель угроз
 
-```bash
-npm ci
-npm run format:check
-npm run lint
-npm test
-npm run build
-python -m pip install -r ocr/requirements-ci.txt
-python -m pytest ocr/tests -q
-RUN_OCR_QUALITY=1 python -m pytest ocr/tests/test_ocr_quality.py -q
-npm run test:ocr:browser
-```
+| Вектор обработки                             | Уровень риска             | Техническое обоснование                                                                                                                                             |
+| -------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Client-side (Browser Engine, PDF Парсер)** | Очень низкий              | Client-side в песочнице V8. Вычислительные данные не покидают устройство на сетевом уровне.                                                                         |
+| **Внутренняя сеть (Gateway, Local OCR)**     | Низкий (Доверенный хост)  | Изоляция через Docker-сеть. Трафик не шифруется (plain HTTP), но замкнут в loopback. Уязвимо только при компрометации самого хоста/системы.                         |
+| **Внешние API (Gemini Cloud, OpenRouter)**   | Высокий (SLA 3-й стороны) | Отправка base64-изображений на публичные эндпоинты. Данные покидают контролируемый периметр. Приватность полностью зависит от честности и политик хранения вендора. |
 
-Workflow `.github/workflows/tests.yml` содержит быстрые frontend/gateway/Python проверки и отдельный тяжелый OCR quality job с `chi_sim+eng+rus`, Tesseract language packs и Noto CJK fonts.
+## Документация и планирование
 
-## Выбор стратегий OCR (в UI)
-
-Выбор OCR - это часть логики браузерного UI, а не отдельный сервис.
-
-- **Auto**: если diagnostics уже видит offline backend, сразу выбирает browser OCR; иначе пробует `/api/convert` и при ошибке переключается на browser OCR.
-- **Gateway / Local Tesseract / Local EasyOCR**: все идут через `/api/convert`; локальные режимы только добавляют `engine_type=tesseract|easyocr`.
-- **Browser Engine**: полностью работает в браузере через PDF.js/Canvas и Tesseract.js WASM.
-- **LLM Cloud API**: браузер напрямую вызывает Gemini или OpenRouter по ключу пользователя.
-
-## Документация
-
-Вторая часть документации (архитектура, задания курса, план и гайдлайны) была вынесена в отдельные файлы для поддержания чистоты:
-
-- **[Архитектура и границы файлов](./docs/architecture.md)**
-- **[План курса и что уже сделано](./docs/COURSE_PLAN.md)**
-- **[Задания курса](./docs/course_tasks.md)**
-- **[Общие требования к коду](./docs/code_guidelines.md)**
-- **[План рефакторинга (`App.tsx`, `run.sh` и т.д.)](./docs/refactoring_plan.md)**
+- **[Архитектура проекта](./docs/architecture.md)**
+- **[Границы ответственности и точки входа](./docs/tmp/boundaries.md)**
+- **[План курса](./docs/COURSE_PLAN.md)**
+- **[Ручной запуск Docker](./docs/docker_manual_launch.md)**
+- **[Отчёт о зависимостях и SBOM](./docs/sbom-report.md)**

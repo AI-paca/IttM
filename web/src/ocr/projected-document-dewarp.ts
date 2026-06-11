@@ -3,11 +3,6 @@ interface Point {
   y: number;
 }
 
-interface CanvasLike {
-  width: number;
-  height: number;
-}
-
 interface ComponentSummary {
   area: number;
   boundary: Point[];

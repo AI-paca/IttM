@@ -41,11 +41,14 @@ async function createTesseractWorker(
   )) as unknown as TesseractWorkerLike;
 }
 
-function appBaseUrl(): string {
-  const meta = import.meta as ImportMeta & { env?: { BASE_URL?: string } };
-  const base = meta.env?.BASE_URL || "/";
+export function normalizeAppBaseUrl(base: string | undefined): string {
   if (!base || base === "./") return "/";
   return base.endsWith("/") ? base : `${base}/`;
+}
+
+function appBaseUrl(): string {
+  const base = typeof document === "undefined" ? "/" : import.meta.env.BASE_URL;
+  return normalizeAppBaseUrl(base);
 }
 
 function localTesseractAssetUrl(fileName = ""): string {
@@ -73,6 +76,32 @@ function cacheKey(profile: BrowserOcrProfile): string {
   });
 }
 
+function normalizeWorkerError(error: unknown, workerPath?: string): Error {
+  if (
+    error instanceof Error &&
+    error.message.startsWith("Не удалось запустить browser OCR worker")
+  ) {
+    return error;
+  }
+
+  let detail = "браузер не сообщил причину";
+  if (error instanceof Error && error.message) {
+    detail = error.message;
+  } else if (typeof error === "string" && error.trim()) {
+    detail = error.trim();
+  } else if (error && typeof error === "object") {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) {
+      detail = message.trim();
+    }
+  }
+
+  const location = workerPath ? ` (${workerPath})` : "";
+  return new Error(
+    `Не удалось запустить browser OCR worker${location}: ${detail}.`,
+  );
+}
+
 class BrowserOcrWorkerSession {
   private readonly key: string;
   private readonly workerPromise: Promise<TesseractWorkerLike>;
@@ -86,12 +115,19 @@ class BrowserOcrWorkerSession {
   ) {
     this.key = cacheKey(profile);
     this.progressSink = onProgress;
-    this.workerPromise = createWorkerFn(profile.languages, 1, {
+    const workerOptions: TesseractWorkerOptions = {
       ...browserTesseractOptions(),
       ...(profile.langPath ? { langPath: profile.langPath } : {}),
       ...(profile.cachePath ? { cachePath: profile.cachePath } : {}),
       ...(profile.gzip !== undefined ? { gzip: profile.gzip } : {}),
       logger: (message) => this.reportProgress(message),
+    };
+    this.workerPromise = createWorkerFn(
+      profile.languages,
+      1,
+      workerOptions,
+    ).catch((error) => {
+      throw normalizeWorkerError(error, workerOptions.workerPath);
     });
   }
 

@@ -1,54 +1,44 @@
-FROM python:3.10-slim AS wheels
+FROM python:3.10-slim AS base
 
-ARG OCR_REQUIREMENTS=requirements-ci.txt
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=8000
 
-WORKDIR /build
+ARG OCR_INSTALL_CJK_FONTS=0
 
-COPY requirements*.txt ./
-
-RUN python -m pip wheel \
-    --disable-pip-version-check \
-    --no-cache-dir \
-    --retries 2 \
-    --default-timeout 60 \
-    --wheel-dir /wheels \
-    -r "${OCR_REQUIREMENTS}" \
-    && cp "${OCR_REQUIREMENTS}" /wheels/requirements.txt
-
-FROM python:3.10-slim AS runtime
-
-ARG OCR_CONTAINER_PORT=8000
-
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PORT=${OCR_CONTAINER_PORT}
-
-RUN apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 update \
-    && apt-get install -y --no-install-recommends \
-        fonts-noto-cjk \
-        libgl1 \
-        libglib2.0-0 \
-        poppler-utils \
-        tesseract-ocr \
-        tesseract-ocr-chi-sim \
-        tesseract-ocr-eng \
-        tesseract-ocr-rus \
-    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 update; \
+    apt-get install -y --no-install-recommends \
+      tesseract-ocr \
+      tesseract-ocr-eng \
+      tesseract-ocr-rus \
+      tesseract-ocr-chi-sim \
+      poppler-utils \
+      libglib2.0-0; \
+    if [ "$OCR_INSTALL_CJK_FONTS" = "1" ]; then \
+      apt-get install -y --no-install-recommends fonts-noto-cjk; \
+    fi; \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY --from=wheels /wheels /wheels
-RUN python -m pip install \
-    --disable-pip-version-check \
-    --no-cache-dir \
-    --no-index \
-    --find-links=/wheels \
-    -r /wheels/requirements.txt \
-    && rm -rf /wheels
+ARG PYTHON_REQUIREMENTS=requirements-light.txt
+COPY requirements*.txt ./
 
-COPY . .
+RUN pip install --no-cache-dir --no-compile --retries 2 --default-timeout 60 -r "$PYTHON_REQUIREMENTS"
 
-EXPOSE ${OCR_CONTAINER_PORT}
+FROM base AS app-base
+COPY app ./app
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
+FROM app-base AS test
+COPY pyproject.toml ./
+COPY .flake8 ./
+COPY tests ./tests
+
+FROM app-base AS runtime
+
+EXPOSE 8000
+
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

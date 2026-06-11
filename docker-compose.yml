@@ -1,55 +1,87 @@
+name: ittm
+
 services:
   ocr:
+    image: ittm-ocr
     build:
       context: ./ocr
       dockerfile: ../docker/ocr.Dockerfile
+      network: ${DOCKER_BUILD_NETWORK:-default}
+      target: ${OCR_BUILD_TARGET:-runtime}
       args:
-        OCR_REQUIREMENTS: "${OCR_REQUIREMENTS:-requirements-ci.txt}"
-        OCR_CONTAINER_PORT: "${OCR_HOST_PORT:-8000}"
-    network_mode: host
-    command:
-      - uvicorn
-      - app.main:app
-      - --host
-      - 0.0.0.0
-      - --port
-      - "${OCR_HOST_PORT:-8000}"
+        PYTHON_REQUIREMENTS: ${OCR_REQUIREMENTS:-requirements-light.txt}
+        OCR_INSTALL_CJK_FONTS: ${OCR_INSTALL_CJK_FONTS:-0}
     environment:
-      - PORT=${OCR_HOST_PORT:-8000}
-      - DISABLE_RUNTIME_EASYOCR_INSTALL=${DISABLE_RUNTIME_EASYOCR_INSTALL:-0}
+      PORT: ${OCR_INTERNAL_PORT:-8000}
+      PYTHONPATH: /opt/ittm-python-packages
+      EASY_INSTALL_TARGET: /opt/ittm-python-packages
+      EASYOCR_MODULE_PATH: /models/easyocr
+      DISABLE_RUNTIME_EASYOCR_INSTALL: ${DISABLE_RUNTIME_EASYOCR_INSTALL:-0}
+    volumes:
+      - ocr-python-packages:/opt/ittm-python-packages
+      - ocr-easyocr-models:/models/easyocr
+    expose:
+      - "${OCR_INTERNAL_PORT:-8000}"
+    command: sh -c 'uvicorn app.main:app --host 0.0.0.0 --port "$$PORT"'
     healthcheck:
       test:
-        [
-          "CMD-SHELL",
-          'python -c "import json, os, urllib.request; port=os.environ.get(''PORT'', ''8000''); data=json.load(urllib.request.urlopen(f''http://127.0.0.1:{port}/readiness'', timeout=2)); raise SystemExit(0 if data.get(''ready'') else 1)"',
-        ]
+        - CMD-SHELL
+        - >-
+          python -c "import json, os, urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:%s/readiness' % os.environ.get('PORT', '8000'), timeout=3)); raise SystemExit(0 if data.get('ready') else 1)"
       interval: 10s
-      timeout: 3s
+      timeout: 5s
       retries: 12
     restart: unless-stopped
 
   gateway:
+    image: ittm-gateway
     build:
       context: .
       dockerfile: docker/gateway.Dockerfile
+      network: ${DOCKER_BUILD_NETWORK:-default}
     expose:
-      - 3000
+      - "${GATEWAY_INTERNAL_PORT:-3000}"
     environment:
-      - PORT=3000
-      - OCR_URL=http://host.docker.internal:${OCR_HOST_PORT:-8000}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      PORT: ${GATEWAY_INTERNAL_PORT:-3000}
+      OCR_URL: http://ocr:${OCR_INTERNAL_PORT:-8000}
     depends_on:
       ocr:
         condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "fetch('http://127.0.0.1:' + (process.env.PORT || '3000') + '/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 12
     restart: unless-stopped
 
   nginx:
+    image: ittm-nginx
     build:
       context: .
       dockerfile: docker/nginx.Dockerfile
+      network: ${DOCKER_BUILD_NETWORK:-default}
+    environment:
+      NGINX_LISTEN_PORT: ${NGINX_INTERNAL_PORT:-80}
+      GATEWAY_HOSTNAME: gateway
+      GATEWAY_INTERNAL_PORT: ${GATEWAY_INTERNAL_PORT:-3000}
     ports:
-      - "${GATEWAY_HOST_BIND:-127.0.0.1}:${GATEWAY_HOST_PORT:-3000}:80"
+      - "${GATEWAY_HOST_BIND:-127.0.0.1}:${GATEWAY_HOST_PORT:-3000-3099}:${NGINX_INTERNAL_PORT:-80}"
     depends_on:
-      - gateway
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          wget -q -O /dev/null "http://127.0.0.1:$${NGINX_LISTEN_PORT:-80}/api/health"
+      interval: 10s
+      timeout: 5s
+      retries: 12
     restart: unless-stopped
+
+volumes:
+  ocr-python-packages:
+  ocr-easyocr-models:

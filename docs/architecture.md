@@ -1,104 +1,100 @@
-# Архитектура Системы: API-First Gateway & OCR Engine
+## Архитектура проекта
 
-Если ты хочешь видеть скучную и сухую техническую документацию со стеком и инструментами, вместо ответов на твои бредовые фантазии про Hyprland — получай. Распечатай это и повесь на стену, чтобы не забыть, что именно ты строишь.
+Text Extractor разделен на четыре основные части: браузерный интерфейс, стратегии распознавания на стороне браузера, TypeScript gateway и Python OCR-сервис. В локальном режиме `server.ts` одновременно обслуживает API и frontend. В Docker-режиме наружу опубликован только nginx: он раздает собранный frontend и проксирует `/api/*` во внутренний gateway. Python OCR-сервис остается закрытым внутри runtime-сети и доступен gateway по `OCR_URL`.
 
-## 1. Фундаментальная концепция: API-First
+```mermaid
+flowchart TB
+    User["User"]
 
-Проект построен по принципу **API-First (Headless Backend)**. Это означает, что ядро приложения — это набор RESTful эндпоинтов, которым абсолютно плевать, кто к ним обращается. Любой клиент (веб-интерфейс, расширение, curl, умный чайник или твоя будущая утилита на C) просто потребляет этот API.
+    subgraph Browser["Browser: React + Vite"]
+        direction TB
+        App["App.tsx<br/>OcrProvider + AppShell"]
+        State["OcrContext.tsx<br/>state + actions"]
+        Workspace["OcrWorkspace<br/>upload / settings / reading"]
+        Strategy["use-extraction.ts<br/>source selection + fallback"]
+        Pdf["pdf-parser.ts<br/>PDF text + page canvas"]
+        BrowserOcr["browser-engine.ts<br/>Tesseract.js WASM"]
+        Llm["llm-client.ts<br/>Gemini / OpenRouter / Ollama"]
 
-### Технический Стек (Текущая реализация)
+        App --> State
+        State --> Workspace
+        State --> Strategy
+        Strategy --> Pdf
+        Strategy --> BrowserOcr
+        Strategy --> Llm
+    end
 
-- **Фронтенд (Web UI)**: React, TailwindCSS, Vite. (В режиме разработки раздается через Vite Middleware, в проде — статикой через Express).
-- **Gateway / API Сервер**: TypeScript, Express.js. Запускается на Node.js (AI Studio/Dev) или Bun (VPS/Prod). Отвечает за оркестрацию, маршрутизацию, безопасность и связь с внешними API (Gemini).
-- **OCR Worker (Микросервис)**: Python 3.10+, FastAPI, Uvicorn, PyTorch, EasyOCR. Изолированный тяжелый воркер для распознавания текста. Опционально может быть заменен на легковесную версию в зависимости от `requirements.txt`.
-- **LLM Engine**: Google Gemini API (через официальный `@google/genai` SDK на стороне Gateway).
+    subgraph LocalRuntime["Local runtime"]
+        direction TB
+        LocalServer["server.ts<br/>Express API + Vite dev/prod static"]
+    end
 
----
+    subgraph DockerRuntime["Docker runtime"]
+        direction TB
+        Nginx["nginx container<br/>published on host<br/>static dist + /api proxy"]
+        GatewayContainer["gateway container<br/>server.ts + gateway/src<br/>internal: 3000"]
+        OcrContainer["ocr container<br/>FastAPI + Tesseract<br/>internal: 8000"]
 
-## 2. Схема потоков данных (Data Flow)
+        Nginx -->|/api/*| GatewayContainer
+        GatewayContainer -->|OCR_URL| OcrContainer
+    end
 
-Ниже представлена диаграмма того, как запрос протекает через систему прямо сейчас, в ее рабочем состоянии:
+    subgraph Gateway["gateway/src"]
+        direction TB
+        Handle["core/handle.ts<br/>API-only dispatch"]
+        Routes["core/routes.ts<br/>convert / health / capabilities / diagnostics / probe / install"]
+        Client["clients/ocrClient.ts<br/>OCR_URL proxy"]
+        Http["core/http.ts<br/>JSON/error helpers"]
 
-```text
-[ Любой Клиент ]
-       │ 1. POST /api/ocr { image: base64, prompt: text }
-       ▼
-[ Gateway (server.ts / Express) ] ──( 2. POST /recognize )──► [ Python OCR Worker (FastAPI) ]
-       │                                                                      │
-       │ 4. Формирование промпта (Текст + Картинка)                           │ 3. Возврат OCR текста
-       ▼                                                                      ▼
-[ LLM Module (Gemini / Ollama) ] ◄─────────────────────────────────────────────
-       │
-       │ 5. Возврат структурированного ответа (JSON / Text)
-       ▼
-[ Gateway (server.ts / Express) ]
-       │
-       │ 6. Response 200 OK
-       ▼
-[ Любой Клиент ]
+        Handle --> Routes
+        Routes --> Client
+        Routes --> Http
+    end
+
+    subgraph Python["ocr/app: FastAPI OCR"]
+        direction TB
+        Api["routers/*<br/>convert / health / probe / install"]
+        Temp["routers/convert.py<br/>tempfile lifecycle"]
+        Convert["services/convert_service.py<br/>file loading + orchestration"]
+        Chunking["chunking/*<br/>split + dedupe"]
+        Engines["engines/*<br/>Auto / Tesseract / EasyOCR / Stub"]
+        Markdown["formatting/markdown_formatter.py<br/>Markdown result"]
+
+        Api --> Temp
+        Temp --> Convert
+        Convert --> Chunking
+        Convert --> Engines
+        Engines --> Markdown
+    end
+
+    External["External APIs<br/>Gemini / OpenRouter / Ollama"]
+    CustomGateway["Custom gateway<br/>user-configured endpoint"]
+    Edge["Cloudflare Worker<br/>optional edge ingress / API proxy"]
+
+    User --> App
+    Strategy -->|Docker /api| Nginx
+    Strategy -. local /api .-> LocalServer
+    Strategy -. custom gateway .-> CustomGateway
+    Llm -. Gemini via edge .-> Edge
+    Edge -. optional origin proxy .-> Nginx
+    Edge -. Gemini proxy .-> External
+    LocalServer --> Handle
+    GatewayContainer --> Handle
+    OcrContainer --> Api
+    Client -->|HTTP OCR_URL| Api
+    Llm --> External
+
+    Markdown -->|JSON response| Client
+    Client -->|passes result back| Strategy
+    Strategy --> State
 ```
 
----
+Проверенное состояние runtime:
 
-## 3. Топология Клиентов (Текущие и запланированные)
+- в Docker наружу публикуется только nginx; host-порт выбирается автоматически из диапазона `3000-3099`, а фактический порт показывает `docker compose port nginx 80`;
+- gateway и OCR остаются внутри Docker-сети;
+- `GET /api/health` через nginx возвращает ответ Python OCR-сервиса;
+- локальный запуск использует те же gateway-маршруты, что и контейнерный запуск;
+- статическая Lite-сборка может работать без серверного OCR и использовать browser OCR или внешние LLM API.
 
-Поскольку Gateway автономен, мы можем реализовывать любые клиенты в зависимости от степени твоего отчаяния и запаса миллиардов лет.
-
-### Клиент 1: Web UI (Существует)
-
-- **Среда**: Браузер пользователя.
-- **Механика**: Обычный SPA на React.
-- **Задача**: Тестирование API, базовая работа через загрузку файлов руками или вставку картинок из буфера обмена.
-
-### Клиент 2: Браузерное расширение (Ближайшее будущее)
-
-- **Среда**: Chrome/Firefox Extension (Manifest V3).
-- **Механика**: Имеет нативный доступ к DOM дерева браузера (позволяет делать скриншоты с прокруткой сшивая части прямо в браузере).
-- **Отказоустойчивость Гибридной Модели**:
-  1.  **Remote Backend**: Расширение стучится на твой VPS `gateway.yoursite.com/api/ocr` (полный фарш: EasyOCR + Gemini).
-  2.  **Local API**: Если включено в настройках, стучится на локальный `localhost:3000` или локальную `Ollama`.
-  3.  **Offline Fallback (WASM)**: Если бэкенд сдох, расширение использует встроенный `tesseract.js` (WebAssembly OCR) для базового извлечения текста без LLM. Качество хуже, но система не превращается в кирпич.
-
-### Клиент 3: Native Linux Utility (Через миллиард лет на C/Rust)
-
-- **Среда**: Wayland (Hyprland / Sway) или X11.
-- **Механика**: Низкоуровневый системный инструмент без интерфейсных излишеств.
-- **Главная архитектурная проблема (Scroll Screenshots)**: Инструменты типа `grim` / `slurp` физически не могут захватить то, что за пределами вьюпорта Wayland. Клиенту придется самостоятельно реализовывать виртуальный скролл (`ydotool`), сшивку панорамы (OpenCV/FFmpeg) и только потом отправку готового Base64 на наш Gateway. Backend эту проблему не решает, это 100% проблема клиента.
-- **Задача Gateway**: Просто стоять и ждать, пока твой код на Rust разберется с Wayland и пришлет ему валидную картинку.
-
----
-
-## 4. Развертывание и Изоляция (DevOps заглушка)
-
-Система спроектирована так, чтобы не засорять хост-машину:
-
-- **JS/TS Окружение**: Работает in-place (Node/Bun). Зависимости лежат в `node_modules/`.
-- **Python Окружение**: `scripts/install-local-python.sh` создает локальный `ocr/.venv/`, как старый `run.sh`. Глобальные библиотеки ОС не затрагиваются, а локальный запуск не требует тяжелых Docker-слоев для базовых задач.
-
----
-
-## 5. Топология Развертывания на VPS (Минимализм)
-
-Для тех, кто боится "жирного Node" и хочет развернуть бэкенд одной командой, мы используем подход **Bundling (Сборка)** на базе `esbuild`.
-
-### Сценарий "Lightweight":
-
-1. **Сборка (Build)**: В CI или локально `gateway` и вся его логика компилируются в один монолитный файл `server.cjs`.
-2. **Деплой**: На сервер летит только этот файл (весом в пару сотен килобайт). Никаких `node_modules`, никакого `npm install`.
-3. **Запуск**: `node server.cjs` или `bun server.cjs`. Для работы нужен только голый рантайм.
-
-### Что такое NGINX?
-
-Для справки: Nginx — это **не** "сервер к которому обращаются движки". Это обратный прокси (Reverse Proxy). Он стоит самым первым щитом между интернетом и твоей VPS. Его работа:
-
-- Принять HTTP/HTTPS запрос из браузера.
-- Раздать статику (твои скомпилированные React-файлы).
-- Проксировать API-запросы (`/api/*`) внутрь на твой Gateway `server.cjs`.
-
-### Как быть с PyTorch?
-
-Модуль OCR в проекте уже имеет два варианта установки (открой папку `ocr`, ты сам их туда положил):
-
-- `requirements.txt` — Полный фарш. Тащит за собой PyTorch и EasyOCR. Занимает гигабайты.
-- `requirements-light.txt` — Легкая версия _без_ EasyOCR и PyTorch.
-  Если ты ставишь легкую версию — ты не используешь EasyOCR. Магии не бывает. Либо ты платишь ресурсами за нейронку, либо на VPS у тебя работает только Tesseract, либо проксирование к внешнему API.
+Границы файлов и точки входа вынесены в отдельный документ: [границы ответственности и точки входа](./tmp/boundaries.md).

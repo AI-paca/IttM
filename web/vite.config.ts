@@ -10,6 +10,11 @@ const webRoot = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = path.resolve(webRoot, "..");
 const distRoot = path.resolve(repoRoot, "dist");
 const tesseractVendorRoute = "vendor/tesseract";
+const tesseractCoreFiles = [
+  "tesseract-core-lstm.wasm.js",
+  "tesseract-core-simd-lstm.wasm.js",
+  "tesseract-core-relaxedsimd-lstm.wasm.js",
+];
 
 function tesseractAssetFiles(): Map<string, string> {
   const files = new Map<string, string>();
@@ -19,12 +24,10 @@ function tesseractAssetFiles(): Map<string, string> {
   );
 
   const coreDir = path.resolve(repoRoot, "node_modules/tesseract.js-core");
-  for (const entry of fs.readdirSync(coreDir)) {
-    if (
-      entry.startsWith("tesseract-core") &&
-      (entry.endsWith(".js") || entry.endsWith(".wasm"))
-    ) {
-      files.set(entry, path.resolve(coreDir, entry));
+  for (const fileName of tesseractCoreFiles) {
+    const sourcePath = path.resolve(coreDir, fileName);
+    if (fs.existsSync(sourcePath)) {
+      files.set(fileName, sourcePath);
     }
   }
 

@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { BrowserOcrProfile } from "./browser-profile";
-import { BrowserOcrWorkerPool } from "./tesseract-worker-session";
+import {
+  BrowserOcrWorkerPool,
+  normalizeAppBaseUrl,
+} from "./tesseract-worker-session";
 
 function profile(): BrowserOcrProfile {
   return {
@@ -23,6 +26,12 @@ function deferred() {
   });
   return { promise, resolve };
 }
+
+test("normalizes GitHub Pages base paths for local OCR assets", () => {
+  assert.equal(normalizeAppBaseUrl("/IttM/"), "/IttM/");
+  assert.equal(normalizeAppBaseUrl("/IttM"), "/IttM/");
+  assert.equal(normalizeAppBaseUrl(undefined), "/");
+});
 
 test("worker pool uses local Tesseract worker and core assets", async () => {
   const globalRecord = globalThis as unknown as Record<string, unknown>;
@@ -71,6 +80,31 @@ test("worker pool uses local Tesseract worker and core assets", async () => {
     await lease.release();
     await pool.releaseCached();
   } finally {
+    if (previousWindow === undefined) {
+      delete globalRecord.window;
+    } else {
+      globalRecord.window = previousWindow;
+    }
+  }
+});
+
+test("worker pool explains worker startup failures without a browser message", async () => {
+  const globalRecord = globalThis as unknown as Record<string, unknown>;
+  const previousWindow = globalRecord.window;
+  globalRecord.window = {};
+
+  const pool = new BrowserOcrWorkerPool(async () => {
+    throw undefined;
+  });
+
+  try {
+    const lease = await pool.acquire(profile(), () => {});
+    await assert.rejects(
+      () => lease.recognize(new Blob(["image"])),
+      /Не удалось запустить browser OCR worker.*браузер не сообщил причину/,
+    );
+  } finally {
+    await pool.releaseCached();
     if (previousWindow === undefined) {
       delete globalRecord.window;
     } else {

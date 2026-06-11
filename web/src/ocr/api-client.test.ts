@@ -5,10 +5,19 @@ import {
   buildBackendGatewayCandidates,
   buildOllamaGenerateUrl,
   isOllamaBaseUrl,
+  normalizePlatformError,
   parseGatewayUrlList,
   parsePlatformError,
   readJsonOrThrow,
 } from "./api-client";
+
+test("normalizePlatformError preserves messages from browser error objects", () => {
+  const error = normalizePlatformError({
+    message: "Worker script failed to load",
+  });
+
+  assert.equal(error.message, "Worker script failed to load");
+});
 
 test("parsePlatformError extracts FastAPI detail from JSON", async () => {
   const response = new Response(

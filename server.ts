@@ -107,6 +107,7 @@ async function startServer(): Promise<http.Server> {
   const app = express();
   const env = read_node_env();
   const PORT = parseInt(env.PORT);
+  const server = http.createServer(app);
 
   // API routes first
   app.use(apiMiddleware(env));
@@ -116,7 +117,7 @@ async function startServer(): Promise<http.Server> {
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       configFile: "web/vite.config.ts",
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: { server } },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -138,7 +139,6 @@ async function startServer(): Promise<http.Server> {
   }
 
   return await new Promise<http.Server>((resolve, reject) => {
-    const server = app.listen(PORT, "0.0.0.0");
     server.once("error", reject);
     server.once("listening", () => {
       console.log(
@@ -146,11 +146,15 @@ async function startServer(): Promise<http.Server> {
       );
       resolve(server);
     });
+    server.listen(PORT, "0.0.0.0");
   });
 }
 
+const importMetaUrl =
+  typeof import.meta.url === "string" ? import.meta.url : "";
 const isMainModule = process.argv[1]
-  ? path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  ? !importMetaUrl ||
+    path.resolve(process.argv[1]) === fileURLToPath(importMetaUrl)
   : false;
 
 if (isMainModule) {

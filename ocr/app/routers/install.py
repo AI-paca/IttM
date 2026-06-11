@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 import threading
+from os import environ, makedirs
 from collections import deque
 from dataclasses import dataclass, field
 
@@ -51,17 +52,23 @@ def _update(*, status: str | None = None, phase: str | None = None, message: str
 
 
 def _pip_install_command() -> list[str]:
-    return [
+    command = [
         sys.executable,
         "-m",
         "pip",
         "install",
         "--progress-bar",
         "on",
-        "easyocr",
-        "torch",
-        "torchvision",
     ]
+    target = environ.get("EASY_INSTALL_TARGET")
+    if target:
+        makedirs(target, exist_ok=True)
+        if target not in sys.path:
+            sys.path.insert(0, target)
+        command.extend(["--target", target])
+
+    command.extend(["easyocr", "torch", "torchvision"])
+    return command
 
 
 def _pip_install_easyocr() -> dict | None:
@@ -93,8 +100,8 @@ def _pip_install_easyocr() -> dict | None:
 
     if network_error_seen:
         last_line = (
-            "Docker OCR container cannot reach PyPI. Restart the stack with scripts/run-docker.sh "
-            "so OCR uses host networking, or fix Docker outbound network access."
+            "Docker OCR container cannot reach PyPI. Restart Docker daemon with "
+            "`sudo systemctl restart docker`, then run `docker compose up -d` again."
         )
 
     _update(status="error", phase="pip_install", message="pip install failed.", progress=100)

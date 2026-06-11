@@ -41,18 +41,16 @@ async function createTesseractWorker(
   )) as unknown as TesseractWorkerLike;
 }
 
+const compiledTesseractAssetRoot = `${
+  import.meta.env?.BASE_URL ?? "/"
+}vendor/tesseract/`;
+const compiledTesseractWorkerUrl = `${
+  import.meta.env?.BASE_URL ?? "/"
+}vendor/tesseract/worker.min.js`;
+
 export function normalizeAppBaseUrl(base: string | undefined): string {
   if (!base || base === "./") return "/";
   return base.endsWith("/") ? base : `${base}/`;
-}
-
-function appBaseUrl(): string {
-  const base = typeof document === "undefined" ? "/" : import.meta.env.BASE_URL;
-  return normalizeAppBaseUrl(base);
-}
-
-function localTesseractAssetUrl(fileName = ""): string {
-  return `${appBaseUrl()}vendor/tesseract/${fileName}`;
 }
 
 function browserTesseractOptions(): Partial<TesseractWorkerOptions> {
@@ -61,8 +59,8 @@ function browserTesseractOptions(): Partial<TesseractWorkerOptions> {
   }
 
   return {
-    workerPath: localTesseractAssetUrl("worker.min.js"),
-    corePath: localTesseractAssetUrl(),
+    workerPath: compiledTesseractWorkerUrl,
+    corePath: compiledTesseractAssetRoot,
     workerBlobURL: false,
   };
 }

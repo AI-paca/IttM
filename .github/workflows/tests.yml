@@ -64,6 +64,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: GitHub Pages OCR asset regression
+        run: npm run build:pages && npm run test:pages
+
       - name: Build Gateway Docker image
         run: docker build -f docker/gateway.Dockerfile -t ittm-gateway-ci .
 

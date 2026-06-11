@@ -15,17 +15,17 @@ The implementation tracks the concerns from:
 
 ## Goals
 
-| Area | Requested outcome | Verification | Status |
-| --- | --- | --- | --- |
-| GitHub Pages | Prevent another missing `BASE_URL` regression for OCR worker/core assets | Build-level test inspects the Pages bundle and files; browser smoke test runs OCR under `/IttM/` | In progress |
-| Browser PDF | Keep expensive PDF page rendering and pixel scanning off the UI thread where browser support allows it | Worker unit tests, PDF regression tests, browser smoke test | Pending |
-| Browser Base64 | Avoid main-thread `FileReader` and giant intermediate data URLs for images/PDF pages | Worker conversion tests and cancellation/error tests | Pending |
-| Browser memory | Bound page/image dimensions and release canvases, bitmaps, object URLs and workers deterministically | Memory-oriented browser scenario and code-level cleanup tests | Pending |
-| Backend uploads | Stop persisting ordinary image uploads to `/tmp`; keep bytes in memory with explicit size limits | FastAPI tests assert no temp file for images and cleanup for PDFs | Pending |
-| Tesseract I/O | Feed PIL/numpy objects directly to `pytesseract`; document unavoidable subprocess internals | Engine tests with mocked pytesseract and temp-directory monitoring | Pending |
-| EasyOCR fallback | Avoid selecting GPU EasyOCR when available VRAM is below a configurable threshold; recover from OOM | Resource policy unit tests and engine fallback tests | Pending |
-| External LLM consent | Require explicit per-session consent before a document is sent to Gemini/OpenRouter | UI/context tests and request-blocking unit tests | Pending |
-| Docker resources | Measure steady-state and request memory for browser/backend paths; detect leaked temporary files | Repeatable scripts/commands recorded below | Pending |
+| Area                 | Requested outcome                                                                                      | Verification                                                                                     | Status      |
+| -------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ | ----------- |
+| GitHub Pages         | Prevent another missing `BASE_URL` regression for OCR worker/core assets                               | Build-level test inspects the Pages bundle and files; browser smoke test runs OCR under `/IttM/` | Implemented |
+| Browser PDF          | Keep expensive PDF page rendering and pixel scanning off the UI thread where browser support allows it | Worker unit tests, PDF regression tests, browser smoke test                                      | Pending     |
+| Browser Base64       | Avoid main-thread `FileReader` and giant intermediate data URLs for images/PDF pages                   | Worker conversion tests and cancellation/error tests                                             | Pending     |
+| Browser memory       | Bound page/image dimensions and release canvases, bitmaps, object URLs and workers deterministically   | Memory-oriented browser scenario and code-level cleanup tests                                    | Pending     |
+| Backend uploads      | Stop persisting ordinary image uploads to `/tmp`; keep bytes in memory with explicit size limits       | FastAPI tests assert no temp file for images and cleanup for PDFs                                | Pending     |
+| Tesseract I/O        | Feed PIL/numpy objects directly to `pytesseract`; document unavoidable subprocess internals            | Engine tests with mocked pytesseract and temp-directory monitoring                               | Pending     |
+| EasyOCR fallback     | Avoid selecting GPU EasyOCR when available VRAM is below a configurable threshold; recover from OOM    | Resource policy unit tests and engine fallback tests                                             | Pending     |
+| External LLM consent | Require explicit per-session consent before a document is sent to Gemini/OpenRouter                    | UI/context tests and request-blocking unit tests                                                 | Pending     |
+| Docker resources     | Measure steady-state and request memory for browser/backend paths; detect leaked temporary files       | Repeatable scripts/commands recorded below                                                       | Pending     |
 
 ## Scope Decisions
 
@@ -78,11 +78,25 @@ deployment changes across local, Docker, Pages and Edge modes.
   JPEG data on the UI thread.
 - Confirmed image uploads are written by the FastAPI router before
   `convert_service` opens them again.
+- Added `build:pages` and `test:pages`. The verifier checks the final HTML,
+  hashed JavaScript bundle and all local Tesseract worker/core files.
+- Added the Pages regression check to pull-request CI and the deploy workflow.
 
 ## Verification Record
 
 Commands and measured results will be appended here after each implementation
 step. Failed checks stay in the log with their cause; they are not erased.
+
+- `npm run build:pages && npm run test:pages`
+  - First run failed because the bundle still assembled the worker URL from
+    separate base and vendor strings. The verifier correctly rejected the
+    artifact.
+  - The runtime contract was tightened to compile a complete worker URL.
+  - Second run passed and verified
+    `/IttM/vendor/tesseract/worker.min.js` plus all four local worker/core
+    assets.
+- `npm test`: 28 tests passed after the Pages contract change.
+- `npm run typecheck`: passed.
 
 ## Remaining Risks
 

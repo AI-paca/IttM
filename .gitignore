@@ -46,7 +46,7 @@ ocr/.tesseract_cache/
 *.jpeg
 *.webp
 temp/
-tmp/
+/tmp/
 *.log
 
 # Node.js / TypeScript
@@ -109,6 +109,9 @@ logs/
 probes/actual*.json
 ocr/tests/fixtures/
 testtables/
+
+# LLM review drafts
+docs/ревью от LLM/
 
 # Model files (large files should use Git LFS)
 *.onnx

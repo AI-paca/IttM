@@ -1,6 +1,6 @@
 import { UploadCloud } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import type { AppState } from "../ocr/types";
+import type { AppState } from "../types/app.types";
 
 interface DragOverlayProps {
   appState: AppState;

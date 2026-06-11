@@ -6,6 +6,7 @@ import {
   buildBackendGatewayCandidates,
   executeBackendOcr,
   executeBackendOcrWithFallback,
+  isOllamaBaseUrl,
   noticeFromError,
 } from "./api-client";
 import {
@@ -14,14 +15,14 @@ import {
   runBrowserOcrLowMemory,
 } from "./browser-engine";
 import { base64JpegToFile } from "./file-utils";
-import { executeLlmOcr } from "./llm-client";
+import { executeLlmOcr, executeOllamaOcr } from "./llm-client";
 import type {
   AppDiagnostics,
-  AppState,
   LlmProvider,
   OcrResult,
   SourceType,
 } from "./types";
+import type { AppState } from "../types/app.types";
 
 interface UseOcrExtractionArgs {
   appState: AppState;
@@ -206,11 +207,28 @@ export function useOcrExtraction({
             browserProfile.pdfRenderScale,
           );
         } else if (effectiveSource === "gateway") {
-          const url = buildApiUrl(pingUrl, "/api/convert");
-          result = await executeBackendOcr(file, url, active, (text) => {
-            if (active.current) setExtractionProgress(text);
-          });
-          handleChunk(result.markdown || "");
+          if (isOllamaBaseUrl(pingUrl)) {
+            result = await executeOllamaOcr(
+              file,
+              { baseUrl: pingUrl, model: llmModel },
+              active,
+              (text) => {
+                if (active.current) setExtractionProgress(text);
+              },
+              handleChunk,
+              lastExtractedPage,
+              setTotalPdfPages,
+              browserProfile.pdfRenderScale,
+            );
+            if (file.type !== "application/pdf")
+              handleChunk(result.markdown || "");
+          } else {
+            const url = buildApiUrl(pingUrl, "/api/convert");
+            result = await executeBackendOcr(file, url, active, (text) => {
+              if (active.current) setExtractionProgress(text);
+            });
+            handleChunk(result.markdown || "");
+          }
         } else if (effectiveSource === "auto") {
           try {
             result = await executeBackendOcrWithFallback(

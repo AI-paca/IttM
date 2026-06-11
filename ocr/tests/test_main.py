@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from app.main import app
+from app.routers import install
 from app.services import convert_service
 
 client = TestClient(app)
@@ -49,6 +50,14 @@ def test_diagnostics_v1_alias():
     json_data = response.json()
     assert "python_version" in json_data
     assert "cpu_cores" in json_data
+
+
+def test_easyocr_install_uses_supported_pip_progress_mode():
+    command = install._pip_install_command()
+
+    assert command[command.index("--progress-bar") + 1] == "on"
+    assert "easyocr" in command
+    assert "torch" in command
 
 
 def test_convert_invalid_pdf():

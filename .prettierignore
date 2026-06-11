@@ -1,0 +1,6 @@
+.python-env/
+node_modules/
+dist/
+build/
+ocr/tests/fixtures/
+.cache/

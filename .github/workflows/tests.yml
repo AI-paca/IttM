@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   linters:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -30,10 +30,10 @@ jobs:
         run: npx eslint .
 
       - name: TypeScript typecheck
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Build OCR Docker image
-        run: docker build -f ocr.Dockerfile -t ittm-ocr-ci ./ocr
+        run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci ./ocr
 
       - name: Python flake8
         run: docker run --rm ittm-ocr-ci python -m flake8 .
@@ -45,7 +45,7 @@ jobs:
         run: docker run --rm ittm-ocr-ci python -m ruff check .
 
   frontend-gateway:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [linters]
     steps:
       - uses: actions/checkout@v4
@@ -64,23 +64,29 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Build Gateway Docker image
+        run: docker build -f docker/gateway.Dockerfile -t ittm-gateway-ci .
+
       - name: Build Nginx gateway Docker image
-        run: docker build -f nginx.Dockerfile -t ittm-nginx-ci .
+        run: docker build -f docker/nginx.Dockerfile -t ittm-nginx-ci .
+
+      - name: Validate Docker Compose config
+        run: docker compose config --quiet
 
   python:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [linters]
     steps:
       - uses: actions/checkout@v4
 
       - name: Build OCR Docker image
-        run: docker build -f ocr.Dockerfile -t ittm-ocr-ci ./ocr
+        run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci ./ocr
 
       - name: Python tests
         run: docker run --rm ittm-ocr-ci python -m pytest tests -q
 
   ocr-quality:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [linters, frontend-gateway, python]
     steps:
       - uses: actions/checkout@v4
@@ -100,7 +106,7 @@ jobs:
         run: npm ci
 
       - name: Build OCR Docker image
-        run: docker build -f ocr.Dockerfile -t ittm-ocr-ci ./ocr
+        run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci ./ocr
 
       - name: Prepare OCR fixtures and tessdata from Docker image
         run: |

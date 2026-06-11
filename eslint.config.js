@@ -35,7 +35,7 @@ export default tseslint.config(
   {
     files: [
       "gateway/**/*.ts",
-      "vite.config.ts",
+      "web/vite.config.ts",
       "**/*.test.ts",
       "**/*.ocr-test.ts",
     ],

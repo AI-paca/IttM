@@ -51,6 +51,38 @@ test("route returns explicit JSON for dead install-light route", async () => {
   assert.match(payload.error, /not implemented/);
 });
 
+test("route includes OCR target in gateway fetch failures", async () => {
+  const originalFetch = globalThis.fetch;
+  const form = new FormData();
+  form.append("file", new Blob(["x"], { type: "text/plain" }), "sample.txt");
+  const error = new Error("fetch failed");
+  (error as any).cause = {
+    code: "ECONNREFUSED",
+    message: "connect ECONNREFUSED",
+  };
+
+  globalThis.fetch = async () => {
+    throw error;
+  };
+
+  try {
+    const response = await route(
+      new Request("http://localhost/api/convert?engine_type=tesseract", {
+        method: "POST",
+        body: form,
+      }),
+      env,
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 502);
+    assert.match(payload.error, /http:\/\/ocr\.local:8000\/v1\/convert/);
+    assert.match(payload.error, /ECONNREFUSED/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("route returns 405 for wrong method and 404 for unknown route", async () => {
   const methodResponse = await route(
     new Request("http://localhost/api/convert", { method: "GET" }),

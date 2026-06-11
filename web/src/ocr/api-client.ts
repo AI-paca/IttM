@@ -276,6 +276,39 @@ export function buildApiUrl(
   return url.toString();
 }
 
+export function isOllamaBaseUrl(baseUrl: string): boolean {
+  const trimmed = baseUrl.trim();
+  if (!trimmed) return false;
+
+  try {
+    const url = new URL(trimmed);
+    return (
+      url.port === "11434" ||
+      url.pathname === "/api/generate" ||
+      url.pathname.endsWith("/api/generate")
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function buildOllamaGenerateUrl(baseUrl: string): string {
+  const trimmed = baseUrl.trim() || "http://localhost:11434";
+  const base = trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
+  const url = new URL(base);
+  const path = url.pathname.replace(/\/$/, "");
+
+  if (path.endsWith("/api/generate")) {
+    url.pathname = path;
+  } else if (path.endsWith("/api")) {
+    url.pathname = `${path}/generate`;
+  } else {
+    url.pathname = `${path}/api/generate`;
+  }
+
+  return url.toString();
+}
+
 export async function executeBackendOcrWithFallback(
   targetFile: File,
   candidates: BackendGatewayCandidate[],

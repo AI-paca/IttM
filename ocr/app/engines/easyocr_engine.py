@@ -1,7 +1,3 @@
-import re
-
-from PIL import Image
-
 from app.engines.base import OcrEngine
 
 
@@ -11,7 +7,7 @@ class EasyOcrEngine(OcrEngine):
     EasyOCR uses deep learning models for text detection and recognition.
     """
 
-    def __init__(self, languages=None):
+    def __init__(self, languages=None, download_enabled: bool = True):
         """
         Initialize EasyOCR engine.
 
@@ -21,6 +17,7 @@ class EasyOcrEngine(OcrEngine):
         if languages is None:
             languages = ["en", "ru"]
         self.languages = languages
+        self.download_enabled = download_enabled
         self._reader = None
         self._available = False
         self._init_error = None
@@ -32,12 +29,17 @@ class EasyOcrEngine(OcrEngine):
                 import easyocr
                 import torch
 
-                # Support CUDA (NVIDIA) and MPS (Apple Silicon), ROCm is handled as CUDA in some PyTorch builds or has separate checks
+                # Support CUDA (NVIDIA) and MPS (Apple Silicon).
+                # Some PyTorch ROCm builds report ROCm devices through CUDA APIs.
                 # easyocr just takes gpu=True/False
                 use_gpu = torch.cuda.is_available() or (
                     hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
                 )
-                self._reader = easyocr.Reader(self.languages, gpu=use_gpu)
+                self._reader = easyocr.Reader(
+                    self.languages,
+                    gpu=use_gpu,
+                    download_enabled=self.download_enabled,
+                )
                 self._available = True
             except Exception as e:
                 self._init_error = str(e)
@@ -103,6 +105,36 @@ class EasyOcrEngine(OcrEngine):
         except Exception as e:
             print(f"EasyOCR recognition error: {e}")
             return ""
+
+    def recognize_words(self, image, psm: int = 6, min_conf: int = 20) -> list[dict]:
+        reader = self._get_reader()
+        if reader is None:
+            return []
+
+        try:
+            import numpy as np
+
+            min_conf_ratio = min_conf / 100
+            result = reader.readtext(np.array(image))
+            words = []
+            for bbox, text, conf in result:
+                if conf < min_conf_ratio or not text.strip():
+                    continue
+
+                xs = [point[0] for point in bbox]
+                ys = [point[1] for point in bbox]
+                words.append(
+                    {
+                        "text": text.strip(),
+                        "bbox": (int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))),
+                        "conf": float(conf * 100),
+                    }
+                )
+
+            return words
+        except Exception as e:
+            print(f"EasyOCR word recognition error: {e}")
+            return []
 
     def available(self) -> bool:
         """Check if EasyOCR is available."""

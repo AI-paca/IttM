@@ -1,4 +1,3 @@
-import type { Dispatch, SetStateAction } from "react";
 import {
   Check,
   ClipboardPaste,
@@ -8,50 +7,54 @@ import {
   X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import type { EngineControls } from "./layout/engine-controls.types";
 import type { LlmProvider, SourceType } from "../ocr/types";
 import { SOURCES } from "./sources";
 
 interface SettingsSidebarProps {
-  easyOcrInstalling: boolean;
+  controls: EngineControls;
   isOpen: boolean;
-  llmKey: string;
-  llmModel: string;
-  llmProvider: LlmProvider;
-  pingUrl: string;
-  rememberChoice: boolean;
-  selectedSource: SourceType;
-  themeMode: "light" | "dark" | "auto";
   onClose: () => void;
-  onInstallEasyOcr: () => void;
-  onRememberChange: (checked: boolean) => void;
-  onSourceSelect: (source: SourceType) => void;
-  setLlmKey: Dispatch<SetStateAction<string>>;
-  setLlmModel: Dispatch<SetStateAction<string>>;
-  setLlmProvider: Dispatch<SetStateAction<LlmProvider>>;
-  setPingUrl: Dispatch<SetStateAction<string>>;
-  setThemeMode: Dispatch<SetStateAction<"light" | "dark" | "auto">>;
 }
 
 export function SettingsSidebar({
-  easyOcrInstalling,
+  controls,
   isOpen,
-  llmKey,
-  llmModel,
-  llmProvider,
-  pingUrl,
-  rememberChoice,
-  selectedSource,
-  themeMode,
   onClose,
-  onInstallEasyOcr,
-  onRememberChange,
-  onSourceSelect,
-  setLlmKey,
-  setLlmModel,
-  setLlmProvider,
-  setPingUrl,
-  setThemeMode,
 }: SettingsSidebarProps) {
+  const {
+    easyOcrInstalling,
+    easyOcrInstallMessage,
+    easyOcrInstallProgress,
+    llmKey,
+    llmModel,
+    llmProvider,
+    pingUrl,
+    rememberChoice,
+    selectedSource,
+    themeMode,
+    onInstallEasyOcr,
+    onRememberChange,
+    onSourceSelect,
+    setLlmKey,
+    setLlmModel,
+    setLlmProvider,
+    setPingUrl,
+    setThemeMode,
+  } = controls;
+
+  const localGatewayEndpoints = [""];
+  const gatewayEndpointOptions = [
+    ...localGatewayEndpoints,
+    "http://localhost:11434",
+    "http://127.0.0.1:11434",
+  ];
+  const gatewayEndpointValue = localGatewayEndpoints.includes(pingUrl)
+    ? ""
+    : gatewayEndpointOptions.includes(pingUrl)
+      ? pingUrl
+      : "custom";
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -134,9 +137,27 @@ export function SettingsSidebar({
                             </button>
                           )}
                         {src.id === "local_easy" && easyOcrInstalling && (
-                          <div className="px-2 py-1 bg-blue-50 dark:bg-blue-900 border border-blue-200 dark:border-blue-700 rounded text-[10px] text-blue-700 dark:text-blue-200 mr-2 flex items-center gap-1">
-                            <div className="w-2 h-2 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                            Ставим...
+                          <div
+                            className="w-[104px] px-2 py-1 bg-blue-50 dark:bg-blue-900 border border-blue-200 dark:border-blue-700 rounded text-[10px] text-blue-700 dark:text-blue-200 mr-2"
+                            title={easyOcrInstallMessage}
+                          >
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="truncate">
+                                {Math.round(easyOcrInstallProgress)}%
+                              </span>
+                              <div className="w-2 h-2 border-2 border-blue-500 border-t-transparent rounded-full animate-spin shrink-0"></div>
+                            </div>
+                            <div className="mt-1 h-1 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-950">
+                              <div
+                                className="h-full rounded-full bg-blue-500 transition-all duration-500"
+                                style={{
+                                  width: `${Math.max(
+                                    3,
+                                    Math.min(100, easyOcrInstallProgress),
+                                  )}%`,
+                                }}
+                              />
+                            </div>
                           </div>
                         )}
                         {selectedSource === src.id && (
@@ -191,14 +212,30 @@ export function SettingsSidebar({
                   )}
 
                   {selectedSource === "gateway" && (
-                    <div className="mt-1 flex flex-col px-1">
-                      <input
-                        type="url"
-                        placeholder="Custom Gateway URL: https://..."
-                        value={pingUrl}
-                        onChange={(e) => setPingUrl(e.target.value)}
-                        className="w-full p-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 outline-none text-gray-800 dark:text-gray-200 transition-all font-mono shadow-sm"
-                      />
+                    <div className="mt-1 flex flex-col gap-2 px-1">
+                      <select
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setPingUrl(value === "custom" ? "" : value);
+                        }}
+                        className="p-2 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-lg text-sm text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-blue-500 transition-all font-sans"
+                        value={gatewayEndpointValue}
+                      >
+                        <option value="">Текущий Gateway</option>
+                        <option value="http://localhost:11434">
+                          Напрямую в Ollama (:11434)
+                        </option>
+                        <option value="custom">Cloudflare Edge / Custom</option>
+                      </select>
+                      {gatewayEndpointValue === "custom" && (
+                        <input
+                          type="url"
+                          placeholder="Edge / Custom URL: https://..."
+                          value={pingUrl}
+                          onChange={(e) => setPingUrl(e.target.value)}
+                          className="w-full p-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 outline-none text-gray-800 dark:text-gray-200 transition-all font-mono shadow-sm"
+                        />
+                      )}
                     </div>
                   )}
 

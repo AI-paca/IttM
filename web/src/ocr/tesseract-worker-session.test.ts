@@ -22,6 +22,61 @@ function deferred() {
   return { promise, resolve };
 }
 
+test("worker pool uses local Tesseract worker and core assets", async () => {
+  const globalRecord = globalThis as unknown as Record<string, unknown>;
+  const previousWindow = globalRecord.window;
+  globalRecord.window = {};
+
+  let capturedOptions:
+    | {
+        workerPath?: string;
+        corePath?: string;
+        workerBlobURL?: boolean;
+        logger?: (message: { status?: string; progress?: number }) => void;
+      }
+    | undefined;
+
+  const workerFactory = async (
+    _languages: string,
+    _oem: number,
+    options: {
+      workerPath?: string;
+      corePath?: string;
+      workerBlobURL?: boolean;
+      logger?: (message: { status?: string; progress?: number }) => void;
+    },
+  ) => {
+    capturedOptions = options;
+    return {
+      async recognize() {
+        return { data: { text: "" } };
+      },
+      async terminate() {},
+    };
+  };
+
+  const pool = new BrowserOcrWorkerPool(workerFactory);
+  try {
+    const lease = await pool.acquire(profile(), () => {});
+
+    assert.equal(
+      capturedOptions?.workerPath,
+      "/vendor/tesseract/worker.min.js",
+    );
+    assert.equal(capturedOptions?.corePath, "/vendor/tesseract/");
+    assert.equal(capturedOptions?.workerBlobURL, false);
+
+    await lease.release();
+    await pool.releaseCached();
+  } finally {
+    if (previousWindow === undefined) {
+      delete globalRecord.window;
+    } else {
+      globalRecord.window = previousWindow;
+    }
+  }
+});
+
 test("worker pool keeps concurrent progress callbacks isolated", async () => {
   const recognitions: ReturnType<typeof deferred>[] = [];
   const workerFactory = async (

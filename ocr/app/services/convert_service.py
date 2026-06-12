@@ -287,8 +287,124 @@ def convert_bytes(
     engine_type: str = "auto",
     pipeline_profile: OcrPipelineProfile | None = None,
 ) -> Tuple[str, dict]:
+    markdown_parts = []
+    meta = None
+    for event in iter_convert_bytes(
+        content,
+        filename=filename,
+        engine_type=engine_type,
+        pipeline_profile=pipeline_profile,
+    ):
+        if event["type"] == "page" and event["markdown"].strip():
+            markdown_parts.append(event["markdown"])
+        elif event["type"] == "complete":
+            meta = event["meta"]
+
+    if meta is None:
+        raise ValueError("OCR conversion did not produce completion metadata.")
+    return "\n\n---\n\n".join(markdown_parts), meta
+
+
+def _create_engine(engine_type: str):
+    if engine_type == "tesseract":
+        from app.engines.tesseract_engine import TesseractEngine
+
+        return TesseractEngine()
+    if engine_type == "easyocr":
+        from app.engines.easyocr_engine import EasyOcrEngine
+
+        engine = EasyOcrEngine()
+        if not engine.available():
+            raise ValueError(f"EasyOCR is not installed or initialization failed: {engine.info().get('init_error')}")
+        return engine
+    return AutoEngine(prefer_tesseract=True)
+
+
+def _convert_page(
+    main_image: Image.Image,
+    engine,
+    profile: OcrPipelineProfile,
+) -> tuple[str, dict]:
+    page_parts = []
+    total_chunks = 0
+    cards_found = 0
+    tables_found = 0
+    table_cells = 0
+    regions = (
+        analyze_document_layout(main_image)
+        if "table_layout" in profile.layout_analysis
+        else [LayoutRegion(kind="image", image=main_image, bbox=(0, 0, *main_image.size))]
+    )
+
+    for region in regions:
+        if region.kind == "table" and region.table is not None:
+            if _should_segment_table_region(region.image, region.table):
+                region_parts, region_chunks, region_cards = _recognize_image_region(
+                    engine,
+                    region.image,
+                )
+                total_chunks += region_chunks
+                cards_found += region_cards
+                page_parts.extend(part for part in region_parts if part.strip())
+                continue
+
+            is_wide_table = region.table.cols >= 45
+            table_layout = region.table if is_wide_table else logical_table_layout(region.image, region.table)
+            tables_found += 1
+            table_cells += len(table_layout.cells)
+            total_chunks += len(table_layout.cells)
+
+            table_md = ""
+            table_words = _recognize_table_words(
+                engine,
+                region.image,
+                table_layout,
+                single_pass=is_wide_table and region.image.size[1] <= MAX_DIRECT_TABLE_HEIGHT,
+            )
+            if table_words:
+                table_md = (
+                    wide_curriculum_table_to_markdown(table_layout, table_words)
+                    if is_wide_table
+                    else table_words_to_markdown(table_layout, table_words)
+                )
+
+            if not table_md.strip():
+                table_md = table_layout_to_markdown(
+                    region.image,
+                    table_layout,
+                    lambda cell_image: _recognize_table_cell(engine, cell_image),
+                )
+            if table_md.strip():
+                page_parts.append(table_md)
+            continue
+
+        region_parts, region_chunks, region_cards = _recognize_image_region(
+            engine,
+            region.image,
+        )
+        total_chunks += region_chunks
+        cards_found += region_cards
+        page_parts.extend(part for part in region_parts if part.strip())
+
+    return (
+        MarkdownFormatter.format_text("\n\n".join(page_parts)),
+        {
+            "chunks": total_chunks,
+            "cards_found": cards_found,
+            "tables_found": tables_found,
+            "table_cells": table_cells,
+        },
+    )
+
+
+def iter_convert_bytes(
+    content: bytes,
+    filename: str,
+    engine_type: str = "auto",
+    pipeline_profile: OcrPipelineProfile | None = None,
+) -> Iterator[dict]:
     """
-    Convert document to markdown using specified OCR engine.
+    Convert a document page by page and yield page/completion events.
 
     Args:
         content: Uploaded document bytes.
@@ -297,23 +413,7 @@ def convert_bytes(
     """
     profile = pipeline_profile or resolve_pipeline_profile(engine_type)
     image_pipeline = OcrPreprocessingPipeline.from_step_names(profile.image_preprocessing)
-
-    # Initialize engine based on type
-    if engine_type == "tesseract":
-        from app.engines.tesseract_engine import TesseractEngine
-
-        engine = TesseractEngine()
-    elif engine_type == "easyocr":
-        from app.engines.easyocr_engine import EasyOcrEngine
-
-        engine = EasyOcrEngine()
-        if not engine.available():
-            raise ValueError(f"EasyOCR is not installed or initialization failed: {engine.info().get('init_error')}")
-    else:  # auto
-        engine = AutoEngine(prefer_tesseract=True)
-
-    # We will simply process all pages and merge
-    all_markdown_parts = []
+    engine = _create_engine(engine_type)
     total_chunks = 0
     cards_found = 0
     tables_found = 0
@@ -324,68 +424,21 @@ def convert_bytes(
         try:
             page_count += 1
             print(f"[OCR] Processing page {page_count}", flush=True)
-            page_parts = []
-            regions = (
-                analyze_document_layout(main_image)
-                if "table_layout" in profile.layout_analysis
-                else [LayoutRegion(kind="image", image=main_image, bbox=(0, 0, *main_image.size))]
-            )
-
-            for region in regions:
-                if region.kind == "table" and region.table is not None:
-                    if _should_segment_table_region(region.image, region.table):
-                        region_parts, region_chunks, region_cards = _recognize_image_region(engine, region.image)
-                        total_chunks += region_chunks
-                        cards_found += region_cards
-                        page_parts.extend(part for part in region_parts if part.strip())
-                        continue
-
-                    is_wide_table = region.table.cols >= 45
-                    table_layout = region.table if is_wide_table else logical_table_layout(region.image, region.table)
-                    tables_found += 1
-                    table_cells += len(table_layout.cells)
-                    total_chunks += len(table_layout.cells)
-
-                    table_md = ""
-                    table_words = _recognize_table_words(
-                        engine,
-                        region.image,
-                        table_layout,
-                        single_pass=is_wide_table and region.image.size[1] <= MAX_DIRECT_TABLE_HEIGHT,
-                    )
-                    if table_words:
-                        table_md = (
-                            wide_curriculum_table_to_markdown(table_layout, table_words)
-                            if is_wide_table
-                            else table_words_to_markdown(table_layout, table_words)
-                        )
-
-                    if not table_md.strip():
-                        table_md = table_layout_to_markdown(
-                            region.image,
-                            table_layout,
-                            lambda cell_image: _recognize_table_cell(engine, cell_image),
-                        )
-                    if table_md.strip():
-                        page_parts.append(table_md)
-                    continue
-
-                region_parts, region_chunks, region_cards = _recognize_image_region(engine, region.image)
-                total_chunks += region_chunks
-                cards_found += region_cards
-                page_parts.extend(part for part in region_parts if part.strip())
-
-            all_markdown_parts.append("\n\n".join(page_parts))
+            page_markdown, page_meta = _convert_page(main_image, engine, profile)
+            total_chunks += page_meta["chunks"]
+            cards_found += page_meta["cards_found"]
+            tables_found += page_meta["tables_found"]
+            table_cells += page_meta["table_cells"]
+            yield {
+                "type": "page",
+                "page": page_count,
+                "markdown": page_markdown,
+            }
         finally:
             main_image.close()
 
     if page_count == 0:
         raise ValueError("Could not load image or parsed zero pages.")
-
-    merged_text = "\n\n---\n\n".join(all_markdown_parts)
-
-    # 5. Format as Markdown
-    markdown = MarkdownFormatter.format_text(merged_text)
 
     meta = {
         "engine": engine.info()["engine"],
@@ -399,5 +452,4 @@ def convert_bytes(
         "layout_steps": list(profile.layout_analysis),
         "elapsed_ms": 0,  # to be overwritten in router
     }
-
-    return markdown, meta
+    yield {"type": "complete", "meta": meta}

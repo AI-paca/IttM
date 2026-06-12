@@ -13,6 +13,11 @@ export async function route(request: Request, env: Env): Promise<Response> {
     return await OcrClient.convert(request, env);
   }
 
+  if (path === "/api/convert/stream" || path === "/convert/stream") {
+    if (method !== "POST") return method_not_allowed();
+    return await OcrClient.convertStream(request, env);
+  }
+
   if (path === "/api/health") {
     if (method !== "GET") return method_not_allowed();
     return await OcrClient.health(env);

@@ -40,6 +40,43 @@ test("route proxies /api/probe to backend /v1/probe", async () => {
   }
 });
 
+test("route proxies streaming OCR without buffering the response", async () => {
+  const originalFetch = globalThis.fetch;
+  let calledUrl = "";
+
+  globalThis.fetch = async (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ) => {
+    calledUrl = String(input);
+    assert.equal(init?.method, "POST");
+    return new Response('{"type":"page","page":1,"markdown":"text"}\n', {
+      headers: { "content-type": "application/x-ndjson" },
+    });
+  };
+
+  try {
+    const form = new FormData();
+    form.append("file", new Blob(["x"]), "sample.png");
+    const response = await route(
+      new Request("http://localhost/api/convert/stream?engine_type=tesseract", {
+        method: "POST",
+        body: form,
+      }),
+      env,
+    );
+
+    assert.equal(
+      calledUrl,
+      "http://ocr.local:8000/v1/convert/stream?engine_type=tesseract",
+    );
+    assert.equal(response.headers.get("content-type"), "application/x-ndjson");
+    assert.match(await response.text(), /"type":"page"/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("route returns explicit JSON for dead install-light route", async () => {
   const response = await route(
     new Request("http://localhost/api/install-light", { method: "POST" }),

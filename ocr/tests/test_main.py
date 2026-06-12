@@ -1,5 +1,6 @@
 import asyncio
 import io
+import json
 import threading
 import time
 
@@ -169,6 +170,46 @@ def test_convert_uses_service_contract(monkeypatch):
     assert json_data["markdown"] == "FAKE OCR MARKDOWN"
     assert json_data["meta"]["engine"] == "fake"
     assert json_data["meta"]["chunks"] == 1
+
+
+def test_convert_stream_emits_pages_before_completion(monkeypatch):
+    def fake_iter(content, filename, engine_type="auto", pipeline_profile=None):
+        assert content == b"image bytes"
+        assert filename == "test.png"
+        assert engine_type == "tesseract"
+        assert pipeline_profile is not None
+        yield {"type": "page", "page": 1, "markdown": "first"}
+        yield {"type": "page", "page": 2, "markdown": "second"}
+        yield {
+            "type": "complete",
+            "meta": {
+                "engine": "fake",
+                "chunks": 2,
+                "cards_found": 0,
+                "tables_found": 0,
+                "table_cells": 0,
+                "pages": 2,
+                "pipeline": "backend_tesseract_standard",
+                "preprocess_steps": [],
+                "layout_steps": [],
+                "elapsed_ms": 0,
+            },
+        }
+
+    monkeypatch.setattr(convert_service, "iter_convert_bytes", fake_iter)
+
+    response = client.post(
+        "/convert/stream?engine_type=tesseract",
+        files={"file": ("test.png", b"image bytes", "image/png")},
+    )
+    events = [json.loads(line) for line in response.text.splitlines()]
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/x-ndjson")
+    assert [event["type"] for event in events] == ["page", "page", "complete"]
+    assert events[0]["markdown"] == "first"
+    assert events[1]["page"] == 2
+    assert events[2]["meta"]["elapsed_ms"] >= 0
 
 
 def test_convert_does_not_block_health_endpoint(monkeypatch):

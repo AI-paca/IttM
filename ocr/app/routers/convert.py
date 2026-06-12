@@ -1,6 +1,8 @@
+import json
 import time
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.pipeline_config import resolve_pipeline_profile
@@ -9,6 +11,28 @@ from app.services import convert_service
 from app.upload_limits import read_upload_limited
 
 router = APIRouter()
+
+
+def _stream_conversion(content, filename, engine_type, pipeline):
+    start_time = time.time()
+    try:
+        for event in convert_service.iter_convert_bytes(
+            content,
+            filename=filename,
+            engine_type=engine_type,
+            pipeline_profile=pipeline,
+        ):
+            if event["type"] == "complete":
+                event["meta"]["elapsed_ms"] = int((time.time() - start_time) * 1000)
+            yield json.dumps(event, ensure_ascii=False) + "\n"
+    except Exception as exc:
+        import traceback
+
+        traceback.print_exc()
+        yield json.dumps(
+            {"type": "error", "detail": str(exc)},
+            ensure_ascii=False,
+        ) + "\n"
 
 
 @router.post("/convert", response_model=ConvertResponse)
@@ -54,3 +78,39 @@ async def convert_endpoint(
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
     finally:
         await file.close()
+
+
+@router.post("/convert/stream")
+@router.post("/v1/convert/stream")
+async def convert_stream_endpoint(
+    file: UploadFile = File(...),
+    engine_type: str = Query("auto", description="Engine type: auto, tesseract, or easyocr"),
+    pipeline_profile: str | None = Query(None, description="High-level OCR pipeline profile name"),
+):
+    print(
+        f"[CONVERT] Received streaming request: {file.filename} "
+        f"(content_type={file.content_type}), engine={engine_type}"
+    )
+    try:
+        content = await read_upload_limited(file)
+        pipeline = resolve_pipeline_profile(engine_type, pipeline_profile)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except OverflowError as exc:
+        raise HTTPException(status_code=413, detail=str(exc))
+    finally:
+        await file.close()
+
+    return StreamingResponse(
+        _stream_conversion(
+            content,
+            file.filename or "upload",
+            engine_type,
+            pipeline,
+        ),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )

@@ -8,6 +8,7 @@ import {
   normalizePlatformError,
   parseGatewayUrlList,
   parsePlatformError,
+  readBackendOcrStream,
   readJsonOrThrow,
 } from "./api-client";
 
@@ -124,5 +125,69 @@ test("buildBackendGatewayCandidates orders cloud, custom and local fallback", ()
       { label: "Custom Gateway", baseUrl: "https://custom.example" },
       { label: "Local Gateway", baseUrl: "" },
     ],
+  );
+});
+
+test("readBackendOcrStream emits pages as NDJSON chunks arrive", async () => {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode('{"type":"page","page":1,"markdown":"first"}\n{"type"'),
+      );
+      controller.enqueue(
+        encoder.encode(
+          ':"page","page":2,"markdown":"second"}\n{"type":"complete","meta":{"pages":2}}\n',
+        ),
+      );
+      controller.close();
+    },
+  });
+  const chunks: Array<[string, number | undefined]> = [];
+  const progress: string[] = [];
+
+  const result = await readBackendOcrStream(
+    new Response(body, {
+      headers: { "content-type": "application/x-ndjson" },
+    }),
+    { current: true },
+    (message) => progress.push(message),
+    (text, page) => chunks.push([text, page]),
+  );
+
+  assert.equal(result.markdown, "first\n\n---\n\nsecond");
+  assert.deepEqual(result.meta, { pages: 2 });
+  assert.deepEqual(chunks, [
+    ["first\n\n---\n\n", 1],
+    ["second\n\n---\n\n", 2],
+  ]);
+  assert.deepEqual(progress, [
+    "Получена страница 1...",
+    "Получена страница 2...",
+  ]);
+});
+
+test("readBackendOcrStream reports backend error events", async () => {
+  const response = new Response('{"type":"error","detail":"page 3 failed"}\n', {
+    headers: { "content-type": "application/x-ndjson" },
+  });
+
+  await assert.rejects(
+    () => readBackendOcrStream(response, { current: true }),
+    /page 3 failed/,
+  );
+});
+
+test("readBackendOcrStream rejects truncated responses", async () => {
+  const response = new Response(
+    '{"type":"page","page":1,"markdown":"partial"}\n',
+    {
+      headers: { "content-type": "application/x-ndjson" },
+    },
+  );
+
+  await assert.rejects(
+    () => readBackendOcrStream(response, { current: true }),
+    /до события complete/,
   );
 });

@@ -4,8 +4,8 @@ import { processPdfIntelligently } from "../lib/pdf-parser";
 import {
   buildApiUrl,
   buildBackendGatewayCandidates,
-  executeBackendOcr,
   executeBackendOcrWithFallback,
+  executeBackendOcrStreaming,
   isOllamaBaseUrl,
   noticeFromError,
 } from "./api-client";
@@ -200,15 +200,20 @@ export function useOcrExtraction({
         ) {
           const engineType =
             effectiveSource === "local_tess" ? "tesseract" : "easyocr";
-          const url = buildApiUrl("", "/api/convert", {
+          const url = buildApiUrl("", "/api/convert/stream", {
             engine_type: engineType,
             ...(backendPipelineParams(effectiveSource) || {}),
           });
 
-          result = await executeBackendOcr(file, url, active, (text) => {
-            if (active.current) setExtractionProgress(text);
-          });
-          handleChunk(result.markdown || "");
+          result = await executeBackendOcrStreaming(
+            file,
+            url,
+            active,
+            (text) => {
+              if (active.current) setExtractionProgress(text);
+            },
+            handleChunk,
+          );
         } else if (effectiveSource === "llm") {
           result = await executeLlmOcr(
             file,
@@ -246,18 +251,18 @@ export function useOcrExtraction({
           } else {
             const gatewayUrl = buildApiUrl(
               pingUrl,
-              "/api/convert",
+              "/api/convert/stream",
               backendPipelineParams("gateway"),
             );
-            result = await executeBackendOcr(
+            result = await executeBackendOcrStreaming(
               file,
               gatewayUrl,
               active,
               (text) => {
                 if (active.current) setExtractionProgress(text);
               },
+              handleChunk,
             );
-            handleChunk(result.markdown || "");
           }
         } else if (effectiveSource === "auto") {
           try {
@@ -269,8 +274,8 @@ export function useOcrExtraction({
                 if (active.current) setExtractionProgress(text);
               },
               backendPipelineParams("auto"),
+              handleChunk,
             );
-            handleChunk(result.markdown || "");
           } catch {
             if (llmKey.trim() && externalLlmConsent) {
               setExtractionProgress(

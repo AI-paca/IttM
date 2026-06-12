@@ -1,6 +1,10 @@
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { findContentBounds } from "./image-content-bounds";
+import {
+  PdfWorkerCanvasFactory,
+  PdfWorkerFilterFactory,
+} from "./pdf-worker-platform";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -142,6 +146,11 @@ self.onmessage = async (event: MessageEvent<PdfWorkerRequest>) => {
       };
       documentTask = pdfjsLib.getDocument({
         data: await request.file.arrayBuffer(),
+        CanvasFactory: PdfWorkerCanvasFactory as never,
+        FilterFactory: PdfWorkerFilterFactory as never,
+        disableFontFace: true,
+        useSystemFonts: false,
+        isOffscreenCanvasSupported: true,
       });
       pdfDocument = await documentTask.promise;
       self.postMessage({

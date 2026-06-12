@@ -234,7 +234,7 @@ for engine in "${engines[@]}"; do
         --max-time "$timeout_seconds" \
         --output "$response_file" \
         --write-out '%{http_code}' \
-        --form "file=@$fixture" \
+        --form "file=@\"$fixture\"" \
         "$base_url/convert?engine_type=$engine&pipeline_profile=$profile" \
         2>"$curl_error_file"
     )"

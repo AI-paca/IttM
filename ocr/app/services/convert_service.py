@@ -1,5 +1,7 @@
+import tempfile
+from io import BytesIO
 from pathlib import Path
-from typing import Tuple
+from typing import Iterator, Tuple
 
 from PIL import Image
 
@@ -20,8 +22,77 @@ from app.formatting.markdown_formatter import MarkdownFormatter
 from app.pipeline_config import OcrPipelineProfile, resolve_pipeline_profile
 from app.preprocessing import OcrPreprocessingPipeline
 
-# Disable maximum image pixel limit for long screenshots
 Image.MAX_IMAGE_PIXELS = None
+
+
+def _prepared_image(image: Image.Image, image_pipeline: OcrPreprocessingPipeline) -> Image.Image:
+    image.load()
+    if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
+        rgba_image = image.convert("RGBA")
+        try:
+            base_image = Image.new("RGB", rgba_image.size, (255, 255, 255))
+            base_image.paste(rgba_image, mask=rgba_image.split()[3])
+        finally:
+            rgba_image.close()
+    else:
+        base_image = image.convert("RGB")
+
+    processed = image_pipeline.apply(base_image)
+    if processed is not base_image:
+        base_image.close()
+    return processed
+
+
+def _iter_document_images(
+    content: bytes,
+    filename: str,
+    image_pipeline: OcrPreprocessingPipeline,
+) -> Iterator[Image.Image]:
+    if Path(filename).suffix.lower() != ".pdf":
+        try:
+            with Image.open(BytesIO(content)) as image:
+                yield _prepared_image(image, image_pipeline)
+        except Exception as exc:
+            raise ValueError(f"Could not load image: {str(exc)}") from exc
+        return
+
+    try:
+        from pdf2image import convert_from_path, pdfinfo_from_path
+
+        with tempfile.TemporaryDirectory(prefix="ittm-pdf-") as temp_dir:
+            pdf_path = Path(temp_dir) / "document.pdf"
+            pdf_path.write_bytes(content)
+            page_count = int(pdfinfo_from_path(str(pdf_path)).get("Pages", 0))
+            if page_count <= 0:
+                raise ValueError("PDF contains no pages")
+
+            for page_number in range(1, page_count + 1):
+                pages = convert_from_path(
+                    str(pdf_path),
+                    dpi=300,
+                    fmt="png",
+                    first_page=page_number,
+                    last_page=page_number,
+                    thread_count=1,
+                )
+                if not pages:
+                    raise ValueError(f"PDF page {page_number} could not be rendered")
+                page = pages[0]
+                try:
+                    yield page.convert("RGB")
+                finally:
+                    for rendered_page in pages:
+                        rendered_page.close()
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"Failed to process PDF: {str(exc)}") from exc
+
+
+MAX_DIRECT_TABLE_HEIGHT = 3600
+MIN_SEGMENTED_TABLE_HEIGHT = 4000
+MIN_SEGMENTED_TABLE_ASPECT_RATIO = 4.0
+MIN_SEGMENTED_TABLE_CELLS = 500
 
 
 def _format_card_to_markdown(card_text: str, card_index: int) -> str:
@@ -41,16 +112,34 @@ def _recognize_image_region(engine, image: Image.Image) -> Tuple[list[str], int,
         page_parts = []
         cards_found = 0
         for i, card_img in enumerate(cards):
-            if card_img.size[1] < 50:
-                continue
-            cards_found += 1
-            card_text = engine.recognize(card_img, mode="text_mode")
-            page_parts.append(_format_card_to_markdown(card_text, i))
+            try:
+                if card_img.size[1] < 50:
+                    continue
+                cards_found += 1
+                card_text = engine.recognize(card_img, mode="text_mode")
+                page_parts.append(_format_card_to_markdown(card_text, i))
+            finally:
+                card_img.close()
         return page_parts, cards_found, cards_found
 
     chunks = split_vertical(image, chunk_height=1200, overlap=100)
-    page_texts = [engine.recognize(chunk, mode="text_mode") for chunk in chunks]
+    page_texts = []
+    for chunk in chunks:
+        try:
+            page_texts.append(engine.recognize(chunk, mode="text_mode"))
+        finally:
+            if chunk is not image:
+                chunk.close()
     return ["\n\n".join(dedupe_chunks(page_texts))], len(chunks), 0
+
+
+def _should_segment_table_region(image: Image.Image, table) -> bool:
+    width, height = image.size
+    return (
+        height >= MIN_SEGMENTED_TABLE_HEIGHT
+        and height / max(1, width) >= MIN_SEGMENTED_TABLE_ASPECT_RATIO
+        and len(table.cells) > MIN_SEGMENTED_TABLE_CELLS
+    )
 
 
 def _recognize_table_cell(engine, image: Image.Image) -> str:
@@ -183,42 +272,30 @@ async def convert(
     engine_type: str = "auto",
     pipeline_profile: OcrPipelineProfile | None = None,
 ) -> Tuple[str, dict]:
+    return convert_bytes(
+        path.read_bytes(),
+        filename=path.name,
+        engine_type=engine_type,
+        pipeline_profile=pipeline_profile,
+    )
+
+
+def convert_bytes(
+    content: bytes,
+    filename: str,
+    engine_type: str = "auto",
+    pipeline_profile: OcrPipelineProfile | None = None,
+) -> Tuple[str, dict]:
     """
     Convert document to markdown using specified OCR engine.
 
     Args:
-        path: Path to the document (image or PDF)
+        content: Uploaded document bytes.
+        filename: Original filename used to distinguish PDF from images.
         engine_type: 'auto' (Tesseract first), 'tesseract' (core), or 'easyocr' (high-quality)
     """
     profile = pipeline_profile or resolve_pipeline_profile(engine_type)
     image_pipeline = OcrPreprocessingPipeline.from_step_names(profile.image_preprocessing)
-
-    # 1. Load document (image or pdf)
-    images = []
-    if path.suffix.lower() == ".pdf":
-        try:
-            from pdf2image import convert_from_path
-
-            images = convert_from_path(str(path), dpi=300, fmt="png")
-        except Exception as e:
-            raise ValueError(f"Failed to process PDF: {str(e)}")
-    else:
-        try:
-            img = Image.open(path)
-            img.load()  # verify image works
-            if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
-                # Apply white background for transparent images
-                img = img.convert("RGBA")
-                bg = Image.new("RGB", img.size, (255, 255, 255))
-                bg.paste(img, mask=img.split()[3])
-                images = [image_pipeline.apply(bg)]
-            else:
-                images = [image_pipeline.apply(img.convert("RGB"))]
-        except Exception as e:
-            raise ValueError(f"Could not load image: {str(e)}")
-
-    if not images:
-        raise ValueError("Could not load image or parsed zero pages.")
 
     # Initialize engine based on type
     if engine_type == "tesseract":
@@ -240,48 +317,68 @@ async def convert(
     cards_found = 0
     tables_found = 0
     table_cells = 0
+    page_count = 0
 
-    for main_image in images:
-        page_parts = []
-        regions = (
-            analyze_document_layout(main_image)
-            if "table_layout" in profile.layout_analysis
-            else [LayoutRegion(kind="image", image=main_image, bbox=(0, 0, *main_image.size))]
-        )
+    for main_image in _iter_document_images(content, filename, image_pipeline):
+        try:
+            page_count += 1
+            page_parts = []
+            regions = (
+                analyze_document_layout(main_image)
+                if "table_layout" in profile.layout_analysis
+                else [LayoutRegion(kind="image", image=main_image, bbox=(0, 0, *main_image.size))]
+            )
 
-        for region in regions:
-            if region.kind == "table" and region.table is not None:
-                is_wide_table = region.table.cols >= 45
-                table_layout = region.table if is_wide_table else logical_table_layout(region.image, region.table)
-                tables_found += 1
-                table_cells += len(table_layout.cells)
-                total_chunks += len(table_layout.cells)
+            for region in regions:
+                if region.kind == "table" and region.table is not None:
+                    if _should_segment_table_region(region.image, region.table):
+                        region_parts, region_chunks, region_cards = _recognize_image_region(engine, region.image)
+                        total_chunks += region_chunks
+                        cards_found += region_cards
+                        page_parts.extend(part for part in region_parts if part.strip())
+                        continue
 
-                table_md = ""
-                table_words = _recognize_table_words(engine, region.image, table_layout, single_pass=is_wide_table)
-                if table_words:
-                    table_md = (
-                        wide_curriculum_table_to_markdown(table_layout, table_words)
-                        if is_wide_table
-                        else table_words_to_markdown(table_layout, table_words)
-                    )
+                    is_wide_table = region.table.cols >= 45
+                    table_layout = region.table if is_wide_table else logical_table_layout(region.image, region.table)
+                    tables_found += 1
+                    table_cells += len(table_layout.cells)
+                    total_chunks += len(table_layout.cells)
 
-                if not table_md.strip():
-                    table_md = table_layout_to_markdown(
+                    table_md = ""
+                    table_words = _recognize_table_words(
+                        engine,
                         region.image,
                         table_layout,
-                        lambda cell_image: _recognize_table_cell(engine, cell_image),
+                        single_pass=is_wide_table and region.image.size[1] <= MAX_DIRECT_TABLE_HEIGHT,
                     )
-                if table_md.strip():
-                    page_parts.append(table_md)
-                continue
+                    if table_words:
+                        table_md = (
+                            wide_curriculum_table_to_markdown(table_layout, table_words)
+                            if is_wide_table
+                            else table_words_to_markdown(table_layout, table_words)
+                        )
 
-            region_parts, region_chunks, region_cards = _recognize_image_region(engine, region.image)
-            total_chunks += region_chunks
-            cards_found += region_cards
-            page_parts.extend(part for part in region_parts if part.strip())
+                    if not table_md.strip():
+                        table_md = table_layout_to_markdown(
+                            region.image,
+                            table_layout,
+                            lambda cell_image: _recognize_table_cell(engine, cell_image),
+                        )
+                    if table_md.strip():
+                        page_parts.append(table_md)
+                    continue
 
-        all_markdown_parts.append("\n\n".join(page_parts))
+                region_parts, region_chunks, region_cards = _recognize_image_region(engine, region.image)
+                total_chunks += region_chunks
+                cards_found += region_cards
+                page_parts.extend(part for part in region_parts if part.strip())
+
+            all_markdown_parts.append("\n\n".join(page_parts))
+        finally:
+            main_image.close()
+
+    if page_count == 0:
+        raise ValueError("Could not load image or parsed zero pages.")
 
     merged_text = "\n\n---\n\n".join(all_markdown_parts)
 
@@ -294,7 +391,7 @@ async def convert(
         "cards_found": cards_found,
         "tables_found": tables_found,
         "table_cells": table_cells,
-        "pages": len(images),
+        "pages": page_count,
         "pipeline": profile.name,
         "preprocess_steps": list(profile.image_preprocessing),
         "layout_steps": list(profile.layout_analysis),

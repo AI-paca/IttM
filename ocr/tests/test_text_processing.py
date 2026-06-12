@@ -6,6 +6,8 @@ from PIL import Image, ImageDraw
 
 from app.chunking.dedupe import dedupe_chunks
 from app.chunking.vertical import (
+    LayoutRegion,
+    TableCell,
     TableLayout,
     analyze_document_layout,
     detect_table_layouts,
@@ -16,6 +18,7 @@ from app.chunking.vertical import (
     wide_curriculum_table_to_markdown,
 )
 from app.formatting.markdown_formatter import MarkdownFormatter
+from app.pipeline_config import OcrPipelineProfile
 from app.services import convert_service
 
 
@@ -99,6 +102,28 @@ def _hierarchical_indent_table_fixture() -> Image.Image:
     draw.text((340, 113), "UK-1", fill="black")
 
     return image
+
+
+def _dense_table_layout(width: int, height: int, *, rows: int, cols: int) -> TableLayout:
+    x_lines = tuple(round(index * (width - 1) / cols) for index in range(cols + 1))
+    y_lines = tuple(round(index * (height - 1) / rows) for index in range(rows + 1))
+    cells = tuple(
+        TableCell(
+            row=row,
+            col=col,
+            bbox=(x_lines[col], y_lines[row], x_lines[col + 1], y_lines[row + 1]),
+        )
+        for row in range(rows)
+        for col in range(cols)
+    )
+    return TableLayout(
+        bbox=(0, 0, width, height),
+        rows=rows,
+        cols=cols,
+        x_lines=x_lines,
+        y_lines=y_lines,
+        cells=cells,
+    )
 
 
 def test_detect_table_layouts_finds_grid_cells():
@@ -252,3 +277,88 @@ def test_convert_service_uses_table_layout_before_vertical_chunks(monkeypatch, t
     assert "| Math | 42 |" in markdown
     assert meta["tables_found"] == 1
     assert meta["table_cells"] == 4
+
+
+def test_convert_service_segments_implausibly_tall_table_region(monkeypatch, tmp_path):
+    recognized_sizes = []
+
+    class FakeEngine:
+        def recognize_words(self, image, psm=6, min_conf=20):
+            raise AssertionError("tall pseudo-table reached table OCR")
+
+        def recognize(self, image, mode="text_mode", psm=6):
+            recognized_sizes.append(image.size)
+            return f"chunk {len(recognized_sizes)}"
+
+        def info(self):
+            return {"engine": "fake"}
+
+    def fake_layout(image):
+        layout = _dense_table_layout(image.width, image.height, rows=21, cols=25)
+        return [LayoutRegion(kind="table", image=image, bbox=layout.bbox, table=layout)]
+
+    monkeypatch.setattr(convert_service, "AutoEngine", lambda prefer_tesseract=True: FakeEngine())
+    monkeypatch.setattr(convert_service, "analyze_document_layout", fake_layout)
+
+    image_path = tmp_path / "long-screenshot.png"
+    Image.new("RGB", (800, 4200), (230, 230, 230)).save(image_path)
+    profile = OcrPipelineProfile(name="test", layout_analysis=("table_layout",))
+
+    markdown, meta = asyncio.run(
+        convert_service.convert(
+            image_path,
+            engine_type="auto",
+            pipeline_profile=profile,
+        )
+    )
+
+    assert "chunk 1" in markdown
+    assert len(recognized_sizes) > 1
+    assert max(height for _, height in recognized_sizes) <= 1200
+    assert meta["chunks"] == len(recognized_sizes)
+    assert meta["tables_found"] == 0
+    assert meta["table_cells"] == 0
+
+
+def test_convert_service_preserves_large_plausible_table_fallback(monkeypatch, tmp_path):
+    word_calls = []
+    recognized_sizes = []
+
+    class FakeEngine:
+        def recognize_words(self, image, psm=6, min_conf=20):
+            word_calls.append(image.size)
+            return []
+
+        def recognize(self, image, mode="text_mode", psm=6):
+            recognized_sizes.append(image.size)
+            return "fallback text"
+
+        def info(self):
+            return {"engine": "fake"}
+
+    def fake_layout(image):
+        layout = _dense_table_layout(image.width, image.height, rows=21, cols=25)
+        return [LayoutRegion(kind="table", image=image, bbox=layout.bbox, table=layout)]
+
+    monkeypatch.setattr(convert_service, "AutoEngine", lambda prefer_tesseract=True: FakeEngine())
+    monkeypatch.setattr(convert_service, "analyze_document_layout", fake_layout)
+
+    image_path = tmp_path / "large-table.png"
+    Image.new("RGB", (800, 1000), (200, 200, 200)).save(image_path)
+    profile = OcrPipelineProfile(name="test", layout_analysis=("table_layout",))
+
+    markdown, meta = asyncio.run(
+        convert_service.convert(
+            image_path,
+            engine_type="auto",
+            pipeline_profile=profile,
+        )
+    )
+
+    assert "fallback text" in markdown
+    assert len(word_calls) == 1
+    assert len(recognized_sizes) == 525
+    assert max(height for _, height in recognized_sizes) <= 208
+    assert meta["chunks"] == 525
+    assert meta["tables_found"] == 1
+    assert meta["table_cells"] == 525

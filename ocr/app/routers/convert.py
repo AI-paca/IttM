@@ -1,14 +1,12 @@
-import os
-import shutil
-import tempfile
 import time
-from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from starlette.concurrency import run_in_threadpool
 
 from app.pipeline_config import resolve_pipeline_profile
 from app.schemas import ConvertResponse, ConvertMeta
 from app.services import convert_service
+from app.upload_limits import read_upload_limited
 
 router = APIRouter()
 
@@ -24,17 +22,13 @@ async def convert_endpoint(
     # This function handles both /convert and /v1/convert
     start_time = time.time()
 
-    # Save the uploaded file temporarily
-    fd, temp_path_str = tempfile.mkstemp(suffix=Path(file.filename or "").suffix or "")
-    temp_path = Path(temp_path_str)
-
     try:
-        with os.fdopen(fd, "wb") as f:
-            shutil.copyfileobj(file.file, f)
-
+        content = await read_upload_limited(file)
         pipeline = resolve_pipeline_profile(engine_type, pipeline_profile)
-        markdown_text, meta_info = await convert_service.convert(
-            temp_path,
+        markdown_text, meta_info = await run_in_threadpool(
+            convert_service.convert_bytes,
+            content,
+            filename=file.filename or "upload",
             engine_type=engine_type,
             pipeline_profile=pipeline,
         )
@@ -51,11 +45,12 @@ async def convert_endpoint(
 
         traceback.print_exc()
         raise HTTPException(status_code=400, detail=str(ve))
+    except OverflowError as exc:
+        raise HTTPException(status_code=413, detail=str(exc))
     except Exception as e:
         import traceback
 
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Internal Server Error: {str(e)}")
     finally:
-        if temp_path.exists():
-            os.remove(temp_path)
+        await file.close()

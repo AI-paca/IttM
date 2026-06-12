@@ -3,6 +3,7 @@ import type { ChangeEvent, DragEvent, ReactNode } from "react";
 import { useMotionValueEvent, useScroll } from "motion/react";
 import { noticeFromError, requestApiJson } from "./api-client";
 import { getBrowserDiagnostics, isSupportedOcrFile } from "./file-utils";
+import { EXTERNAL_LLM_CONSENT_ERROR } from "./llm-consent";
 import type {
   AppState,
   Notice,
@@ -119,6 +120,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
   const [llmProvider, setLlmProvider] = useState<LlmProvider>("gemini");
   const [llmModel, setLlmModel] = useState("gemini-2.5-flash-lite");
   const [llmKey, setLlmKey] = useState("");
+  const [externalLlmConsent, setExternalLlmConsent] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("theme-mode");
@@ -203,6 +205,11 @@ export function OcrProvider({ children }: { children: ReactNode }) {
     },
     [rememberChoice],
   );
+
+  const handleLlmProviderChange = useCallback((provider: LlmProvider) => {
+    setLlmProvider(provider);
+    setExternalLlmConsent(false);
+  }, []);
 
   const handleRememberChange = useCallback(
     (checked: boolean) => {
@@ -300,17 +307,25 @@ export function OcrProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const handleStartExtraction = useCallback(() => {
+    if (selectedSource === "llm" && !externalLlmConsent) {
+      showNotice(EXTERNAL_LLM_CONSENT_ERROR);
+      return;
+    }
     setLastExtractedPage(1);
     setTotalPdfPages(null);
     setExtractedText("");
     setAppState("loading");
     setTriggerCount((prev) => prev + 1);
-  }, []);
+  }, [externalLlmConsent, selectedSource, showNotice]);
 
   const handleResumeExtraction = useCallback(() => {
+    if (selectedSource === "llm" && !externalLlmConsent) {
+      showNotice(EXTERNAL_LLM_CONSENT_ERROR);
+      return;
+    }
     setAppState("loading");
     setTriggerCount((prev) => prev + 1);
-  }, []);
+  }, [externalLlmConsent, selectedSource, showNotice]);
 
   const handleInstallEasyOcr = useCallback(async () => {
     setEasyOcrInstalling(true);
@@ -371,6 +386,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
     appState,
     diagnostics,
     extractedText,
+    externalLlmConsent,
     file,
     lastExtractedPage,
     llmKey,
@@ -404,6 +420,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       easyOcrInstallMessage,
       easyOcrInstallProgress,
       easyOcrInstalling,
+      externalLlmConsent,
       llmKey,
       llmModel,
       llmProvider,
@@ -412,11 +429,12 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       selectedSource,
       themeMode,
       onInstallEasyOcr: handleInstallEasyOcr,
+      onLlmProviderChange: handleLlmProviderChange,
       onRememberChange: handleRememberChange,
       onSourceSelect: handleSourceSelect,
       setLlmKey,
       setLlmModel,
-      setLlmProvider,
+      setExternalLlmConsent,
       setPingUrl,
       setThemeMode,
     }),
@@ -424,7 +442,9 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       easyOcrInstalling,
       easyOcrInstallMessage,
       easyOcrInstallProgress,
+      externalLlmConsent,
       handleInstallEasyOcr,
+      handleLlmProviderChange,
       handleRememberChange,
       handleSourceSelect,
       llmKey,

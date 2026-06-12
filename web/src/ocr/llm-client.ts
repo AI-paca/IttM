@@ -1,10 +1,14 @@
-import { cropWhiteBorders, processPdfIntelligently } from "../lib/pdf-parser";
+import { processPdfIntelligently } from "../lib/pdf-parser";
 import {
   buildOllamaGenerateUrl,
   parsePlatformError,
   normalizePlatformError,
 } from "./api-client";
-import { imageFileToCroppedBase64 } from "./file-utils";
+import {
+  blobToBase64OffMainThread,
+  prepareImageForLlm,
+} from "./document-encoding";
+import { assertExternalLlmConsent, runExternalLlmRequest } from "./llm-consent";
 import type { LlmProvider, OcrResult, ProgressSink } from "./types";
 
 const OCR_PROMPT =
@@ -42,6 +46,7 @@ export interface LlmSettings {
   provider: LlmProvider;
   model: string;
   key: string;
+  externalConsent: boolean;
 }
 
 export async function executeLlmOcrForImage(
@@ -51,6 +56,7 @@ export async function executeLlmOcrForImage(
   activeContent: { current: boolean },
   onProgress?: ProgressSink,
 ): Promise<OcrResult> {
+  assertExternalLlmConsent(settings.externalConsent);
   const key = settings.key.trim();
   const model = settings.model.trim();
   if (!model) throw new Error("Модель не указана");
@@ -78,11 +84,13 @@ export async function executeLlmOcrForImage(
 
     let response: Response;
     try {
-      response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      response = await runExternalLlmRequest(settings.externalConsent, () =>
+        fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }),
+      );
     } catch (error) {
       throw new Error(
         `Gemini: сеть недоступна или ключ ограничен политиками браузера (${
@@ -130,14 +138,16 @@ export async function executeLlmOcrForImage(
 
   let response: Response;
   try {
-    response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${key}`,
-      },
-      body: JSON.stringify(payload),
-    });
+    response = await runExternalLlmRequest(settings.externalConsent, () =>
+      fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${key}`,
+        },
+        body: JSON.stringify(payload),
+      }),
+    );
   } catch (error) {
     throw new Error(
       `OpenRouter: сеть недоступна или запрос заблокирован (${normalizePlatformError(error).message})`,
@@ -206,7 +216,8 @@ export async function executeOllamaOcr(
       (msg) => {
         if (activeContent.current) onProgress(msg);
       },
-      async (b64) => {
+      async (image) => {
+        const b64 = await blobToBase64OffMainThread(image);
         const res = await executeOllamaOcrForImage(
           b64,
           settings,
@@ -218,12 +229,16 @@ export async function executeOllamaOcr(
       onChunk,
       startPage,
       onTotalPages,
-      { renderScale: pdfRenderScale },
+      {
+        renderScale: pdfRenderScale,
+        shouldContinue: () => activeContent.current,
+      },
     );
     return { markdown: md };
   }
 
-  const b64 = await imageFileToCroppedBase64(targetFile, cropWhiteBorders);
+  const prepared = await prepareImageForLlm(targetFile);
+  const b64 = await blobToBase64OffMainThread(prepared);
   return await executeOllamaOcrForImage(
     b64,
     settings,
@@ -242,6 +257,7 @@ export async function executeLlmOcr(
   onTotalPages?: (total: number) => void,
   pdfRenderScale?: number,
 ): Promise<OcrResult> {
+  assertExternalLlmConsent(settings.externalConsent);
   if (activeContent.current) onProgress("Подготовка файла...");
 
   if (targetFile.type === "application/pdf") {
@@ -250,7 +266,8 @@ export async function executeLlmOcr(
       (msg) => {
         if (activeContent.current) onProgress(msg);
       },
-      async (b64) => {
+      async (image) => {
+        const b64 = await blobToBase64OffMainThread(image);
         const res = await executeLlmOcrForImage(
           b64,
           "image/jpeg",
@@ -263,12 +280,16 @@ export async function executeLlmOcr(
       onChunk,
       startPage,
       onTotalPages,
-      { renderScale: pdfRenderScale },
+      {
+        renderScale: pdfRenderScale,
+        shouldContinue: () => activeContent.current,
+      },
     );
     return { markdown: md };
   }
 
-  const b64 = await imageFileToCroppedBase64(targetFile, cropWhiteBorders);
+  const prepared = await prepareImageForLlm(targetFile);
+  const b64 = await blobToBase64OffMainThread(prepared);
   const result = await executeLlmOcrForImage(
     b64,
     "image/jpeg",

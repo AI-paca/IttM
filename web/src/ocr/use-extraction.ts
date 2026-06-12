@@ -14,7 +14,6 @@ import {
   releaseBrowserOcrCache,
   runBrowserOcrLowMemory,
 } from "./browser-engine";
-import { base64JpegToFile } from "./file-utils";
 import { executeLlmOcr, executeOllamaOcr } from "./llm-client";
 import {
   backendPipelineParams,
@@ -34,6 +33,7 @@ interface UseOcrExtractionArgs {
   extractedText: string;
   file: File | null;
   lastExtractedPage: number;
+  externalLlmConsent: boolean;
   llmKey: string;
   llmModel: string;
   llmProvider: LlmProvider;
@@ -55,6 +55,7 @@ export function useOcrExtraction({
   extractedText,
   file,
   lastExtractedPage,
+  externalLlmConsent,
   llmKey,
   llmModel,
   llmProvider,
@@ -138,8 +139,10 @@ export function useOcrExtraction({
               (msg) => {
                 if (active.current) setExtractionProgress(msg);
               },
-              async (b64) => {
-                const tempFile = await base64JpegToFile(b64);
+              async (image) => {
+                const tempFile = new File([image], "page.jpg", {
+                  type: image.type || "image/jpeg",
+                });
                 const ocrRes = await runBrowserOcrLowMemory(
                   tempFile,
                   (text) => {
@@ -153,7 +156,12 @@ export function useOcrExtraction({
               handleChunk,
               lastExtractedPage,
               setTotalPdfPages,
-              { renderScale: browserProfile.pdfRenderScale },
+              {
+                renderScale: browserProfile.pdfRenderScale,
+                maxPagePixels: browserProfile.maxImagePixels,
+                maxDimension: browserProfile.maxDimension,
+                shouldContinue: () => active.current,
+              },
             );
             return { markdown: md };
           }
@@ -204,7 +212,12 @@ export function useOcrExtraction({
         } else if (effectiveSource === "llm") {
           result = await executeLlmOcr(
             file,
-            { provider: llmProvider, model: llmModel, key: llmKey },
+            {
+              provider: llmProvider,
+              model: llmModel,
+              key: llmKey,
+              externalConsent: externalLlmConsent,
+            },
             active,
             (text) => {
               if (active.current) setExtractionProgress(text);
@@ -259,14 +272,19 @@ export function useOcrExtraction({
             );
             handleChunk(result.markdown || "");
           } catch {
-            if (llmKey.trim()) {
+            if (llmKey.trim() && externalLlmConsent) {
               setExtractionProgress(
                 "Cloud/локальный gateway недоступен, пробуем LLM OCR...",
               );
               try {
                 result = await executeLlmOcr(
                   file,
-                  { provider: llmProvider, model: llmModel, key: llmKey },
+                  {
+                    provider: llmProvider,
+                    model: llmModel,
+                    key: llmKey,
+                    externalConsent: externalLlmConsent,
+                  },
                   active,
                   (text) => {
                     if (active.current) setExtractionProgress(text);

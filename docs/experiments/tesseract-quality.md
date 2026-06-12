@@ -28,7 +28,7 @@ from the local OCR Docker image.
 
 ## Experiment 1: Profile Grid Confidence
 
-Commit `50ab3fa` adds `grid_min_confirmed_cell_ratio` to the Python pipeline
+Commit `11a0241` adds `grid_min_confirmed_cell_ratio` to the Python pipeline
 profile. The morphology detector accepts a table only when enough enclosed
 rectangular cells are confirmed by contours. The standard backend profiles use
 `0.35`; profiles without table analysis are unaffected.

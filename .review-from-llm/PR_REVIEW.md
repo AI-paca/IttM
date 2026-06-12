@@ -59,6 +59,9 @@ The important residual risks are:
   `error` event rather than a non-200 HTTP status.
 - Browser and Python OCR are intentionally separate implementations; profile
   parity must be tested behaviorally, not assumed from shared names.
+- The ignored `testtables/` corpus is useful for A/B checks but does not cover
+  input limits such as a one-word 4K banner, decompression bombs, extreme
+  aspect ratios or upload-size boundaries.
 
 An independent subagent review was requested during development, but the review
 service returned no report and then hit its usage limit. This file therefore

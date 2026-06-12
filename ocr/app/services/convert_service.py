@@ -67,6 +67,7 @@ def _iter_document_images(
                 raise ValueError("PDF contains no pages")
 
             for page_number in range(1, page_count + 1):
+                print(f"[PDF] Rendering page {page_number}/{page_count}", flush=True)
                 pages = convert_from_path(
                     str(pdf_path),
                     dpi=300,
@@ -322,6 +323,7 @@ def convert_bytes(
     for main_image in _iter_document_images(content, filename, image_pipeline):
         try:
             page_count += 1
+            print(f"[OCR] Processing page {page_count}", flush=True)
             page_parts = []
             regions = (
                 analyze_document_layout(main_image)

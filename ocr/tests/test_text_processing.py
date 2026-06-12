@@ -104,6 +104,22 @@ def _hierarchical_indent_table_fixture() -> Image.Image:
     return image
 
 
+def _bar_chart_fixture() -> Image.Image:
+    image = Image.new("RGB", (900, 700), (8, 32, 92))
+    draw = ImageDraw.Draw(image)
+
+    draw.text((30, 30), "Top devices", fill="white")
+    for index in range(10):
+        top = 100 + index * 52
+        right = 790 - index * 24
+        draw.rectangle((90, top, right, top + 36), fill=(20, 120 + index * 8, 240))
+        draw.text((40, top + 8), str(index + 1), fill="white")
+        draw.text((105, top + 8), f"Device {index + 1}", fill="white")
+        draw.text((right + 8, top + 8), str(1_800_000 - index * 90_000), fill="white")
+
+    return image
+
+
 def _dense_table_layout(width: int, height: int, *, rows: int, cols: int) -> TableLayout:
     x_lines = tuple(round(index * (width - 1) / cols) for index in range(cols + 1))
     y_lines = tuple(round(index * (height - 1) / rows) for index in range(rows + 1))
@@ -255,6 +271,17 @@ def test_detect_table_layouts_ignores_blank_page():
     assert detect_table_layouts(Image.new("RGB", (500, 300), "white")) == []
 
 
+def test_detect_table_layouts_rejects_bar_chart_as_grid():
+    pytest.importorskip("cv2")
+    assert (
+        detect_table_layouts(
+            _bar_chart_fixture(),
+            min_confirmed_cell_ratio=0.35,
+        )
+        == []
+    )
+
+
 def test_convert_service_uses_table_layout_before_vertical_chunks(monkeypatch, tmp_path):
     pytest.importorskip("cv2")
     values = iter(["Предмет", "Часы", "Math", "42"])
@@ -293,7 +320,8 @@ def test_convert_service_segments_implausibly_tall_table_region(monkeypatch, tmp
         def info(self):
             return {"engine": "fake"}
 
-    def fake_layout(image):
+    def fake_layout(image, min_confirmed_cell_ratio=0.0):
+        assert min_confirmed_cell_ratio == 0.42
         layout = _dense_table_layout(image.width, image.height, rows=21, cols=25)
         return [LayoutRegion(kind="table", image=image, bbox=layout.bbox, table=layout)]
 
@@ -302,7 +330,11 @@ def test_convert_service_segments_implausibly_tall_table_region(monkeypatch, tmp
 
     image_path = tmp_path / "long-screenshot.png"
     Image.new("RGB", (800, 4200), (230, 230, 230)).save(image_path)
-    profile = OcrPipelineProfile(name="test", layout_analysis=("table_layout",))
+    profile = OcrPipelineProfile(
+        name="test",
+        layout_analysis=("table_layout",),
+        grid_min_confirmed_cell_ratio=0.42,
+    )
 
     markdown, meta = asyncio.run(
         convert_service.convert(
@@ -336,7 +368,8 @@ def test_convert_service_preserves_large_plausible_table_fallback(monkeypatch, t
         def info(self):
             return {"engine": "fake"}
 
-    def fake_layout(image):
+    def fake_layout(image, min_confirmed_cell_ratio=0.0):
+        assert min_confirmed_cell_ratio == 0.0
         layout = _dense_table_layout(image.width, image.height, rows=21, cols=25)
         return [LayoutRegion(kind="table", image=image, bbox=layout.bbox, table=layout)]
 

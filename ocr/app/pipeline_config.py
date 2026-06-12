@@ -6,6 +6,7 @@ class OcrPipelineProfile:
     name: str
     image_preprocessing: tuple[str, ...] = ()
     layout_analysis: tuple[str, ...] = ()
+    grid_min_confirmed_cell_ratio: float = 0.0
 
 
 OCR_PIPELINE_PROFILES: dict[str, OcrPipelineProfile] = {
@@ -13,16 +14,19 @@ OCR_PIPELINE_PROFILES: dict[str, OcrPipelineProfile] = {
         name="backend_auto_standard",
         image_preprocessing=("projected_document_dewarp",),
         layout_analysis=("table_layout",),
+        grid_min_confirmed_cell_ratio=0.35,
     ),
     "backend_tesseract_standard": OcrPipelineProfile(
         name="backend_tesseract_standard",
         image_preprocessing=("projected_document_dewarp",),
         layout_analysis=("table_layout",),
+        grid_min_confirmed_cell_ratio=0.35,
     ),
     "backend_easyocr_standard": OcrPipelineProfile(
         name="backend_easyocr_standard",
         image_preprocessing=("projected_document_dewarp",),
         layout_analysis=("table_layout",),
+        grid_min_confirmed_cell_ratio=0.35,
     ),
     "backend_plain_text": OcrPipelineProfile(
         name="backend_plain_text",

@@ -331,7 +331,10 @@ def _convert_page(
     tables_found = 0
     table_cells = 0
     regions = (
-        analyze_document_layout(main_image)
+        analyze_document_layout(
+            main_image,
+            min_confirmed_cell_ratio=profile.grid_min_confirmed_cell_ratio,
+        )
         if "table_layout" in profile.layout_analysis
         else [LayoutRegion(kind="image", image=main_image, bbox=(0, 0, *main_image.size))]
     )

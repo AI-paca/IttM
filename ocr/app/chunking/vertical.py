@@ -192,7 +192,7 @@ def _grid_line_masks(binary: np.ndarray):
 
 def _cell_line_hints_from_contours(
     table_grid: np.ndarray, local_width: int, local_height: int
-) -> tuple[list[int], list[int]]:
+) -> tuple[list[int], list[int], int]:
     """
     Use contour holes inside the connected grid as additional cell-boundary hints.
 
@@ -203,16 +203,17 @@ def _cell_line_hints_from_contours(
 
     x_positions: list[int] = []
     y_positions: list[int] = []
+    confirmed_cells = 0
 
     contours, hierarchy = cv2.findContours(table_grid, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     if hierarchy is None:
-        return x_positions, y_positions
+        return x_positions, y_positions, confirmed_cells
 
     min_cell_width = max(6, int(local_width * 0.002))
     min_cell_height = max(6, int(local_height * 0.002))
     max_cell_area = int(local_width * local_height * 0.95)
 
-    for contour in contours:
+    for index, contour in enumerate(contours):
         x, y, width, height = cv2.boundingRect(contour)
         area = width * height
         if width < min_cell_width or height < min_cell_height:
@@ -225,7 +226,13 @@ def _cell_line_hints_from_contours(
         x_positions.extend([x, x + width])
         y_positions.extend([y, y + height])
 
-    return x_positions, y_positions
+        if hierarchy[0][index][3] >= 0:
+            contour_area = cv2.contourArea(contour)
+            rectangularity = contour_area / area if area else 0.0
+            if rectangularity >= 0.82:
+                confirmed_cells += 1
+
+    return x_positions, y_positions, confirmed_cells
 
 
 def _build_grid_mask(horizontal: np.ndarray, vertical: np.ndarray):
@@ -236,7 +243,11 @@ def _build_grid_mask(horizontal: np.ndarray, vertical: np.ndarray):
     return cv2.dilate(grid, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
 
 
-def detect_table_layouts(image: Image.Image, min_cells: int = 4) -> list[TableLayout]:
+def detect_table_layouts(
+    image: Image.Image,
+    min_cells: int = 4,
+    min_confirmed_cell_ratio: float = 0.0,
+) -> list[TableLayout]:
     """
     Detect table-like grids using OpenCV line morphology and contours.
 
@@ -282,7 +293,11 @@ def detect_table_layouts(image: Image.Image, min_cells: int = 4) -> list[TableLa
         table_grid = grid[y:y2, x:x2]
         local_width = x2 - x
         local_height = y2 - y
-        contour_x_lines, contour_y_lines = _cell_line_hints_from_contours(table_grid, local_width, local_height)
+        contour_x_lines, contour_y_lines, confirmed_cells = _cell_line_hints_from_contours(
+            table_grid,
+            local_width,
+            local_height,
+        )
 
         y_lines_local = _with_edges(
             [
@@ -311,6 +326,13 @@ def detect_table_layouts(image: Image.Image, min_cells: int = 4) -> list[TableLa
         cols = len(x_lines) - 1
         if rows * cols < min_cells or len(cells) < min_cells:
             continue
+        if min_confirmed_cell_ratio > 0:
+            min_confirmed_cells = max(
+                min_cells,
+                int(np.ceil(rows * cols * min_confirmed_cell_ratio)),
+            )
+            if confirmed_cells < min_confirmed_cells:
+                continue
 
         tables.append(
             TableLayout(
@@ -422,7 +444,10 @@ def logical_table_layout(image: Image.Image, table: TableLayout, min_major_cover
     )
 
 
-def analyze_document_layout(image: Image.Image) -> list[LayoutRegion]:
+def analyze_document_layout(
+    image: Image.Image,
+    min_confirmed_cell_ratio: float = 0.0,
+) -> list[LayoutRegion]:
     """
     Split a page into ordered text/image and table regions.
 
@@ -431,7 +456,10 @@ def analyze_document_layout(image: Image.Image) -> list[LayoutRegion]:
     """
     cropped = remove_white_borders(image)
     width, height = cropped.size
-    tables = detect_table_layouts(cropped)
+    tables = detect_table_layouts(
+        cropped,
+        min_confirmed_cell_ratio=min_confirmed_cell_ratio,
+    )
     if not tables:
         return [LayoutRegion(kind="image", image=cropped, bbox=(0, 0, width, height))]
 

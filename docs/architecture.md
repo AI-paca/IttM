@@ -12,7 +12,7 @@ flowchart TB
         State["OcrContext.tsx<br/>state + actions"]
         Workspace["OcrWorkspace<br/>upload / settings / reading"]
         Strategy["use-extraction.ts<br/>source selection + fallback"]
-        Pdf["pdf-parser.ts<br/>PDF text + page canvas"]
+        Pdf["pdf-parser.ts + worker<br/>PDF text + page canvas"]
         BrowserOcr["browser-engine.ts<br/>Tesseract.js WASM"]
         Llm["llm-client.ts<br/>Gemini / OpenRouter / Ollama"]
 
@@ -54,14 +54,14 @@ flowchart TB
     subgraph Python["ocr/app: FastAPI OCR"]
         direction TB
         Api["routers/*<br/>convert / health / probe / install"]
-        Temp["routers/convert.py<br/>tempfile lifecycle"]
-        Convert["services/convert_service.py<br/>file loading + orchestration"]
+        Upload["routers/convert.py<br/>upload + JSON/NDJSON"]
+        Convert["services/convert_service.py<br/>page iterator + orchestration"]
         Chunking["chunking/*<br/>split + dedupe"]
         Engines["engines/*<br/>Auto / Tesseract / EasyOCR / Stub"]
         Markdown["formatting/markdown_formatter.py<br/>Markdown result"]
 
-        Api --> Temp
-        Temp --> Convert
+        Api --> Upload
+        Upload --> Convert
         Convert --> Chunking
         Convert --> Engines
         Engines --> Markdown
@@ -84,7 +84,7 @@ flowchart TB
     Client -->|HTTP OCR_URL| Api
     Llm --> External
 
-    Markdown -->|JSON response| Client
+    Markdown -->|JSON or page NDJSON| Client
     Client -->|passes result back| Strategy
     Strategy --> State
 ```

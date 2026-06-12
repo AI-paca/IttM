@@ -5,20 +5,18 @@ class AutoEngine(OcrEngine):
     """Auto-fallback engine that tries Tesseract first (core), then Easy OCR (optional high-quality)."""
 
     def __init__(self, prefer_tesseract: bool = True):
-        from app.engines.stub_engine import StubEngine
         from app.engines.easyocr_engine import EasyOcrEngine
         from app.engines.tesseract_engine import TesseractEngine
 
         self.tesseract = TesseractEngine()
         self.easy = EasyOcrEngine()
-        self.stub = StubEngine()
 
         if prefer_tesseract:
-            self.engines = [self.tesseract, self.easy, self.stub]
+            self.engines = [self.tesseract, self.easy]
         else:
-            self.engines = [self.easy, self.tesseract, self.stub]
+            self.engines = [self.easy, self.tesseract]
 
-        self.active_engine = next((e for e in self.engines if e.available()), self.stub)
+        self.active_engine = next((engine for engine in self.engines if engine.available()), None)
 
     def recognize(self, image, mode: str = "text_mode", psm: int = 6) -> str:
         for engine in self.engines:
@@ -48,7 +46,7 @@ class AutoEngine(OcrEngine):
         return self.tesseract.available() or self.easy.available()
 
     def info(self) -> dict:
-        info = self.active_engine.info()
+        info = self.active_engine.info() if self.active_engine is not None else {"engine": "none", "available": False}
         info["strategy"] = "auto_fallback"
         info["tesseract_available"] = self.tesseract.available()
         info["easyocr_available"] = self.easy.available()

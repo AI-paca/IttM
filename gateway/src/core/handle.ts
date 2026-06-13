@@ -17,7 +17,11 @@ export async function handle(request: Request, env: Env): Promise<Response> {
 }
 
 export function isGatewayApiRequest(pathname: string): boolean {
-  return pathname.startsWith("/api/") || pathname === "/convert";
+  return (
+    pathname.startsWith("/api/") ||
+    pathname === "/convert" ||
+    pathname.startsWith("/convert/")
+  );
 }
 
 export {

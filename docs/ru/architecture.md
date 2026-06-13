@@ -1,4 +1,7 @@
-## Архитектура проекта
+# Архитектура проекта
+
+[Документация](./README.md) |
+[Границы ответственности](./course/boundaries.md)
 
 Text Extractor разделен на четыре основные части: браузерный интерфейс, стратегии распознавания на стороне браузера, TypeScript gateway и Python OCR-сервис. В локальном режиме `server.ts` одновременно обслуживает API и frontend. В Docker-режиме наружу опубликован только nginx: он раздает собранный frontend и проксирует `/api/*` во внутренний gateway. Python OCR-сервис остается закрытым внутри runtime-сети и доступен gateway по `OCR_URL`.
 
@@ -12,7 +15,7 @@ flowchart TB
         State["OcrContext.tsx<br/>state + actions"]
         Workspace["OcrWorkspace<br/>upload / settings / reading"]
         Strategy["use-extraction.ts<br/>source selection + fallback"]
-        Pdf["pdf-parser.ts<br/>PDF text + page canvas"]
+        Pdf["pdf-parser.ts + worker<br/>PDF text + page canvas"]
         BrowserOcr["browser-engine.ts<br/>Tesseract.js WASM"]
         Llm["llm-client.ts<br/>Gemini / OpenRouter / Ollama"]
 
@@ -54,14 +57,14 @@ flowchart TB
     subgraph Python["ocr/app: FastAPI OCR"]
         direction TB
         Api["routers/*<br/>convert / health / probe / install"]
-        Temp["routers/convert.py<br/>tempfile lifecycle"]
-        Convert["services/convert_service.py<br/>file loading + orchestration"]
+        Upload["routers/convert.py<br/>upload + JSON/NDJSON"]
+        Convert["services/convert_service.py<br/>page iterator + orchestration"]
         Chunking["chunking/*<br/>split + dedupe"]
         Engines["engines/*<br/>Auto / Tesseract / EasyOCR / Stub"]
         Markdown["formatting/markdown_formatter.py<br/>Markdown result"]
 
-        Api --> Temp
-        Temp --> Convert
+        Api --> Upload
+        Upload --> Convert
         Convert --> Chunking
         Convert --> Engines
         Engines --> Markdown
@@ -84,7 +87,7 @@ flowchart TB
     Client -->|HTTP OCR_URL| Api
     Llm --> External
 
-    Markdown -->|JSON response| Client
+    Markdown -->|JSON or page NDJSON| Client
     Client -->|passes result back| Strategy
     Strategy --> State
 ```
@@ -97,4 +100,5 @@ flowchart TB
 - локальный запуск использует те же gateway-маршруты, что и контейнерный запуск;
 - статическая Lite-сборка может работать без серверного OCR и использовать browser OCR или внешние LLM API.
 
-Границы файлов и точки входа вынесены в отдельный документ: [границы ответственности и точки входа](./tmp/boundaries.md).
+Границы файлов и точки входа вынесены в отдельный документ:
+[границы ответственности и точки входа](./course/boundaries.md).

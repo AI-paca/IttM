@@ -1,4 +1,6 @@
 import type { AppDiagnostics } from "./types";
+import type { BrowserPipelineProfile } from "./pipeline-config";
+import { BROWSER_PIPELINE_PROFILES } from "./pipeline-config";
 
 export const STRICT_LANGUAGES = "chi_sim+eng+rus";
 
@@ -9,6 +11,8 @@ export interface BrowserOcrProfile {
   maxDimension: number;
   pdfRenderScale: number;
   reason: string;
+  preprocessingProfile: string;
+  imagePreprocessing: BrowserPipelineProfile["imagePreprocessing"];
   langPath?: string;
   cachePath?: string;
   gzip?: boolean;
@@ -20,6 +24,7 @@ function numberOrNull(value: unknown): number | null {
 
 export function createBrowserOcrProfile(
   diagnostics: AppDiagnostics | null,
+  pipelineProfile: BrowserPipelineProfile = BROWSER_PIPELINE_PROFILES.browser_tesseract_standard,
 ): BrowserOcrProfile {
   const memory = numberOrNull(diagnostics?.browser.memory);
   const cores = numberOrNull(diagnostics?.browser.cores);
@@ -33,6 +38,8 @@ export function createBrowserOcrProfile(
       maxDimension: 2200,
       pdfRenderScale: 1,
       reason: "low-memory-browser",
+      preprocessingProfile: pipelineProfile.name,
+      imagePreprocessing: pipelineProfile.imagePreprocessing,
     };
   }
 
@@ -44,6 +51,8 @@ export function createBrowserOcrProfile(
       maxDimension: 3200,
       pdfRenderScale: 1.25,
       reason: "balanced-browser-fallback",
+      preprocessingProfile: pipelineProfile.name,
+      imagePreprocessing: pipelineProfile.imagePreprocessing,
     };
   }
 
@@ -54,5 +63,7 @@ export function createBrowserOcrProfile(
     maxDimension: 4200,
     pdfRenderScale: 1.5,
     reason: "quality-first",
+    preprocessingProfile: pipelineProfile.name,
+    imagePreprocessing: pipelineProfile.imagePreprocessing,
   };
 }

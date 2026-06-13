@@ -6,6 +6,8 @@ from PIL import Image, ImageDraw
 
 from app.chunking.dedupe import dedupe_chunks
 from app.chunking.vertical import (
+    LayoutRegion,
+    TableCell,
     TableLayout,
     analyze_document_layout,
     detect_table_layouts,
@@ -16,6 +18,7 @@ from app.chunking.vertical import (
     wide_curriculum_table_to_markdown,
 )
 from app.formatting.markdown_formatter import MarkdownFormatter
+from app.pipeline_config import OcrPipelineProfile
 from app.services import convert_service
 
 
@@ -99,6 +102,44 @@ def _hierarchical_indent_table_fixture() -> Image.Image:
     draw.text((340, 113), "UK-1", fill="black")
 
     return image
+
+
+def _bar_chart_fixture() -> Image.Image:
+    image = Image.new("RGB", (900, 700), (8, 32, 92))
+    draw = ImageDraw.Draw(image)
+
+    draw.text((30, 30), "Top devices", fill="white")
+    for index in range(10):
+        top = 100 + index * 52
+        right = 790 - index * 24
+        draw.rectangle((90, top, right, top + 36), fill=(20, 120 + index * 8, 240))
+        draw.text((40, top + 8), str(index + 1), fill="white")
+        draw.text((105, top + 8), f"Device {index + 1}", fill="white")
+        draw.text((right + 8, top + 8), str(1_800_000 - index * 90_000), fill="white")
+
+    return image
+
+
+def _dense_table_layout(width: int, height: int, *, rows: int, cols: int) -> TableLayout:
+    x_lines = tuple(round(index * (width - 1) / cols) for index in range(cols + 1))
+    y_lines = tuple(round(index * (height - 1) / rows) for index in range(rows + 1))
+    cells = tuple(
+        TableCell(
+            row=row,
+            col=col,
+            bbox=(x_lines[col], y_lines[row], x_lines[col + 1], y_lines[row + 1]),
+        )
+        for row in range(rows)
+        for col in range(cols)
+    )
+    return TableLayout(
+        bbox=(0, 0, width, height),
+        rows=rows,
+        cols=cols,
+        x_lines=x_lines,
+        y_lines=y_lines,
+        cells=cells,
+    )
 
 
 def test_detect_table_layouts_finds_grid_cells():
@@ -230,6 +271,17 @@ def test_detect_table_layouts_ignores_blank_page():
     assert detect_table_layouts(Image.new("RGB", (500, 300), "white")) == []
 
 
+def test_detect_table_layouts_rejects_bar_chart_as_grid():
+    pytest.importorskip("cv2")
+    assert (
+        detect_table_layouts(
+            _bar_chart_fixture(),
+            min_confirmed_cell_ratio=0.35,
+        )
+        == []
+    )
+
+
 def test_convert_service_uses_table_layout_before_vertical_chunks(monkeypatch, tmp_path):
     pytest.importorskip("cv2")
     values = iter(["Предмет", "Часы", "Math", "42"])
@@ -252,3 +304,276 @@ def test_convert_service_uses_table_layout_before_vertical_chunks(monkeypatch, t
     assert "| Math | 42 |" in markdown
     assert meta["tables_found"] == 1
     assert meta["table_cells"] == 4
+
+
+def test_convert_service_segments_implausibly_tall_table_region(monkeypatch, tmp_path):
+    recognized_sizes = []
+
+    class FakeEngine:
+        def recognize_words(self, image, psm=6, min_conf=20):
+            raise AssertionError("tall pseudo-table reached table OCR")
+
+        def recognize(self, image, mode="text_mode", psm=6):
+            recognized_sizes.append(image.size)
+            return f"chunk {len(recognized_sizes)}"
+
+        def info(self):
+            return {"engine": "fake"}
+
+    def fake_layout(image, min_confirmed_cell_ratio=0.0):
+        assert min_confirmed_cell_ratio == 0.42
+        layout = _dense_table_layout(image.width, image.height, rows=21, cols=25)
+        return [LayoutRegion(kind="table", image=image, bbox=layout.bbox, table=layout)]
+
+    monkeypatch.setattr(convert_service, "AutoEngine", lambda prefer_tesseract=True: FakeEngine())
+    monkeypatch.setattr(convert_service, "analyze_document_layout", fake_layout)
+
+    image_path = tmp_path / "long-screenshot.png"
+    Image.new("RGB", (800, 4200), (230, 230, 230)).save(image_path)
+    profile = OcrPipelineProfile(
+        name="test",
+        layout_analysis=("table_layout",),
+        grid_min_confirmed_cell_ratio=0.42,
+    )
+
+    markdown, meta = asyncio.run(
+        convert_service.convert(
+            image_path,
+            engine_type="auto",
+            pipeline_profile=profile,
+        )
+    )
+
+    assert "chunk 1" in markdown
+    assert len(recognized_sizes) > 1
+    assert max(height for _, height in recognized_sizes) <= 1200
+    assert meta["chunks"] == len(recognized_sizes)
+    assert meta["tables_found"] == 0
+    assert meta["table_cells"] == 0
+
+
+def test_convert_service_bounds_large_table_fallback(monkeypatch, tmp_path):
+    word_calls = []
+    recognized_sizes = []
+
+    class FakeEngine:
+        def recognize_words(self, image, psm=6, min_conf=20):
+            word_calls.append(image.size)
+            return []
+
+        def recognize(self, image, mode="text_mode", psm=6):
+            recognized_sizes.append(image.size)
+            return "fallback text"
+
+        def info(self):
+            return {"engine": "fake"}
+
+    def fake_layout(image, min_confirmed_cell_ratio=0.0):
+        assert min_confirmed_cell_ratio == 0.0
+        layout = _dense_table_layout(image.width, image.height, rows=21, cols=25)
+        return [LayoutRegion(kind="table", image=image, bbox=layout.bbox, table=layout)]
+
+    monkeypatch.setattr(convert_service, "AutoEngine", lambda prefer_tesseract=True: FakeEngine())
+    monkeypatch.setattr(convert_service, "analyze_document_layout", fake_layout)
+
+    image_path = tmp_path / "large-table.png"
+    Image.new("RGB", (800, 1000), (200, 200, 200)).save(image_path)
+    profile = OcrPipelineProfile(name="test", layout_analysis=("table_layout",))
+
+    markdown, meta = asyncio.run(
+        convert_service.convert(
+            image_path,
+            engine_type="auto",
+            pipeline_profile=profile,
+        )
+    )
+
+    assert "fallback text" in markdown
+    assert len(word_calls) == 1
+    assert recognized_sizes == [(800, 1000)]
+    assert meta["chunks"] == 2
+    assert meta["tables_found"] == 1
+    assert meta["table_cells"] == 525
+
+
+def test_convert_service_rejects_sparse_table_markdown(monkeypatch, tmp_path):
+    recognized_sizes = []
+
+    class FakeEngine:
+        def recognize_words(self, image, psm=6, min_conf=20):
+            return [{"text": "lonely", "bbox": (20, 20, 80, 50)}]
+
+        def recognize(self, image, mode="text_mode", psm=6):
+            recognized_sizes.append(image.size)
+            return "raw ranking with names and numbers"
+
+        def info(self):
+            return {"engine": "fake"}
+
+    def fake_layout(image, min_confirmed_cell_ratio=0.0):
+        layout = _dense_table_layout(image.width, image.height, rows=12, cols=12)
+        return [
+            LayoutRegion(
+                kind="table",
+                image=image,
+                bbox=layout.bbox,
+                table=layout,
+            )
+        ]
+
+    monkeypatch.setattr(
+        convert_service,
+        "AutoEngine",
+        lambda prefer_tesseract=True: FakeEngine(),
+    )
+    monkeypatch.setattr(convert_service, "analyze_document_layout", fake_layout)
+
+    image_path = tmp_path / "sparse-pseudo-table.png"
+    Image.new("RGB", (900, 700), (200, 200, 200)).save(image_path)
+    profile = OcrPipelineProfile(
+        name="test",
+        layout_analysis=("table_layout",),
+        table_min_word_cell_coverage=0.35,
+        max_table_cell_ocr_calls=16,
+    )
+
+    markdown, meta = asyncio.run(
+        convert_service.convert(
+            image_path,
+            engine_type="auto",
+            pipeline_profile=profile,
+        )
+    )
+
+    assert markdown == "raw ranking with names and numbers"
+    assert recognized_sizes == [(900, 700)]
+    assert meta["chunks"] == 2
+    assert meta["tables_found"] == 1
+    assert meta["table_cells"] == 144
+
+
+def test_convert_service_rejects_sparse_cell_markdown(monkeypatch, tmp_path):
+    cell_calls = 0
+    raw_calls = 0
+
+    class FakeEngine:
+        def recognize_words(self, image, psm=6, min_conf=20):
+            return []
+
+        def recognize(self, image, mode="text_mode", psm=6):
+            nonlocal cell_calls, raw_calls
+            if image.size == (400, 400):
+                raw_calls += 1
+                return "raw names 1 2 3 4"
+            cell_calls += 1
+            return "only one cell" if cell_calls == 1 else ""
+
+        def info(self):
+            return {"engine": "fake"}
+
+    def fake_layout(image, min_confirmed_cell_ratio=0.0):
+        layout = _dense_table_layout(image.width, image.height, rows=4, cols=4)
+        return [
+            LayoutRegion(
+                kind="table",
+                image=image,
+                bbox=layout.bbox,
+                table=layout,
+            )
+        ]
+
+    monkeypatch.setattr(
+        convert_service,
+        "AutoEngine",
+        lambda prefer_tesseract=True: FakeEngine(),
+    )
+    monkeypatch.setattr(convert_service, "analyze_document_layout", fake_layout)
+
+    image_path = tmp_path / "sparse-small-table.png"
+    Image.new("RGB", (400, 400), (200, 200, 200)).save(image_path)
+    profile = OcrPipelineProfile(
+        name="test",
+        layout_analysis=("table_layout",),
+        max_table_cell_ocr_calls=16,
+        table_min_cell_coverage=0.5,
+    )
+
+    markdown, meta = asyncio.run(
+        convert_service.convert(
+            image_path,
+            engine_type="auto",
+            pipeline_profile=profile,
+        )
+    )
+
+    assert markdown == "raw names 1 2 3 4"
+    assert cell_calls == 16
+    assert raw_calls == 1
+    assert meta["chunks"] == 18
+
+
+def test_convert_service_checks_wide_table_coverage_before_formatting(
+    monkeypatch,
+    tmp_path,
+):
+    formatted = False
+
+    class FakeEngine:
+        def recognize_words(self, image, psm=6, min_conf=20):
+            return [{"text": "Б1.О.01", "bbox": (5, 5, 20, 20)}]
+
+        def recognize(self, image, mode="text_mode", psm=6):
+            return "raw curriculum text"
+
+        def info(self):
+            return {"engine": "fake"}
+
+    image_path = tmp_path / "sparse-wide-table.png"
+    Image.new("RGB", (1000, 200), (200, 200, 200)).save(image_path)
+    layout = _dense_table_layout(1000, 200, rows=2, cols=50)
+
+    monkeypatch.setattr(
+        convert_service,
+        "AutoEngine",
+        lambda prefer_tesseract=True: FakeEngine(),
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "analyze_document_layout",
+        lambda image, min_confirmed_cell_ratio=0.0: [
+            LayoutRegion(
+                kind="table",
+                image=image,
+                bbox=layout.bbox,
+                table=layout,
+            )
+        ],
+    )
+
+    def fake_wide_formatter(table, words):
+        nonlocal formatted
+        formatted = True
+        return "| sparse |"
+
+    monkeypatch.setattr(
+        convert_service,
+        "wide_curriculum_table_to_markdown",
+        fake_wide_formatter,
+    )
+
+    profile = OcrPipelineProfile(
+        name="test",
+        layout_analysis=("table_layout",),
+        wide_table_min_word_cell_coverage=0.02,
+        max_table_cell_ocr_calls=16,
+    )
+    markdown, _ = asyncio.run(
+        convert_service.convert(
+            image_path,
+            engine_type="auto",
+            pipeline_profile=profile,
+        )
+    )
+
+    assert markdown == "raw curriculum text"
+    assert formatted is False

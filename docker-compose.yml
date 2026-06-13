@@ -16,6 +16,7 @@ services:
       PYTHONPATH: /opt/ittm-python-packages
       EASY_INSTALL_TARGET: /opt/ittm-python-packages
       EASYOCR_MODULE_PATH: /models/easyocr
+      DISABLE_RUNTIME_EASYOCR_INSTALL: ${DISABLE_RUNTIME_EASYOCR_INSTALL:-0}
     volumes:
       - ocr-python-packages:/opt/ittm-python-packages
       - ocr-easyocr-models:/models/easyocr
@@ -26,7 +27,7 @@ services:
       test:
         - CMD-SHELL
         - >-
-          python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('PORT', '8000'), timeout=3).read()"
+          python -c "import json, os, urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:%s/readiness' % os.environ.get('PORT', '8000'), timeout=3)); raise SystemExit(0 if data.get('ready') else 1)"
       interval: 10s
       timeout: 5s
       retries: 12

@@ -1,74 +1,111 @@
 # IttM (Image-to-Text Markdown)
 
-[Веб-приложение](https://ai-paca.github.io/IttM/) для конвертации длинных скриншотов и PDF-документов в формат Markdown.
+[Русский](./docs/ru/README.md) | [English](./docs/en/README.md)
 
-## Запуск и окружение
+[IttM](https://ai-paca.github.io/IttM/) преобразует изображения, длинные
+скриншоты и PDF-документы в Markdown. Приложение поддерживает обработку в
+браузере, локальные Tesseract/EasyOCR и внешние LLM-провайдеры.
 
-Для полноценной работы с локальными моделями Tesseract и EasyOCR требуется запуск бэкенда.
+## Возможности
 
-### Быстрый старт
+- Browser OCR на Tesseract.js/WASM без отправки документа на сервер.
+- Локальный Tesseract и EasyOCR через Python FastAPI.
+- Постраничная выдача PDF через NDJSON.
+- Распознавание таблиц с ограниченным raw-text fallback.
+- Native text extraction из PDF до запуска OCR.
+- Gemini, OpenRouter и Ollama с явным согласием перед внешней отправкой.
+- GitHub Pages-сборка с локальными Tesseract worker/core assets.
 
-#### Docker Compose
+## Режимы обработки
 
-- **Windows (PowerShell):**
+| Режим           | Где выполняется                | Передача исходного файла                                     |
+| --------------- | ------------------------------ | ------------------------------------------------------------ |
+| Browser         | Tesseract.js worker в браузере | Файл не покидает вкладку                                     |
+| Local Tesseract | Python backend                 | Исходный `File` отправляется multipart-потоком через gateway |
+| Local EasyOCR   | Python backend                 | Исходный `File` отправляется multipart-потоком через gateway |
+| External LLM    | API выбранного провайдера      | Только после явного согласия пользователя                    |
 
-  ```powershell
-  docker compose up -d; $url = "http://" + (docker compose port nginx 80).Trim(); Start-Process $url; $url
-  ```
+Для локальных режимов frontend не декодирует файл через `arrayBuffer()` и не
+кодирует его в Base64. Gateway передает исходное тело запроса в OCR backend.
+Python пока собирает upload в `bytes` перед OCR; это зафиксированное ограничение
+backend, а не браузера.
 
-- **Linux / macOS:**
+## Быстрый старт
 
-  ```bash
-  docker compose up -d && url="http://$(docker compose port nginx 80)" && (xdg-open "$url" || open "$url")
-  ```
+### Docker Compose
 
-_Для проверки работы API:_ `curl -fsS "http://localhost:3000/api/health"` (замените `3000` на выданный Docker порт, если он отличается).
+```bash
+docker compose up -d
+docker compose port nginx 80
+```
 
-Подробные команды `docker build` и `docker run` без Compose:
-[ручной запуск Docker](./docs/docker_manual_launch.md).
+Откройте адрес, который вернула вторая команда. Проверка API:
 
-#### Bare-metal
+```bash
+curl -fsS "http://127.0.0.1:<порт>/api/health"
+```
 
-Сборка и запуск компонентов вне контейнеров (для локального бэкендом требуются Bun, Python 3.10+, Tesseract и Poppler; для статической сборки — Node.js/npm).
+Подробные команды: [ручной запуск Docker](./docs/ru/docker-manual-launch.md).
 
-1. **Полная версия:**
+### Локальная разработка
 
-   ```bash
-   bash scripts/run-local.sh
-   ```
+Требуются Bun, Python 3.10+, Tesseract и Poppler:
 
-2. **Статический фронтенд (без бэкенда):**
+```bash
+bash scripts/run-local.sh
+```
 
-   Вся обработка происходит на устройстве клиента или через внешние API.
+Статическая сборка без Python backend:
 
-   ```bash
-   bash scripts/build-lite.sh
-   ```
+```bash
+bash scripts/build-lite.sh
+```
 
-## Текущие ограничения архитектуры
+## Архитектурные границы
 
-| Компонент / Роль                    | Локация исполнения        | Поток данных и память                                  | Архитектурные ограничения и узкие места                                                                                                                                                    |
-| ----------------------------------- | ------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Browser OCR** (Edge Engine)       | Изолированно в браузере   | V8 Heap                                                | OOM краши вкладки при `>4000x4000px`. Жесткие квоты памяти WebAssembly/V8. Требует принудительного downscale'а.                                                                            |
-| **PDF Parser** (Extract)            | Main Thread (Client)      | V8 Heap                                                | Извлечение текста синхронно блокирует Event Loop (замораживание UI на средних и тяжелых файлах).                                                                                           |
-| **Gateway API** (Transport)         | Nginx ➔ Node.js (Backend) | ОЗУ Клиента ➔ Stream Nginx/Gateway ➔ `/tmp` Python OCR | Ограничено директивой `client_max_body_size`. Nginx/gateway не буферизуют тело запроса (`proxy_request_buffering off`); Python-бэкенд сохраняет upload во временный файл перед обработкой. |
-| **Local OCR** (Tesseract / EasyOCR) | Python FastAPI (Backend)  | `/tmp` хоста ➔ RAM / VRAM                              | EasyOCR падает на CPU при `<6GB VRAM`. Tesseract создает высокий дисковый I/O из-за постоянного чтения временных файлов.                                                                   |
-| **LLM Cloud API** (External)        | Публичный Провайдер       | V8 Heap ➔ HTTP Payload                                 | Кодирование крупных файлов в Base64 на клиенте забивает ОЗУ и вызывает фризы перед началом сетевого запроса.                                                                               |
+| Компонент   | Текущее поведение                                      | Ограничение                                                           |
+| ----------- | ------------------------------------------------------ | --------------------------------------------------------------------- |
+| Browser OCR | Worker, resize до `2200-4200px`/`4-14MP`               | Downscale может терять мелкие цифры и линии                           |
+| Browser PDF | Постраничный PDF.js worker и `OffscreenCanvas`         | Весь PDF сначала попадает в worker `ArrayBuffer`                      |
+| Gateway     | Потоковое multipart-проксирование и NDJSON             | Нет task queue, durable retry и backend cancellation                  |
+| Python OCR  | Страницы PDF рендерятся по одной; decoded guard `80MP` | Upload целиком существует в RAM; PDF временно спуливается для Poppler |
+| EasyOCR     | CPU fallback без обязательных 6 ГБ VRAM                | CPU-путь заметно медленнее и требует больше памяти                    |
 
----
+Полная матрица:
+[ограничения OCR-архитектуры](./docs/ru/architecture-limitations.md).
 
-## Приватность и модель угроз
+## Приватность
 
-| Вектор обработки                             | Уровень риска             | Техническое обоснование                                                                                                                                             |
-| -------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Client-side (Browser Engine, PDF Парсер)** | Очень низкий              | Client-side в песочнице V8. Вычислительные данные не покидают устройство на сетевом уровне.                                                                         |
-| **Внутренняя сеть (Gateway, Local OCR)**     | Низкий (Доверенный хост)  | Изоляция через Docker-сеть. Трафик не шифруется (plain HTTP), но замкнут в loopback. Уязвимо только при компрометации самого хоста/системы.                         |
-| **Внешние API (Gemini Cloud, OpenRouter)**   | Высокий (SLA 3-й стороны) | Отправка base64-изображений на публичные эндпоинты. Данные покидают контролируемый периметр. Приватность полностью зависит от честности и политик хранения вендора. |
+- Browser OCR не отправляет документ по сети.
+- Docker публикует наружу только nginx; gateway и OCR остаются во внутренней
+  сети.
+- Локальный gateway не сохраняет документы в базе данных.
+- Внешний LLM получает документ только после явного согласия.
+- API-ключи внешних провайдеров не отправляются в локальный OCR backend.
 
-## Документация и планирование
+Подробнее: [политика безопасности](./docs/ru/security.md).
 
-- **[Архитектура проекта](./docs/architecture.md)**
-- **[Границы ответственности и точки входа](./docs/tmp/boundaries.md)**
-- **[План курса](./docs/COURSE_PLAN.md)**
-- **[Ручной запуск Docker](./docs/docker_manual_launch.md)**
-- **[Отчёт о зависимостях и SBOM](./docs/sbom-report.md)**
+## Проверки
+
+```bash
+npm run format:check
+npm run lint
+npm test
+npm run build
+npm run build:pages && npm run test:pages
+docker compose config --quiet
+```
+
+Python-проверки выполняются в OCR CI-образе. Полный список:
+[тестирование](./docs/ru/testing.md).
+
+## Документация
+
+- [Русская документация](./docs/ru/README.md)
+- [English documentation](./docs/en/README.md)
+- [Архитектура](./docs/ru/architecture.md)
+- [Границы ответственности](./docs/ru/course/boundaries.md)
+- [Ограничения движка](./docs/ru/architecture-limitations.md)
+- [История усиления движка](./docs/ru/engine-hardening-progress.md)
+- [План курса](./docs/ru/course/COURSE_PLAN.md)
+- [SBOM / зависимости](./docs/ru/sbom-report.md)

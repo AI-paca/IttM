@@ -5,6 +5,8 @@ import express, {
 } from "express";
 import * as http from "http";
 import * as path from "path";
+import { once } from "node:events";
+import { Readable } from "node:stream";
 import { fileURLToPath } from "url";
 import { handle, isGatewayApiRequest } from "./gateway/src/core/handle";
 import { error_response } from "./gateway/src/core/http";
@@ -33,14 +35,7 @@ export async function to_web_request(
   };
 
   if (req.method !== "GET" && req.method !== "HEAD") {
-    const stream = new ReadableStream({
-      start(controller) {
-        req.on("data", (chunk) => controller.enqueue(chunk));
-        req.on("end", () => controller.close());
-        req.on("error", (err) => controller.error(err));
-      },
-    });
-    init.body = stream;
+    init.body = Readable.toWeb(req) as ReadableStream<Uint8Array>;
     // Node 18+ requires duplex: 'half' for Request streaming body
     (init as any).duplex = "half";
   }
@@ -64,7 +59,7 @@ export async function send_web_response(
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      res.write(value);
+      if (!res.write(value)) await once(res, "drain");
     }
   }
   res.end();

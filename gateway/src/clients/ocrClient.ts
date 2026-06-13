@@ -44,6 +44,28 @@ export class OcrClient {
     }
   }
 
+  static async convertStream(req: Request, env: Env): Promise<Response> {
+    const url = new URL(req.url);
+    const queryParams = url.searchParams.toString();
+    const targetUrl = `${env.OCR_URL}/v1/convert/stream${queryParams ? "?" + queryParams : ""}`;
+
+    try {
+      const headers = new Headers();
+      const contentType = req.headers.get("content-type");
+      if (contentType) headers.set("content-type", contentType);
+
+      return await fetch(targetUrl, {
+        method: "POST",
+        headers,
+        body: req.body,
+        // @ts-ignore
+        duplex: "half",
+      });
+    } catch (e: any) {
+      return backendFetchError(targetUrl, e);
+    }
+  }
+
   static async health(env: Env): Promise<Response> {
     const targetUrl = `${env.OCR_URL}/health`;
     try {

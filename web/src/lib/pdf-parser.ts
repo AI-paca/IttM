@@ -1,199 +1,298 @@
 import * as pdfjsLib from "pdfjs-dist";
-import { mergeNativeAndOcrText } from "../ocr/pdf-text";
-// Configure worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { findContentBounds } from "./image-content-bounds";
+import { boundedViewportScale, processPreparedPages } from "./pdf-processing";
+import type { PdfProcessingOptions, PreparedPdfPage } from "./pdf-processing";
 
-export interface PdfProcessingOptions {
-  renderScale?: number;
-}
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+
+export type { PdfProcessingOptions } from "./pdf-processing";
 
 interface PdfTextItem {
   str?: string;
   hasEOL?: boolean;
 }
 
+interface PdfWorkerResponse<T> {
+  id: number;
+  ok: boolean;
+  value?: T;
+  error?: string;
+}
+
+let nextPdfWorkerRequestId = 0;
+const PDF_WORKER_REQUEST_TIMEOUT_MS = 120_000;
+
+class PdfPageWorkerClient {
+  private readonly worker = new Worker(
+    new URL("./pdf-page.worker.ts", import.meta.url),
+    { type: "module" },
+  );
+  private readonly pending = new Map<
+    number,
+    {
+      resolve: (value: unknown) => void;
+      reject: (error: Error) => void;
+      timeout: ReturnType<typeof setTimeout>;
+      cancellationCheck?: ReturnType<typeof setInterval>;
+    }
+  >();
+  private failure: Error | null = null;
+
+  constructor() {
+    this.worker.onmessage = (
+      event: MessageEvent<PdfWorkerResponse<unknown>>,
+    ) => {
+      const request = this.pending.get(event.data.id);
+      if (!request) return;
+      this.pending.delete(event.data.id);
+      clearTimeout(request.timeout);
+      if (request.cancellationCheck) {
+        clearInterval(request.cancellationCheck);
+      }
+      if (event.data.ok) request.resolve(event.data.value);
+      else request.reject(new Error(event.data.error || "PDF worker failed."));
+    };
+    this.worker.onerror = (event) => {
+      this.fail(new Error(event.message || "PDF worker failed."));
+    };
+  }
+
+  private fail(error: Error) {
+    if (this.failure) return;
+    this.failure = error;
+    for (const request of this.pending.values()) {
+      clearTimeout(request.timeout);
+      if (request.cancellationCheck) {
+        clearInterval(request.cancellationCheck);
+      }
+      request.reject(error);
+    }
+    this.pending.clear();
+    this.worker.terminate();
+  }
+
+  request<T>(
+    payload: Record<string, unknown>,
+    shouldContinue?: () => boolean,
+  ): Promise<T> {
+    if (this.failure) return Promise.reject(this.failure);
+    if (shouldContinue && !shouldContinue()) {
+      return Promise.reject(
+        new DOMException("PDF processing was cancelled.", "AbortError"),
+      );
+    }
+
+    return new Promise<T>((resolve, reject) => {
+      const id = ++nextPdfWorkerRequestId;
+      const timeout = setTimeout(() => {
+        this.fail(new Error("PDF worker request timed out."));
+      }, PDF_WORKER_REQUEST_TIMEOUT_MS);
+      const cancellationCheck = shouldContinue
+        ? setInterval(() => {
+            if (!shouldContinue()) {
+              this.fail(
+                new DOMException("PDF processing was cancelled.", "AbortError"),
+              );
+            }
+          }, 100)
+        : undefined;
+      this.pending.set(id, {
+        resolve: (value) => resolve(value as T),
+        reject,
+        timeout,
+        cancellationCheck,
+      });
+      try {
+        this.worker.postMessage({ id, ...payload });
+      } catch (error) {
+        this.fail(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  }
+
+  async dispose() {
+    if (this.failure) return;
+    try {
+      await this.request({ action: "dispose" });
+    } finally {
+      this.worker.terminate();
+    }
+  }
+}
+
+function normalizedPdfText(items: PdfTextItem[]): string {
+  return items
+    .map((item) => `${item.str ?? ""}${item.hasEOL ? "\n" : " "}`)
+    .join("")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n[ \t]+/g, "\n")
+    .trim();
+}
+
+async function processPdfInWorker(
+  file: File,
+  onProgress: (msg: string) => void,
+  processImageCallback: (image: Blob) => Promise<string>,
+  onChunkExtracted: ((text: string, pageIdx?: number) => void) | undefined,
+  startPage: number,
+  onTotalPages: ((total: number) => void) | undefined,
+  options: PdfProcessingOptions,
+): Promise<string> {
+  const client = new PdfPageWorkerClient();
+  try {
+    const { totalPages } = await client.request<{ totalPages: number }>(
+      {
+        action: "init",
+        file,
+        renderScale: options.renderScale ?? 1.5,
+        maxPagePixels: options.maxPagePixels ?? 12_000_000,
+        maxDimension: options.maxDimension ?? 4096,
+      },
+      options.shouldContinue,
+    );
+    onTotalPages?.(totalPages);
+    return await processPreparedPages(
+      totalPages,
+      startPage,
+      options,
+      onProgress,
+      (pageNumber) =>
+        client.request<PreparedPdfPage>(
+          { action: "page", pageNumber },
+          options.shouldContinue,
+        ),
+      processImageCallback,
+      onChunkExtracted,
+    );
+  } finally {
+    await client.dispose();
+  }
+}
+
+async function processPdfOnMainThread(
+  file: File,
+  onProgress: (msg: string) => void,
+  processImageCallback: (image: Blob) => Promise<string>,
+  onChunkExtracted: ((text: string, pageIdx?: number) => void) | undefined,
+  startPage: number,
+  onTotalPages: ((total: number) => void) | undefined,
+  options: PdfProcessingOptions,
+): Promise<string> {
+  const loadingTask = pdfjsLib.getDocument({ data: await file.arrayBuffer() });
+  const pdf = await loadingTask.promise;
+  onTotalPages?.(pdf.numPages);
+
+  try {
+    return await processPreparedPages(
+      pdf.numPages,
+      startPage,
+      options,
+      onProgress,
+      async (pageNumber) => {
+        const page = await pdf.getPage(pageNumber);
+        try {
+          const textContent = await page.getTextContent();
+          const renderScale = options.renderScale ?? 1.5;
+          const requestedViewport = page.getViewport({ scale: renderScale });
+          const viewport = page.getViewport({
+            scale:
+              renderScale *
+              boundedViewportScale(
+                requestedViewport.width,
+                requestedViewport.height,
+                options,
+              ),
+          });
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.ceil(viewport.width));
+          canvas.height = Math.max(1, Math.ceil(viewport.height));
+          const context = canvas.getContext("2d", {
+            willReadFrequently: true,
+          });
+          if (!context) throw new Error("Could not create PDF canvas.");
+          await page.render({ canvasContext: context, viewport } as never)
+            .promise;
+          const cropped = cropWhiteBorders(canvas);
+          const image = await new Promise<Blob>((resolve, reject) => {
+            cropped.toBlob(
+              (blob) =>
+                blob
+                  ? resolve(blob)
+                  : reject(new Error("Canvas returned no PDF page.")),
+              "image/jpeg",
+              0.9,
+            );
+          });
+          canvas.width = 1;
+          canvas.height = 1;
+          return {
+            nativeText: normalizedPdfText(textContent.items as PdfTextItem[]),
+            image,
+          };
+        } finally {
+          page.cleanup();
+        }
+      },
+      processImageCallback,
+      onChunkExtracted,
+    );
+  } finally {
+    await pdf.cleanup();
+    await loadingTask.destroy();
+  }
+}
+
 export async function processPdfIntelligently(
   file: File,
   onProgress: (msg: string) => void,
-  processImageCallback: (b64Image: string) => Promise<string>,
+  processImageCallback: (image: Blob) => Promise<string>,
   onChunkExtracted?: (text: string, pageIdx?: number) => void,
-  startPage: number = 1,
+  startPage = 1,
   onTotalPages?: (total: number) => void,
   options: PdfProcessingOptions = {},
 ): Promise<string> {
   onProgress("Загрузка PDF...");
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  const numPages = pdf.numPages;
-  if (onTotalPages) onTotalPages(numPages);
-  const markdownParts: string[] = [];
-
-  for (let i = startPage; i <= numPages; i++) {
-    onProgress(`Обработка страницы ${i} из ${numPages}...`);
-    const page = await pdf.getPage(i);
-
-    // 1. Extract native PDF text if it exists.
-    const textContent = await page.getTextContent();
-    let nativeText = "";
-
-    for (const item of textContent.items as PdfTextItem[]) {
-      nativeText += `${item.str ?? ""}${item.hasEOL ? "\n" : " "}`;
-    }
-    nativeText = nativeText
-      .replace(/[ \t]+/g, " ")
-      .replace(/\n[ \t]+/g, "\n")
-      .trim();
-
-    // 2. Always render the page too: many PDFs contain both native text and image-only regions.
-    const viewport = page.getViewport({ scale: options.renderScale ?? 1.5 });
-    const canvas = document.createElement("canvas");
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    let pageText = nativeText;
-
-    if (ctx) {
-      await page.render({ canvasContext: ctx, viewport } as any).promise;
-
-      const croppedCanvas = cropWhiteBorders(canvas);
-
-      onProgress(
-        nativeText
-          ? `Проверка изображения на странице ${i}...`
-          : `Распознавание скана страницы ${i}...`,
-      );
-      const b64 = await new Promise<string>((resolve, reject) => {
-        croppedCanvas.toBlob(
-          (blob) => {
-            if (!blob)
-              return reject(new Error("Canvas вернул пустую PDF-страницу."));
-            const reader = new FileReader();
-            reader.readAsDataURL(blob);
-            reader.onloadend = () => {
-              const res = reader.result as string;
-              const base64 = res.split(",")[1];
-              if (!base64)
-                reject(new Error("Не удалось сериализовать PDF-страницу."));
-              else resolve(base64);
-            };
-            reader.onerror = () =>
-              reject(reader.error ?? new Error("Ошибка чтения PDF-страницы."));
-          },
-          "image/jpeg",
-          0.9,
-        );
-      });
-
-      const ocrText = await processImageCallback(b64);
-      pageText = mergeNativeAndOcrText(nativeText, ocrText);
-    }
-
-    if (pageText.trim()) {
-      markdownParts.push(pageText);
-      onChunkExtracted?.(`${pageText}\n\n---\n\n`, i);
-    }
+  if (typeof Worker !== "undefined" && typeof OffscreenCanvas !== "undefined") {
+    return await processPdfInWorker(
+      file,
+      onProgress,
+      processImageCallback,
+      onChunkExtracted,
+      startPage,
+      onTotalPages,
+      options,
+    );
   }
-
-  return markdownParts.join("\n\n---\n\n");
+  return await processPdfOnMainThread(
+    file,
+    onProgress,
+    processImageCallback,
+    onChunkExtracted,
+    startPage,
+    onTotalPages,
+    options,
+  );
 }
 
-// Function to find bounding box of non-white pixels and crop canvas
 export function cropWhiteBorders(canvas: HTMLCanvasElement): HTMLCanvasElement {
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return canvas;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return canvas;
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const bounds = findContentBounds(imageData.data, canvas.width, canvas.height);
+  const cropWidth = Math.max(1, bounds.right - bounds.left);
+  const cropHeight = Math.max(1, bounds.bottom - bounds.top);
+  if (cropWidth === canvas.width && cropHeight === canvas.height) return canvas;
 
-  const width = canvas.width;
-  const height = canvas.height;
-  const imgData = ctx.getImageData(0, 0, width, height);
-  const data = imgData.data;
-
-  let top = 0,
-    bottom = height,
-    left = 0,
-    right = width;
-  const threshold = 240; // 255 is white, allow slight variations
-
-  // Find top
-  topLoop: for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const idx = (y * width + x) * 4;
-      if (
-        data[idx] < threshold ||
-        data[idx + 1] < threshold ||
-        data[idx + 2] < threshold
-      ) {
-        top = y;
-        break topLoop;
-      }
-    }
-  }
-
-  // Find bottom
-  bottomLoop: for (let y = height - 1; y >= 0; y--) {
-    for (let x = 0; x < width; x++) {
-      const idx = (y * width + x) * 4;
-      if (
-        data[idx] < threshold ||
-        data[idx + 1] < threshold ||
-        data[idx + 2] < threshold
-      ) {
-        bottom = y;
-        break bottomLoop;
-      }
-    }
-  }
-
-  // Find left
-  leftLoop: for (let x = 0; x < width; x++) {
-    for (let y = top; y <= bottom; y++) {
-      const idx = (y * width + x) * 4;
-      if (
-        data[idx] < threshold ||
-        data[idx + 1] < threshold ||
-        data[idx + 2] < threshold
-      ) {
-        left = x;
-        break leftLoop;
-      }
-    }
-  }
-
-  // Find right
-  rightLoop: for (let x = width - 1; x >= 0; x--) {
-    for (let y = top; y <= bottom; y++) {
-      const idx = (y * width + x) * 4;
-      if (
-        data[idx] < threshold ||
-        data[idx + 1] < threshold ||
-        data[idx + 2] < threshold
-      ) {
-        right = x;
-        break rightLoop;
-      }
-    }
-  }
-
-  // Add padding
-  const padding = 20;
-  left = Math.max(0, left - padding);
-  top = Math.max(0, top - padding);
-  right = Math.min(width, right + padding);
-  bottom = Math.min(height, bottom + padding);
-
-  const cropWidth = right - left;
-  const cropHeight = bottom - top;
-
-  if (cropWidth <= 0 || cropHeight <= 0) return canvas;
-
-  const croppedCanvas = document.createElement("canvas");
-  croppedCanvas.width = cropWidth;
-  croppedCanvas.height = cropHeight;
-  const croppedCtx = croppedCanvas.getContext("2d");
-  if (croppedCtx) {
-    croppedCtx.drawImage(
+  const cropped = document.createElement("canvas");
+  cropped.width = cropWidth;
+  cropped.height = cropHeight;
+  cropped
+    .getContext("2d")
+    ?.drawImage(
       canvas,
-      left,
-      top,
+      bounds.left,
+      bounds.top,
       cropWidth,
       cropHeight,
       0,
@@ -201,8 +300,5 @@ export function cropWhiteBorders(canvas: HTMLCanvasElement): HTMLCanvasElement {
       cropWidth,
       cropHeight,
     );
-    return croppedCanvas;
-  }
-
-  return canvas;
+  return cropped;
 }

@@ -26,6 +26,7 @@ export function SettingsSidebar({
     easyOcrInstalling,
     easyOcrInstallMessage,
     easyOcrInstallProgress,
+    externalLlmConsent,
     llmKey,
     llmModel,
     llmProvider,
@@ -34,11 +35,12 @@ export function SettingsSidebar({
     selectedSource,
     themeMode,
     onInstallEasyOcr,
+    onLlmProviderChange,
     onRememberChange,
     onSourceSelect,
     setLlmKey,
     setLlmModel,
-    setLlmProvider,
+    setExternalLlmConsent,
     setPingUrl,
     setThemeMode,
   } = controls;
@@ -249,7 +251,7 @@ export function SettingsSidebar({
                           value={llmProvider}
                           onChange={(e) => {
                             const prov = e.target.value as LlmProvider;
-                            setLlmProvider(prov);
+                            onLlmProviderChange(prov);
                             if (prov === "gemini")
                               setLlmModel("gemini-2.5-flash-lite");
                             else setLlmModel("baidu/qianfan-ocr-fast:free");
@@ -300,6 +302,24 @@ export function SettingsSidebar({
                           </button>
                         </div>
                       </div>
+                      <label className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+                        <input
+                          type="checkbox"
+                          checked={externalLlmConsent}
+                          onChange={(event) =>
+                            setExternalLlmConsent(event.target.checked)
+                          }
+                          className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
+                        />
+                        <span className="text-[11px] leading-4">
+                          Я согласен отправить содержимое документа во внешний
+                          сервис{" "}
+                          {llmProvider === "gemini"
+                            ? "Google Gemini"
+                            : "OpenRouter"}
+                          . Согласие действует только до перезагрузки вкладки.
+                        </span>
+                      </label>
                     </div>
                   )}
                 </div>

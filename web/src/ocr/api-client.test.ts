@@ -4,11 +4,23 @@ import {
   buildApiUrl,
   buildBackendGatewayCandidates,
   buildOllamaGenerateUrl,
+  executeBackendOcrWithFallback,
+  executeBackendOcrStreaming,
   isOllamaBaseUrl,
+  normalizePlatformError,
   parseGatewayUrlList,
   parsePlatformError,
+  readBackendOcrStream,
   readJsonOrThrow,
 } from "./api-client";
+
+test("normalizePlatformError preserves messages from browser error objects", () => {
+  const error = normalizePlatformError({
+    message: "Worker script failed to load",
+  });
+
+  assert.equal(error.message, "Worker script failed to load");
+});
 
 test("parsePlatformError extracts FastAPI detail from JSON", async () => {
   const response = new Response(
@@ -115,5 +127,171 @@ test("buildBackendGatewayCandidates orders cloud, custom and local fallback", ()
       { label: "Custom Gateway", baseUrl: "https://custom.example" },
       { label: "Local Gateway", baseUrl: "" },
     ],
+  );
+});
+
+test("backend OCR uploads the original File without browser-side decoding", async () => {
+  const originalFetch = globalThis.fetch;
+  let arrayBufferCalls = 0;
+
+  class GuardedFile extends File {
+    override async arrayBuffer(): Promise<ArrayBuffer> {
+      arrayBufferCalls += 1;
+      throw new Error("local backend mode must not decode the file in browser");
+    }
+  }
+
+  const file = new GuardedFile(["local payload"], "sample.png", {
+    type: "image/png",
+  });
+
+  globalThis.fetch = async (
+    _input: string | URL | Request,
+    init?: RequestInit,
+  ) => {
+    assert.equal(init?.method, "POST");
+    assert.ok(init?.body instanceof FormData);
+    assert.equal(init.body.get("file"), file);
+
+    return new Response(
+      '{"type":"complete","meta":{"engine":"tesseract","pages":1}}\n',
+      {
+        headers: { "content-type": "application/x-ndjson" },
+      },
+    );
+  };
+
+  try {
+    const result = await executeBackendOcrStreaming(
+      file,
+      "/api/convert/stream?engine_type=tesseract",
+      { current: true },
+    );
+
+    assert.equal(arrayBufferCalls, 0);
+    assert.deepEqual(result.meta, { engine: "tesseract", pages: 1 });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("readBackendOcrStream emits pages as NDJSON chunks arrive", async () => {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode('{"type":"page","page":1,"markdown":"first"}\n{"type"'),
+      );
+      controller.enqueue(
+        encoder.encode(
+          ':"page","page":2,"markdown":"second"}\n{"type":"complete","meta":{"pages":2}}\n',
+        ),
+      );
+      controller.close();
+    },
+  });
+  const chunks: Array<[string, number | undefined]> = [];
+  const progress: string[] = [];
+
+  const result = await readBackendOcrStream(
+    new Response(body, {
+      headers: { "content-type": "application/x-ndjson" },
+    }),
+    { current: true },
+    (message) => progress.push(message),
+    (text, page) => chunks.push([text, page]),
+  );
+
+  assert.equal(result.markdown, "first\n\n---\n\nsecond");
+  assert.deepEqual(result.meta, { pages: 2 });
+  assert.deepEqual(chunks, [
+    ["first\n\n---\n\n", 1],
+    ["second\n\n---\n\n", 2],
+  ]);
+  assert.deepEqual(progress, [
+    "Получена страница 1...",
+    "Получена страница 2...",
+  ]);
+});
+
+test("readBackendOcrStream reports backend error events", async () => {
+  const response = new Response('{"type":"error","detail":"page 3 failed"}\n', {
+    headers: { "content-type": "application/x-ndjson" },
+  });
+
+  await assert.rejects(
+    () => readBackendOcrStream(response, { current: true }),
+    /page 3 failed/,
+  );
+});
+
+test("backend fallback stops after a partial streaming result", async () => {
+  const originalFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  const requestedUrls: string[] = [];
+  const chunks: string[] = [];
+
+  globalThis.fetch = async (input: string | URL | Request) => {
+    requestedUrls.push(String(input));
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            '{"type":"page","page":1,"markdown":"first"}\n' +
+              '{"type":"error","detail":"page 2 failed"}\n',
+          ),
+        );
+        controller.close();
+      },
+    });
+    return new Response(body, {
+      headers: { "content-type": "application/x-ndjson" },
+    });
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        executeBackendOcrWithFallback(
+          new File(["pdf"], "book.pdf", { type: "application/pdf" }),
+          [
+            { label: "First", baseUrl: "https://first.example" },
+            { label: "Second", baseUrl: "https://second.example" },
+          ],
+          { current: true },
+          undefined,
+          undefined,
+          (text) => chunks.push(text),
+        ),
+      (error: unknown) => {
+        assert.equal(normalizePlatformError(error).partialResult, true);
+        assert.match(normalizePlatformError(error).message, /page 2 failed/);
+        return true;
+      },
+    );
+
+    assert.deepEqual(requestedUrls, [
+      "https://first.example/api/convert/stream",
+    ]);
+    assert.deepEqual(chunks, ["first\n\n---\n\n"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("readBackendOcrStream rejects truncated responses", async () => {
+  const response = new Response(
+    '{"type":"page","page":1,"markdown":"partial"}\n',
+    {
+      headers: { "content-type": "application/x-ndjson" },
+    },
+  );
+
+  await assert.rejects(
+    () => readBackendOcrStream(response, { current: true }),
+    {
+      message: /до события complete/,
+      partialResult: true,
+    },
   );
 });

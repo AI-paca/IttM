@@ -4,9 +4,10 @@ import { processPdfIntelligently } from "../lib/pdf-parser";
 import {
   buildApiUrl,
   buildBackendGatewayCandidates,
-  executeBackendOcr,
   executeBackendOcrWithFallback,
+  executeBackendOcrStreaming,
   isOllamaBaseUrl,
+  normalizePlatformError,
   noticeFromError,
 } from "./api-client";
 import {
@@ -14,8 +15,12 @@ import {
   releaseBrowserOcrCache,
   runBrowserOcrLowMemory,
 } from "./browser-engine";
-import { base64JpegToFile } from "./file-utils";
 import { executeLlmOcr, executeOllamaOcr } from "./llm-client";
+import {
+  backendPipelineParams,
+  browserPipelineProfileForSource,
+} from "./pipeline-config";
+import { hasAvailableLocalBackend } from "./source-availability";
 import type {
   AppDiagnostics,
   LlmProvider,
@@ -25,11 +30,11 @@ import type {
 import type { AppState } from "../types/app.types";
 
 interface UseOcrExtractionArgs {
-  appState: AppState;
   diagnostics: AppDiagnostics | null;
   extractedText: string;
   file: File | null;
   lastExtractedPage: number;
+  externalLlmConsent: boolean;
   llmKey: string;
   llmModel: string;
   llmProvider: LlmProvider;
@@ -46,11 +51,11 @@ interface UseOcrExtractionArgs {
 }
 
 export function useOcrExtraction({
-  appState,
   diagnostics,
   extractedText,
   file,
   lastExtractedPage,
+  externalLlmConsent,
   llmKey,
   llmModel,
   llmProvider,
@@ -100,10 +105,13 @@ export function useOcrExtraction({
         file.name,
       );
       setIsExtracting(true);
+      let progressiveText = lastExtractedPage > 1 ? extractedText || "" : "";
       try {
         let result: OcrResult | null = null;
-        let progressiveText = lastExtractedPage > 1 ? extractedText || "" : "";
-        const browserProfile = createBrowserOcrProfile(diagnostics);
+        const browserProfile = createBrowserOcrProfile(
+          diagnostics,
+          browserPipelineProfileForSource("browser"),
+        );
 
         const handleChunk = (chunk: string, pageIndex?: number) => {
           console.log(
@@ -131,8 +139,10 @@ export function useOcrExtraction({
               (msg) => {
                 if (active.current) setExtractionProgress(msg);
               },
-              async (b64) => {
-                const tempFile = await base64JpegToFile(b64);
+              async (image) => {
+                const tempFile = new File([image], "page.jpg", {
+                  type: image.type || "image/jpeg",
+                });
                 const ocrRes = await runBrowserOcrLowMemory(
                   tempFile,
                   (text) => {
@@ -146,7 +156,12 @@ export function useOcrExtraction({
               handleChunk,
               lastExtractedPage,
               setTotalPdfPages,
-              { renderScale: browserProfile.pdfRenderScale },
+              {
+                renderScale: browserProfile.pdfRenderScale,
+                maxPagePixels: browserProfile.maxImagePixels,
+                maxDimension: browserProfile.maxDimension,
+                shouldContinue: () => active.current,
+              },
             );
             return { markdown: md };
           }
@@ -163,8 +178,7 @@ export function useOcrExtraction({
         };
 
         let effectiveSource = selectedSource;
-        const localBackendAvailable =
-          !diagnostics || Boolean(diagnostics.backend && !diagnostics.error);
+        const localBackendAvailable = hasAvailableLocalBackend(diagnostics);
         const autoBackendCandidates = buildBackendGatewayCandidates({
           customBaseUrl: pingUrl,
           includeLocal: localBackendAvailable,
@@ -185,18 +199,29 @@ export function useOcrExtraction({
         ) {
           const engineType =
             effectiveSource === "local_tess" ? "tesseract" : "easyocr";
-          const url = buildApiUrl("", "/api/convert", {
+          const url = buildApiUrl("", "/api/convert/stream", {
             engine_type: engineType,
+            ...(backendPipelineParams(effectiveSource) || {}),
           });
 
-          result = await executeBackendOcr(file, url, active, (text) => {
-            if (active.current) setExtractionProgress(text);
-          });
-          handleChunk(result.markdown || "");
+          result = await executeBackendOcrStreaming(
+            file,
+            url,
+            active,
+            (text) => {
+              if (active.current) setExtractionProgress(text);
+            },
+            handleChunk,
+          );
         } else if (effectiveSource === "llm") {
           result = await executeLlmOcr(
             file,
-            { provider: llmProvider, model: llmModel, key: llmKey },
+            {
+              provider: llmProvider,
+              model: llmModel,
+              key: llmKey,
+              externalConsent: externalLlmConsent,
+            },
             active,
             (text) => {
               if (active.current) setExtractionProgress(text);
@@ -223,11 +248,20 @@ export function useOcrExtraction({
             if (file.type !== "application/pdf")
               handleChunk(result.markdown || "");
           } else {
-            const url = buildApiUrl(pingUrl, "/api/convert");
-            result = await executeBackendOcr(file, url, active, (text) => {
-              if (active.current) setExtractionProgress(text);
-            });
-            handleChunk(result.markdown || "");
+            const gatewayUrl = buildApiUrl(
+              pingUrl,
+              "/api/convert/stream",
+              backendPipelineParams("gateway"),
+            );
+            result = await executeBackendOcrStreaming(
+              file,
+              gatewayUrl,
+              active,
+              (text) => {
+                if (active.current) setExtractionProgress(text);
+              },
+              handleChunk,
+            );
           }
         } else if (effectiveSource === "auto") {
           try {
@@ -238,17 +272,26 @@ export function useOcrExtraction({
               (text) => {
                 if (active.current) setExtractionProgress(text);
               },
+              backendPipelineParams("auto"),
+              handleChunk,
             );
-            handleChunk(result.markdown || "");
-          } catch {
-            if (llmKey.trim()) {
+          } catch (backendError) {
+            if (normalizePlatformError(backendError).partialResult) {
+              throw backendError;
+            }
+            if (llmKey.trim() && externalLlmConsent) {
               setExtractionProgress(
                 "Cloud/локальный gateway недоступен, пробуем LLM OCR...",
               );
               try {
                 result = await executeLlmOcr(
                   file,
-                  { provider: llmProvider, model: llmModel, key: llmKey },
+                  {
+                    provider: llmProvider,
+                    model: llmModel,
+                    key: llmKey,
+                    externalConsent: externalLlmConsent,
+                  },
                   active,
                   (text) => {
                     if (active.current) setExtractionProgress(text);
@@ -288,7 +331,7 @@ export function useOcrExtraction({
         console.error("[OCR] Extraction failed:", error);
         const normalized = noticeFromError(error);
         if (active.current) {
-          if (extractedText || appState === "reading") {
+          if (progressiveText) {
             setExtractedText(
               (prev) =>
                 prev + `\n\n[Прервано из-за ошибки: ${normalized.message}]`,

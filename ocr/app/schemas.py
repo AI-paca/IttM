@@ -1,6 +1,6 @@
 from typing import Any, Dict, List
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ConvertMeta(BaseModel):
@@ -10,6 +10,9 @@ class ConvertMeta(BaseModel):
     tables_found: int = 0
     table_cells: int = 0
     pages: int
+    pipeline: str = ""
+    preprocess_steps: List[str] = Field(default_factory=list)
+    layout_steps: List[str] = Field(default_factory=list)
     elapsed_ms: int
 
 

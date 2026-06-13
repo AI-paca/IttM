@@ -6,6 +6,7 @@ export interface EngineControlsState {
   easyOcrInstallMessage: string;
   easyOcrInstallProgress: number;
   easyOcrInstalling: boolean;
+  externalLlmConsent: boolean;
   llmKey: string;
   llmModel: string;
   llmProvider: LlmProvider;
@@ -17,11 +18,12 @@ export interface EngineControlsState {
 
 export interface EngineControlsActions {
   onInstallEasyOcr: () => void;
+  onLlmProviderChange: (provider: LlmProvider) => void;
   onRememberChange: (checked: boolean) => void;
   onSourceSelect: (source: SourceType) => void;
   setLlmKey: Dispatch<SetStateAction<string>>;
   setLlmModel: Dispatch<SetStateAction<string>>;
-  setLlmProvider: Dispatch<SetStateAction<LlmProvider>>;
+  setExternalLlmConsent: Dispatch<SetStateAction<boolean>>;
   setPingUrl: Dispatch<SetStateAction<string>>;
   setThemeMode: Dispatch<SetStateAction<ThemeMode>>;
 }

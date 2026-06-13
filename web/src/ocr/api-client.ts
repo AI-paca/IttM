@@ -74,6 +74,17 @@ export function normalizePlatformError(
   if (typeof error === "string") {
     return new PlatformError({ message: error, source });
   }
+  if (error && typeof error === "object") {
+    const message = firstString([
+      (error as Record<string, unknown>).message,
+      (error as Record<string, unknown>).detail,
+      (error as Record<string, unknown>).error,
+      (error as Record<string, unknown>).reason,
+    ]);
+    if (message) {
+      return new PlatformError({ message, source });
+    }
+  }
   return new PlatformError({ message: "Неизвестная ошибка.", source });
 }
 
@@ -172,9 +183,9 @@ export async function requestApiJson<T>(
   return readJsonOrThrow<T>(response, source);
 }
 
-interface ImportMetaWithEnv extends ImportMeta {
+type ImportMetaWithEnv = ImportMeta & {
   env?: Record<string, string | undefined>;
-}
+};
 
 export interface BackendGatewayCandidate {
   label: string;
@@ -315,6 +326,7 @@ export async function executeBackendOcrWithFallback(
   activeContent: { current: boolean },
   onProgress?: ProgressSink,
   params?: Record<string, string>,
+  onChunk?: (text: string, pageIndex?: number) => void,
 ): Promise<OcrResult> {
   let lastError: unknown = new PlatformError({
     message: "Нет доступных OCR gateway endpoint-ов.",
@@ -324,17 +336,19 @@ export async function executeBackendOcrWithFallback(
   for (const candidate of candidates) {
     if (!activeContent.current) break;
 
-    const url = buildApiUrl(candidate.baseUrl, "/api/convert", params);
+    const url = buildApiUrl(candidate.baseUrl, "/api/convert/stream", params);
     try {
       onProgress?.(`Пробуем ${candidate.label}...`);
-      return await executeBackendOcr(
+      return await executeBackendOcrStreaming(
         targetFile,
         url,
         activeContent,
         onProgress,
+        onChunk,
       );
     } catch (error) {
       lastError = error;
+      if (normalizePlatformError(error).partialResult) throw error;
     }
   }
 
@@ -364,6 +378,164 @@ export async function executeBackendOcr(
   return readJsonOrThrow<OcrResult>(response, "OCR API");
 }
 
+interface BackendStreamPageEvent {
+  type: "page";
+  page: number;
+  markdown: string;
+}
+
+interface BackendStreamCompleteEvent {
+  type: "complete";
+  meta: Record<string, unknown>;
+}
+
+interface BackendStreamErrorEvent {
+  type: "error";
+  detail?: string;
+  error?: string;
+}
+
+type BackendStreamEvent =
+  | BackendStreamPageEvent
+  | BackendStreamCompleteEvent
+  | BackendStreamErrorEvent;
+
+function backendJsonUrl(streamUrl: string): string {
+  return streamUrl.replace(/\/convert\/stream(?=[?#]|$)/, "/convert");
+}
+
+export async function readBackendOcrStream(
+  response: Response,
+  activeContent: { current: boolean },
+  onProgress?: ProgressSink,
+  onChunk?: (text: string, pageIndex?: number) => void,
+): Promise<OcrResult> {
+  if (!response.ok) throw await parsePlatformError(response, "OCR API");
+  if (!response.body) {
+    throw new PlatformError({
+      message: "OCR API: потоковый ответ не содержит body.",
+      status: response.status,
+      source: "OCR API",
+    });
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const markdownParts: string[] = [];
+  let meta: Record<string, unknown> | undefined;
+  let buffered = "";
+
+  const consumeLine = (line: string) => {
+    if (!line.trim()) return;
+    let event: BackendStreamEvent;
+    try {
+      event = JSON.parse(line) as BackendStreamEvent;
+    } catch (error) {
+      throw new PlatformError({
+        message: `OCR API: повреждённая строка NDJSON (${normalizePlatformError(error).message}).`,
+        source: "OCR API",
+        raw: line.slice(0, 2000),
+      });
+    }
+
+    if (event.type === "error") {
+      throw new PlatformError({
+        message: `OCR API: ${event.detail || event.error || "неизвестная ошибка потока."}`,
+        source: "OCR API",
+      });
+    }
+    if (event.type === "complete") {
+      meta = event.meta;
+      return;
+    }
+    if (event.type !== "page" || typeof event.markdown !== "string") {
+      throw new PlatformError({
+        message: "OCR API: неизвестное событие потока.",
+        source: "OCR API",
+        raw: line.slice(0, 2000),
+      });
+    }
+
+    markdownParts.push(event.markdown);
+    onProgress?.(`Получена страница ${event.page}...`);
+    onChunk?.(`${event.markdown}\n\n---\n\n`, event.page);
+  };
+
+  try {
+    while (activeContent.current) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffered += decoder.decode(value, { stream: true });
+      const lines = buffered.split("\n");
+      buffered = lines.pop() || "";
+      lines.forEach(consumeLine);
+    }
+    buffered += decoder.decode();
+    if (buffered.trim()) consumeLine(buffered);
+  } catch (error) {
+    const normalized = normalizePlatformError(error, "OCR API");
+    if (markdownParts.length > 0) {
+      throw new PlatformError({
+        message: normalized.message,
+        status: normalized.status,
+        source: normalized.source,
+        raw: normalized.raw,
+        partialResult: true,
+      });
+    }
+    throw error;
+  } finally {
+    if (!activeContent.current) await reader.cancel();
+    reader.releaseLock();
+  }
+
+  if (activeContent.current && !meta) {
+    throw new PlatformError({
+      message: "OCR API: поток завершился до события complete.",
+      source: "OCR API",
+      partialResult: markdownParts.length > 0,
+    });
+  }
+  return {
+    markdown: markdownParts.join("\n\n---\n\n"),
+    ...(meta ? { meta } : {}),
+  };
+}
+
+export async function executeBackendOcrStreaming(
+  targetFile: File,
+  url: string,
+  activeContent: { current: boolean },
+  onProgress?: ProgressSink,
+  onChunk?: (text: string, pageIndex?: number) => void,
+): Promise<OcrResult> {
+  const formData = new FormData();
+  formData.append("file", targetFile);
+  if (activeContent.current) onProgress?.("Отправка на сервер...");
+
+  let response: Response;
+  try {
+    response = await fetch(url, { method: "POST", body: formData });
+  } catch (error) {
+    throw new PlatformError({
+      message: `OCR API: сеть недоступна или CORS/платформа заблокировали запрос (${normalizePlatformError(error).message})`,
+      source: "OCR API",
+    });
+  }
+
+  if (response.status === 404 || response.status === 405) {
+    const result = await executeBackendOcr(
+      targetFile,
+      backendJsonUrl(url),
+      activeContent,
+      onProgress,
+    );
+    if (result.markdown) onChunk?.(result.markdown);
+    return result;
+  }
+  return readBackendOcrStream(response, activeContent, onProgress, onChunk);
+}
+
 export function noticeFromError(error: unknown): PlatformErrorShape {
   const normalized = normalizePlatformError(error);
   return {
@@ -371,5 +543,6 @@ export function noticeFromError(error: unknown): PlatformErrorShape {
     status: normalized.status,
     source: normalized.source,
     raw: normalized.raw,
+    partialResult: normalized.partialResult,
   };
 }

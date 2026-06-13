@@ -23,3 +23,12 @@ test("handle accepts direct legacy convert API route", async () => {
 
   assert.equal(response.status, 405);
 });
+
+test("handle accepts direct legacy streaming convert route", async () => {
+  const response = await handle(
+    new Request("http://localhost/convert/stream", { method: "GET" }),
+    env,
+  );
+
+  assert.equal(response.status, 405);
+});

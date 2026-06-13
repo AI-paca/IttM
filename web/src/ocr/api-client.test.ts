@@ -4,6 +4,7 @@ import {
   buildApiUrl,
   buildBackendGatewayCandidates,
   buildOllamaGenerateUrl,
+  executeBackendOcrWithFallback,
   executeBackendOcrStreaming,
   isOllamaBaseUrl,
   normalizePlatformError,
@@ -224,6 +225,60 @@ test("readBackendOcrStream reports backend error events", async () => {
   );
 });
 
+test("backend fallback stops after a partial streaming result", async () => {
+  const originalFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  const requestedUrls: string[] = [];
+  const chunks: string[] = [];
+
+  globalThis.fetch = async (input: string | URL | Request) => {
+    requestedUrls.push(String(input));
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            '{"type":"page","page":1,"markdown":"first"}\n' +
+              '{"type":"error","detail":"page 2 failed"}\n',
+          ),
+        );
+        controller.close();
+      },
+    });
+    return new Response(body, {
+      headers: { "content-type": "application/x-ndjson" },
+    });
+  };
+
+  try {
+    await assert.rejects(
+      () =>
+        executeBackendOcrWithFallback(
+          new File(["pdf"], "book.pdf", { type: "application/pdf" }),
+          [
+            { label: "First", baseUrl: "https://first.example" },
+            { label: "Second", baseUrl: "https://second.example" },
+          ],
+          { current: true },
+          undefined,
+          undefined,
+          (text) => chunks.push(text),
+        ),
+      (error: unknown) => {
+        assert.equal(normalizePlatformError(error).partialResult, true);
+        assert.match(normalizePlatformError(error).message, /page 2 failed/);
+        return true;
+      },
+    );
+
+    assert.deepEqual(requestedUrls, [
+      "https://first.example/api/convert/stream",
+    ]);
+    assert.deepEqual(chunks, ["first\n\n---\n\n"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("readBackendOcrStream rejects truncated responses", async () => {
   const response = new Response(
     '{"type":"page","page":1,"markdown":"partial"}\n',
@@ -234,6 +289,9 @@ test("readBackendOcrStream rejects truncated responses", async () => {
 
   await assert.rejects(
     () => readBackendOcrStream(response, { current: true }),
-    /до события complete/,
+    {
+      message: /до события complete/,
+      partialResult: true,
+    },
   );
 });

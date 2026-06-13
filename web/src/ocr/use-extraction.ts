@@ -7,6 +7,7 @@ import {
   executeBackendOcrWithFallback,
   executeBackendOcrStreaming,
   isOllamaBaseUrl,
+  normalizePlatformError,
   noticeFromError,
 } from "./api-client";
 import {
@@ -28,7 +29,6 @@ import type {
 import type { AppState } from "../types/app.types";
 
 interface UseOcrExtractionArgs {
-  appState: AppState;
   diagnostics: AppDiagnostics | null;
   extractedText: string;
   file: File | null;
@@ -50,7 +50,6 @@ interface UseOcrExtractionArgs {
 }
 
 export function useOcrExtraction({
-  appState,
   diagnostics,
   extractedText,
   file,
@@ -105,9 +104,9 @@ export function useOcrExtraction({
         file.name,
       );
       setIsExtracting(true);
+      let progressiveText = lastExtractedPage > 1 ? extractedText || "" : "";
       try {
         let result: OcrResult | null = null;
-        let progressiveText = lastExtractedPage > 1 ? extractedText || "" : "";
         const browserProfile = createBrowserOcrProfile(
           diagnostics,
           browserPipelineProfileForSource("browser"),
@@ -276,7 +275,10 @@ export function useOcrExtraction({
               backendPipelineParams("auto"),
               handleChunk,
             );
-          } catch {
+          } catch (backendError) {
+            if (normalizePlatformError(backendError).partialResult) {
+              throw backendError;
+            }
             if (llmKey.trim() && externalLlmConsent) {
               setExtractionProgress(
                 "Cloud/локальный gateway недоступен, пробуем LLM OCR...",
@@ -329,7 +331,7 @@ export function useOcrExtraction({
         console.error("[OCR] Extraction failed:", error);
         const normalized = noticeFromError(error);
         if (active.current) {
-          if (extractedText || appState === "reading") {
+          if (progressiveText) {
             setExtractedText(
               (prev) =>
                 prev + `\n\n[Прервано из-за ошибки: ${normalized.message}]`,

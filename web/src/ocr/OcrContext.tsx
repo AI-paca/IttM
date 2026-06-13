@@ -383,7 +383,6 @@ export function OcrProvider({ children }: { children: ReactNode }) {
   }, [showNotice]);
 
   const { cancelExtraction } = useOcrExtraction({
-    appState,
     diagnostics,
     extractedText,
     externalLlmConsent,

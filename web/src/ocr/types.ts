@@ -49,12 +49,14 @@ export interface PlatformErrorShape {
   status?: number;
   source: string;
   raw?: string;
+  partialResult?: boolean;
 }
 
 export class PlatformError extends Error {
   status?: number;
   source: string;
   raw?: string;
+  partialResult: boolean;
 
   constructor(error: PlatformErrorShape) {
     super(error.message);
@@ -62,6 +64,7 @@ export class PlatformError extends Error {
     this.status = error.status;
     this.source = error.source;
     this.raw = error.raw;
+    this.partialResult = Boolean(error.partialResult);
   }
 }
 

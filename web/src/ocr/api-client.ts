@@ -348,6 +348,7 @@ export async function executeBackendOcrWithFallback(
       );
     } catch (error) {
       lastError = error;
+      if (normalizePlatformError(error).partialResult) throw error;
     }
   }
 
@@ -471,6 +472,18 @@ export async function readBackendOcrStream(
     }
     buffered += decoder.decode();
     if (buffered.trim()) consumeLine(buffered);
+  } catch (error) {
+    const normalized = normalizePlatformError(error, "OCR API");
+    if (markdownParts.length > 0) {
+      throw new PlatformError({
+        message: normalized.message,
+        status: normalized.status,
+        source: normalized.source,
+        raw: normalized.raw,
+        partialResult: true,
+      });
+    }
+    throw error;
   } finally {
     if (!activeContent.current) await reader.cancel();
     reader.releaseLock();
@@ -480,6 +493,7 @@ export async function readBackendOcrStream(
     throw new PlatformError({
       message: "OCR API: поток завершился до события complete.",
       source: "OCR API",
+      partialResult: markdownParts.length > 0,
     });
   }
   return {
@@ -529,5 +543,6 @@ export function noticeFromError(error: unknown): PlatformErrorShape {
     status: normalized.status,
     source: normalized.source,
     raw: normalized.raw,
+    partialResult: normalized.partialResult,
   };
 }

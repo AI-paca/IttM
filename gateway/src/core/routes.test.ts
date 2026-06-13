@@ -43,6 +43,7 @@ test("route proxies /api/probe to backend /v1/probe", async () => {
 test("route proxies streaming OCR without buffering the response", async () => {
   const originalFetch = globalThis.fetch;
   let calledUrl = "";
+  let proxiedBody: BodyInit | null | undefined;
 
   globalThis.fetch = async (
     input: string | URL | Request,
@@ -50,6 +51,7 @@ test("route proxies streaming OCR without buffering the response", async () => {
   ) => {
     calledUrl = String(input);
     assert.equal(init?.method, "POST");
+    proxiedBody = init?.body;
     return new Response('{"type":"page","page":1,"markdown":"text"}\n', {
       headers: { "content-type": "application/x-ndjson" },
     });
@@ -58,18 +60,20 @@ test("route proxies streaming OCR without buffering the response", async () => {
   try {
     const form = new FormData();
     form.append("file", new Blob(["x"]), "sample.png");
-    const response = await route(
-      new Request("http://localhost/api/convert/stream?engine_type=tesseract", {
+    const request = new Request(
+      "http://localhost/api/convert/stream?engine_type=tesseract",
+      {
         method: "POST",
         body: form,
-      }),
-      env,
+      },
     );
+    const response = await route(request, env);
 
     assert.equal(
       calledUrl,
       "http://ocr.local:8000/v1/convert/stream?engine_type=tesseract",
     );
+    assert.equal(proxiedBody, request.body);
     assert.equal(response.headers.get("content-type"), "application/x-ndjson");
     assert.match(await response.text(), /"type":"page"/);
   } finally {

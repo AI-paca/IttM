@@ -4,6 +4,7 @@ import {
   buildApiUrl,
   buildBackendGatewayCandidates,
   buildOllamaGenerateUrl,
+  executeBackendOcrStreaming,
   isOllamaBaseUrl,
   normalizePlatformError,
   parseGatewayUrlList,
@@ -126,6 +127,51 @@ test("buildBackendGatewayCandidates orders cloud, custom and local fallback", ()
       { label: "Local Gateway", baseUrl: "" },
     ],
   );
+});
+
+test("backend OCR uploads the original File without browser-side decoding", async () => {
+  const originalFetch = globalThis.fetch;
+  let arrayBufferCalls = 0;
+
+  class GuardedFile extends File {
+    override async arrayBuffer(): Promise<ArrayBuffer> {
+      arrayBufferCalls += 1;
+      throw new Error("local backend mode must not decode the file in browser");
+    }
+  }
+
+  const file = new GuardedFile(["local payload"], "sample.png", {
+    type: "image/png",
+  });
+
+  globalThis.fetch = async (
+    _input: string | URL | Request,
+    init?: RequestInit,
+  ) => {
+    assert.equal(init?.method, "POST");
+    assert.ok(init?.body instanceof FormData);
+    assert.equal(init.body.get("file"), file);
+
+    return new Response(
+      '{"type":"complete","meta":{"engine":"tesseract","pages":1}}\n',
+      {
+        headers: { "content-type": "application/x-ndjson" },
+      },
+    );
+  };
+
+  try {
+    const result = await executeBackendOcrStreaming(
+      file,
+      "/api/convert/stream?engine_type=tesseract",
+      { current: true },
+    );
+
+    assert.equal(arrayBufferCalls, 0);
+    assert.deepEqual(result.meta, { engine: "tesseract", pages: 1 });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("readBackendOcrStream emits pages as NDJSON chunks arrive", async () => {

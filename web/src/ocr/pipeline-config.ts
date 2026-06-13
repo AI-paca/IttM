@@ -18,6 +18,10 @@ export const BROWSER_PIPELINE_PROFILES: Record<string, BrowserPipelineProfile> =
   {
     browser_tesseract_standard: {
       name: "browser_tesseract_standard",
+      imagePreprocessing: ["browser_resize"],
+    },
+    browser_tesseract_dewarp: {
+      name: "browser_tesseract_dewarp",
       imagePreprocessing: ["projected_document_dewarp", "browser_resize"],
     },
     browser_tesseract_raw: {

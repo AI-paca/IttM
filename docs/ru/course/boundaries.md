@@ -1,30 +1,32 @@
 # Границы ответственности и точки входа
 
+[Документация](../README.md) | [Архитектура](../architecture.md)
+
 Этот документ описывает папки и сценарии входа в программу: от браузерного UI до Docker, local runtime, OCR API, edge-прокси и CI.
 
 ## Реестр точек входа
 
-| Сценарий           | Внешний вход                       | Первый исполняемый файл                       | Следующая граница                           |
-| ------------------ | ---------------------------------- | --------------------------------------------- | ------------------------------------------- |
-| Browser UI         | открытие страницы                  | `web/index.html` -> `web/src/main.tsx`        | `App.tsx` -> `OcrProvider` -> `AppShell`    |
-| Загрузка документа | file input, drop, paste            | `web/src/ocr/OcrContext.tsx`                  | `file-utils.ts` -> `use-extraction.ts`      |
-| Browser OCR        | выбор `browser` или fallback       | `web/src/ocr/use-extraction.ts`               | `browser-engine.ts` -> Tesseract.js         |
-| Server OCR         | `POST /api/convert` или `/convert` | `server.ts`                                   | `gateway/src/core/handle.ts` -> Python OCR  |
-| Gateway API        | HTTP `/api/*`                      | `gateway/src/core/handle.ts`                  | `core/routes.ts` -> `clients/ocrClient.ts`  |
-| Python OCR API     | ASGI `app.main:app`                | `ocr/app/main.py`                             | `routers/*` -> `services/*` -> `engines/*`  |
-| Edge proxy         | Cloudflare Worker `fetch`          | `edge/cloudflare-worker.ts`                   | Gemini API или `ORIGIN_URL`                 |
-| Local full runtime | `bash scripts/run-local.sh`        | `scripts/run-local.sh`                        | Bun `server.ts` + Uvicorn `app.main:app`    |
-| Static build       | `bash scripts/build-lite.sh`       | `scripts/build-lite.sh`                       | `npm run build:web` -> Vite -> `dist/`      |
-| Node development   | `npm run dev`                      | `package.json` -> `tsx server.ts`             | Express + Vite middleware                   |
-| Node production    | `npm run build && npm start`       | `dist/server.js`                              | Express API + static `dist/`                |
-| Docker stack       | `docker compose up -d`             | `docker-compose.yml`                          | nginx -> gateway -> OCR                     |
-| Gateway container  | Docker `CMD`                       | `docker/gateway.Dockerfile`                   | `node dist/server.cjs`                      |
-| Frontend container | Docker `CMD`                       | `docker/nginx.Dockerfile`                     | nginx config -> static files and API proxy  |
-| OCR container      | Compose `command` / Docker `CMD`   | `docker-compose.yml`, `docker/ocr.Dockerfile` | `uvicorn app.main:app`                      |
-| CI quality gate    | push, pull request, manual run     | `.github/workflows/tests.yml`                 | lint, tests, builds, OCR quality            |
-| GitHub Pages       | push to `main`, manual run         | `.github/workflows/static.yml`                | Vite build -> Pages artifact                |
-| Local CI mirror    | `npm run debug`                    | `scripts/debug.sh`                            | Compose, JS/Python checks, optional `act`   |
-| Test fixtures      | CI/debug script                    | `ocr/tests/quality_fixtures.py`               | generated files under ignored test fixtures |
+| Сценарий           | Внешний вход                     | Первый исполняемый файл                       | Следующая граница                           |
+| ------------------ | -------------------------------- | --------------------------------------------- | ------------------------------------------- |
+| Browser UI         | открытие страницы                | `web/index.html` -> `web/src/main.tsx`        | `App.tsx` -> `OcrProvider` -> `AppShell`    |
+| Загрузка документа | file input, drop, paste          | `web/src/ocr/OcrContext.tsx`                  | `file-utils.ts` -> `use-extraction.ts`      |
+| Browser OCR        | выбор `browser` или fallback     | `web/src/ocr/use-extraction.ts`               | `browser-engine.ts` -> Tesseract.js         |
+| Server OCR         | `POST /api/convert/stream`       | `server.ts`                                   | `gateway/src/core/handle.ts` -> Python OCR  |
+| Gateway API        | HTTP `/api/*`                    | `gateway/src/core/handle.ts`                  | `core/routes.ts` -> `clients/ocrClient.ts`  |
+| Python OCR API     | ASGI `app.main:app`              | `ocr/app/main.py`                             | `routers/*` -> `services/*` -> `engines/*`  |
+| Edge proxy         | Cloudflare Worker `fetch`        | `edge/cloudflare-worker.ts`                   | Gemini API или `ORIGIN_URL`                 |
+| Local full runtime | `bash scripts/run-local.sh`      | `scripts/run-local.sh`                        | Bun `server.ts` + Uvicorn `app.main:app`    |
+| Static build       | `bash scripts/build-lite.sh`     | `scripts/build-lite.sh`                       | `npm run build:web` -> Vite -> `dist/`      |
+| Node development   | `npm run dev`                    | `package.json` -> `tsx server.ts`             | Express + Vite middleware                   |
+| Node production    | `npm run build && npm start`     | `dist/server.js`                              | Express API + static `dist/`                |
+| Docker stack       | `docker compose up -d`           | `docker-compose.yml`                          | nginx -> gateway -> OCR                     |
+| Gateway container  | Docker `CMD`                     | `docker/gateway.Dockerfile`                   | `node dist/server.cjs`                      |
+| Frontend container | Docker `CMD`                     | `docker/nginx.Dockerfile`                     | nginx config -> static files and API proxy  |
+| OCR container      | Compose `command` / Docker `CMD` | `docker-compose.yml`, `docker/ocr.Dockerfile` | `uvicorn app.main:app`                      |
+| CI quality gate    | push, pull request, manual run   | `.github/workflows/tests.yml`                 | lint, tests, builds, OCR quality            |
+| GitHub Pages       | push to `main`, manual run       | `.github/workflows/static.yml`                | Vite build -> Pages artifact                |
+| Local CI mirror    | `npm run debug`                  | `scripts/debug.sh`                            | Compose, JS/Python checks, optional `act`   |
+| Test fixtures      | CI/debug script                  | `ocr/tests/quality_fixtures.py`               | generated files under ignored test fixtures |
 
 ## 1. Browser UI
 
@@ -60,8 +62,8 @@ web/src/main.tsx
 web/src/ocr/use-extraction.ts
 ├─ source=auto       # cloud/custom/local gateway -> LLM при наличии ключа -> browser fallback
 ├─ source=browser    # browser OCR без backend
-├─ source=local_tess # /api/convert?engine_type=tesseract
-├─ source=local_easy # /api/convert?engine_type=easyocr
+├─ source=local_tess # /api/convert/stream?engine_type=tesseract
+├─ source=local_easy # /api/convert/stream?engine_type=easyocr
 ├─ source=gateway    # custom gateway URL или direct Ollama, если URL похож на :11434
 └─ source=llm        # Gemini / OpenRouter напрямую или Gemini через edge URL
 ```
@@ -71,8 +73,10 @@ web/src/ocr/use-extraction.ts
 - `browser-profile.ts` задает лимиты browser OCR по памяти/ядрам/diagnostics.
 - `api-client.ts` строит URL для local/custom/cloud gateway и нормализует ошибки.
 - `llm-client.ts` отвечает только за Gemini/OpenRouter/Ollama payload-и.
-- `lib/pdf-parser.ts` отвечает за PDF: native text, canvas render, crop и page-to-base64 callback.
-- `ocr/pdf-text.ts` решает, доверять ли native PDF text и как слить его с OCR-текстом.
+- `lib/pdf-parser.ts` отвечает за PDF: native text, постраничный render, crop и
+  передачу page `Blob` выбранному OCR callback.
+- `lib/pdf-processing.ts` решает, доверять ли native PDF text и как слить его с
+  OCR-текстом.
 
 ## 3. Browser OCR Scenario
 
@@ -82,9 +86,11 @@ web/src/ocr/use-extraction.ts
 PDF:
 lib/pdf-parser.ts
 └─ processPdfIntelligently()
-   ├─ pdf.js getDocument/getPage/getTextContent
-   ├─ canvas render + cropWhiteBorders()
-   ├─ FileReader -> base64 page image
+   ├─ pdf-page.worker.ts
+   │  ├─ file.arrayBuffer() внутри worker
+   │  ├─ pdf.js getDocument/getPage/getTextContent
+   │  └─ OffscreenCanvas render + crop -> page Blob
+   ├─ main-thread fallback для старых браузеров
    └─ callback to browser OCR
 
 Image:
@@ -99,20 +105,21 @@ ocr/browser-engine.ts
 
 ## 4. Gateway / Server OCR Scenario
 
-**Frontend вход:** `web/src/ocr/api-client.ts -> executeBackendOcr()`
+**Frontend вход:** `web/src/ocr/api-client.ts -> executeBackendOcrStreaming()`
 
 ```text
 Browser
-└─ fetch POST /api/convert multipart/form-data
+└─ original File -> FormData
+   └─ fetch POST /api/convert/stream multipart/form-data
    └─ server.ts
       └─ gateway/src/core/handle.ts
          └─ gateway/src/core/routes.ts
             └─ gateway/src/clients/ocrClient.ts
-               └─ OCR_URL/v1/convert
+               └─ original Request.body -> OCR_URL/v1/convert/stream
                   └─ ocr/app/routers/convert.py
                      └─ ocr/app/services/convert_service.py
-                        ├─ tempfile upload
-                        ├─ PDF/image load
+                        ├─ image bytes -> PIL
+                        ├─ PDF bytes -> one temporary Poppler input
                         ├─ chunking/*
                         ├─ engines/tesseract_engine.py
                         ├─ engines/easyocr_engine.py
@@ -123,13 +130,18 @@ Browser
 
 - `server.ts` в local/prod Node runtime обслуживает API middleware и статику/Vite.
 - `gateway/src/core/handle.ts` принимает только API-запросы.
-- `gateway/src/core/routes.ts` сопоставляет `/api/convert`, `/api/health`, `/api/capabilities`, `/api/diagnostics`, `/api/probe`, `/api/install-easyocr` и status endpoint.
-- `gateway/src/clients/ocrClient.ts` проксирует request body в Python по `OCR_URL`; multipart не парсится в Node.
+- `gateway/src/core/routes.ts` сопоставляет `/api/convert`,
+  `/api/convert/stream`, health/capabilities/diagnostics/probe/install routes.
+- `gateway/src/clients/ocrClient.ts` проксирует исходный request body в Python
+  по `OCR_URL`; multipart не парсится и не перекодируется в Node.
 
 **Python boundary:**
 
 - `ocr/app/main.py` создает FastAPI app и подключает routers.
-- `routers/convert.py` сохраняет upload во временный файл и вызывает `convert_service.convert()`.
+- `routers/convert.py` читает upload чанками в ограничиваемый `bytes`, выносит
+  синхронный OCR в threadpool и отдаёт JSON либо NDJSON.
+- `convert_service.py` открывает images из памяти; PDF один раз спуливается во
+  временный каталог для Poppler и рендерится по одной странице.
 - `routers/health.py` обслуживает `/health`, `/diagnostics`, `/v1/capabilities`.
 - `routers/probe.py` проверяет выбранный engine/languages для файла.
 - `routers/install.py` запускает фоновой install job для EasyOCR packages/models.
@@ -155,7 +167,10 @@ source=gateway + baseUrl :11434
    └─ POST /api/generate напрямую из браузера
 ```
 
-PDF для LLM/Ollama проходит через `processPdfIntelligently()` постранично. Изображения проходят через `imageFileToCroppedBase64()` и `cropWhiteBorders()`.
+PDF для LLM/Ollama проходит через `processPdfIntelligently()` постранично.
+Изображения проходят через `prepareImageForLlm()`, а page/image `Blob`
+кодируется функцией `blobToBase64OffMainThread()`. Эти шаги не вызываются для
+`local_tess` и `local_easy`.
 
 ## 6. EasyOCR Install Scenario
 
@@ -224,7 +239,8 @@ scripts/build-lite.sh
 
 **Точка входа:** `.github/workflows/static.yml`
 
-Workflow ставит Node 20, выполняет `VITE_BASE_PATH=/IttM/ npm run build` и публикует `dist` в Pages.
+Workflow ставит Node 20, выполняет `npm run build:pages`, проверяет
+`npm run test:pages` и публикует `dist` в Pages.
 
 ### Cloudflare Worker
 
@@ -286,9 +302,13 @@ web/
    ├─ ocr/tesseract-recognize-input.ts
    │                           # адаптер входа для Tesseract.js в browser/Node runtime
    ├─ ocr/llm-client.ts        # прямые запросы Gemini/OpenRouter/Ollama
-   ├─ ocr/file-utils.ts        # проверка файлов, browser diagnostics, image helpers
-   ├─ ocr/pdf-text.ts          # слияние native PDF text и OCR-слоя
-   ├─ lib/pdf-parser.ts        # PDF.js: чтение текста, рендер страниц в Canvas
+   ├─ ocr/file-utils.ts        # проверка файлов и browser diagnostics
+   ├─ ocr/document-encoding.ts # LLM resize/crop/Base64 worker orchestration
+   ├─ ocr/document-encoding.worker.ts
+   │                           # OffscreenCanvas и streaming Base64 для LLM
+   ├─ lib/pdf-processing.ts    # слияние native PDF text и OCR-слоя
+   ├─ lib/pdf-page.worker.ts   # PDF.js + OffscreenCanvas page pipeline
+   ├─ lib/pdf-parser.ts        # worker client и main-thread fallback
    └─ lib/browser-ocr.ts       # совместимый re-export browser OCR API
 ```
 
@@ -311,7 +331,8 @@ ocr/app/
 ├─ schemas.py               # Pydantic-модели ответов convert/probe/install
 ├─ routers/*                # health, diagnostics, convert, probe, install
 ├─ services/convert_service.py
-│                           # загрузка файла, split/dedupe, выбор engine
+│                           # page iterator, layout, split/dedupe, выбор engine
+├─ upload_limits.py          # chunked upload read и optional byte limit
 ├─ services/probe_service.py
 │                           # проверка доступности Tesseract/EasyOCR и языковых пакетов
 ├─ engines/*                # OcrEngine, Tesseract, EasyOCR, Auto, Stub
@@ -348,7 +369,7 @@ Runtime/config:
    └─ tests.yml             # lint, tests, build и OCR quality
 ```
 
-## 10. File Ownership Summary
+## 10. Области ответственности
 
 ```text
 web/src/                  # browser UI, state, OCR strategy, LLM/API clients

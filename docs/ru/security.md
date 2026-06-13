@@ -19,9 +19,12 @@
 - Gateway проксирует тело запроса потоком и не сохраняет документ в базе данных.
 - Python читает upload чанками, но перед OCR объединяет его в полный объект
   `bytes`.
+- Перед decode действует предел `OCR_MAX_DECODED_IMAGE_PIXELS` (`80MP` по
+  умолчанию); dewarp имеет отдельный рабочий предел `16MP`.
 - Обычные изображения обрабатываются из памяти. PDF временно записывается в
   каталог `tempfile`, потому что Poppler принимает путь к файлу; каталог
-  удаляется после запроса.
+  удаляется после запроса. PDF-страницы больше `6000px` снижают render DPI,
+  обычные страницы не апскейлятся.
 
 Проект не заявляет абсолютный zero-retention для операционной системы:
 временные файлы PDF, swap, crash dumps и логи хоста зависят от окружения.
@@ -29,9 +32,10 @@
 ## Browser OCR
 
 При выборе Browser исходный документ не отправляется в backend. Tesseract.js,
-PDF.js и preprocessing выполняются в browser workers, где это поддерживается.
-Весь PDF сначала читается в worker `ArrayBuffer`; для очень больших файлов это
-остаётся риском памяти.
+PDF.js, standard resize и encoding выполняются в browser workers, где это
+поддерживается. Синхронный projected-document dewarp не входит в standard
+profile. Весь PDF сначала читается в worker `ArrayBuffer`; для очень больших
+файлов это остаётся риском памяти.
 
 ## Внешние LLM
 
@@ -49,6 +53,7 @@ PDF.js и preprocessing выполняются в browser workers, где это
   сетевую конфигурацию.
 - Нет task ID, durable queue, retention policy и серверной отмены OCR.
 - Upload целиком существует в памяти Python.
-- Нет встроенной защиты от всех вариантов decompression/image bomb.
+- Decoded guard не заменяет tile decoder и не закрывает все форматы
+  decompression bomb.
 - NDJSON-ошибка после начала ответа возвращается событием `error` внутри HTTP
   200, а не новым HTTP status.

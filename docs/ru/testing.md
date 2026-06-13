@@ -12,8 +12,8 @@ npm run build
 ```
 
 `npm run lint` включает ESLint и typecheck для web, gateway и edge.
-`npm test` проверяет URL/ошибки API, NDJSON, gateway proxy, PDF workers,
-Base64-поток, consent и Tesseract assets.
+`npm test` проверяет URL/ошибки API, частичный NDJSON, gateway proxy и
+backpressure adapter, PDF workers, Base64-поток, consent и Tesseract assets.
 
 Отдельная регрессия локальных режимов требует, чтобы frontend передавал тот же
 объект `File` в `FormData` без browser-side `arrayBuffer()`, а gateway
@@ -26,9 +26,11 @@ npm run build:pages
 npm run test:pages
 ```
 
-Проверка подтверждает base path `/IttM/`, локальный Tesseract worker и четыре
-worker/core asset. Эти команды нельзя запускать параллельно с обычной сборкой,
-потому что обе записывают результат в `dist`.
+Проверка поднимает временный HTTP server и получает через base path `/IttM/`
+локальный Tesseract worker и четыре worker/core asset. Это проверяет production
+URL и код 200, но не заменяет multilingual OCR quality test. Команды нельзя
+запускать параллельно с обычной сборкой, потому что обе записывают результат в
+`dist`.
 
 ## Python OCR
 
@@ -46,7 +48,7 @@ docker run --rm ittm-ocr-ci python -m pytest tests -q
 
 Строгие multilingual quality-тесты генерируют собственные fixtures и
 проверяют `eng`, `rus` и `chi_sim` отдельно для browser Tesseract.js и backend
-Tesseract.
+Tesseract, включая PDF без принудительного upscaling.
 
 ## Docker
 

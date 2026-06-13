@@ -32,7 +32,7 @@ reverted independently.
 Recorded on June 12, 2026:
 
 - Frontend and gateway: 43 tests passed.
-- Backend: 36 passed, 7 skipped.
+- Backend: 43 passed, 29 skipped.
 - TypeScript typecheck passed.
 - GitHub Pages build verified `/IttM/vendor/tesseract/worker.min.js` and four
   local Tesseract assets.

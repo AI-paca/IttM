@@ -112,6 +112,7 @@ testtables/
 
 # LLM review drafts
 docs/ревью от LLM/
+.review-from-llm/
 
 # Model files (large files should use Git LFS)
 *.onnx

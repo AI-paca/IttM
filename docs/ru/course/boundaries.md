@@ -140,8 +140,10 @@ Browser
 - `ocr/app/main.py` создает FastAPI app и подключает routers.
 - `routers/convert.py` читает upload чанками в ограничиваемый `bytes`, выносит
   синхронный OCR в threadpool и отдаёт JSON либо NDJSON.
-- `convert_service.py` открывает images из памяти; PDF один раз спуливается во
-  временный каталог для Poppler и рендерится по одной странице.
+- `convert_service.py` проверяет decoded pixel budget до загрузки images; PDF
+  один раз спуливается во временный каталог для Poppler и рендерится по одной
+  странице. Render DPI снижается только для страниц больше configured
+  dimension budget.
 - `routers/health.py` обслуживает `/health`, `/diagnostics`, `/v1/capabilities`.
 - `routers/probe.py` проверяет выбранный engine/languages для файла.
 - `routers/install.py` запускает фоновой install job для EasyOCR packages/models.

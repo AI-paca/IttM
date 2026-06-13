@@ -1,6 +1,6 @@
 # IttM (Image-to-Text Markdown)
 
-[Русский](./README.md) | [English](./docs/en/README.md)
+[Русский](./docs/ru/README.md) | [English](./docs/en/README.md)
 
 [IttM](https://ai-paca.github.io/IttM/) преобразует изображения, длинные
 скриншоты и PDF-документы в Markdown. Приложение поддерживает обработку в
@@ -11,7 +11,7 @@
 - Browser OCR на Tesseract.js/WASM без отправки документа на сервер.
 - Локальный Tesseract и EasyOCR через Python FastAPI.
 - Постраничная выдача PDF через NDJSON.
-- Распознавание таблиц и сохранение безопасного raw-text fallback.
+- Распознавание таблиц с ограниченным raw-text fallback.
 - Native text extraction из PDF до запуска OCR.
 - Gemini, OpenRouter и Ollama с явным согласием перед внешней отправкой.
 - GitHub Pages-сборка с локальными Tesseract worker/core assets.
@@ -63,13 +63,13 @@ bash scripts/build-lite.sh
 
 ## Архитектурные границы
 
-| Компонент   | Текущее поведение                              | Ограничение                                                           |
-| ----------- | ---------------------------------------------- | --------------------------------------------------------------------- |
-| Browser OCR | Worker, resize до `4096px`/`12MP`              | Downscale может терять мелкие цифры и линии                           |
-| Browser PDF | Постраничный PDF.js worker и `OffscreenCanvas` | Весь PDF сначала попадает в worker `ArrayBuffer`                      |
-| Gateway     | Потоковое multipart-проксирование и NDJSON     | Нет task queue, durable retry и backend cancellation                  |
-| Python OCR  | Страницы PDF рендерятся по одной               | Upload целиком существует в RAM; PDF временно спуливается для Poppler |
-| EasyOCR     | CPU fallback без обязательных 6 ГБ VRAM        | CPU-путь заметно медленнее и требует больше памяти                    |
+| Компонент   | Текущее поведение                                      | Ограничение                                                           |
+| ----------- | ------------------------------------------------------ | --------------------------------------------------------------------- |
+| Browser OCR | Worker, resize до `2200-4200px`/`4-14MP`               | Downscale может терять мелкие цифры и линии                           |
+| Browser PDF | Постраничный PDF.js worker и `OffscreenCanvas`         | Весь PDF сначала попадает в worker `ArrayBuffer`                      |
+| Gateway     | Потоковое multipart-проксирование и NDJSON             | Нет task queue, durable retry и backend cancellation                  |
+| Python OCR  | Страницы PDF рендерятся по одной; decoded guard `80MP` | Upload целиком существует в RAM; PDF временно спуливается для Poppler |
+| EasyOCR     | CPU fallback без обязательных 6 ГБ VRAM                | CPU-путь заметно медленнее и требует больше памяти                    |
 
 Полная матрица:
 [ограничения OCR-архитектуры](./docs/ru/architecture-limitations.md).

@@ -20,6 +20,7 @@ import {
   backendPipelineParams,
   browserPipelineProfileForSource,
 } from "./pipeline-config";
+import { hasAvailableLocalBackend } from "./source-availability";
 import type {
   AppDiagnostics,
   LlmProvider,
@@ -177,8 +178,7 @@ export function useOcrExtraction({
         };
 
         let effectiveSource = selectedSource;
-        const localBackendAvailable =
-          !diagnostics || Boolean(diagnostics.backend && !diagnostics.error);
+        const localBackendAvailable = hasAvailableLocalBackend(diagnostics);
         const autoBackendCandidates = buildBackendGatewayCandidates({
           customBaseUrl: pingUrl,
           includeLocal: localBackendAvailable,

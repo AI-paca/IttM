@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
@@ -41,6 +42,65 @@ async function assertNonEmpty(filePath) {
   assert.ok(fileStat.size > 0, `${filePath} is empty`);
 }
 
+async function verifyServedPagesAssets(routes) {
+  const server = createServer(async (request, response) => {
+    try {
+      const requestPath = decodeURIComponent(
+        new URL(request.url || "/", "http://localhost").pathname,
+      );
+      if (!requestPath.startsWith(expectedBase)) {
+        response.writeHead(404).end("Not found");
+        return;
+      }
+
+      const relativePath =
+        requestPath.slice(expectedBase.length) || "index.html";
+      const filePath = path.resolve(distRoot, relativePath);
+      const relativeToDist = path.relative(distRoot, filePath);
+      if (relativeToDist.startsWith("..") || path.isAbsolute(relativeToDist)) {
+        response.writeHead(400).end("Invalid path");
+        return;
+      }
+
+      const content = await readFile(filePath);
+      response.writeHead(200, {
+        "content-type": filePath.endsWith(".html")
+          ? "text/html"
+          : "application/javascript",
+      });
+      response.end(content);
+    } catch {
+      response.writeHead(404).end("Not found");
+    }
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  try {
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const origin = `http://127.0.0.1:${address.port}`;
+
+    for (const route of routes) {
+      const response = await fetch(`${origin}${route}`);
+      assert.equal(
+        response.status,
+        200,
+        `${route} returned ${response.status}`,
+      );
+      const content = await response.arrayBuffer();
+      assert.ok(content.byteLength > 0, `${route} returned an empty body`);
+    }
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+}
+
 const indexHtml = await readFile(path.join(distRoot, "index.html"), "utf8");
 assert.match(
   indexHtml,
@@ -76,6 +136,13 @@ if (expectedBase !== "/") {
   );
 }
 
+await verifyServedPagesAssets([
+  expectedBase,
+  ...requiredTesseractAssets.map(
+    (asset) => `${expectedBase}vendor/tesseract/${asset}`,
+  ),
+]);
+
 console.log(
-  `Pages build verified: ${expectedWorkerPath} and ${requiredTesseractAssets.length} local Tesseract assets`,
+  `Pages build verified over HTTP: ${expectedWorkerPath} and ${requiredTesseractAssets.length} local Tesseract assets`,
 );

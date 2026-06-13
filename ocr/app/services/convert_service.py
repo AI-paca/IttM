@@ -15,6 +15,7 @@ from app.chunking.vertical import (
     split_vertical,
     table_layout_to_markdown,
     table_words_to_markdown,
+    table_words_to_rows,
     wide_curriculum_table_to_markdown,
 )
 from app.engines.auto_engine import AutoEngine
@@ -184,7 +185,13 @@ def _recognize_scaled_words(
 
     resample = getattr(Image, "Resampling", Image).LANCZOS
     scaled = image.resize((max(1, image.size[0] * scale), max(1, image.size[1] * scale)), resample)
-    words = recognize_words(erase_table_lines_for_ocr(scaled), psm=psm, min_conf=min_conf)
+    prepared = erase_table_lines_for_ocr(scaled)
+    try:
+        words = recognize_words(prepared, psm=psm, min_conf=min_conf)
+    finally:
+        if prepared is not scaled:
+            prepared.close()
+        scaled.close()
     scaled_words = []
     for word in words:
         bbox = word.get("bbox")
@@ -205,19 +212,27 @@ def _recognize_scaled_words(
     return scaled_words
 
 
-def _merge_wide_table_left_strip_words(engine, image: Image.Image, table, words: list[dict]) -> list[dict]:
+def _merge_wide_table_left_strip_words(engine, image: Image.Image, table, words: list[dict]) -> tuple[list[dict], int]:
     if table.cols < 45 or len(table.x_lines) < 3:
-        return words
+        return words, 0
 
     left_limit = min(image.size[0], max(1, int(table.x_lines[2])))
     if left_limit <= 1:
-        return words
+        return words, 0
 
-    left_words = _recognize_scaled_words(
-        engine, image.crop((0, 0, left_limit, image.size[1])), scale=3, psm=6, min_conf=0
-    )
+    left_strip = image.crop((0, 0, left_limit, image.size[1]))
+    try:
+        left_words = _recognize_scaled_words(
+            engine,
+            left_strip,
+            scale=3,
+            psm=6,
+            min_conf=0,
+        )
+    finally:
+        left_strip.close()
     if len(left_words) < 10:
-        return words
+        return words, 1
 
     remaining = []
     for word in words:
@@ -228,20 +243,37 @@ def _merge_wide_table_left_strip_words(engine, image: Image.Image, table, words:
         if (left + right) / 2 > left_limit:
             remaining.append(word)
 
-    return [*remaining, *left_words]
+    return [*remaining, *left_words], 1
 
 
-def _recognize_table_words(engine, image: Image.Image, table, *, single_pass: bool = False) -> list[dict]:
+def _recognize_table_words(
+    engine,
+    image: Image.Image,
+    table,
+    *,
+    single_pass: bool = False,
+) -> tuple[list[dict], int]:
     recognize_words = getattr(engine, "recognize_words", None)
     if not callable(recognize_words):
-        return []
+        return [], 0
 
     width, height = image.size
     if single_pass or (table.cols <= 4 and height <= 3600):
-        words = recognize_words(erase_table_lines_for_ocr(image), psm=6, min_conf=18)
+        prepared = erase_table_lines_for_ocr(image)
+        try:
+            words = recognize_words(prepared, psm=6, min_conf=18)
+        finally:
+            if prepared is not image:
+                prepared.close()
         if single_pass:
-            return _merge_wide_table_left_strip_words(engine, image, table, words)
-        return words
+            merged_words, extra_calls = _merge_wide_table_left_strip_words(
+                engine,
+                image,
+                table,
+                words,
+            )
+            return merged_words, 1 + extra_calls
+        return words, 1
 
     x_segments = _line_bounded_segments(table.x_lines, width, max_span=1700)
     y_segments = _line_bounded_segments(table.y_lines, height, max_span=1300)
@@ -249,10 +281,22 @@ def _recognize_table_words(engine, image: Image.Image, table, *, single_pass: bo
     min_conf = 18 if len(table.cells) <= 200 else 25
 
     words = []
+    word_calls = 0
     for y1, y2 in y_segments:
         for x1, x2 in x_segments:
             tile = image.crop((x1, y1, x2, y2))
-            tile_words = recognize_words(erase_table_lines_for_ocr(tile), psm=psm, min_conf=min_conf)
+            prepared = erase_table_lines_for_ocr(tile)
+            try:
+                tile_words = recognize_words(
+                    prepared,
+                    psm=psm,
+                    min_conf=min_conf,
+                )
+                word_calls += 1
+            finally:
+                if prepared is not tile:
+                    prepared.close()
+                tile.close()
             for word in tile_words:
                 bbox = word.get("bbox")
                 if not bbox or len(bbox) != 4:
@@ -265,7 +309,29 @@ def _recognize_table_words(engine, image: Image.Image, table, *, single_pass: bo
                     }
                 )
 
-    return words
+    return words, word_calls
+
+
+def _table_word_cell_coverage(table, words: list[dict]) -> float:
+    if not table.cells:
+        return 0.0
+
+    rows = table_words_to_rows(table, words)
+    populated_cells = sum(bool(cell.strip()) for row in rows for cell in row)
+    return populated_cells / len(table.cells)
+
+
+def _append_raw_table_region(
+    page_parts: list[str],
+    engine,
+    image: Image.Image,
+) -> tuple[int, int]:
+    region_parts, region_chunks, region_cards = _recognize_image_region(
+        engine,
+        image,
+    )
+    page_parts.extend(part for part in region_parts if part.strip())
+    return region_chunks, region_cards
 
 
 async def convert(
@@ -355,30 +421,63 @@ def _convert_page(
             table_layout = region.table if is_wide_table else logical_table_layout(region.image, region.table)
             tables_found += 1
             table_cells += len(table_layout.cells)
-            total_chunks += len(table_layout.cells)
-
             table_md = ""
-            table_words = _recognize_table_words(
+            table_words, table_word_calls = _recognize_table_words(
                 engine,
                 region.image,
                 table_layout,
                 single_pass=is_wide_table and region.image.size[1] <= MAX_DIRECT_TABLE_HEIGHT,
             )
+            total_chunks += table_word_calls
             if table_words:
-                table_md = (
-                    wide_curriculum_table_to_markdown(table_layout, table_words)
-                    if is_wide_table
-                    else table_words_to_markdown(table_layout, table_words)
-                )
+                if is_wide_table:
+                    table_md = wide_curriculum_table_to_markdown(
+                        table_layout,
+                        table_words,
+                    )
+                if (
+                    not table_md.strip()
+                    and _table_word_cell_coverage(table_layout, table_words) >= profile.table_min_word_cell_coverage
+                ):
+                    table_md = table_words_to_markdown(
+                        table_layout,
+                        table_words,
+                    )
 
             if not table_md.strip():
+                if len(table_layout.cells) > profile.max_table_cell_ocr_calls:
+                    region_chunks, region_cards = _append_raw_table_region(
+                        page_parts,
+                        engine,
+                        region.image,
+                    )
+                    total_chunks += region_chunks
+                    cards_found += region_cards
+                    continue
+
+                cell_ocr_calls = 0
+
+                def recognize_cell(cell_image: Image.Image) -> str:
+                    nonlocal cell_ocr_calls
+                    cell_ocr_calls += 1
+                    return _recognize_table_cell(engine, cell_image)
+
                 table_md = table_layout_to_markdown(
                     region.image,
                     table_layout,
-                    lambda cell_image: _recognize_table_cell(engine, cell_image),
+                    recognize_cell,
                 )
+                total_chunks += cell_ocr_calls
             if table_md.strip():
                 page_parts.append(table_md)
+            else:
+                region_chunks, region_cards = _append_raw_table_region(
+                    page_parts,
+                    engine,
+                    region.image,
+                )
+                total_chunks += region_chunks
+                cards_found += region_cards
             continue
 
         region_parts, region_chunks, region_cards = _recognize_image_region(

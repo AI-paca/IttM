@@ -352,7 +352,7 @@ def test_convert_service_segments_implausibly_tall_table_region(monkeypatch, tmp
     assert meta["table_cells"] == 0
 
 
-def test_convert_service_preserves_large_plausible_table_fallback(monkeypatch, tmp_path):
+def test_convert_service_bounds_large_table_fallback(monkeypatch, tmp_path):
     word_calls = []
     recognized_sizes = []
 
@@ -390,8 +390,63 @@ def test_convert_service_preserves_large_plausible_table_fallback(monkeypatch, t
 
     assert "fallback text" in markdown
     assert len(word_calls) == 1
-    assert len(recognized_sizes) == 525
-    assert max(height for _, height in recognized_sizes) <= 208
-    assert meta["chunks"] == 525
+    assert recognized_sizes == [(800, 1000)]
+    assert meta["chunks"] == 2
     assert meta["tables_found"] == 1
     assert meta["table_cells"] == 525
+
+
+def test_convert_service_rejects_sparse_table_markdown(monkeypatch, tmp_path):
+    recognized_sizes = []
+
+    class FakeEngine:
+        def recognize_words(self, image, psm=6, min_conf=20):
+            return [{"text": "lonely", "bbox": (20, 20, 80, 50)}]
+
+        def recognize(self, image, mode="text_mode", psm=6):
+            recognized_sizes.append(image.size)
+            return "raw ranking with names and numbers"
+
+        def info(self):
+            return {"engine": "fake"}
+
+    def fake_layout(image, min_confirmed_cell_ratio=0.0):
+        layout = _dense_table_layout(image.width, image.height, rows=12, cols=12)
+        return [
+            LayoutRegion(
+                kind="table",
+                image=image,
+                bbox=layout.bbox,
+                table=layout,
+            )
+        ]
+
+    monkeypatch.setattr(
+        convert_service,
+        "AutoEngine",
+        lambda prefer_tesseract=True: FakeEngine(),
+    )
+    monkeypatch.setattr(convert_service, "analyze_document_layout", fake_layout)
+
+    image_path = tmp_path / "sparse-pseudo-table.png"
+    Image.new("RGB", (900, 700), (200, 200, 200)).save(image_path)
+    profile = OcrPipelineProfile(
+        name="test",
+        layout_analysis=("table_layout",),
+        table_min_word_cell_coverage=0.15,
+        max_table_cell_ocr_calls=64,
+    )
+
+    markdown, meta = asyncio.run(
+        convert_service.convert(
+            image_path,
+            engine_type="auto",
+            pipeline_profile=profile,
+        )
+    )
+
+    assert markdown == "raw ranking with names and numbers"
+    assert recognized_sizes == [(900, 700)]
+    assert meta["chunks"] == 2
+    assert meta["tables_found"] == 1
+    assert meta["table_cells"] == 144

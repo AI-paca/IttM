@@ -16,11 +16,11 @@ Branch: `engine-tesseract-quality`, based on local PR-ready `engine`.
 
 Commit `f339fd9`:
 
-| Fixture | Backend Tesseract | EasyOCR CPU | Browser Tesseract.js |
-| --- | --- | --- | --- |
-| `image (6).png` | 1.04 s, false 570-cell table, rankings lost | 3.08 s, false table, partial names | 2.52 s, useful raw text with ranks 1-10 and all scores |
-| `photo_10...jpg` | 0.72 s, readable slide | 2.93 s, loses several lines | Node harness returned empty text; full DOM/Canvas path is required |
-| Long catalog screenshot | 8.61 s, noisy text | 43.82 s, more text but far above target | 8.75 s, noisy text |
+| Fixture                 | Backend Tesseract                           | EasyOCR CPU                             | Browser Tesseract.js                                               |
+| ----------------------- | ------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------ |
+| `image (6).png`         | 1.04 s, false 570-cell table, rankings lost | 3.08 s, false table, partial names      | 2.52 s, useful raw text with ranks 1-10 and all scores             |
+| `photo_10...jpg`        | 0.72 s, readable slide                      | 2.93 s, loses several lines             | Node harness returned empty text; full DOM/Canvas path is required |
+| Long catalog screenshot | 8.61 s, noisy text                          | 43.82 s, more text but far above target | 8.75 s, noisy text                                                 |
 
 The first browser attempt failed because local language files were absent. The
 runner recorded exit `1`; the repeat used `chi_sim`, `eng` and `rus` data copied
@@ -35,9 +35,9 @@ rectangular cells are confirmed by contours. The standard backend profiles use
 
 Result on `image (6).png`:
 
-| Engine | Before | After | Visual result |
-| --- | ---: | ---: | --- |
-| Tesseract | 1.04 s | 1.45 s | Keeps title, ranks 1-10, names and all ten scores |
+| Engine      | Before |  After | Visual result                                                           |
+| ----------- | -----: | -----: | ----------------------------------------------------------------------- |
+| Tesseract   | 1.04 s | 1.45 s | Keeps title, ranks 1-10, names and all ten scores                       |
 | EasyOCR CPU | 3.08 s | 4.81 s | Keeps most names and scores as raw text; some field order remains wrong |
 
 The change removes destructive table reconstruction rather than pretending the

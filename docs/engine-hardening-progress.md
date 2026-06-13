@@ -5,15 +5,15 @@ untouched.
 
 ## Stable Scope
 
-| Area | Result | Verification |
-| --- | --- | --- |
-| GitHub Pages assets | Tesseract worker/core URLs include the Vite base path | Pages production build verifier |
-| Backend documents | Long false-table inputs are segmented; uploads no longer block the FastAPI event loop | Backend routing and processing tests |
-| Browser encoding | PDF preparation and Base64 work run in dedicated workers where supported | Worker, cancellation and error tests |
-| External LLM privacy | Gemini/OpenRouter requests require explicit per-session consent | Request-blocking tests |
-| PDF worker | PDF.js uses `OffscreenCanvas` and DOM-free worker factories | Worker platform tests |
-| Backend result streaming | Python, gateway and web expose page NDJSON incrementally | Route, parser and truncation tests |
-| Benchmarking | Backend, browser image and browser PDF-memory runners are reusable | Scripts committed separately |
+| Area                     | Result                                                                                | Verification                         |
+| ------------------------ | ------------------------------------------------------------------------------------- | ------------------------------------ |
+| GitHub Pages assets      | Tesseract worker/core URLs include the Vite base path                                 | Pages production build verifier      |
+| Backend documents        | Long false-table inputs are segmented; uploads no longer block the FastAPI event loop | Backend routing and processing tests |
+| Browser encoding         | PDF preparation and Base64 work run in dedicated workers where supported              | Worker, cancellation and error tests |
+| External LLM privacy     | Gemini/OpenRouter requests require explicit per-session consent                       | Request-blocking tests               |
+| PDF worker               | PDF.js uses `OffscreenCanvas` and DOM-free worker factories                           | Worker platform tests                |
+| Backend result streaming | Python, gateway and web expose page NDJSON incrementally                              | Route, parser and truncation tests   |
+| Benchmarking             | Backend, browser image and browser PDF-memory runners are reusable                    | Scripts committed separately         |
 
 ## Deliberately Excluded
 

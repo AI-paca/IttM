@@ -35,7 +35,9 @@ def test_pdf_renderer_logs_each_page(monkeypatch, capsys):
         "pdf2image",
         SimpleNamespace(
             convert_from_path=convert_from_path,
-            pdfinfo_from_path=lambda _path: {"Pages": 2},
+            pdfinfo_from_path=lambda _path, first_page=None, last_page=None: (
+                {"Pages": 2} if first_page is None else {f"Page {first_page} size": "612 x 792 pts"}
+            ),
         ),
     )
 

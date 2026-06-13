@@ -1,3 +1,5 @@
+import os
+import re
 import tempfile
 from io import BytesIO
 from pathlib import Path
@@ -23,10 +25,63 @@ from app.formatting.markdown_formatter import MarkdownFormatter
 from app.pipeline_config import OcrPipelineProfile, resolve_pipeline_profile
 from app.preprocessing import OcrPreprocessingPipeline
 
-Image.MAX_IMAGE_PIXELS = None
+DEFAULT_MAX_DECODED_IMAGE_PIXELS = 80_000_000
+DEFAULT_MAX_PDF_RENDER_DIMENSION = 6000
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    raw_value = os.environ.get(name, str(default))
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be an integer") from exc
+    if value <= 0:
+        raise RuntimeError(f"{name} must be greater than zero")
+    return value
+
+
+def _validate_decoded_image_size(image: Image.Image) -> None:
+    width, height = image.size
+    pixel_count = width * height
+    limit = _positive_int_env(
+        "OCR_MAX_DECODED_IMAGE_PIXELS",
+        DEFAULT_MAX_DECODED_IMAGE_PIXELS,
+    )
+    if pixel_count > limit:
+        raise ValueError(f"Decoded image contains {pixel_count} pixels; limit is {limit}")
+
+
+def _pdf_render_options(page_info: dict) -> dict:
+    max_dimension = _positive_int_env(
+        "OCR_MAX_PDF_RENDER_DIMENSION",
+        DEFAULT_MAX_PDF_RENDER_DIMENSION,
+    )
+    page_size = next(
+        (
+            str(value)
+            for key, value in page_info.items()
+            if str(key).lower().endswith("size") and "pts" in str(value).lower()
+        ),
+        "",
+    )
+    match = re.search(r"([\d.]+)\s+x\s+([\d.]+)\s+pts", page_size, re.I)
+    if not match:
+        return {"dpi": 300}
+
+    max_points = max(float(match.group(1)), float(match.group(2)))
+    projected_dimension = max_points * 300 / 72
+    if projected_dimension <= max_dimension:
+        return {"dpi": 300}
+
+    dpi = max(10, int(300 * max_dimension / projected_dimension))
+    options = {"dpi": dpi}
+    if max_points * dpi / 72 > max_dimension:
+        options["size"] = max_dimension
+    return options
 
 
 def _prepared_image(image: Image.Image, image_pipeline: OcrPreprocessingPipeline) -> Image.Image:
+    _validate_decoded_image_size(image)
     image.load()
     if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
         rgba_image = image.convert("RGBA")
@@ -69,18 +124,24 @@ def _iter_document_images(
 
             for page_number in range(1, page_count + 1):
                 print(f"[PDF] Rendering page {page_number}/{page_count}", flush=True)
+                page_info = pdfinfo_from_path(
+                    str(pdf_path),
+                    first_page=page_number,
+                    last_page=page_number,
+                )
                 pages = convert_from_path(
                     str(pdf_path),
-                    dpi=300,
                     fmt="png",
                     first_page=page_number,
                     last_page=page_number,
                     thread_count=1,
+                    **_pdf_render_options(page_info),
                 )
                 if not pages:
                     raise ValueError(f"PDF page {page_number} could not be rendered")
                 page = pages[0]
                 try:
+                    _validate_decoded_image_size(page)
                     yield page.convert("RGB")
                 finally:
                     for rendered_page in pages:

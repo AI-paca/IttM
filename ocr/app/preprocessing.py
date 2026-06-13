@@ -1,4 +1,22 @@
+import os
+
 from PIL import Image
+
+DEFAULT_MAX_DEWARP_PIXELS = 16_000_000
+
+
+def max_dewarp_pixels() -> int:
+    raw_value = os.environ.get(
+        "OCR_MAX_DEWARP_PIXELS",
+        str(DEFAULT_MAX_DEWARP_PIXELS),
+    )
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError("OCR_MAX_DEWARP_PIXELS must be an integer") from exc
+    if value <= 0:
+        raise RuntimeError("OCR_MAX_DEWARP_PIXELS must be greater than zero")
+    return value
 
 
 class ImagePreprocessingStep:
@@ -13,6 +31,8 @@ class ProjectedDocumentDewarpStep(ImagePreprocessingStep):
 
     def apply(self, image: Image.Image) -> Image.Image:
         if min(image.size) < 300:
+            return image
+        if image.size[0] * image.size[1] > max_dewarp_pixels():
             return image
 
         try:

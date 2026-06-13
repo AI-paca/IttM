@@ -5,6 +5,7 @@ import express, {
 } from "express";
 import * as http from "http";
 import * as path from "path";
+import { once } from "node:events";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "url";
 import { handle, isGatewayApiRequest } from "./gateway/src/core/handle";
@@ -58,7 +59,7 @@ export async function send_web_response(
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      res.write(value);
+      if (!res.write(value)) await once(res, "drain");
     }
   }
   res.end();

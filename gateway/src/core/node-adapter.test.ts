@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import type { IncomingMessage } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
-import { to_web_request } from "../../../server";
+import { send_web_response, to_web_request } from "../../../server";
 
 test("Node gateway adapts uploads through the standard backpressure stream", async () => {
   const incoming = new PassThrough() as PassThrough & IncomingMessage;
@@ -27,4 +28,56 @@ test("nginx proxies direct JSON and streaming compatibility routes", async () =>
 
   assert.match(config, /location ~ \^\/convert\(\?:\/stream\)\?\$/);
   assert.match(config, /proxy_request_buffering off;/);
+});
+
+test("Node gateway waits for response drain before reading the next chunk", async () => {
+  class BackpressuredResponse extends EventEmitter {
+    statusCode = 0;
+    statusMessage = "";
+    writes: Uint8Array[] = [];
+    ended = false;
+    headers = new Map<string, string | number | readonly string[]>();
+
+    setHeader(name: string, value: string | number | readonly string[]) {
+      this.headers.set(name, value);
+      return this;
+    }
+
+    write(value: Uint8Array) {
+      this.writes.push(value);
+      return this.writes.length > 1;
+    }
+
+    end() {
+      this.ended = true;
+      return this;
+    }
+  }
+
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode("first"));
+      controller.enqueue(encoder.encode("second"));
+      controller.close();
+    },
+  });
+  const response = new BackpressuredResponse();
+  const sendPromise = send_web_response(
+    response as unknown as ServerResponse,
+    new Response(body),
+  );
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(response.writes.length, 1);
+  assert.equal(response.ended, false);
+
+  response.emit("drain");
+  await sendPromise;
+
+  assert.deepEqual(
+    response.writes.map((chunk) => new TextDecoder().decode(chunk)),
+    ["first", "second"],
+  );
+  assert.equal(response.ended, true);
 });

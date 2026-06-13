@@ -7,8 +7,10 @@ class OcrPipelineProfile:
     image_preprocessing: tuple[str, ...] = ()
     layout_analysis: tuple[str, ...] = ()
     grid_min_confirmed_cell_ratio: float = 0.0
-    table_min_word_cell_coverage: float = 0.15
-    max_table_cell_ocr_calls: int = 64
+    table_min_word_cell_coverage: float = 0.35
+    wide_table_min_word_cell_coverage: float = 0.02
+    table_min_cell_coverage: float = 0.5
+    max_table_cell_ocr_calls: int = 16
 
 
 OCR_PIPELINE_PROFILES: dict[str, OcrPipelineProfile] = {

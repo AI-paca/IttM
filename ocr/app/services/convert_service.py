@@ -15,7 +15,8 @@ from app.chunking.vertical import (
     logical_table_layout,
     split_by_blank_bands,
     split_vertical,
-    table_layout_to_markdown,
+    table_layout_to_rows,
+    table_rows_to_markdown,
     table_words_to_markdown,
     table_words_to_rows,
     wide_curriculum_table_to_markdown,
@@ -382,6 +383,13 @@ def _table_word_cell_coverage(table, words: list[dict]) -> float:
     return populated_cells / len(table.cells)
 
 
+def _table_row_cell_coverage(table, rows: list[list[str]]) -> float:
+    if not table.cells:
+        return 0.0
+    populated_cells = sum(bool(cell.strip()) for row in rows for cell in row)
+    return populated_cells / len(table.cells)
+
+
 def _append_raw_table_region(
     page_parts: list[str],
     engine,
@@ -491,15 +499,16 @@ def _convert_page(
             )
             total_chunks += table_word_calls
             if table_words:
-                if is_wide_table:
+                word_cell_coverage = _table_word_cell_coverage(
+                    table_layout,
+                    table_words,
+                )
+                if is_wide_table and word_cell_coverage >= profile.wide_table_min_word_cell_coverage:
                     table_md = wide_curriculum_table_to_markdown(
                         table_layout,
                         table_words,
                     )
-                if (
-                    not table_md.strip()
-                    and _table_word_cell_coverage(table_layout, table_words) >= profile.table_min_word_cell_coverage
-                ):
+                if not table_md.strip() and word_cell_coverage >= profile.table_min_word_cell_coverage:
                     table_md = table_words_to_markdown(
                         table_layout,
                         table_words,
@@ -523,12 +532,14 @@ def _convert_page(
                     cell_ocr_calls += 1
                     return _recognize_table_cell(engine, cell_image)
 
-                table_md = table_layout_to_markdown(
+                cell_rows = table_layout_to_rows(
                     region.image,
                     table_layout,
                     recognize_cell,
                 )
                 total_chunks += cell_ocr_calls
+                if _table_row_cell_coverage(table_layout, cell_rows) >= profile.table_min_cell_coverage:
+                    table_md = table_rows_to_markdown(cell_rows)
             if table_md.strip():
                 page_parts.append(table_md)
             else:

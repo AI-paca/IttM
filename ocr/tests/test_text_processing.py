@@ -433,8 +433,8 @@ def test_convert_service_rejects_sparse_table_markdown(monkeypatch, tmp_path):
     profile = OcrPipelineProfile(
         name="test",
         layout_analysis=("table_layout",),
-        table_min_word_cell_coverage=0.15,
-        max_table_cell_ocr_calls=64,
+        table_min_word_cell_coverage=0.35,
+        max_table_cell_ocr_calls=16,
     )
 
     markdown, meta = asyncio.run(
@@ -450,3 +450,130 @@ def test_convert_service_rejects_sparse_table_markdown(monkeypatch, tmp_path):
     assert meta["chunks"] == 2
     assert meta["tables_found"] == 1
     assert meta["table_cells"] == 144
+
+
+def test_convert_service_rejects_sparse_cell_markdown(monkeypatch, tmp_path):
+    cell_calls = 0
+    raw_calls = 0
+
+    class FakeEngine:
+        def recognize_words(self, image, psm=6, min_conf=20):
+            return []
+
+        def recognize(self, image, mode="text_mode", psm=6):
+            nonlocal cell_calls, raw_calls
+            if image.size == (400, 400):
+                raw_calls += 1
+                return "raw names 1 2 3 4"
+            cell_calls += 1
+            return "only one cell" if cell_calls == 1 else ""
+
+        def info(self):
+            return {"engine": "fake"}
+
+    def fake_layout(image, min_confirmed_cell_ratio=0.0):
+        layout = _dense_table_layout(image.width, image.height, rows=4, cols=4)
+        return [
+            LayoutRegion(
+                kind="table",
+                image=image,
+                bbox=layout.bbox,
+                table=layout,
+            )
+        ]
+
+    monkeypatch.setattr(
+        convert_service,
+        "AutoEngine",
+        lambda prefer_tesseract=True: FakeEngine(),
+    )
+    monkeypatch.setattr(convert_service, "analyze_document_layout", fake_layout)
+
+    image_path = tmp_path / "sparse-small-table.png"
+    Image.new("RGB", (400, 400), (200, 200, 200)).save(image_path)
+    profile = OcrPipelineProfile(
+        name="test",
+        layout_analysis=("table_layout",),
+        max_table_cell_ocr_calls=16,
+        table_min_cell_coverage=0.5,
+    )
+
+    markdown, meta = asyncio.run(
+        convert_service.convert(
+            image_path,
+            engine_type="auto",
+            pipeline_profile=profile,
+        )
+    )
+
+    assert markdown == "raw names 1 2 3 4"
+    assert cell_calls == 16
+    assert raw_calls == 1
+    assert meta["chunks"] == 18
+
+
+def test_convert_service_checks_wide_table_coverage_before_formatting(
+    monkeypatch,
+    tmp_path,
+):
+    formatted = False
+
+    class FakeEngine:
+        def recognize_words(self, image, psm=6, min_conf=20):
+            return [{"text": "Б1.О.01", "bbox": (5, 5, 20, 20)}]
+
+        def recognize(self, image, mode="text_mode", psm=6):
+            return "raw curriculum text"
+
+        def info(self):
+            return {"engine": "fake"}
+
+    image_path = tmp_path / "sparse-wide-table.png"
+    Image.new("RGB", (1000, 200), (200, 200, 200)).save(image_path)
+    layout = _dense_table_layout(1000, 200, rows=2, cols=50)
+
+    monkeypatch.setattr(
+        convert_service,
+        "AutoEngine",
+        lambda prefer_tesseract=True: FakeEngine(),
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "analyze_document_layout",
+        lambda image, min_confirmed_cell_ratio=0.0: [
+            LayoutRegion(
+                kind="table",
+                image=image,
+                bbox=layout.bbox,
+                table=layout,
+            )
+        ],
+    )
+
+    def fake_wide_formatter(table, words):
+        nonlocal formatted
+        formatted = True
+        return "| sparse |"
+
+    monkeypatch.setattr(
+        convert_service,
+        "wide_curriculum_table_to_markdown",
+        fake_wide_formatter,
+    )
+
+    profile = OcrPipelineProfile(
+        name="test",
+        layout_analysis=("table_layout",),
+        wide_table_min_word_cell_coverage=0.02,
+        max_table_cell_ocr_calls=16,
+    )
+    markdown, _ = asyncio.run(
+        convert_service.convert(
+            image_path,
+            engine_type="auto",
+            pipeline_profile=profile,
+        )
+    )
+
+    assert markdown == "raw curriculum text"
+    assert formatted is False

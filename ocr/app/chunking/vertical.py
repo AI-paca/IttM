@@ -1010,11 +1010,46 @@ def _prepare_cell_for_ocr(image: Image.Image) -> Image.Image:
 
     if scale > 1.05:
         resample = getattr(Image, "Resampling", Image).LANCZOS
-        gray = gray.resize((max(1, int(width * scale)), max(1, int(height * scale))), resample)
+        resized = gray.resize(
+            (max(1, int(width * scale)), max(1, int(height * scale))),
+            resample,
+        )
+        gray.close()
+        gray = resized
 
     padded = Image.new("L", (gray.size[0] + 16, gray.size[1] + 16), "white")
     padded.paste(gray, (8, 8))
+    gray.close()
     return padded
+
+
+def table_layout_to_rows(
+    image: Image.Image,
+    table: TableLayout,
+    recognize_cell: Callable[[Image.Image], str],
+    *,
+    skip_blank_cells: bool = True,
+) -> list[list[str]]:
+    rows: list[list[str]] = [["" for _ in range(table.cols)] for _ in range(table.rows)]
+
+    for cell in table.cells:
+        cell_image = _prepare_cell_crop(image, cell.bbox)
+        try:
+            if skip_blank_cells and not _cell_has_visible_content(cell_image):
+                continue
+            prepared = _prepare_cell_for_ocr(cell_image)
+            try:
+                rows[cell.row][cell.col] = _normalize_cell_text(recognize_cell(prepared))
+            finally:
+                prepared.close()
+        finally:
+            cell_image.close()
+
+    return rows
+
+
+def table_rows_to_markdown(rows: list[list[str]]) -> str:
+    return _rows_to_markdown(rows)
 
 
 def table_layout_to_markdown(
@@ -1024,13 +1059,12 @@ def table_layout_to_markdown(
     *,
     skip_blank_cells: bool = True,
 ) -> str:
-    rows: list[list[str]] = [["" for _ in range(table.cols)] for _ in range(table.rows)]
-
-    for cell in table.cells:
-        cell_image = _prepare_cell_crop(image, cell.bbox)
-        if skip_blank_cells and not _cell_has_visible_content(cell_image):
-            continue
-        rows[cell.row][cell.col] = _normalize_cell_text(recognize_cell(_prepare_cell_for_ocr(cell_image)))
+    rows = table_layout_to_rows(
+        image,
+        table,
+        recognize_cell,
+        skip_blank_cells=skip_blank_cells,
+    )
 
     return _rows_to_markdown(rows)
 

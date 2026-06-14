@@ -72,6 +72,50 @@ test("process worker rejects malformed or oversized protocol output", async () =
   );
 });
 
+test("process worker preserves partial events before malformed protocol failure", async () => {
+  const worker = await execute(
+    executorFor(`
+      process.stdout.write('{"type":"page","page":1,"markdown":"partial before fault"}\\n');
+      process.stdout.write('{malformed-json\\n');
+    `),
+  );
+
+  await assert.rejects(
+    worker.result,
+    (error: unknown) =>
+      error instanceof WorkerProcessError &&
+      error.code === "WORKER_PROTOCOL" &&
+      !error.retryable,
+  );
+  assert.deepEqual(worker.events, [
+    { type: "page", page: 1, markdown: "partial before fault" },
+  ]);
+});
+
+test("process worker sends the extraction request over stdin as the boundary payload", async () => {
+  const worker = await execute(
+    executorFor(`
+      let payload = '';
+      process.stdin.setEncoding('utf8');
+      process.stdin.on('data', (chunk) => { payload += chunk; });
+      process.stdin.on('end', () => {
+        const request = JSON.parse(payload);
+        process.stdout.write(JSON.stringify({
+          type: 'page',
+          page: 1,
+          markdown: request.filename + ':' + request.engine,
+        }) + '\\n');
+        process.stdout.write('{"type":"complete","meta":{"stdin":true}}\\n');
+      });
+    `),
+  );
+
+  assert.deepEqual(await worker.result, { stdin: true });
+  assert.deepEqual(worker.events, [
+    { type: "page", page: 1, markdown: "generated.png:tesseract" },
+  ]);
+});
+
 test("process worker rejects stale or unknown protocol events", async () => {
   const stale = await execute(
     executorFor(`process.stdout.write('{"type":"stale","version":99}\\n')`),

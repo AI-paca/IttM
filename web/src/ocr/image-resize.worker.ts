@@ -1,27 +1,14 @@
-import type { BrowserLayoutPipelineConfig } from "./layout-contracts";
 import { planBrowserLayoutRegions } from "./layout-pipeline";
+import type {
+  ResizeWorkerCommand,
+  ResizeWorkerRequest,
+  ResizeWorkerResponse,
+} from "./image-resize-protocol";
 import {
   planImageTiles,
   planRegionTiles,
   type ImageTile,
 } from "./image-tiling";
-
-interface ResizeRequest {
-  file: File;
-  maxImagePixels: number;
-  maxDimension: number;
-  layout: BrowserLayoutPipelineConfig;
-}
-
-interface ResizeSuccess {
-  ok: true;
-  blobs: Blob[];
-}
-
-interface ResizeFailure {
-  ok: false;
-  error: string;
-}
 
 const MAX_ANALYSIS_PIXELS = 2_000_000;
 const MAX_ANALYSIS_DIMENSION = 4096;
@@ -40,7 +27,7 @@ function analysisSize(width: number, height: number) {
 
 function planLayoutTiles(
   bitmap: ImageBitmap,
-  request: ResizeRequest,
+  request: ResizeWorkerRequest,
 ): ImageTile[] {
   if (request.layout.featureExtractors.length === 0) {
     return planImageTiles(bitmap.width, bitmap.height, request);
@@ -65,12 +52,23 @@ function planLayoutTiles(
   return planRegionTiles(regions, request);
 }
 
-self.onmessage = async (event: MessageEvent<ResizeRequest>) => {
+let releaseNextTile: (() => void) | undefined;
+
+function waitForNextTile(): Promise<void> {
+  return new Promise((resolve) => {
+    releaseNextTile = resolve;
+  });
+}
+
+async function processImage(request: ResizeWorkerRequest) {
   let bitmap: ImageBitmap | undefined;
   try {
-    const request = event.data;
     bitmap = await createImageBitmap(request.file);
     const tiles = planLayoutTiles(bitmap, request);
+    self.postMessage({
+      type: "plan",
+      total: tiles.length,
+    } satisfies ResizeWorkerResponse);
 
     if (
       tiles.length === 1 &&
@@ -81,19 +79,25 @@ self.onmessage = async (event: MessageEvent<ResizeRequest>) => {
       tiles[0].targetWidth === bitmap.width &&
       tiles[0].targetHeight === bitmap.height
     ) {
-      self.postMessage({ ok: true, blobs: [] } satisfies ResizeSuccess);
+      self.postMessage({
+        type: "passthrough",
+        total: 1,
+      } satisfies ResizeWorkerResponse);
+      self.postMessage({
+        type: "complete",
+        total: 1,
+      } satisfies ResizeWorkerResponse);
       return;
     }
 
-    const blobs: Blob[] = [];
-    for (const tile of tiles) {
+    for (const [index, tile] of tiles.entries()) {
       const canvas = new OffscreenCanvas(tile.targetWidth, tile.targetHeight);
       const ctx = canvas.getContext("2d");
       if (!ctx) {
         self.postMessage({
-          ok: false,
+          type: "error",
           error: "Could not create OffscreenCanvas context",
-        } satisfies ResizeFailure);
+        } satisfies ResizeWorkerResponse);
         return;
       }
 
@@ -108,23 +112,41 @@ self.onmessage = async (event: MessageEvent<ResizeRequest>) => {
         tile.targetWidth,
         tile.targetHeight,
       );
-      blobs.push(
-        await canvas.convertToBlob({
-          type: "image/jpeg",
-          quality: 0.92,
-        }),
-      );
+      const blob = await canvas.convertToBlob({
+        type: "image/jpeg",
+        quality: 0.92,
+      });
+      self.postMessage({
+        type: "tile",
+        index,
+        total: tiles.length,
+        blob,
+      } satisfies ResizeWorkerResponse);
+      if (index < tiles.length - 1) await waitForNextTile();
     }
 
-    self.postMessage({ ok: true, blobs } satisfies ResizeSuccess);
+    self.postMessage({
+      type: "complete",
+      total: tiles.length,
+    } satisfies ResizeWorkerResponse);
   } catch (error) {
     self.postMessage({
-      ok: false,
+      type: "error",
       error: error instanceof Error ? error.message : String(error),
-    } satisfies ResizeFailure);
+    } satisfies ResizeWorkerResponse);
   } finally {
     bitmap?.close();
   }
+}
+
+self.onmessage = (event: MessageEvent<ResizeWorkerCommand>) => {
+  if (event.data.type === "next") {
+    const release = releaseNextTile;
+    releaseNextTile = undefined;
+    release?.();
+    return;
+  }
+  void processImage(event.data.request);
 };
 
 export {};

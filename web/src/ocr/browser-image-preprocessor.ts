@@ -1,4 +1,8 @@
 import type { BrowserOcrProfile } from "./browser-profile";
+import type {
+  ResizeWorkerCommand,
+  ResizeWorkerResponse,
+} from "./image-resize-protocol";
 import { dewarpProjectedDocumentCanvas } from "./projected-document-dewarp";
 import { planImageTiles, type ImageTile } from "./image-tiling";
 
@@ -7,12 +11,20 @@ interface ImageSize {
   height: number;
 }
 
-interface ResizeWorkerResponse {
-  ok: boolean;
-  blobs?: Blob[];
+export interface PreparedBrowserOcrInput {
+  input: File | Blob;
+  index: number;
+  total: number;
 }
 
 type BrowserCanvas = OffscreenCanvas | HTMLCanvasElement;
+
+export interface ResizeWorkerLike {
+  onmessage: ((event: MessageEvent<ResizeWorkerResponse>) => void) | null;
+  onerror: ((event: ErrorEvent) => void) | null;
+  postMessage(message: ResizeWorkerCommand): void;
+  terminate(): void;
+}
 
 function yieldToBrowser(): Promise<void> {
   const scheduler = (
@@ -27,48 +39,85 @@ function yieldToBrowser(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-async function resizeInWorker(
+export function streamImagesFromResizeWorker(
   file: File,
   profile: BrowserOcrProfile,
-): Promise<Array<File | Blob> | null> {
+  createWorker?: () => ResizeWorkerLike,
+): AsyncIterable<PreparedBrowserOcrInput> | null {
   if (
-    typeof Worker === "undefined" ||
-    typeof createImageBitmap === "undefined" ||
-    typeof OffscreenCanvas === "undefined"
+    !createWorker &&
+    (typeof Worker === "undefined" ||
+      typeof createImageBitmap === "undefined" ||
+      typeof OffscreenCanvas === "undefined")
   ) {
     return null;
   }
 
-  const worker = new Worker(
-    new URL("./image-resize.worker.ts", import.meta.url),
-    {
-      type: "module",
-    },
-  );
+  return (async function* () {
+    let worker: ResizeWorkerLike | undefined;
+    const pending: ResizeWorkerResponse[] = [];
+    let resolveNext: ((response: ResizeWorkerResponse) => void) | undefined;
+    const push = (response: ResizeWorkerResponse) => {
+      if (resolveNext) {
+        const resolve = resolveNext;
+        resolveNext = undefined;
+        resolve(response);
+      } else {
+        pending.push(response);
+      }
+    };
+    const next = () =>
+      pending.length > 0
+        ? Promise.resolve(pending.shift()!)
+        : new Promise<ResizeWorkerResponse>((resolve) => {
+            resolveNext = resolve;
+          });
 
-  try {
-    return await new Promise<Array<File | Blob> | null>((resolve) => {
-      worker.onmessage = (event: MessageEvent<ResizeWorkerResponse>) => {
-        const response = event.data;
-        resolve(
-          response.ok
-            ? response.blobs?.length
-              ? response.blobs
-              : [file]
-            : null,
-        );
-      };
-      worker.onerror = () => resolve(null);
+    try {
+      worker = createWorker
+        ? createWorker()
+        : new Worker(new URL("./image-resize.worker.ts", import.meta.url), {
+            type: "module",
+          });
+      worker.onmessage = (event) => push(event.data);
+      worker.onerror = (event) =>
+        push({
+          type: "error",
+          error: event.message || "Image resize worker failed",
+        });
       worker.postMessage({
-        file,
-        maxImagePixels: profile.maxImagePixels,
-        maxDimension: profile.maxDimension,
-        layout: profile.layout,
+        type: "start",
+        request: {
+          file,
+          maxImagePixels: profile.maxImagePixels,
+          maxDimension: profile.maxDimension,
+          layout: profile.layout,
+        },
       });
-    });
-  } finally {
-    worker.terminate();
-  }
+
+      while (true) {
+        const response = await next();
+        if (response.type === "plan") continue;
+        if (response.type === "passthrough") {
+          yield { input: file, index: 0, total: 1 };
+          continue;
+        }
+        if (response.type === "tile") {
+          yield {
+            input: response.blob,
+            index: response.index,
+            total: response.total,
+          };
+          worker.postMessage({ type: "next" });
+          continue;
+        }
+        if (response.type === "complete") return;
+        throw new Error(response.error);
+      }
+    } finally {
+      worker?.terminate();
+    }
+  })();
 }
 
 function loadImageElement(file: File): Promise<HTMLImageElement | null> {
@@ -144,19 +193,18 @@ async function renderTileToCanvas(
   return canvas;
 }
 
-async function preprocessInBrowserCanvas(
+async function* streamInBrowserCanvas(
   file: File,
   profile: BrowserOcrProfile,
-): Promise<Array<File | Blob> | null> {
+): AsyncGenerator<PreparedBrowserOcrInput> {
   const image = await loadBrowserImage(file);
-  if (!image) return null;
+  if (!image) return;
 
   try {
     const tiles = planImageTiles(image.width, image.height, profile);
-    const results: Blob[] = [];
-    for (const tile of tiles) {
+    for (const [index, tile] of tiles.entries()) {
       let canvas = await renderTileToCanvas(image, tile);
-      if (!canvas) return null;
+      if (!canvas) throw new Error("Could not create browser OCR canvas");
 
       if (profile.imagePreprocessing.includes("projected_document_dewarp")) {
         canvas =
@@ -168,12 +216,10 @@ async function preprocessInBrowserCanvas(
       }
 
       const blob = await canvasToJpegBlob(canvas);
-      if (!blob) return null;
-      results.push(blob);
+      if (!blob) throw new Error("Could not encode browser OCR tile");
+      yield { input: blob, index, total: tiles.length };
       await yieldToBrowser();
     }
-
-    return results;
   } finally {
     if ("close" in image && typeof image.close === "function") {
       image.close();
@@ -181,18 +227,35 @@ async function preprocessInBrowserCanvas(
   }
 }
 
-export async function prepareImagesForBrowserOcr(
+export async function* streamImagesForBrowserOcr(
   file: File,
   profile: BrowserOcrProfile,
-): Promise<Array<File | Blob>> {
+): AsyncGenerator<PreparedBrowserOcrInput> {
   if (!file.type.startsWith("image/") || typeof document === "undefined") {
-    return [file];
+    yield { input: file, index: 0, total: 1 };
+    return;
   }
 
   if (!profile.imagePreprocessing.includes("projected_document_dewarp")) {
-    const workerResult = await resizeInWorker(file, profile);
-    if (workerResult) return workerResult;
+    const workerStream = streamImagesFromResizeWorker(file, profile);
+    if (workerStream) {
+      let emitted = false;
+      try {
+        for await (const prepared of workerStream) {
+          emitted = true;
+          yield prepared;
+        }
+        return;
+      } catch (error) {
+        if (emitted) throw error;
+      }
+    }
   }
 
-  return (await preprocessInBrowserCanvas(file, profile)) || [file];
+  let emitted = false;
+  for await (const prepared of streamInBrowserCanvas(file, profile)) {
+    emitted = true;
+    yield prepared;
+  }
+  if (!emitted) yield { input: file, index: 0, total: 1 };
 }

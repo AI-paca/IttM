@@ -547,6 +547,111 @@ test("task API sync text mode returns plain markdown for Hyprland curl pipelines
   }
 });
 
+test("literal extract text endpoint accepts raw PNG bytes and returns plain text", async () => {
+  resetTaskApiForTests();
+  const originalFetch = globalThis.fetch;
+  let uploadedName = "";
+  globalThis.fetch = async (_input, init) => {
+    const form = init?.body as FormData;
+    const file = form.get("file");
+    uploadedName = file instanceof File ? file.name : "";
+    return new Response(
+      '{"type":"page","page":1,"markdown":"literal text"}\n' +
+        '{"type":"complete","meta":{"pages":1}}\n',
+      { headers: { "content-type": "application/x-ndjson" } },
+    );
+  };
+
+  try {
+    const response = await route(
+      new Request("http://localhost/api/extract/text", {
+        method: "POST",
+        headers: { "content-type": "image/png" },
+        body: new Uint8Array([1, 2, 3]),
+      }),
+      env,
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      response.headers.get("content-type"),
+      "text/plain; charset=utf-8",
+    );
+    assert.equal(response.headers.get("content-length"), "12");
+    assert.equal(uploadedName, "screenshot.png");
+    assert.equal(await response.text(), "literal text");
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetTaskApiForTests();
+  }
+});
+
+test("literal extract text endpoint forwards engine and profile query aliases", async () => {
+  resetTaskApiForTests();
+  const originalFetch = globalThis.fetch;
+  let calledUrl = "";
+  globalThis.fetch = async (input) => {
+    calledUrl = String(input);
+    return new Response(
+      '{"type":"page","page":1,"markdown":"ok"}\n' +
+        '{"type":"complete","meta":{}}\n',
+      { headers: { "content-type": "application/x-ndjson" } },
+    );
+  };
+
+  try {
+    const response = await route(
+      new Request(
+        "http://localhost/api/extract/text?engine=tesseract&profile=backend_tesseract_standard",
+        {
+          method: "POST",
+          headers: { "content-type": "application/octet-stream" },
+          body: new Uint8Array([1]),
+        },
+      ),
+      env,
+    );
+
+    assert.equal(response.status, 200);
+    assert.match(
+      calledUrl,
+      /engine_type=tesseract&pipeline_profile=backend_tesseract_standard/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetTaskApiForTests();
+  }
+});
+
+test("literal extract text endpoint rejects an empty body", async () => {
+  resetTaskApiForTests();
+  try {
+    const response = await route(
+      new Request("http://localhost/api/extract/text", { method: "POST" }),
+      env,
+    );
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: "Task upload is empty." });
+  } finally {
+    resetTaskApiForTests();
+  }
+});
+
+test("literal extract text endpoint only accepts POST", async () => {
+  resetTaskApiForTests();
+  try {
+    const response = await route(
+      new Request("http://localhost/api/extract/text"),
+      env,
+    );
+
+    assert.equal(response.status, 405);
+  } finally {
+    resetTaskApiForTests();
+  }
+});
+
 test("route proxies /api/probe to backend /v1/probe", async () => {
   const originalFetch = globalThis.fetch;
   let calledUrl = "";

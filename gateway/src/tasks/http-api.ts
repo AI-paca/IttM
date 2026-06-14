@@ -64,6 +64,11 @@ export async function handleTaskApi(
 
   const service = getTaskService(env);
 
+  if (match.kind === "extractText") {
+    if (request.method !== "POST") return method_not_allowed();
+    return await createTaskResponse(request, env, service, "text");
+  }
+
   if (match.kind === "collection") {
     if (request.method === "GET") return listTasksResponse(url, service);
     if (request.method !== "POST") return method_not_allowed();
@@ -131,6 +136,7 @@ async function createTaskResponse(
   request: Request,
   env: Env,
   service: TaskService,
+  syncOverride?: SyncMode,
 ): Promise<Response> {
   let extractionRequest: ExtractionRequest;
   try {
@@ -153,7 +159,7 @@ async function createTaskResponse(
   }
 
   schedule(service);
-  const sync = resolveSyncMode(request);
+  const sync = syncOverride ?? resolveSyncMode(request);
 
   if (sync === "async") {
     return json_response(
@@ -702,11 +708,13 @@ function serializeSource(
 function matchTaskRoute(
   pathname: string,
 ):
+  | { kind: "extractText" }
   | { kind: "collection" }
   | { kind: "item"; id: string }
   | { kind: "events"; id: string }
   | { kind: "cancel"; id: string }
   | null {
+  if (pathname === "/api/extract/text") return { kind: "extractText" };
   if (pathname === "/api/tasks") return { kind: "collection" };
   const match = /^\/api\/tasks\/([^/]+)(?:\/(events|cancel))?$/.exec(pathname);
   if (!match) return null;

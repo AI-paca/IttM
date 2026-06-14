@@ -13,6 +13,7 @@ export interface BrowserOcrProfile {
   reason: string;
   preprocessingProfile: string;
   imagePreprocessing: BrowserPipelineProfile["imagePreprocessing"];
+  layout: BrowserPipelineProfile["layout"];
   langPath?: string;
   cachePath?: string;
   gzip?: boolean;
@@ -40,6 +41,7 @@ export function createBrowserOcrProfile(
       reason: "low-memory-browser",
       preprocessingProfile: pipelineProfile.name,
       imagePreprocessing: pipelineProfile.imagePreprocessing,
+      layout: pipelineProfile.layout,
     };
   }
 
@@ -53,6 +55,7 @@ export function createBrowserOcrProfile(
       reason: "balanced-browser-fallback",
       preprocessingProfile: pipelineProfile.name,
       imagePreprocessing: pipelineProfile.imagePreprocessing,
+      layout: pipelineProfile.layout,
     };
   }
 
@@ -65,5 +68,6 @@ export function createBrowserOcrProfile(
     reason: "quality-first",
     preprocessingProfile: pipelineProfile.name,
     imagePreprocessing: pipelineProfile.imagePreprocessing,
+    layout: pipelineProfile.layout,
   };
 }

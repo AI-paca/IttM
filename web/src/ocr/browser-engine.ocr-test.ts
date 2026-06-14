@@ -7,6 +7,7 @@ import {
   releaseBrowserOcrCache,
   runBrowserOcrLowMemory,
 } from "./browser-engine";
+import { BROWSER_PIPELINE_PROFILES } from "./pipeline-config";
 
 const fixtureRoot = resolve("ocr/tests/fixtures");
 const expectedTokens = [
@@ -97,6 +98,7 @@ test(
             reason: "ci-strict-multilingual",
             preprocessingProfile: "browser_tesseract_raw",
             imagePreprocessing: ["browser_resize"],
+            layout: BROWSER_PIPELINE_PROFILES.browser_tesseract_raw.layout,
             langPath: tessdataPath,
             cachePath: resolve(".cache/tesseract-js"),
             gzip: false,

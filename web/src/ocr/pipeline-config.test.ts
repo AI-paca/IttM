@@ -13,6 +13,9 @@ test("standard browser OCR keeps preprocessing in the resize worker", () => {
     profile.imagePreprocessing.includes("projected_document_dewarp"),
     false,
   );
+  assert.deepEqual(profile.layout.featureExtractors, ["projection_geometry"]);
+  assert.equal(profile.layout.selector, "uniform_spatial_v1");
+  assert.deepEqual(profile.layout.allowedStages, ["spatial_regions"]);
 });
 
 test("projected document dewarp remains isolated from the standard profile", () => {

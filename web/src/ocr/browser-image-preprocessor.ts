@@ -1,5 +1,6 @@
 import type { BrowserOcrProfile } from "./browser-profile";
 import { dewarpProjectedDocumentCanvas } from "./projected-document-dewarp";
+import { planImageTiles, type ImageTile } from "./image-tiling";
 
 interface ImageSize {
   width: number;
@@ -8,29 +9,10 @@ interface ImageSize {
 
 interface ResizeWorkerResponse {
   ok: boolean;
-  blob?: Blob | null;
+  blobs?: Blob[];
 }
 
 type BrowserCanvas = OffscreenCanvas | HTMLCanvasElement;
-
-function targetSize(width: number, height: number, profile: BrowserOcrProfile) {
-  const pixels = width * height;
-  const dimensionScale = Math.min(
-    1,
-    profile.maxDimension / Math.max(width, height),
-  );
-  const pixelScale = Math.min(
-    1,
-    Math.sqrt(profile.maxImagePixels / Math.max(pixels, 1)),
-  );
-  const scale = Math.min(dimensionScale, pixelScale);
-
-  if (scale >= 0.999) return null;
-  return {
-    width: Math.max(1, Math.round(width * scale)),
-    height: Math.max(1, Math.round(height * scale)),
-  };
-}
 
 function yieldToBrowser(): Promise<void> {
   const scheduler = (
@@ -48,7 +30,7 @@ function yieldToBrowser(): Promise<void> {
 async function resizeInWorker(
   file: File,
   profile: BrowserOcrProfile,
-): Promise<File | Blob | null> {
+): Promise<Array<File | Blob> | null> {
   if (
     typeof Worker === "undefined" ||
     typeof createImageBitmap === "undefined" ||
@@ -65,16 +47,23 @@ async function resizeInWorker(
   );
 
   try {
-    return await new Promise<File | Blob | null>((resolve) => {
+    return await new Promise<Array<File | Blob> | null>((resolve) => {
       worker.onmessage = (event: MessageEvent<ResizeWorkerResponse>) => {
         const response = event.data;
-        resolve(response.ok ? response.blob || file : null);
+        resolve(
+          response.ok
+            ? response.blobs?.length
+              ? response.blobs
+              : [file]
+            : null,
+        );
       };
       worker.onerror = () => resolve(null);
       worker.postMessage({
         file,
         maxImagePixels: profile.maxImagePixels,
         maxDimension: profile.maxDimension,
+        layout: profile.layout,
       });
     });
   } finally {
@@ -116,37 +105,6 @@ async function loadBrowserImage(
   return await loadImageElement(file);
 }
 
-async function renderWithOffscreenCanvas(
-  image: CanvasImageSource,
-  size: ImageSize,
-): Promise<BrowserCanvas | null> {
-  if (typeof OffscreenCanvas === "undefined") return null;
-
-  const canvas = new OffscreenCanvas(size.width, size.height);
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-  ctx.drawImage(image, 0, 0, size.width, size.height);
-  return canvas;
-}
-
-async function renderWithHtmlCanvas(
-  image: CanvasImageSource,
-  size: ImageSize,
-): Promise<BrowserCanvas | null> {
-  if (typeof document === "undefined") return null;
-
-  await yieldToBrowser();
-  const canvas = document.createElement("canvas");
-  canvas.width = size.width;
-  canvas.height = size.height;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return null;
-
-  ctx.drawImage(image, 0, 0, size.width, size.height);
-  await yieldToBrowser();
-  return canvas;
-}
-
 async function canvasToJpegBlob(canvas: BrowserCanvas): Promise<Blob | null> {
   if ("convertToBlob" in canvas) {
     return await canvas.convertToBlob({ type: "image/jpeg", quality: 0.92 });
@@ -156,45 +114,66 @@ async function canvasToJpegBlob(canvas: BrowserCanvas): Promise<Blob | null> {
   });
 }
 
-async function renderImageToCanvas(
+async function renderTileToCanvas(
   image: CanvasImageSource,
-  size: ImageSize,
+  tile: ImageTile,
 ): Promise<BrowserCanvas | null> {
-  return (
-    (await renderWithOffscreenCanvas(image, size)) ||
-    (await renderWithHtmlCanvas(image, size))
+  const canvas =
+    typeof OffscreenCanvas !== "undefined"
+      ? new OffscreenCanvas(tile.targetWidth, tile.targetHeight)
+      : typeof document !== "undefined"
+        ? document.createElement("canvas")
+        : null;
+  if (!canvas) return null;
+
+  canvas.width = tile.targetWidth;
+  canvas.height = tile.targetHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(
+    image,
+    tile.sourceX,
+    tile.sourceY,
+    tile.sourceWidth,
+    tile.sourceHeight,
+    0,
+    0,
+    tile.targetWidth,
+    tile.targetHeight,
   );
+  return canvas;
 }
 
 async function preprocessInBrowserCanvas(
   file: File,
   profile: BrowserOcrProfile,
-): Promise<File | Blob | null> {
+): Promise<Array<File | Blob> | null> {
   const image = await loadBrowserImage(file);
   if (!image) return null;
 
   try {
-    const originalSize = { width: image.width, height: image.height };
-    let canvas = await renderImageToCanvas(image, originalSize);
-    if (!canvas) return null;
+    const tiles = planImageTiles(image.width, image.height, profile);
+    const results: Blob[] = [];
+    for (const tile of tiles) {
+      let canvas = await renderTileToCanvas(image, tile);
+      if (!canvas) return null;
 
-    if (profile.imagePreprocessing.includes("projected_document_dewarp")) {
-      canvas =
-        dewarpProjectedDocumentCanvas(
-          canvas,
-          profile.maxImagePixels,
-          profile.maxDimension,
-        ) || canvas;
-    }
-
-    if (profile.imagePreprocessing.includes("browser_resize")) {
-      const size = targetSize(canvas.width, canvas.height, profile);
-      if (size) {
-        canvas = (await renderImageToCanvas(canvas, size)) || canvas;
+      if (profile.imagePreprocessing.includes("projected_document_dewarp")) {
+        canvas =
+          dewarpProjectedDocumentCanvas(
+            canvas,
+            profile.maxImagePixels,
+            profile.maxDimension,
+          ) || canvas;
       }
+
+      const blob = await canvasToJpegBlob(canvas);
+      if (!blob) return null;
+      results.push(blob);
+      await yieldToBrowser();
     }
 
-    return (await canvasToJpegBlob(canvas)) || file;
+    return results;
   } finally {
     if ("close" in image && typeof image.close === "function") {
       image.close();
@@ -202,12 +181,12 @@ async function preprocessInBrowserCanvas(
   }
 }
 
-export async function resizeImageForBrowserOcr(
+export async function prepareImagesForBrowserOcr(
   file: File,
   profile: BrowserOcrProfile,
-): Promise<File | Blob> {
+): Promise<Array<File | Blob>> {
   if (!file.type.startsWith("image/") || typeof document === "undefined") {
-    return file;
+    return [file];
   }
 
   if (!profile.imagePreprocessing.includes("projected_document_dewarp")) {
@@ -215,5 +194,5 @@ export async function resizeImageForBrowserOcr(
     if (workerResult) return workerResult;
   }
 
-  return (await preprocessInBrowserCanvas(file, profile)) || file;
+  return (await preprocessInBrowserCanvas(file, profile)) || [file];
 }

@@ -1,4 +1,5 @@
 import type { SourceType } from "./types";
+import type { BrowserLayoutPipelineConfig } from "./layout-contracts";
 
 export type ImagePreprocessStepId =
   | "projected_document_dewarp"
@@ -7,6 +8,7 @@ export type ImagePreprocessStepId =
 export interface BrowserPipelineProfile {
   name: string;
   imagePreprocessing: ImagePreprocessStepId[];
+  layout: BrowserLayoutPipelineConfig;
 }
 
 export interface SourcePipelineProfile {
@@ -19,14 +21,40 @@ export const BROWSER_PIPELINE_PROFILES: Record<string, BrowserPipelineProfile> =
     browser_tesseract_standard: {
       name: "browser_tesseract_standard",
       imagePreprocessing: ["browser_resize"],
+      layout: {
+        featureExtractors: ["projection_geometry"],
+        selector: "uniform_spatial_v1",
+        allowedStages: ["spatial_regions"],
+        defaultParameters: {
+          maxRegionHeight: 1400,
+          minRegionHeight: 300,
+          minSeparatorCoverage: 0.55,
+        },
+      },
     },
     browser_tesseract_dewarp: {
       name: "browser_tesseract_dewarp",
       imagePreprocessing: ["projected_document_dewarp", "browser_resize"],
+      layout: {
+        featureExtractors: ["projection_geometry"],
+        selector: "uniform_spatial_v1",
+        allowedStages: ["spatial_regions"],
+        defaultParameters: {
+          maxRegionHeight: 1400,
+          minRegionHeight: 300,
+          minSeparatorCoverage: 0.55,
+        },
+      },
     },
     browser_tesseract_raw: {
       name: "browser_tesseract_raw",
       imagePreprocessing: ["browser_resize"],
+      layout: {
+        featureExtractors: [],
+        selector: "fixed",
+        allowedStages: [],
+        defaultParameters: {},
+      },
     },
   };
 

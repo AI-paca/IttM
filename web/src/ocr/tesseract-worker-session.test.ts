@@ -5,6 +5,7 @@ import {
   BrowserOcrWorkerPool,
   normalizeAppBaseUrl,
 } from "./tesseract-worker-session";
+import { BROWSER_PIPELINE_PROFILES } from "./pipeline-config";
 
 function profile(): BrowserOcrProfile {
   return {
@@ -16,6 +17,7 @@ function profile(): BrowserOcrProfile {
     reason: "unit-test",
     preprocessingProfile: "browser_tesseract_raw",
     imagePreprocessing: ["browser_resize"],
+    layout: BROWSER_PIPELINE_PROFILES.browser_tesseract_raw.layout,
   };
 }
 

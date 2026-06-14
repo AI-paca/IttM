@@ -620,6 +620,199 @@ test("task API sync text mode returns plain markdown for Hyprland curl pipelines
   }
 });
 
+test("task API negotiates legacy Accept headers into functional sync modes", async () => {
+  resetTaskApiForTests();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    return new Response(
+      '{"type":"page","page":1,"markdown":"negotiated"}\n' +
+        '{"type":"complete","meta":{"pages":1}}\n',
+      { headers: { "content-type": "application/x-ndjson" } },
+    );
+  };
+
+  try {
+    const wildcard = await route(
+      new Request("http://localhost/api/tasks", {
+        method: "POST",
+        headers: { "content-type": "image/png", accept: "*/*" },
+        body: new Uint8Array([1]),
+      }),
+      env,
+    );
+    assert.equal(wildcard.status, 200);
+    assert.match(wildcard.headers.get("content-type") ?? "", /text\/plain/);
+    assert.equal(await wildcard.text(), "negotiated");
+
+    const markdown = await route(
+      new Request("http://localhost/api/tasks", {
+        method: "POST",
+        headers: { "content-type": "image/png", accept: "text/markdown" },
+        body: new Uint8Array([2]),
+      }),
+      env,
+    );
+    assert.equal(markdown.status, 200);
+    assert.match(markdown.headers.get("content-type") ?? "", /text\/markdown/);
+    assert.ok(markdown.headers.get("x-markdown-meta"));
+    assert.equal(await markdown.text(), "negotiated");
+
+    const jsonUpload = await route(
+      new Request("http://localhost/api/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "*/*" },
+        body: JSON.stringify({
+          filename: "legacy-json.png",
+          source: {
+            kind: "screenshot",
+            png: new Uint8Array([3, 4]).buffer,
+          },
+        }),
+      }),
+      env,
+    );
+    assert.equal(jsonUpload.status, 202);
+    assert.match(jsonUpload.headers.get("location") ?? "", /^\/api\/tasks\//);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetTaskApiForTests();
+  }
+});
+
+test("task API honors legacy engine and profile header fallbacks", async () => {
+  resetTaskApiForTests();
+  const originalFetch = globalThis.fetch;
+  let calledUrl = "";
+  globalThis.fetch = async (input) => {
+    calledUrl = String(input);
+    return new Response(
+      '{"type":"page","page":1,"markdown":"legacy"}\n' +
+        '{"type":"complete","meta":{"pages":1}}\n',
+      { headers: { "content-type": "application/x-ndjson" } },
+    );
+  };
+
+  try {
+    const response = await route(
+      new Request("http://localhost/api/tasks?sync=json", {
+        method: "POST",
+        headers: {
+          "content-type": "image/png",
+          "x-ocr-engine": "easyocr",
+          "x-ocr-profile": "backend_easyocr_standard",
+        },
+        body: new Uint8Array([1]),
+      }),
+      env,
+    );
+    const payload = (await response.json()) as {
+      meta: { pages: number };
+      markdown: string;
+    };
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(payload.meta, { pages: 1 });
+    assert.equal(payload.markdown, "legacy");
+    assert.match(
+      calledUrl,
+      /engine_type=easyocr&pipeline_profile=backend_easyocr_standard/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetTaskApiForTests();
+  }
+});
+
+test("task API sync json preserves retryability and partial metadata from backend failures", async () => {
+  resetTaskApiForTests();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      '{"type":"page","page":1,"markdown":"partial"}\n' +
+        '{"type":"error","code":"BAD_MEDIA","message":"invalid image","retryable":false}\n',
+      { headers: { "content-type": "application/x-ndjson" } },
+    );
+
+  try {
+    const response = await route(
+      new Request("http://localhost/api/tasks?sync=json", {
+        method: "POST",
+        headers: { "content-type": "image/png", accept: "application/json" },
+        body: new Uint8Array([1]),
+      }),
+      env,
+    );
+    const payload = (await response.json()) as {
+      error: {
+        code: string;
+        message: string;
+        retryable: boolean;
+        partial: boolean;
+        httpStatus: number;
+      };
+    };
+
+    assert.equal(response.status, 502);
+    assert.deepEqual(payload.error, {
+      code: "BAD_MEDIA",
+      message: "invalid image",
+      retryable: false,
+      partial: true,
+      httpStatus: 502,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetTaskApiForTests();
+  }
+});
+
+test("task API item reads resume event history with the since query alias", async () => {
+  resetTaskApiForTests();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      '{"type":"progress","stage":"decode"}\n' +
+        '{"type":"page","page":1,"markdown":"resumed"}\n' +
+        '{"type":"complete","meta":{"pages":1}}\n',
+      { headers: { "content-type": "application/x-ndjson" } },
+    );
+
+  try {
+    const create = await route(
+      new Request("http://localhost/api/tasks", {
+        method: "POST",
+        headers: { "content-type": "image/png", accept: "application/json" },
+        body: new Uint8Array([1]),
+      }),
+      env,
+    );
+    const { taskId } = (await create.json()) as { taskId: string };
+    await waitFor(
+      async () => (await readTask(taskId, env)).state === "completed",
+    );
+
+    const response = await route(
+      new Request(`http://localhost/api/tasks/${taskId}?since=2`),
+      env,
+    );
+    const payload = (await response.json()) as {
+      events: Array<{ type: string; sequence: number }>;
+    };
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(
+      payload.events.map((event) => [event.type, event.sequence]),
+      [
+        ["page", 2],
+        ["complete", 3],
+      ],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetTaskApiForTests();
+  }
+});
+
 test("literal extract text endpoint accepts raw PNG bytes and returns plain text", async () => {
   resetTaskApiForTests();
   const originalFetch = globalThis.fetch;

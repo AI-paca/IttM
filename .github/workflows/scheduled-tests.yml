@@ -1,0 +1,35 @@
+name: Scheduled resilience tests
+
+on:
+  schedule:
+    - cron: "23 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compose-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:pages
+      - run: npm run test:compose
+
+  resource-soak:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - name: Generated fuzz and bounded resource soak
+        env:
+          OCR_SOAK_ITERATIONS: "5"
+          OCR_TEST_MEMORY: 768m
+          OCR_TEST_CPUS: "2"
+        run: bash scripts/run-resource-tests.sh

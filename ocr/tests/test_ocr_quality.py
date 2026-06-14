@@ -5,6 +5,15 @@ from fastapi.testclient import TestClient
 
 from app.engines.tesseract_engine import TesseractEngine
 from app.main import app
+from tests.document_templates import (
+    generate_document_templates,
+    generate_long_cart,
+)
+from tests.quality_metrics import (
+    digit_sequence_recall,
+    name_value_pair_recall,
+    ordered_phrase_recall,
+)
 from tests.quality_fixtures import QUALITY_TEXT, write_quality_fixtures
 
 pytestmark = pytest.mark.skipif(
@@ -72,3 +81,59 @@ def test_backend_tesseract_strict_multilingual_quality(filename: str, mime: str)
     assert response.status_code == 200, response.text
     payload = response.json()
     _assert_tokens(payload["markdown"], filename)
+
+
+@pytest.mark.parametrize("template_index", range(10))
+def test_backend_tesseract_generated_document_quality(template_index: int):
+    _assert_tesseract_languages()
+    templates = generate_document_templates()
+    template = templates[template_index]
+    try:
+        from io import BytesIO
+
+        payload = BytesIO()
+        template.image.save(payload, format="PNG")
+        response = client.post(
+            "/convert?engine_type=tesseract&pipeline_profile=backend_raw",
+            files={
+                "file": (
+                    f"{template.name}.png",
+                    payload.getvalue(),
+                    "image/png",
+                )
+            },
+        )
+    finally:
+        for generated in templates:
+            generated.image.close()
+
+    assert response.status_code == 200, response.text
+    markdown = response.json()["markdown"]
+    assert ordered_phrase_recall(list(template.expected_phrases), markdown) >= 0.6
+    if template.expected_pairs:
+        assert name_value_pair_recall(list(template.expected_pairs), markdown) >= 0.5
+        expected = "\n".join(" ".join(pair) for pair in template.expected_pairs)
+        assert digit_sequence_recall(expected, markdown) >= 0.6
+
+
+def test_backend_tesseract_long_cart_keeps_top_middle_and_bottom():
+    _assert_tesseract_languages()
+    template = generate_long_cart()
+    try:
+        from io import BytesIO
+
+        payload = BytesIO()
+        template.image.save(payload, format="PNG")
+        response = client.post(
+            "/convert?engine_type=tesseract&pipeline_profile=backend_raw",
+            files={"file": ("long-cart.png", payload.getvalue(), "image/png")},
+        )
+    finally:
+        template.image.close()
+
+    assert response.status_code == 200, response.text
+    result = response.json()
+    markdown = result["markdown"]
+    assert ordered_phrase_recall(list(template.expected_phrases), markdown) >= 0.8
+    assert name_value_pair_recall(list(template.expected_pairs), markdown) >= 2 / 3
+    assert result["meta"]["chunks"] > 1

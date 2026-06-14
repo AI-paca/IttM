@@ -1,7 +1,51 @@
 import io
 import random
+from dataclasses import dataclass
 
 from PIL import Image, ImageDraw
+
+
+@dataclass(frozen=True)
+class GeneratedFixtureSpec:
+    id: str
+    seed: int
+    category: str
+    tier: str
+    expected_tokens: tuple[str, ...]
+    expected_pairs: tuple[tuple[str, str], ...] = ()
+
+
+GENERATED_FIXTURE_REGISTRY = (
+    GeneratedFixtureSpec(
+        id="long-screenshot-receipt",
+        seed=2026061401,
+        category="long_screenshot",
+        tier="contract",
+        expected_tokens=("ITEM-001", "TOTAL"),
+    ),
+    GeneratedFixtureSpec(
+        id="structured-product-table",
+        seed=2026061402,
+        category="table",
+        tier="contract",
+        expected_tokens=("PRODUCT-001", "12345.67"),
+        expected_pairs=(("PRODUCT-001", "12345.67"),),
+    ),
+    GeneratedFixtureSpec(
+        id="full-width-banner",
+        seed=2026061403,
+        category="banner",
+        tier="contract",
+        expected_tokens=("NOTICE", "CONTINUE"),
+    ),
+    GeneratedFixtureSpec(
+        id="mixed-language-card",
+        seed=2026061404,
+        category="mixed_language",
+        tier="contract",
+        expected_tokens=("HELLO", "ПРИВЕТ", "你好"),
+    ),
+)
 
 
 def image_bytes(

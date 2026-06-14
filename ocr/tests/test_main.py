@@ -1,3 +1,5 @@
+# FastAPI smoke/glue suite. Contract confidence lives in focused service tests.
+# See .zoo/.review-from-llm/TEST_PLATFORM_RFC.md, Tier 2.
 import asyncio
 import io
 import json

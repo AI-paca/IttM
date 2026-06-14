@@ -15,6 +15,30 @@ npm run build
 `npm test` проверяет URL/ошибки API, частичный NDJSON, gateway proxy и
 backpressure adapter, PDF workers, Base64-поток, consent и Tesseract assets.
 
+### Contract и smoke tiers
+
+Быстрый PR-safe contract tier:
+
+```bash
+npm run test:contract
+```
+
+Он запускает task lifecycle, worker protocol, bounded input storage, browser
+layout contracts, generated fixture registry и быстрые upload/resource
+инварианты. Все fixtures создаются детерминированно из кода и seed-значений;
+внешний `testtables/` не нужен.
+
+Smoke tier:
+
+```bash
+npm run test:smoke
+```
+
+Он проверяет HTTP routing/static glue и FastAPI endpoint wiring. Файлы
+`gateway/src/core/routes.test.ts` и `ocr/tests/test_main.py` относятся к smoke:
+они полезны для связности адаптеров, но не заменяют контракты `TaskService`,
+worker protocol и focused service tests.
+
 Отдельная регрессия локальных режимов требует, чтобы frontend передавал тот же
 объект `File` в `FormData` без browser-side `arrayBuffer()`, а gateway
 проксировал исходный `Request.body`.
@@ -65,8 +89,12 @@ curl -fsS "http://$(docker compose port nginx 80)/api/health"
 
 ## Ручной corpus
 
-`testtables/` и `testtables/tmp/` игнорируются Git. Это A/B corpus, а не
-полное покрытие входных данных. Для повторяемых прогонов используются:
+`testtables/` и `testtables/tmp/` игнорируются Git. Это только ручной A/B
+corpus: он не входит в `npm test`, `npm run test:contract`, smoke suite или
+любой обязательный PR gate. Для PR-safe повторяемых прогонов используется
+generated fixture registry из `ocr/tests/generated_media.py`.
+
+Ручные A/B прогоны:
 
 - `scripts/benchmark-testtables.sh`
 - `scripts/benchmark-browser-testtables.sh`

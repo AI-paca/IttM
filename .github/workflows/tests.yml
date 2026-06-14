@@ -13,9 +13,9 @@ jobs:
   linters:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -48,9 +48,9 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [linters]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -80,7 +80,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [linters]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Build OCR Docker image
         run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci ./ocr
@@ -92,15 +92,18 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [linters, frontend-gateway, python]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
 
+      - name: Prepare Tesseract.js cache directory
+        run: mkdir -p .cache/tesseract-js
+
       - name: Cache Tesseract.js data
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .cache/tesseract-js
           key: tesseract-js-${{ runner.os }}-eng-rus-chi-sim-v2
@@ -192,6 +195,7 @@ jobs:
           npm run test:ocr:browser || {
             echo "Browser OCR failed once; clearing Tesseract.js cache and retrying."
             rm -rf .cache/tesseract-js
+            mkdir -p .cache/tesseract-js
             npm run test:ocr:browser
           }
 

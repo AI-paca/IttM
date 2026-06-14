@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { TaskCapacityError, TaskService } from "./task-service";
+import { WorkerProcessError } from "./process-worker";
 import type { WorkerExecutor } from "./types";
 
 const request = {
@@ -102,6 +103,27 @@ test("worker crashes become typed errors without losing prior pages", async () =
   }
 });
 
+test("retryable worker exits preserve partial output metadata", async () => {
+  const service = new TaskService({
+    async execute(_request, context) {
+      context.emit({ type: "page", page: 1, markdown: "safe partial" });
+      throw new WorkerProcessError(
+        "WORKER_EXIT",
+        "worker exited before completion",
+        true,
+      );
+    },
+  });
+  const task = service.create(request);
+
+  await service.runNext();
+
+  assert.equal(task.state, "failed");
+  assert.equal(task.error?.code, "WORKER_EXIT");
+  assert.equal(task.error?.retryable, true);
+  assert.equal(task.error?.partial, true);
+});
+
 test("bounded queue rejects rapid-fire work instead of growing forever", () => {
   const service = new TaskService(
     {
@@ -141,6 +163,28 @@ test("task listing returns newest records with state and limit filters", () => {
     service.list({ state: "cancelled" }).map((record) => record.id),
     [first.id],
   );
+});
+
+test("task watchers unsubscribe after cancellation", async () => {
+  const service = new TaskService({
+    async execute() {
+      return {};
+    },
+  });
+  const task = service.create(request);
+  const controller = new AbortController();
+  const iterator = service
+    .watch(task.id, { signal: controller.signal })
+    [Symbol.asyncIterator]();
+
+  assert.equal((await iterator.next()).value?.type, "accepted");
+  controller.abort();
+  assert.equal((await iterator.next()).done, true);
+
+  const internals = service as unknown as {
+    subscribers: Map<string, Set<unknown>>;
+  };
+  assert.equal(internals.subscribers.has(task.id), false);
 });
 
 test("worker concurrency never exceeds configured capacity", async () => {

@@ -1,3 +1,5 @@
+// @smoke Integration glue only; contract confidence lives in gateway/src/tasks/*.
+// See .zoo/.review-from-llm/TEST_PLATFORM_RFC.md, Tier 2.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { route } from "./routes";
@@ -188,7 +190,13 @@ test("task API lists in-memory tasks with state and limit filters", async () => 
       count: number;
       state: string;
       limit: number;
-      tasks: Array<{ id: string; state: string }>;
+      tasks: Array<{
+        id: string;
+        state: string;
+        request: {
+          source: Record<string, unknown>;
+        };
+      }>;
     };
 
     assert.equal(response.status, 200);
@@ -197,9 +205,74 @@ test("task API lists in-memory tasks with state and limit filters", async () => 
     assert.equal(payload.limit, 1);
     assert.equal(payload.tasks[0]?.id, taskId);
     assert.equal(payload.tasks[0]?.state, "queued");
+    assert.deepEqual(payload.tasks[0]?.request.source, {
+      kind: "file",
+      name: "screenshot.png",
+      size: 1,
+      type: "image/png",
+    });
+    assert.equal("file" in payload.tasks[0].request.source, false);
     releaseFirst();
   } finally {
     if (holdFirst && releaseFirst) releaseFirst();
+    globalThis.fetch = originalFetch;
+    resetTaskApiForTests();
+  }
+});
+
+test("task API rejects invalid listing states and unsupported engines", async () => {
+  resetTaskApiForTests();
+  try {
+    const invalidState = await route(
+      new Request("http://localhost/api/tasks?state=stale"),
+      env,
+    );
+    const invalidEngine = await route(
+      new Request("http://localhost/api/tasks?engine=unknown", {
+        method: "POST",
+        headers: { "content-type": "image/png" },
+        body: new Uint8Array([1]),
+      }),
+      env,
+    );
+
+    assert.equal(invalidState.status, 400);
+    assert.equal(invalidEngine.status, 400);
+  } finally {
+    resetTaskApiForTests();
+  }
+});
+
+test("task API records a retryable partial failure when backend stream truncates", async () => {
+  resetTaskApiForTests();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response('{"type":"page","page":1,"markdown":"partial"}\n', {
+      headers: { "content-type": "application/x-ndjson" },
+    });
+
+  try {
+    const create = await route(
+      new Request("http://localhost/api/tasks", {
+        method: "POST",
+        headers: { "content-type": "image/png", accept: "application/json" },
+        body: new Uint8Array([1]),
+      }),
+      env,
+    );
+    const { taskId } = (await create.json()) as { taskId: string };
+
+    await waitFor(async () => (await readTask(taskId, env)).state === "failed");
+    const task = await readTask(taskId, env);
+
+    assert.deepEqual(task.error, {
+      code: "WORKER_PROTOCOL",
+      message: "OCR stream ended before completion.",
+      retryable: true,
+      partial: true,
+      httpStatus: 502,
+    });
+  } finally {
     globalThis.fetch = originalFetch;
     resetTaskApiForTests();
   }
@@ -846,7 +919,17 @@ test("route returns 405 for wrong method and 404 for unknown route", async () =>
 async function readTask(
   taskId: string,
   testEnv: Env,
-): Promise<{ state: string; events: Array<{ type: string }> }> {
+): Promise<{
+  state: string;
+  events: Array<{ type: string }>;
+  error?: {
+    code: string;
+    message: string;
+    retryable: boolean;
+    partial: boolean;
+    httpStatus?: number;
+  };
+}> {
   const response = await route(
     new Request(`http://localhost/api/tasks/${taskId}`),
     testEnv,
@@ -854,6 +937,13 @@ async function readTask(
   return (await response.json()) as {
     state: string;
     events: Array<{ type: string }>;
+    error?: {
+      code: string;
+      message: string;
+      retryable: boolean;
+      partial: boolean;
+      httpStatus?: number;
+    };
   };
 }
 

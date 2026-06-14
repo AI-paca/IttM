@@ -220,6 +220,16 @@ export class TaskService {
       };
     }
 
+    if (isWorkerFailure(error)) {
+      return {
+        code: error.code,
+        message: error.message,
+        retryable: error.retryable,
+        partial: record.events.some((event) => event.type === "page"),
+        httpStatus: 502,
+      };
+    }
+
     return {
       code: "WORKER_FAILED",
       message: error instanceof Error ? error.message : String(error),
@@ -301,4 +311,17 @@ export class TaskService {
   private get ids(): IdGenerator {
     return this.options.ids ?? (this.options.ids = new SequentialIds());
   }
+}
+
+function isWorkerFailure(
+  error: unknown,
+): error is Error & { code: string; retryable: boolean } {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    error.code.startsWith("WORKER_") &&
+    "retryable" in error &&
+    typeof error.retryable === "boolean"
+  );
 }

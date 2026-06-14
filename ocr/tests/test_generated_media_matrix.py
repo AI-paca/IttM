@@ -1,4 +1,5 @@
 import io
+import os
 import tempfile
 from pathlib import Path
 
@@ -107,8 +108,9 @@ def test_invalid_or_unsupported_media_fails_as_value_error(payload):
 def test_deterministic_binary_mutations_never_escape_as_native_crashes():
     seed = text_image_bytes()
     outcomes = []
+    mutation_count = 512 if os.environ.get("RUN_GENERATED_FUZZ") == "1" else 32
 
-    for payload in deterministic_mutations(seed):
+    for payload in deterministic_mutations(seed, count=mutation_count):
         try:
             pages = _load_pages(payload, "fuzz.png")
         except ValueError:
@@ -118,7 +120,7 @@ def test_deterministic_binary_mutations_never_escape_as_native_crashes():
             for page in pages:
                 page.close()
 
-    assert len(outcomes) == 32
+    assert len(outcomes) == mutation_count
     assert set(outcomes) <= {"decoded", "rejected"}
 
 

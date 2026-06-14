@@ -9,7 +9,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 ARG OCR_INSTALL_CJK_FONTS=0
 
 RUN set -eux; \
-    apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 update; \
+    apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 update; \
     apt-get install -y --no-install-recommends \
       tesseract-ocr \
       tesseract-ocr-eng \

@@ -72,6 +72,38 @@ test("process worker rejects malformed or oversized protocol output", async () =
   );
 });
 
+test("process worker rejects stale or unknown protocol events", async () => {
+  const stale = await execute(
+    executorFor(`process.stdout.write('{"type":"stale","version":99}\\n')`),
+  );
+
+  await assert.rejects(
+    stale.result,
+    (error: unknown) =>
+      error instanceof WorkerProcessError && error.code === "WORKER_PROTOCOL",
+  );
+});
+
+test("process worker reports a retryable exit after partial output", async () => {
+  const worker = await execute(
+    executorFor(`
+      process.stdout.write('{"type":"page","page":1,"markdown":"partial"}\\n');
+      process.exit(7);
+    `),
+  );
+
+  await assert.rejects(
+    worker.result,
+    (error: unknown) =>
+      error instanceof WorkerProcessError &&
+      error.code === "WORKER_EXIT" &&
+      error.retryable,
+  );
+  assert.deepEqual(worker.events, [
+    { type: "page", page: 1, markdown: "partial" },
+  ]);
+});
+
 test("process worker enforces timeout and cancellation", async () => {
   const timed = await execute(
     executorFor(`process.stdin.resume(); setInterval(() => {}, 1000)`, 30),
@@ -103,7 +135,7 @@ test("process worker reports native-style crashes and bounds stderr", async () =
         "--input-type=module",
         "--eval",
         `
-          process.stderr.write('secret'.repeat(1000));
+          process.stderr.write('bounded'.repeat(1000) + 'SENSITIVE_TAIL');
           process.kill(process.pid, 'SIGKILL');
         `,
       ],
@@ -118,7 +150,8 @@ test("process worker reports native-style crashes and bounds stderr", async () =
       error.code === "WORKER_EXIT" &&
       error.retryable &&
       error.message.length < 256 &&
-      /SIGKILL/.test(error.message),
+      /SIGKILL/.test(error.message) &&
+      !/SENSITIVE_TAIL/.test(error.message),
   );
 });
 

@@ -1,11 +1,15 @@
 import { Env } from "../domain/types";
 import { OcrClient } from "../clients/ocrClient";
 import { json_response, method_not_allowed, not_found } from "./http";
+import { handleTaskApi } from "../tasks/http-api";
 
 export async function route(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method;
+
+  const taskResponse = await handleTaskApi(request, env);
+  if (taskResponse) return taskResponse;
 
   // Support both /convert and /api/convert for compatibility
   if (path === "/api/convert" || path === "/convert") {

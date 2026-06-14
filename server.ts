@@ -17,6 +17,8 @@ export function read_node_env(): Env {
   return {
     PORT: process.env.PORT || "3000",
     OCR_URL: process.env.OCR_URL || "http://127.0.0.1:8000",
+    TASK_EVENTS_DISCONNECT_GRACE_MS:
+      process.env.TASK_EVENTS_DISCONNECT_GRACE_MS,
   };
 }
 

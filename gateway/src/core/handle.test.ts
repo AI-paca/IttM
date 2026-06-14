@@ -32,3 +32,12 @@ test("handle accepts direct legacy streaming convert route", async () => {
 
   assert.equal(response.status, 405);
 });
+
+test("handle accepts the new task API route", async () => {
+  const response = await handle(
+    new Request("http://localhost/api/tasks", { method: "GET" }),
+    env,
+  );
+
+  assert.equal(response.status, 200);
+});

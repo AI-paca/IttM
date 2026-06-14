@@ -5,6 +5,9 @@ from dataclasses import dataclass
 from PIL import Image, ImageDraw
 
 
+GENERATED_FIXTURE_GENERATOR_VERSION = "2026.06.14-1"
+
+
 @dataclass(frozen=True)
 class GeneratedFixtureSpec:
     id: str
@@ -12,6 +15,7 @@ class GeneratedFixtureSpec:
     category: str
     tier: str
     expected_tokens: tuple[str, ...]
+    generator_version: str = GENERATED_FIXTURE_GENERATOR_VERSION
     expected_pairs: tuple[tuple[str, str], ...] = ()
 
 

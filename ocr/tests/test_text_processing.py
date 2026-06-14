@@ -12,13 +12,15 @@ from app.chunking.vertical import (
     analyze_document_layout,
     detect_table_layouts,
     logical_table_layout,
+    split_by_blank_bands,
     split_vertical,
     table_layout_to_markdown,
     table_words_to_markdown,
     wide_curriculum_table_to_markdown,
 )
 from app.formatting.markdown_formatter import MarkdownFormatter
-from app.pipeline_config import OcrPipelineProfile
+from app.layout.contracts import LayoutDecision, LayoutStageSpec
+from app.pipeline_config import LayoutPipelineConfig, OcrPipelineProfile
 from app.services import convert_service
 
 
@@ -43,6 +45,210 @@ def test_split_vertical_returns_at_least_one_chunk_for_small_image():
 
     assert len(chunks) == 1
     assert chunks[0].size[0] <= image.size[0]
+
+
+def _generated_long_screenshot(width=620, card_count=48):
+    card_height = 160
+    gap_height = 28
+    height = card_count * (card_height + gap_height)
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+    marker_colors = []
+
+    for index in range(card_count):
+        top = index * (card_height + gap_height)
+        marker = (
+            20 + index % 200,
+            30 + (index * 3) % 190,
+            40 + (index * 7) % 180,
+        )
+        marker_colors.append(marker)
+        draw.rectangle((8, top + 8, 18, top + 18), fill=marker)
+        draw.rectangle((30, top + 10, width - 30, top + 145), outline="black", width=2)
+        draw.text((45, top + 35), f"PRODUCT-{index:03d}", fill="black")
+        draw.text((45, top + 85), f"{1000 + index}.99", fill="black")
+
+    return image, marker_colors
+
+
+def _image_colors(image):
+    return {color for _, color in image.getcolors(maxcolors=image.width * image.height)}
+
+
+def test_long_screenshot_segmentation_preserves_every_generated_card_marker():
+    image, marker_colors = _generated_long_screenshot()
+    chunks = split_vertical(image, chunk_height=1200, overlap=100)
+
+    try:
+        chunk_colors = [_image_colors(chunk.convert("RGB")) for chunk in chunks]
+        for marker in marker_colors:
+            assert any(marker in colors for colors in chunk_colors), marker
+        assert len(chunks) > 1
+        assert max(chunk.height for chunk in chunks) <= 1600
+    finally:
+        for chunk in chunks:
+            if chunk is not image:
+                chunk.close()
+        image.close()
+
+
+def test_blank_band_chunking_coalesces_small_content_instead_of_dropping_it():
+    image, marker_colors = _generated_long_screenshot(card_count=12)
+    chunks = split_by_blank_bands(image, min_chunk_height=300)
+
+    try:
+        pixels = [_image_colors(chunk.convert("RGB")) for chunk in chunks]
+        assert all(any(marker in colors for colors in pixels) for marker in marker_colors)
+        assert all(chunk.height >= 300 for chunk in chunks[:-1])
+    finally:
+        for chunk in chunks:
+            chunk.close()
+        image.close()
+
+
+def test_convert_page_segments_extreme_long_screenshot_before_layout(monkeypatch):
+    image, _ = _generated_long_screenshot(card_count=64)
+    layout_sizes = []
+    recognized = []
+
+    class FakeEngine:
+        def recognize(self, chunk, mode="text_mode", psm=6):
+            recognized.append(chunk.size)
+            return f"segment-{len(recognized)}"
+
+    def fake_layout(chunk, min_confirmed_cell_ratio=0.0):
+        layout_sizes.append(chunk.size)
+        return [LayoutRegion(kind="image", image=chunk, bbox=(0, 0, *chunk.size))]
+
+    monkeypatch.setattr(convert_service, "analyze_document_layout", fake_layout)
+    profile = OcrPipelineProfile(
+        name="long-screenshot-test",
+        layout=LayoutPipelineConfig(allowed_stages=("table_regions",)),
+    )
+
+    try:
+        markdown, meta = convert_service._convert_page(image, FakeEngine(), profile)
+    finally:
+        image.close()
+
+    assert len(layout_sizes) > 1
+    assert max(height for _, height in layout_sizes) <= 1600
+    assert len(recognized) == len(layout_sizes)
+    assert "segment-1" in markdown
+    assert meta["chunks"] == len(recognized)
+
+
+def test_convert_page_uses_spatial_layout_before_long_screenshot_fallback(
+    monkeypatch,
+):
+    image, _ = _generated_long_screenshot(card_count=64)
+    layout_inputs = []
+    region_inputs = []
+    layout_crops = []
+
+    class FakeEngine:
+        def recognize(self, chunk, mode="text_mode", psm=6):
+            raise AssertionError("test replaces region recognition")
+
+    def fake_analyze_layout(
+        page,
+        config,
+        *,
+        min_confirmed_cell_ratio,
+    ):
+        layout_inputs.append(page.size)
+        assert config.selector == "uniform_spatial_v1"
+        assert min_confirmed_cell_ratio == 0.35
+        first = page.crop((0, 0, page.width, page.height // 2))
+        second = page.crop((0, page.height // 2, page.width, page.height))
+        layout_crops.extend((first, second))
+        return (
+            [
+                LayoutRegion(
+                    kind="image",
+                    image=first,
+                    bbox=(0, 0, page.width, page.height // 2),
+                ),
+                LayoutRegion(
+                    kind="image",
+                    image=second,
+                    bbox=(0, page.height // 2, page.width, page.height),
+                ),
+            ],
+            LayoutDecision(
+                label="spatial",
+                stages=(LayoutStageSpec(name="spatial_regions"),),
+                confidence=1.0,
+            ),
+        )
+
+    monkeypatch.setattr(convert_service, "analyze_layout", fake_analyze_layout)
+
+    def fake_recognize_region(_engine, region):
+        region_inputs.append(region.size)
+        return [f"region-{len(region_inputs)}"], 1, 0
+
+    monkeypatch.setattr(
+        convert_service,
+        "_recognize_image_region",
+        fake_recognize_region,
+    )
+    profile = OcrPipelineProfile(
+        name="adaptive-long-screenshot",
+        layout=LayoutPipelineConfig(
+            feature_extractors=("projection_geometry",),
+            selector="uniform_spatial_v1",
+            allowed_stages=("spatial_regions",),
+        ),
+        grid_min_confirmed_cell_ratio=0.35,
+    )
+
+    try:
+        markdown, meta = convert_service._convert_page(
+            image,
+            FakeEngine(),
+            profile,
+        )
+    finally:
+        image.close()
+
+    assert layout_inputs == [(620, 12032)]
+    assert region_inputs == [(620, 6016), (620, 6016)]
+    assert "region-1" in markdown
+    assert "region-2" in markdown
+    assert meta["chunks"] == 2
+    for crop in layout_crops:
+        with pytest.raises(ValueError):
+            crop.getpixel((0, 0))
+
+
+def test_convert_layout_region_honors_direct_ocr_decision_parameter():
+    calls = []
+
+    class FakeEngine:
+        def recognize(self, image, mode="text_mode", psm=6):
+            calls.append((image.size, mode, psm))
+            return "direct region text"
+
+    image = Image.new("RGB", (600, 2400), "white")
+    region = LayoutRegion(
+        kind="image",
+        image=image,
+        bbox=(0, 0, 600, 2400),
+    )
+    try:
+        parts, meta = convert_service._convert_layout_region(
+            region,
+            FakeEngine(),
+            OcrPipelineProfile(name="test"),
+            (("direct_region_ocr", True),),
+        )
+    finally:
+        image.close()
+
+    assert parts == ["direct region text"]
+    assert calls == [((600, 2400), "text_mode", 6)]
+    assert meta["chunks"] == 1
 
 
 def _table_fixture() -> Image.Image:
@@ -332,7 +538,7 @@ def test_convert_service_segments_implausibly_tall_table_region(monkeypatch, tmp
     Image.new("RGB", (800, 4200), (230, 230, 230)).save(image_path)
     profile = OcrPipelineProfile(
         name="test",
-        layout_analysis=("table_layout",),
+        layout=LayoutPipelineConfig(allowed_stages=("table_regions",)),
         grid_min_confirmed_cell_ratio=0.42,
     )
 
@@ -378,7 +584,10 @@ def test_convert_service_bounds_large_table_fallback(monkeypatch, tmp_path):
 
     image_path = tmp_path / "large-table.png"
     Image.new("RGB", (800, 1000), (200, 200, 200)).save(image_path)
-    profile = OcrPipelineProfile(name="test", layout_analysis=("table_layout",))
+    profile = OcrPipelineProfile(
+        name="test",
+        layout=LayoutPipelineConfig(allowed_stages=("table_regions",)),
+    )
 
     markdown, meta = asyncio.run(
         convert_service.convert(
@@ -432,7 +641,7 @@ def test_convert_service_rejects_sparse_table_markdown(monkeypatch, tmp_path):
     Image.new("RGB", (900, 700), (200, 200, 200)).save(image_path)
     profile = OcrPipelineProfile(
         name="test",
-        layout_analysis=("table_layout",),
+        layout=LayoutPipelineConfig(allowed_stages=("table_regions",)),
         table_min_word_cell_coverage=0.35,
         max_table_cell_ocr_calls=16,
     )
@@ -493,7 +702,7 @@ def test_convert_service_rejects_sparse_cell_markdown(monkeypatch, tmp_path):
     Image.new("RGB", (400, 400), (200, 200, 200)).save(image_path)
     profile = OcrPipelineProfile(
         name="test",
-        layout_analysis=("table_layout",),
+        layout=LayoutPipelineConfig(allowed_stages=("table_regions",)),
         max_table_cell_ocr_calls=16,
         table_min_cell_coverage=0.5,
     )
@@ -555,17 +764,27 @@ def test_convert_service_checks_wide_table_coverage_before_formatting(
         formatted = True
         return "| sparse |"
 
+    original_formatter = convert_service.format_table_words
+
+    def fake_formatter(name, table, words):
+        if name == "curriculum":
+            return fake_wide_formatter(table, words)
+        return original_formatter(name, table, words)
+
     monkeypatch.setattr(
         convert_service,
-        "wide_curriculum_table_to_markdown",
-        fake_wide_formatter,
+        "format_table_words",
+        fake_formatter,
     )
 
     profile = OcrPipelineProfile(
         name="test",
-        layout_analysis=("table_layout",),
+        layout=LayoutPipelineConfig(allowed_stages=("table_regions",)),
         wide_table_min_word_cell_coverage=0.02,
         max_table_cell_ocr_calls=16,
+        table_layout_normalization="preserve_grid",
+        table_word_recognition="single_pass_with_left_strip",
+        table_word_formatters=("curriculum", "generic_markdown"),
     )
     markdown, _ = asyncio.run(
         convert_service.convert(
@@ -577,3 +796,51 @@ def test_convert_service_checks_wide_table_coverage_before_formatting(
 
     assert markdown == "raw curriculum text"
     assert formatted is False
+
+
+def test_generic_profile_does_not_infer_curriculum_from_column_count(monkeypatch):
+    layout = _dense_table_layout(1000, 200, rows=2, cols=50)
+    calls = []
+
+    class FakeEngine:
+        def recognize_words(self, image, psm=6, min_conf=20):
+            return [
+                {
+                    "text": "value",
+                    "bbox": (5, 5, 20, 20),
+                }
+            ]
+
+        def recognize(self, image, mode="text_mode", psm=6):
+            return "raw table"
+
+    region = LayoutRegion(
+        kind="table",
+        image=Image.new("RGB", (1000, 200), "white"),
+        bbox=layout.bbox,
+        table=layout,
+    )
+    original_formatter = convert_service.format_table_words
+
+    def recording_formatter(name, table, words):
+        calls.append(name)
+        return original_formatter(name, table, words)
+
+    monkeypatch.setattr(
+        convert_service,
+        "format_table_words",
+        recording_formatter,
+    )
+    try:
+        convert_service._convert_layout_region(
+            region,
+            FakeEngine(),
+            OcrPipelineProfile(
+                name="generic",
+                table_min_word_cell_coverage=0,
+            ),
+        )
+    finally:
+        region.image.close()
+
+    assert calls == ["generic_markdown"]

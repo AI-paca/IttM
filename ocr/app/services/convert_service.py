@@ -1,11 +1,12 @@
 import os
 import re
 import tempfile
+from contextlib import contextmanager
 from io import BytesIO
 from pathlib import Path
 from typing import Iterator, Tuple
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app.chunking.dedupe import dedupe_chunks
 from app.chunking.vertical import (
@@ -17,17 +18,21 @@ from app.chunking.vertical import (
     split_vertical,
     table_layout_to_rows,
     table_rows_to_markdown,
-    table_words_to_markdown,
     table_words_to_rows,
-    wide_curriculum_table_to_markdown,
 )
 from app.engines.auto_engine import AutoEngine
 from app.formatting.markdown_formatter import MarkdownFormatter
+from app.layout.contracts import FeatureValue
+from app.layout.pipeline import analyze_layout
+from app.layout.table_formatters import format_table_words
 from app.pipeline_config import OcrPipelineProfile, resolve_pipeline_profile
 from app.preprocessing import OcrPreprocessingPipeline
 
 DEFAULT_MAX_DECODED_IMAGE_PIXELS = 80_000_000
 DEFAULT_MAX_PDF_RENDER_DIMENSION = 6000
+DEFAULT_MAX_PDF_PAGES = 100
+LONG_SCREENSHOT_MIN_HEIGHT = 6000
+LONG_SCREENSHOT_MIN_ASPECT_RATIO = 8.0
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -82,17 +87,20 @@ def _pdf_render_options(page_info: dict) -> dict:
 
 
 def _prepared_image(image: Image.Image, image_pipeline: OcrPreprocessingPipeline) -> Image.Image:
-    _validate_decoded_image_size(image)
-    image.load()
-    if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
-        rgba_image = image.convert("RGBA")
+    oriented = ImageOps.exif_transpose(image)
+    _validate_decoded_image_size(oriented)
+    oriented.load()
+    if oriented.mode in ("RGBA", "LA") or (oriented.mode == "P" and "transparency" in oriented.info):
+        rgba_image = oriented.convert("RGBA")
         try:
             base_image = Image.new("RGB", rgba_image.size, (255, 255, 255))
             base_image.paste(rgba_image, mask=rgba_image.split()[3])
         finally:
             rgba_image.close()
     else:
-        base_image = image.convert("RGB")
+        base_image = oriented.convert("RGB")
+    if oriented is not image:
+        oriented.close()
 
     processed = image_pipeline.apply(base_image)
     if processed is not base_image:
@@ -122,6 +130,12 @@ def _iter_document_images(
             page_count = int(pdfinfo_from_path(str(pdf_path)).get("Pages", 0))
             if page_count <= 0:
                 raise ValueError("PDF contains no pages")
+            page_limit = _positive_int_env(
+                "OCR_MAX_PDF_PAGES",
+                DEFAULT_MAX_PDF_PAGES,
+            )
+            if page_count > page_limit:
+                raise ValueError(f"PDF contains {page_count} pages; limit is {page_limit}")
 
             for page_number in range(1, page_count + 1):
                 print(f"[PDF] Rendering page {page_number}/{page_count}", flush=True)
@@ -171,14 +185,12 @@ def _recognize_image_region(engine, image: Image.Image) -> Tuple[list[str], int,
     if height <= 1600 or (width > 0 and height / width <= 1.8):
         return [engine.recognize(image, mode="text_mode")], 1, 0
 
-    cards = split_by_blank_bands(image)
+    cards = split_by_blank_bands(image, min_chunk_height=200)
     if cards and len(cards) > 1:
         page_parts = []
         cards_found = 0
         for i, card_img in enumerate(cards):
             try:
-                if card_img.size[1] < 50:
-                    continue
                 cards_found += 1
                 card_text = engine.recognize(card_img, mode="text_mode")
                 page_parts.append(_format_card_to_markdown(card_text, i))
@@ -274,8 +286,8 @@ def _recognize_scaled_words(
     return scaled_words
 
 
-def _merge_wide_table_left_strip_words(engine, image: Image.Image, table, words: list[dict]) -> tuple[list[dict], int]:
-    if table.cols < 45 or len(table.x_lines) < 3:
+def _merge_table_left_strip_words(engine, image: Image.Image, table, words: list[dict]) -> tuple[list[dict], int]:
+    if len(table.x_lines) < 3:
         return words, 0
 
     left_limit = min(image.size[0], max(1, int(table.x_lines[2])))
@@ -313,13 +325,20 @@ def _recognize_table_words(
     image: Image.Image,
     table,
     *,
-    single_pass: bool = False,
+    strategy: str = "bounded_tiles",
 ) -> tuple[list[dict], int]:
     recognize_words = getattr(engine, "recognize_words", None)
     if not callable(recognize_words):
         return [], 0
 
     width, height = image.size
+    if strategy not in {
+        "bounded_tiles",
+        "single_pass_with_left_strip",
+    }:
+        raise ValueError(f"Unknown table word recognition strategy '{strategy}'")
+
+    single_pass = strategy == "single_pass_with_left_strip" and height <= MAX_DIRECT_TABLE_HEIGHT
     if single_pass or (table.cols <= 4 and height <= 3600):
         prepared = erase_table_lines_for_ocr(image)
         try:
@@ -328,7 +347,7 @@ def _recognize_table_words(
             if prepared is not image:
                 prepared.close()
         if single_pass:
-            merged_words, extra_calls = _merge_wide_table_left_strip_words(
+            merged_words, extra_calls = _merge_table_left_strip_words(
                 engine,
                 image,
                 table,
@@ -455,94 +474,76 @@ def _create_engine(engine_type: str):
     return AutoEngine(prefer_tesseract=True)
 
 
-def _convert_page(
-    main_image: Image.Image,
+def _convert_layout_region(
+    region: LayoutRegion,
     engine,
     profile: OcrPipelineProfile,
-) -> tuple[str, dict]:
+    layout_parameters: tuple[tuple[str, FeatureValue], ...] = (),
+) -> tuple[list[str], dict]:
     page_parts = []
     total_chunks = 0
     cards_found = 0
     tables_found = 0
     table_cells = 0
-    regions = (
-        analyze_document_layout(
-            main_image,
-            min_confirmed_cell_ratio=profile.grid_min_confirmed_cell_ratio,
-        )
-        if "table_layout" in profile.layout_analysis
-        else [LayoutRegion(kind="image", image=main_image, bbox=(0, 0, *main_image.size))]
-    )
 
-    for region in regions:
-        if region.kind == "table" and region.table is not None:
-            if _should_segment_table_region(region.image, region.table):
-                region_parts, region_chunks, region_cards = _recognize_image_region(
-                    engine,
-                    region.image,
-                )
-                total_chunks += region_chunks
-                cards_found += region_cards
-                page_parts.extend(part for part in region_parts if part.strip())
-                continue
-
-            is_wide_table = region.table.cols >= 45
-            table_layout = region.table if is_wide_table else logical_table_layout(region.image, region.table)
-            tables_found += 1
-            table_cells += len(table_layout.cells)
-            table_md = ""
-            table_words, table_word_calls = _recognize_table_words(
+    if region.kind == "table" and region.table is not None:
+        if _should_segment_table_region(region.image, region.table):
+            region_parts, region_chunks, region_cards = _recognize_image_region(
                 engine,
                 region.image,
-                table_layout,
-                single_pass=is_wide_table and region.image.size[1] <= MAX_DIRECT_TABLE_HEIGHT,
             )
-            total_chunks += table_word_calls
-            if table_words:
-                word_cell_coverage = _table_word_cell_coverage(
+            return (
+                [part for part in region_parts if part.strip()],
+                {
+                    "chunks": region_chunks,
+                    "cards_found": region_cards,
+                    "tables_found": 0,
+                    "table_cells": 0,
+                },
+            )
+
+        if profile.table_layout_normalization == "preserve_grid":
+            table_layout = region.table
+        elif profile.table_layout_normalization == "logical_columns":
+            table_layout = logical_table_layout(
+                region.image,
+                region.table,
+            )
+        else:
+            raise ValueError("Unknown table layout normalization " f"'{profile.table_layout_normalization}'")
+        tables_found += 1
+        table_cells += len(table_layout.cells)
+        table_md = ""
+        table_words, table_word_calls = _recognize_table_words(
+            engine,
+            region.image,
+            table_layout,
+            strategy=profile.table_word_recognition,
+        )
+        total_chunks += table_word_calls
+        if table_words:
+            word_cell_coverage = _table_word_cell_coverage(
+                table_layout,
+                table_words,
+            )
+            for formatter_name in profile.table_word_formatters:
+                min_coverage = (
+                    profile.wide_table_min_word_cell_coverage
+                    if formatter_name == "curriculum"
+                    else profile.table_min_word_cell_coverage
+                )
+                if word_cell_coverage < min_coverage:
+                    continue
+                table_md = format_table_words(
+                    formatter_name,
                     table_layout,
                     table_words,
                 )
-                if is_wide_table and word_cell_coverage >= profile.wide_table_min_word_cell_coverage:
-                    table_md = wide_curriculum_table_to_markdown(
-                        table_layout,
-                        table_words,
-                    )
-                if not table_md.strip() and word_cell_coverage >= profile.table_min_word_cell_coverage:
-                    table_md = table_words_to_markdown(
-                        table_layout,
-                        table_words,
-                    )
+                if table_md.strip():
+                    break
 
-            if not table_md.strip():
-                if len(table_layout.cells) > profile.max_table_cell_ocr_calls:
-                    region_chunks, region_cards = _append_raw_table_region(
-                        page_parts,
-                        engine,
-                        region.image,
-                    )
-                    total_chunks += region_chunks
-                    cards_found += region_cards
-                    continue
-
-                cell_ocr_calls = 0
-
-                def recognize_cell(cell_image: Image.Image) -> str:
-                    nonlocal cell_ocr_calls
-                    cell_ocr_calls += 1
-                    return _recognize_table_cell(engine, cell_image)
-
-                cell_rows = table_layout_to_rows(
-                    region.image,
-                    table_layout,
-                    recognize_cell,
-                )
-                total_chunks += cell_ocr_calls
-                if _table_row_cell_coverage(table_layout, cell_rows) >= profile.table_min_cell_coverage:
-                    table_md = table_rows_to_markdown(cell_rows)
-            if table_md.strip():
-                page_parts.append(table_md)
-            else:
+        if not table_md.strip():
+            if len(table_layout.cells) > profile.max_table_cell_ocr_calls:
                 region_chunks, region_cards = _append_raw_table_region(
                     page_parts,
                     engine,
@@ -550,25 +551,178 @@ def _convert_page(
                 )
                 total_chunks += region_chunks
                 cards_found += region_cards
-            continue
+                return (
+                    page_parts,
+                    {
+                        "chunks": total_chunks,
+                        "cards_found": cards_found,
+                        "tables_found": tables_found,
+                        "table_cells": table_cells,
+                    },
+                )
 
+            cell_ocr_calls = 0
+
+            def recognize_cell(cell_image: Image.Image) -> str:
+                nonlocal cell_ocr_calls
+                cell_ocr_calls += 1
+                return _recognize_table_cell(engine, cell_image)
+
+            cell_rows = table_layout_to_rows(
+                region.image,
+                table_layout,
+                recognize_cell,
+            )
+            total_chunks += cell_ocr_calls
+            if _table_row_cell_coverage(table_layout, cell_rows) >= profile.table_min_cell_coverage:
+                table_md = table_rows_to_markdown(cell_rows)
+        if table_md.strip():
+            page_parts.append(table_md)
+        else:
+            region_chunks, region_cards = _append_raw_table_region(
+                page_parts,
+                engine,
+                region.image,
+            )
+            total_chunks += region_chunks
+            cards_found += region_cards
+        return (
+            page_parts,
+            {
+                "chunks": total_chunks,
+                "cards_found": cards_found,
+                "tables_found": tables_found,
+                "table_cells": table_cells,
+            },
+        )
+
+    if dict(layout_parameters).get("direct_region_ocr") is True:
+        region_parts = [
+            engine.recognize(
+                region.image,
+                mode="text_mode",
+            )
+        ]
+        region_chunks = 1
+        region_cards = 0
+    else:
         region_parts, region_chunks, region_cards = _recognize_image_region(
             engine,
             region.image,
         )
-        total_chunks += region_chunks
-        cards_found += region_cards
-        page_parts.extend(part for part in region_parts if part.strip())
+    return (
+        [part for part in region_parts if part.strip()],
+        {
+            "chunks": region_chunks,
+            "cards_found": region_cards,
+            "tables_found": 0,
+            "table_cells": 0,
+        },
+    )
+
+
+@contextmanager
+def _owned_layout_regions(
+    regions: list[LayoutRegion],
+    source_image: Image.Image,
+):
+    try:
+        yield regions
+    finally:
+        for region in regions:
+            if region.image is not source_image:
+                region.image.close()
+
+
+def _convert_page_segment(
+    image: Image.Image,
+    engine,
+    profile: OcrPipelineProfile,
+) -> tuple[str, dict]:
+    page_parts = []
+    totals = {
+        "chunks": 0,
+        "cards_found": 0,
+        "tables_found": 0,
+        "table_cells": 0,
+    }
+    if profile.layout.feature_extractors:
+        regions, layout_decision = analyze_layout(
+            image,
+            profile.layout,
+            min_confirmed_cell_ratio=profile.grid_min_confirmed_cell_ratio,
+        )
+        layout_parameters = layout_decision.stages[0].parameters if layout_decision.stages else ()
+    else:
+        layout_parameters = ()
+        regions = (
+            analyze_document_layout(
+                image,
+                min_confirmed_cell_ratio=profile.grid_min_confirmed_cell_ratio,
+            )
+            if "table_regions" in profile.layout.allowed_stages
+            else [
+                LayoutRegion(
+                    kind="image",
+                    image=image,
+                    bbox=(0, 0, *image.size),
+                )
+            ]
+        )
+
+    with _owned_layout_regions(regions, image) as owned_regions:
+        for region in owned_regions:
+            region_parts, meta = _convert_layout_region(
+                region,
+                engine,
+                profile,
+                layout_parameters,
+            )
+            page_parts.extend(region_parts)
+            for key in totals:
+                totals[key] += meta[key]
+            if region.image is not image:
+                region.image.close()
 
     return (
         MarkdownFormatter.format_text("\n\n".join(page_parts)),
-        {
-            "chunks": total_chunks,
-            "cards_found": cards_found,
-            "tables_found": tables_found,
-            "table_cells": table_cells,
-        },
+        totals,
     )
+
+
+def _convert_page(
+    main_image: Image.Image,
+    engine,
+    profile: OcrPipelineProfile,
+) -> tuple[str, dict]:
+    width, height = main_image.size
+    is_long_screenshot = (
+        height >= LONG_SCREENSHOT_MIN_HEIGHT and height / max(1, width) >= LONG_SCREENSHOT_MIN_ASPECT_RATIO
+    )
+    if not is_long_screenshot or profile.layout.feature_extractors:
+        return _convert_page_segment(main_image, engine, profile)
+
+    page_parts = []
+    totals = {
+        "chunks": 0,
+        "cards_found": 0,
+        "tables_found": 0,
+        "table_cells": 0,
+    }
+    segments = split_vertical(main_image, chunk_height=1600, overlap=120)
+    try:
+        for segment in segments:
+            markdown, meta = _convert_page_segment(segment, engine, profile)
+            if markdown.strip():
+                page_parts.append(markdown)
+            for key in totals:
+                totals[key] += meta[key]
+    finally:
+        for segment in segments:
+            if segment is not main_image:
+                segment.close()
+
+    return MarkdownFormatter.format_text("\n\n".join(page_parts)), totals
 
 
 def iter_convert_bytes(
@@ -623,7 +777,7 @@ def iter_convert_bytes(
         "pages": page_count,
         "pipeline": profile.name,
         "preprocess_steps": list(profile.image_preprocessing),
-        "layout_steps": list(profile.layout_analysis),
+        "layout_steps": list(profile.layout.allowed_stages),
         "elapsed_ms": 0,  # to be overwritten in router
     }
     yield {"type": "complete", "meta": meta}

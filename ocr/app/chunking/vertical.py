@@ -1129,7 +1129,11 @@ def find_blank_horizontal_bands(image: Image.Image, min_gap: int = 10) -> list:
     return bands
 
 
-def split_by_blank_bands(image: Image.Image, min_gap: int = 10) -> list:
+def split_by_blank_bands(
+    image: Image.Image,
+    min_gap: int = 10,
+    min_chunk_height: int = 0,
+) -> list:
     """
     Splits screenshot by empty horizontal places between cards.
     Returns list of image chunks cropped at blank bands.
@@ -1140,20 +1144,25 @@ def split_by_blank_bands(image: Image.Image, min_gap: int = 10) -> list:
     if not bands:
         return []
 
-    chunks = []
-    last_end = 0
+    boxes = []
+    segment_start = 0
 
     for start, end in bands:
-        # Cut from last_end to start of blank band
-        if start > last_end:
-            chunks.append(image.crop((0, last_end, width, start)))
-        last_end = end
+        if start <= segment_start:
+            segment_start = max(segment_start, end)
+            continue
+        if start - segment_start < min_chunk_height:
+            continue
+        boxes.append([segment_start, start])
+        segment_start = end
 
-    # Add remaining part after last blank band
-    if last_end < height:
-        chunks.append(image.crop((0, last_end, width, height)))
+    if segment_start < height:
+        if boxes and height - segment_start < min_chunk_height:
+            boxes[-1][1] = height
+        else:
+            boxes.append([segment_start, height])
 
-    return chunks
+    return [image.crop((0, start, width, end)) for start, end in boxes if end > start]
 
 
 def fallback_split_with_overlap(image: Image.Image, chunk_height: int = 1600, overlap: int = 120) -> list:
@@ -1187,15 +1196,13 @@ def split_vertical(image: Image.Image, chunk_height: int = 1600, overlap: int = 
             return [image]
 
         # Try card-aware splitting first
-        chunks = split_by_blank_bands(image)
+        chunks = split_by_blank_bands(
+            image,
+            min_chunk_height=max(1, chunk_height // 4),
+        )
 
-        # If we found meaningful chunks (more than 1, and each is reasonable size)
         if len(chunks) > 1:
-            # Filter out very small chunks (likely noise)
-            min_chunk_height = chunk_height // 4
-            filtered_chunks = [c for c in chunks if c.size[1] >= min_chunk_height]
-            if filtered_chunks:
-                return filtered_chunks
+            return chunks
 
         # Fallback to overlap-based splitting
         return fallback_split_with_overlap(image, chunk_height, overlap)

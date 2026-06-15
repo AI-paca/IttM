@@ -6,6 +6,23 @@ def normalize_text(value: str) -> str:
     return " ".join(value.casefold().split())
 
 
+def normalize_token(value: str) -> str:
+    return re.sub(r"[^0-9a-zа-яё\u4e00-\u9fff]+", "", value.casefold())
+
+
+def token_recall(expected_tokens: list[str], actual: str) -> float:
+    compact_actual = normalize_token(actual)
+    if not expected_tokens:
+        return 1.0
+    matched = sum(1 for token in expected_tokens if normalize_token(token) in compact_actual)
+    return matched / len(expected_tokens)
+
+
+def missing_tokens(expected_tokens: list[str], actual: str) -> list[str]:
+    compact_actual = normalize_token(actual)
+    return [token for token in expected_tokens if normalize_token(token) not in compact_actual]
+
+
 def character_error_rate(expected: str, actual: str) -> float:
     left = normalize_text(expected)
     right = normalize_text(actual)

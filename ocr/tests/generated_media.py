@@ -1,11 +1,13 @@
 import io
 import random
 from dataclasses import dataclass
+from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 
 GENERATED_FIXTURE_GENERATOR_VERSION = "2026.06.14-1"
+FUNCTIONAL_OCR_GENERATOR_VERSION = "2026.06.14-functional-1"
 
 
 @dataclass(frozen=True)
@@ -17,6 +19,18 @@ class GeneratedFixtureSpec:
     expected_tokens: tuple[str, ...]
     generator_version: str = GENERATED_FIXTURE_GENERATOR_VERSION
     expected_pairs: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class FunctionalOcrFixtureSpec:
+    id: str
+    seed: int
+    category: str
+    tier: str
+    expected_tokens: tuple[str, ...]
+    generator_version: str = FUNCTIONAL_OCR_GENERATOR_VERSION
+    expected_pairs: tuple[tuple[str, str], ...] = ()
+    table_shape: tuple[int, int] | None = None
 
 
 GENERATED_FIXTURE_REGISTRY = (
@@ -50,6 +64,197 @@ GENERATED_FIXTURE_REGISTRY = (
         expected_tokens=("HELLO", "ПРИВЕТ", "你好"),
     ),
 )
+
+
+FUNCTIONAL_OCR_FIXTURE_REGISTRY = (
+    FunctionalOcrFixtureSpec(
+        id="generated-simple-paragraph",
+        seed=2026061451,
+        category="simple_paragraph",
+        tier="quality",
+        expected_tokens=("ALPHA PROJECT", "ORDER", "ZX-2026-42", "12345", "ALICE"),
+        expected_pairs=(("ORDER", "ZX-2026-42"),),
+    ),
+    FunctionalOcrFixtureSpec(
+        id="generated-product-table",
+        seed=2026061452,
+        category="table",
+        tier="quality",
+        expected_tokens=("ITEM", "ALPHA", "BETA", "123.45", "987.65", "A-100", "B-200"),
+        expected_pairs=(("ALPHA", "123.45"), ("BETA", "987.65")),
+        table_shape=(3, 4),
+    ),
+    FunctionalOcrFixtureSpec(
+        id="generated-low-contrast-noise",
+        seed=2026061453,
+        category="degraded_text",
+        tier="quality",
+        expected_tokens=("GAMMA CHECK", "NOISE-2048", "45678", "TOKEN"),
+        expected_pairs=(("TOKEN", "45678"),),
+    ),
+    FunctionalOcrFixtureSpec(
+        id="generated-small-skew",
+        seed=2026061454,
+        category="skewed_text",
+        tier="quality",
+        expected_tokens=("DELTA RECEIPT", "SKEW-17", "TOTAL", "24680"),
+        expected_pairs=(("TOTAL", "24680"),),
+    ),
+)
+
+
+def _font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    candidates = (
+        "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+        if bold
+        else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/liberation/LiberationSans-Bold.ttf"
+        if bold
+        else "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"
+        if bold
+        else "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf",
+    )
+    for path in candidates:
+        if Path(path).exists() or not path.startswith("/"):
+            try:
+                return ImageFont.truetype(path, size=size)
+            except OSError:
+                continue
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
+
+
+def _draw_lines(image, lines, *, x=80, y=70, spacing=92, size=54, fill=None, bold=False):
+    if fill is None:
+        fill = "black"
+    draw = ImageDraw.Draw(image)
+    font = _font(size, bold=bold)
+    for index, line in enumerate(lines):
+        draw.text((x, y + index * spacing), line, fill=fill, font=font)
+
+
+def _simple_paragraph_fixture() -> Image.Image:
+    image = Image.new("RGB", (1600, 720), "white")
+    _draw_lines(
+        image,
+        [
+            "ALPHA PROJECT STATUS",
+            "ORDER ZX-2026-42",
+            "Reliable OCR keeps digits 12345",
+            "Owner ALICE reviews the report",
+        ],
+        size=58,
+        spacing=116,
+        bold=True,
+    )
+    return image
+
+
+def _product_table_fixture() -> Image.Image:
+    image = Image.new("RGB", (1300, 640), "white")
+    draw = ImageDraw.Draw(image)
+    font = _font(46)
+    header_font = _font(48, bold=True)
+    x_lines = (60, 430, 650, 930, 1230)
+    y_lines = (70, 220, 370, 520)
+
+    for x in x_lines:
+        draw.line((x, y_lines[0], x, y_lines[-1]), fill="black", width=4)
+    for y in y_lines:
+        draw.line((x_lines[0], y, x_lines[-1], y), fill="black", width=4)
+
+    rows = (
+        ("ITEM", "QTY", "PRICE", "CODE"),
+        ("ALPHA", "2", "123.45", "A-100"),
+        ("BETA", "5", "987.65", "B-200"),
+    )
+    for row_index, row in enumerate(rows):
+        y = y_lines[row_index] + 48
+        for col_index, value in enumerate(row):
+            x = x_lines[col_index] + 34
+            draw.text((x, y), value, fill="black", font=header_font if row_index == 0 else font)
+    return image
+
+
+def _low_contrast_noise_fixture(seed: int) -> Image.Image:
+    image = Image.new("RGB", (1500, 620), (246, 246, 238))
+    _draw_lines(
+        image,
+        [
+            "GAMMA CHECK",
+            "TOKEN 45678",
+            "NOISE-2048 remains readable",
+        ],
+        size=62,
+        spacing=128,
+        fill=(72, 72, 72),
+        bold=True,
+    )
+    image = ImageEnhance.Contrast(image).enhance(0.62)
+    pixels = image.load()
+    if pixels is None:
+        return image
+    rng = random.Random(seed)
+    for _ in range((image.width * image.height) // 280):
+        x = rng.randrange(image.width)
+        y = rng.randrange(image.height)
+        value = 35 if rng.random() < 0.5 else 225
+        pixels[x, y] = (value, value, value)
+    return image
+
+
+def _small_skew_fixture() -> Image.Image:
+    image = Image.new("RGB", (1450, 620), "white")
+    _draw_lines(
+        image,
+        [
+            "DELTA RECEIPT",
+            "SKEW-17 SAMPLE",
+            "TOTAL 24680",
+        ],
+        size=68,
+        spacing=136,
+        bold=True,
+    )
+    rotated = image.rotate(1.4, resample=Image.Resampling.BICUBIC, expand=True, fillcolor="white")
+    image.close()
+    return rotated
+
+
+def functional_ocr_fixture_spec(fixture_id: str) -> FunctionalOcrFixtureSpec:
+    for spec in FUNCTIONAL_OCR_FIXTURE_REGISTRY:
+        if spec.id == fixture_id:
+            return spec
+    known = ", ".join(spec.id for spec in FUNCTIONAL_OCR_FIXTURE_REGISTRY)
+    raise KeyError(f"Unknown functional OCR fixture '{fixture_id}'. Known fixtures: {known}")
+
+
+def functional_ocr_fixture_image(fixture_id: str) -> Image.Image:
+    spec = functional_ocr_fixture_spec(fixture_id)
+    if spec.category == "simple_paragraph":
+        return _simple_paragraph_fixture()
+    if spec.category == "table":
+        return _product_table_fixture()
+    if spec.category == "degraded_text":
+        return _low_contrast_noise_fixture(spec.seed)
+    if spec.category == "skewed_text":
+        return _small_skew_fixture()
+    raise ValueError(f"Unsupported functional OCR fixture category '{spec.category}'")
+
+
+def functional_ocr_fixture_bytes(fixture_id: str, *, image_format="PNG", **save_options):
+    image = functional_ocr_fixture_image(fixture_id)
+    try:
+        output = io.BytesIO()
+        image.save(output, format=image_format, **save_options)
+        return output.getvalue()
+    finally:
+        image.close()
 
 
 def image_bytes(

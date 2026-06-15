@@ -4,8 +4,10 @@ from tests.quality_metrics import (
     character_error_rate,
     digit_sequence_recall,
     markdown_table_shape,
+    missing_tokens,
     name_value_pair_recall,
     ordered_phrase_recall,
+    token_recall,
 )
 
 
@@ -65,3 +67,11 @@ def test_markdown_table_shape_ignores_separator_and_counts_real_cells():
 
     assert markdown_table_shape(markdown) == (3, 3)
     assert markdown_table_shape("plain text") == (0, 0)
+
+
+def test_token_recall_normalizes_spacing_and_punctuation():
+    expected = ["ORDER ZX-2026-42", "12345", "ALPHA"]
+    actual = "Order ZX 2026 42\nvalue: 12345"
+
+    assert token_recall(expected, actual) == pytest.approx(2 / 3)
+    assert missing_tokens(expected, actual) == ["ALPHA"]

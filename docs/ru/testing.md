@@ -70,9 +70,25 @@ docker run --rm ittm-ocr-ci python -m ruff check .
 docker run --rm ittm-ocr-ci python -m pytest tests -q
 ```
 
-Строгие multilingual quality-тесты генерируют собственные fixtures и
-проверяют `eng`, `rus` и `chi_sim` отдельно для browser Tesseract.js и backend
-Tesseract, включая PDF без принудительного upscaling.
+Resource tier без ручного `testtables/` corpus:
+
+```bash
+npm run test:resources
+```
+
+Функциональный OCR quality tier запускает сгенерированные изображения через
+реальный backend pipeline и проверяет token/pair recall, страницы и table
+markers, когда доступен OpenCV layout analysis:
+
+```bash
+npm run test:ocr:quality
+```
+
+Строгие multilingual quality-тесты генерируют собственные fixtures и проверяют
+`eng`, `rus` и `chi_sim` для backend Tesseract, включая PDF без принудительного
+upscaling. Если локально нет Tesseract/language packs/OpenCV, соответствующие
+resource-тесты пропускаются с явной причиной; Docker quality tier готовит эти
+зависимости в OCR test image.
 
 ## Docker
 

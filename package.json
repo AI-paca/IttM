@@ -23,6 +23,7 @@
     "test:pages:live": "node scripts/smoke-pages.mjs",
     "test:compose": "bash scripts/smoke-compose.sh",
     "test:resources": "bash scripts/run-resource-tests.sh",
+    "test:ocr:quality": "OCR_TEST_TIER=quality bash scripts/run-resource-tests.sh",
     "test:ocr:browser": "node --import tsx --test web/src/**/*.ocr-test.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

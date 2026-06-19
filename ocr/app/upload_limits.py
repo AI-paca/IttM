@@ -2,7 +2,7 @@ import os
 
 from fastapi import UploadFile
 
-DEFAULT_MAX_UPLOAD_BYTES = 0
+DEFAULT_MAX_UPLOAD_BYTES = 128 * 1024 * 1024
 UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
 
 

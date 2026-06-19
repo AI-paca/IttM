@@ -86,6 +86,14 @@ FUNCTIONAL_QUALITY_MATRIX = (
         profile="backend_auto_standard",
         min_token_recall=0.75,
     ),
+    FunctionalQualityCase(
+        fixture_id="generated-tiny-score-list",
+        engine="tesseract",
+        profile="backend_tesseract_standard",
+        min_token_recall=0.85,
+        min_pair_recall=0.75,
+        min_digit_recall=0.8,
+    ),
 )
 
 

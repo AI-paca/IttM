@@ -14,6 +14,8 @@ RUN set -eux; \
       tesseract-ocr \
       tesseract-ocr-eng \
       tesseract-ocr-rus \
+      tesseract-ocr-kaz \
+      tesseract-ocr-kir \
       tesseract-ocr-chi-sim \
       poppler-utils \
       libglib2.0-0; \

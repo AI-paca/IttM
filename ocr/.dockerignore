@@ -11,6 +11,7 @@ htmlcov
 .tesseract_cache
 tests/fixtures
 testtables/
+debug-corpus/
 .env
 .env.*
 dist

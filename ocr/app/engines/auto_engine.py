@@ -4,11 +4,21 @@ from app.engines.base import OcrEngine
 class AutoEngine(OcrEngine):
     """Auto-fallback engine that tries Tesseract first (core), then Easy OCR (optional high-quality)."""
 
-    def __init__(self, prefer_tesseract: bool = True):
+    def __init__(
+        self,
+        prefer_tesseract: bool = True,
+        tesseract_language_priority: tuple[str, ...] | None = None,
+        tesseract_ocr_border_pixels: int = 10,
+        tesseract_edge_word_fallback_psms: tuple[int, ...] = (8, 13),
+    ):
         from app.engines.easyocr_engine import EasyOcrEngine
         from app.engines.tesseract_engine import TesseractEngine
 
-        self.tesseract = TesseractEngine()
+        self.tesseract = TesseractEngine(
+            language_priority=tesseract_language_priority,
+            ocr_border_pixels=tesseract_ocr_border_pixels,
+            edge_word_fallback_psms=tesseract_edge_word_fallback_psms,
+        )
         self.easy = EasyOcrEngine()
 
         if prefer_tesseract:
@@ -16,7 +26,9 @@ class AutoEngine(OcrEngine):
         else:
             self.engines = [self.easy, self.tesseract]
 
-        self.active_engine = next((engine for engine in self.engines if engine.available()), None)
+        self.active_engine = next(
+            (engine for engine in self.engines if engine.available()), None
+        )
 
     def recognize(self, image, mode: str = "text_mode", psm: int = 6) -> str:
         for engine in self.engines:
@@ -46,7 +58,11 @@ class AutoEngine(OcrEngine):
         return self.tesseract.available() or self.easy.available()
 
     def info(self) -> dict:
-        info = self.active_engine.info() if self.active_engine is not None else {"engine": "none", "available": False}
+        info = (
+            self.active_engine.info()
+            if self.active_engine is not None
+            else {"engine": "none", "available": False}
+        )
         info["strategy"] = "auto_fallback"
         info["tesseract_available"] = self.tesseract.available()
         info["easyocr_available"] = self.easy.available()

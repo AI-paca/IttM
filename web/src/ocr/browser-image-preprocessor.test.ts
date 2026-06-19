@@ -6,6 +6,8 @@ import type {
   ResizeWorkerResponse,
 } from "./image-resize-protocol";
 import {
+  shouldTryProjectorSlideDewarp,
+  shouldTryProjectedDocumentDewarp,
   streamImagesFromResizeWorker,
   type ResizeWorkerLike,
 } from "./browser-image-preprocessor";
@@ -20,10 +22,28 @@ function profile(): BrowserOcrProfile {
     pdfRenderScale: 1,
     reason: "stream-test",
     preprocessingProfile: "browser_tesseract_standard",
-    imagePreprocessing: ["browser_resize"],
+    imagePreprocessing: ["browser_resize", "ocr_border"],
+    textRegionPsm: "6",
+    denseGridFallback: true,
+    denseGridTargetWidth: 3300,
+    ocrBorderPixels: 10,
+    edgeWordFallbackPsm: "7",
+    edgeWordFallbackMinTokens: 1,
     layout: BROWSER_PIPELINE_PROFILES.browser_tesseract_standard.layout,
   };
 }
+
+test("projected dewarp skips long screenshots before contour detection", () => {
+  assert.equal(shouldTryProjectedDocumentDewarp(1240, 27466), false);
+  assert.equal(shouldTryProjectedDocumentDewarp(1240, 12700), false);
+  assert.equal(shouldTryProjectedDocumentDewarp(960, 1280), true);
+});
+
+test("projector slide dewarp targets projector photo dimensions only", () => {
+  assert.equal(shouldTryProjectorSlideDewarp(960, 1280), true);
+  assert.equal(shouldTryProjectorSlideDewarp(1600, 900), false);
+  assert.equal(shouldTryProjectorSlideDewarp(1240, 27466), false);
+});
 
 test("resize worker tiles are yielded before the complete message", async () => {
   let terminated = false;

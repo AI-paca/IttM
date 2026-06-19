@@ -77,7 +77,8 @@ async function processImage(request: ResizeWorkerRequest) {
       tiles[0].sourceWidth === bitmap.width &&
       tiles[0].sourceHeight === bitmap.height &&
       tiles[0].targetWidth === bitmap.width &&
-      tiles[0].targetHeight === bitmap.height
+      tiles[0].targetHeight === bitmap.height &&
+      request.ocrBorderPixels === 0
     ) {
       self.postMessage({
         type: "passthrough",
@@ -91,7 +92,9 @@ async function processImage(request: ResizeWorkerRequest) {
     }
 
     for (const [index, tile] of tiles.entries()) {
-      const canvas = new OffscreenCanvas(tile.targetWidth, tile.targetHeight);
+      const outputWidth = tile.targetWidth + request.ocrBorderPixels * 2;
+      const outputHeight = tile.targetHeight + request.ocrBorderPixels * 2;
+      const canvas = new OffscreenCanvas(outputWidth, outputHeight);
       const ctx = canvas.getContext("2d");
       if (!ctx) {
         self.postMessage({
@@ -101,14 +104,16 @@ async function processImage(request: ResizeWorkerRequest) {
         return;
       }
 
+      ctx.fillStyle = "white";
+      ctx.fillRect(0, 0, outputWidth, outputHeight);
       ctx.drawImage(
         bitmap,
         tile.sourceX,
         tile.sourceY,
         tile.sourceWidth,
         tile.sourceHeight,
-        0,
-        0,
+        request.ocrBorderPixels,
+        request.ocrBorderPixels,
         tile.targetWidth,
         tile.targetHeight,
       );

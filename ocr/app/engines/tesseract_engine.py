@@ -1,7 +1,7 @@
 import re
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 
 from app.engines.base import OcrEngine
 
@@ -21,8 +21,20 @@ class TesseractEngine(OcrEngine):
         "абвгдеёжзийклмнопрстуфхцчшщъыьэюя"
         "0123456789.,:-%₽$()[]/+ "
     )
-    BASE_LANGUAGES = ("eng", "rus")
-    OPTIONAL_LANGUAGES = ("chi_sim",)
+    BASE_LANGUAGES = ("rus", "eng")
+    OPTIONAL_LANGUAGES = ("kaz", "kir", "chi_sim")
+    ISOLATED_LANGUAGES = ("kaz",)
+    OCR_BORDER_PIXELS = 10
+
+    def __init__(
+        self,
+        language_priority: tuple[str, ...] | None = None,
+        ocr_border_pixels: int = OCR_BORDER_PIXELS,
+        edge_word_fallback_psms: tuple[int, ...] = (8, 13),
+    ):
+        self.language_priority = language_priority
+        self.ocr_border_pixels = ocr_border_pixels
+        self.edge_word_fallback_psms = edge_word_fallback_psms
 
     @staticmethod
     def installed_languages() -> list:
@@ -35,10 +47,56 @@ class TesseractEngine(OcrEngine):
 
     @classmethod
     def ocr_language_string(cls) -> str:
+        return cls.ocr_language_string_for(cls.BASE_LANGUAGES + cls.OPTIONAL_LANGUAGES)
+
+    @classmethod
+    def ocr_language_string_for(cls, language_priority: tuple[str, ...]) -> str:
         installed = set(cls.installed_languages())
-        languages = [lang for lang in cls.OPTIONAL_LANGUAGES if lang in installed]
-        languages.extend(lang for lang in cls.BASE_LANGUAGES if lang in installed)
+        languages = [lang for lang in language_priority if lang in installed]
+        if len(languages) > 1 and languages[0] not in cls.ISOLATED_LANGUAGES:
+            languages = [lang for lang in languages if lang not in cls.ISOLATED_LANGUAGES]
         return "+".join(languages or ["eng"])
+
+    def configured_ocr_language_string(self) -> str:
+        priority = self.language_priority or (
+            self.BASE_LANGUAGES + self.OPTIONAL_LANGUAGES
+        )
+        return self.ocr_language_string_for(priority)
+
+    def _add_ocr_border(self, image: Image.Image) -> Image.Image:
+        return ImageOps.expand(image, border=self.ocr_border_pixels, fill="white")
+
+    @staticmethod
+    def _ink_ratio(image: Image.Image) -> float:
+        gray = image.convert("L")
+        try:
+            histogram = gray.histogram()
+        finally:
+            if gray is not image:
+                gray.close()
+        total = sum(histogram)
+        if total <= 0:
+            return 0.0
+        return sum(histogram[:220]) / total
+
+    @classmethod
+    def _edge_ink_touches_all_sides(cls, image: Image.Image) -> bool:
+        width, height = image.size
+        if width < 80 or height < 40:
+            return False
+
+        edge = max(2, min(12, min(width, height) // 80))
+        strips = (
+            image.crop((0, 0, width, edge)),
+            image.crop((0, height - edge, width, height)),
+            image.crop((0, 0, edge, height)),
+            image.crop((width - edge, 0, width, height)),
+        )
+        try:
+            return all(cls._ink_ratio(strip) >= 0.02 for strip in strips)
+        finally:
+            for strip in strips:
+                strip.close()
 
     @staticmethod
     def _parse_confidence(conf) -> float:
@@ -48,7 +106,9 @@ class TesseractEngine(OcrEngine):
             return -1.0
 
     @staticmethod
-    def crop_garbage_zones(image: Image.Image, left_percent: float = 0.15, right_percent: float = 0.20) -> Image.Image:
+    def crop_garbage_zones(
+        image: Image.Image, left_percent: float = 0.15, right_percent: float = 0.20
+    ) -> Image.Image:
         """
         Crops garbage zones from product card image.
         Removes left part (product image) and right part (buttons like - 1 +).
@@ -221,7 +281,7 @@ class TesseractEngine(OcrEngine):
             # PSM 6 = Single uniform block (good default)
             config = f"--oem 1 --psm {psm}"
 
-            lang = self.ocr_language_string()
+            lang = self.configured_ocr_language_string()
             data = pytesseract.image_to_data(
                 image,  # Pass original image directly
                 lang=lang,
@@ -246,15 +306,19 @@ class TesseractEngine(OcrEngine):
             import pytesseract
 
             config = f"--oem 1 --psm {psm}"
+            bordered = self._add_ocr_border(image)
             text = pytesseract.image_to_string(
-                image,
-                lang=self.ocr_language_string(),
+                bordered,
+                lang=self.configured_ocr_language_string(),
                 config=config,
             )
             return text.strip()
         except Exception as e:
             print(f"Error in recognize_to_string: {e}")
             return ""
+        finally:
+            if "bordered" in locals():
+                bordered.close()
 
     def recognize_words(self, image, psm: int = 6, min_conf: int = 20) -> list[dict]:
         data = self.recognize_with_psm(image, psm=psm, mode="table")
@@ -300,6 +364,14 @@ class TesseractEngine(OcrEngine):
                 text = self.recognize_to_string(image, psm)
                 if text:
                     return text
+                if (
+                    psm not in self.edge_word_fallback_psms
+                    and self._edge_ink_touches_all_sides(image)
+                ):
+                    for fallback_psm in self.edge_word_fallback_psms:
+                        text = self.recognize_to_string(image, fallback_psm)
+                        if text:
+                            return text
 
             data = self.recognize_with_psm(image, psm, mode)
 
@@ -370,6 +442,6 @@ class TesseractEngine(OcrEngine):
         return {
             "engine": "tesseract",
             "device": "cpu",
-            "langs": self.ocr_language_string(),
+            "langs": self.configured_ocr_language_string(),
             "installed_langs": self.installed_languages(),
         }

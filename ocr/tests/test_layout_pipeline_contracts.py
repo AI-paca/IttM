@@ -85,16 +85,25 @@ def test_standard_backend_profiles_enable_uniform_spatial_layout():
     for name in (
         "backend_auto_standard",
         "backend_tesseract_standard",
+        "backend_easyocr_standard",
     ):
+        assert OCR_PIPELINE_PROFILES[name].image_preprocessing == (
+            "projector_slide_dewarp",
+            "mobile_screen_upscale",
+            "small_text_upscale",
+            "projected_document_dewarp",
+        )
         layout = OCR_PIPELINE_PROFILES[name].layout
         assert layout.feature_extractors == ("projection_geometry",)
         assert layout.selector == "uniform_spatial_v1"
         assert layout.allowed_stages == ("spatial_regions",)
 
-    easy_standard = OCR_PIPELINE_PROFILES["backend_easyocr_standard"].layout
-    assert easy_standard.feature_extractors == ()
-    assert easy_standard.selector == "fixed"
-    assert easy_standard.allowed_stages == ("table_regions",)
+
+def test_easyocr_table_profile_keeps_table_only_diagnostic_path():
+    layout = OCR_PIPELINE_PROFILES["backend_easyocr_table"].layout
+    assert layout.feature_extractors == ()
+    assert layout.selector == "fixed"
+    assert layout.allowed_stages == ("table_regions",)
 
 
 def test_easyocr_spatial_profile_is_explicitly_experimental():

@@ -2,7 +2,7 @@ import type { AppDiagnostics } from "./types";
 import type { BrowserPipelineProfile } from "./pipeline-config";
 import { BROWSER_PIPELINE_PROFILES } from "./pipeline-config";
 
-export const STRICT_LANGUAGES = "chi_sim+eng+rus";
+export const STRICT_LANGUAGES = "rus+eng+chi_sim";
 
 export interface BrowserOcrProfile {
   languages: string;
@@ -13,6 +13,12 @@ export interface BrowserOcrProfile {
   reason: string;
   preprocessingProfile: string;
   imagePreprocessing: BrowserPipelineProfile["imagePreprocessing"];
+  textRegionPsm: string;
+  denseGridFallback: boolean;
+  denseGridTargetWidth: number;
+  ocrBorderPixels: number;
+  edgeWordFallbackPsm: string;
+  edgeWordFallbackMinTokens: number;
   layout: BrowserPipelineProfile["layout"];
   langPath?: string;
   cachePath?: string;
@@ -41,6 +47,12 @@ export function createBrowserOcrProfile(
       reason: "low-memory-browser",
       preprocessingProfile: pipelineProfile.name,
       imagePreprocessing: pipelineProfile.imagePreprocessing,
+      textRegionPsm: pipelineProfile.textRegionPsm,
+      denseGridFallback: pipelineProfile.denseGridFallback,
+      denseGridTargetWidth: pipelineProfile.denseGridTargetWidth,
+      ocrBorderPixels: pipelineProfile.ocrBorderPixels,
+      edgeWordFallbackPsm: pipelineProfile.edgeWordFallbackPsm,
+      edgeWordFallbackMinTokens: pipelineProfile.edgeWordFallbackMinTokens,
       layout: pipelineProfile.layout,
     };
   }
@@ -55,6 +67,12 @@ export function createBrowserOcrProfile(
       reason: "balanced-browser-fallback",
       preprocessingProfile: pipelineProfile.name,
       imagePreprocessing: pipelineProfile.imagePreprocessing,
+      textRegionPsm: pipelineProfile.textRegionPsm,
+      denseGridFallback: pipelineProfile.denseGridFallback,
+      denseGridTargetWidth: pipelineProfile.denseGridTargetWidth,
+      ocrBorderPixels: pipelineProfile.ocrBorderPixels,
+      edgeWordFallbackPsm: pipelineProfile.edgeWordFallbackPsm,
+      edgeWordFallbackMinTokens: pipelineProfile.edgeWordFallbackMinTokens,
       layout: pipelineProfile.layout,
     };
   }
@@ -68,6 +86,12 @@ export function createBrowserOcrProfile(
     reason: "quality-first",
     preprocessingProfile: pipelineProfile.name,
     imagePreprocessing: pipelineProfile.imagePreprocessing,
+    textRegionPsm: pipelineProfile.textRegionPsm,
+    denseGridFallback: pipelineProfile.denseGridFallback,
+    denseGridTargetWidth: pipelineProfile.denseGridTargetWidth,
+    ocrBorderPixels: pipelineProfile.ocrBorderPixels,
+    edgeWordFallbackPsm: pipelineProfile.edgeWordFallbackPsm,
+    edgeWordFallbackMinTokens: pipelineProfile.edgeWordFallbackMinTokens,
     layout: pipelineProfile.layout,
   };
 }

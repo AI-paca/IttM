@@ -2,12 +2,20 @@ import type { SourceType } from "./types";
 import type { BrowserLayoutPipelineConfig } from "./layout-contracts";
 
 export type ImagePreprocessStepId =
+  | "projector_slide_dewarp"
   | "projected_document_dewarp"
+  | "ocr_border"
   | "browser_resize";
 
 export interface BrowserPipelineProfile {
   name: string;
   imagePreprocessing: ImagePreprocessStepId[];
+  textRegionPsm: string;
+  denseGridFallback: boolean;
+  denseGridTargetWidth: number;
+  ocrBorderPixels: number;
+  edgeWordFallbackPsm: string;
+  edgeWordFallbackMinTokens: number;
   layout: BrowserLayoutPipelineConfig;
 }
 
@@ -20,7 +28,13 @@ export const BROWSER_PIPELINE_PROFILES: Record<string, BrowserPipelineProfile> =
   {
     browser_tesseract_standard: {
       name: "browser_tesseract_standard",
-      imagePreprocessing: ["browser_resize"],
+      imagePreprocessing: ["browser_resize", "ocr_border"],
+      textRegionPsm: "6",
+      denseGridFallback: true,
+      denseGridTargetWidth: 3300,
+      ocrBorderPixels: 10,
+      edgeWordFallbackPsm: "7",
+      edgeWordFallbackMinTokens: 1,
       layout: {
         featureExtractors: ["projection_geometry"],
         selector: "uniform_spatial_v1",
@@ -34,7 +48,18 @@ export const BROWSER_PIPELINE_PROFILES: Record<string, BrowserPipelineProfile> =
     },
     browser_tesseract_dewarp: {
       name: "browser_tesseract_dewarp",
-      imagePreprocessing: ["projected_document_dewarp", "browser_resize"],
+      imagePreprocessing: [
+        "projector_slide_dewarp",
+        "projected_document_dewarp",
+        "browser_resize",
+        "ocr_border",
+      ],
+      textRegionPsm: "6",
+      denseGridFallback: true,
+      denseGridTargetWidth: 3300,
+      ocrBorderPixels: 10,
+      edgeWordFallbackPsm: "7",
+      edgeWordFallbackMinTokens: 1,
       layout: {
         featureExtractors: ["projection_geometry"],
         selector: "uniform_spatial_v1",
@@ -48,7 +73,13 @@ export const BROWSER_PIPELINE_PROFILES: Record<string, BrowserPipelineProfile> =
     },
     browser_tesseract_raw: {
       name: "browser_tesseract_raw",
-      imagePreprocessing: ["browser_resize"],
+      imagePreprocessing: ["browser_resize", "ocr_border"],
+      textRegionPsm: "6",
+      denseGridFallback: true,
+      denseGridTargetWidth: 3300,
+      ocrBorderPixels: 10,
+      edgeWordFallbackPsm: "7",
+      edgeWordFallbackMinTokens: 1,
       layout: {
         featureExtractors: [],
         selector: "fixed",
@@ -64,7 +95,7 @@ export const SOURCE_PIPELINE_PROFILES: Record<
 > = {
   auto: { backendProfile: "backend_auto_standard" },
   gateway: { backendProfile: "backend_auto_standard" },
-  browser: { browserProfile: "browser_tesseract_standard" },
+  browser: { browserProfile: "browser_tesseract_dewarp" },
   local_tess: { backendProfile: "backend_tesseract_standard" },
   local_easy: { backendProfile: "backend_easyocr_standard" },
   llm: {},

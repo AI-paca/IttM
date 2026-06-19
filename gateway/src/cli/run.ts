@@ -10,7 +10,8 @@ import {
 const DEFAULT_TEXT_ENDPOINT = "http://localhost:3000/api/extract/text";
 const DEFAULT_STREAM_ENDPOINT = "http://localhost:3000/api/tasks?sync=events";
 const LEGACY_STREAM_ENDPOINT = "http://localhost:3000/api/convert/stream";
-const USAGE = "Usage: ittm-extract <file|-> [--endpoint=URL] [--stream]\n";
+const USAGE =
+  "Usage: ittm-extract <file|-> [--endpoint=URL] [--stream] [--pdf-mode=auto|raster]\n";
 
 export interface CliIo {
   stdout(value: string): void;
@@ -26,6 +27,7 @@ export async function runCli(
 ): Promise<number> {
   const fileArg = args.find((arg) => !arg.startsWith("--"));
   const endpointArg = args.find((arg) => arg.startsWith("--endpoint="));
+  const pdfModeArg = args.find((arg) => arg.startsWith("--pdf-mode="));
   const stream = args.includes("--stream");
   if (!fileArg) {
     io.stderr(USAGE);
@@ -45,9 +47,16 @@ export async function runCli(
     return 3;
   }
 
-  const endpoint =
+  const pdfMode = pdfModeArg?.slice("--pdf-mode=".length) || "auto";
+  if (pdfMode !== "auto" && pdfMode !== "raster") {
+    io.stderr(USAGE);
+    return 2;
+  }
+  const endpoint = withPdfMode(
     endpointArg?.slice("--endpoint=".length) ||
-    (stream ? DEFAULT_STREAM_ENDPOINT : DEFAULT_TEXT_ENDPOINT);
+      (stream ? DEFAULT_STREAM_ENDPOINT : DEFAULT_TEXT_ENDPOINT),
+    pdfMode,
+  );
   const file = new File(
     [toArrayBuffer(bytes)],
     fileArg === "-" ? "stdin.bin" : basename(fileArg),
@@ -68,7 +77,11 @@ export async function runCli(
       if (!shouldUseLegacyFallback(error, stream, Boolean(endpointArg))) {
         throw error;
       }
-      result = await client.extract(file, LEGACY_STREAM_ENDPOINT, options);
+      result = await client.extract(
+        file,
+        withPdfMode(LEGACY_STREAM_ENDPOINT, pdfMode),
+        options,
+      );
     }
 
     if (!stream) io.stdout(result.markdown);
@@ -79,6 +92,13 @@ export async function runCli(
     io.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
     return error instanceof HeadlessClientError && error.status ? 5 : 4;
   }
+}
+
+function withPdfMode(endpoint: string, pdfMode: string): string {
+  if (pdfMode === "auto") return endpoint;
+  const url = new URL(endpoint);
+  url.searchParams.set("pdf_mode", pdfMode);
+  return url.toString();
 }
 
 function shouldUseLegacyFallback(

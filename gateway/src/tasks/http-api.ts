@@ -289,6 +289,7 @@ async function toExtractionRequest(
     url.searchParams.get("pipeline_profile") ??
     request.headers.get("x-ocr-profile") ??
     undefined;
+  const pdfMode = readPdfMode(request, url);
 
   if (contentType.includes("application/json")) {
     const payload = (await request.json()) as Partial<ExtractionRequest>;
@@ -297,6 +298,10 @@ async function toExtractionRequest(
         typeof payload.filename === "string" ? payload.filename : "upload",
       engine: readEngine(request, url, payload.engine),
       profile: typeof payload.profile === "string" ? payload.profile : profile,
+      pdfMode:
+        payload.pdfMode === undefined
+          ? pdfMode
+          : normalizePdfMode(payload.pdfMode),
       source: payload.source,
       budgets: payload.budgets,
       privacy: payload.privacy,
@@ -315,6 +320,7 @@ async function toExtractionRequest(
       filename: file.name || url.searchParams.get("filename") || "upload",
       engine,
       profile,
+      pdfMode,
       source: { kind: "file", file },
       contentType: file.type || undefined,
     };
@@ -336,9 +342,25 @@ async function toExtractionRequest(
     filename,
     engine,
     profile,
+    pdfMode,
     source: { kind: "file", file },
     contentType: binaryContentType,
   };
+}
+
+function readPdfMode(request: Request, url: URL): ExtractionRequest["pdfMode"] {
+  const raw =
+    url.searchParams.get("pdf_mode") ??
+    request.headers.get("x-pdf-mode") ??
+    "auto";
+  return normalizePdfMode(raw);
+}
+
+function normalizePdfMode(value: unknown): "auto" | "raster" {
+  if (value !== "auto" && value !== "raster") {
+    throw new Error("Unsupported PDF mode. Expected auto or raster.");
+  }
+  return value;
 }
 
 function readEngine(
@@ -740,6 +762,7 @@ function serializeRequest(request: ExtractionRequest): Record<string, unknown> {
     filename: request.filename,
     engine: request.engine,
     profile: request.profile,
+    pdfMode: request.pdfMode,
     source: request.source ? serializeSource(request.source) : undefined,
     budgets: request.budgets,
     privacy: request.privacy,
@@ -796,6 +819,8 @@ class OcrStreamTaskExecutor implements WorkerExecutor {
     targetUrl.searchParams.set("engine_type", request.engine);
     if (request.profile)
       targetUrl.searchParams.set("pipeline_profile", request.profile);
+    if (request.pdfMode)
+      targetUrl.searchParams.set("pdf_mode", request.pdfMode);
 
     const form = new FormData();
     form.append("file", file, request.filename || file.name || "upload");

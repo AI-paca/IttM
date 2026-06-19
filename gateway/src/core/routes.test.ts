@@ -1020,6 +1020,90 @@ test("literal extract text endpoint forwards engine and profile query aliases", 
   }
 });
 
+test("literal extract text endpoint forwards forced PDF raster mode", async () => {
+  resetTaskApiForTests();
+  const originalFetch = globalThis.fetch;
+  let calledUrl = "";
+  globalThis.fetch = async (input) => {
+    calledUrl = String(input);
+    return new Response(
+      '{"type":"page","page":1,"markdown":"ok"}\n' +
+        '{"type":"complete","meta":{"pdf_mode":"raster"}}\n',
+      { headers: { "content-type": "application/x-ndjson" } },
+    );
+  };
+
+  try {
+    const response = await route(
+      new Request(
+        "http://localhost/api/extract/text?pdf_mode=raster&filename=plan.pdf",
+        {
+          method: "POST",
+          headers: { "content-type": "application/pdf" },
+          body: new TextEncoder().encode("%PDF-1.7"),
+        },
+      ),
+      env,
+    );
+
+    assert.equal(response.status, 200);
+    assert.match(calledUrl, /pdf_mode=raster/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetTaskApiForTests();
+  }
+});
+
+test("literal extract text endpoint rejects an unknown PDF mode", async () => {
+  resetTaskApiForTests();
+  try {
+    const response = await route(
+      new Request(
+        "http://localhost/api/extract/text?pdf_mode=magic&filename=plan.pdf",
+        {
+          method: "POST",
+          headers: { "content-type": "application/pdf" },
+          body: new TextEncoder().encode("%PDF-1.7"),
+        },
+      ),
+      env,
+    );
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      error: "Unsupported PDF mode. Expected auto or raster.",
+    });
+  } finally {
+    resetTaskApiForTests();
+  }
+});
+
+test("task JSON rejects an unknown PDF mode instead of falling back to auto", async () => {
+  resetTaskApiForTests();
+  try {
+    const response = await route(
+      new Request("http://localhost/api/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          filename: "plan.pdf",
+          engine: "auto",
+          pdfMode: "magic",
+          source: { kind: "url", url: "https://example.test/plan.pdf" },
+        }),
+      }),
+      env,
+    );
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      error: "Unsupported PDF mode. Expected auto or raster.",
+    });
+  } finally {
+    resetTaskApiForTests();
+  }
+});
+
 test("literal extract text endpoint rejects an empty body", async () => {
   resetTaskApiForTests();
   try {

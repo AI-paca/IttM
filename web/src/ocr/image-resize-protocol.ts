@@ -4,6 +4,7 @@ export interface ResizeWorkerRequest {
   file: File;
   maxImagePixels: number;
   maxDimension: number;
+  ocrBorderPixels: number;
   layout: BrowserLayoutPipelineConfig;
 }
 

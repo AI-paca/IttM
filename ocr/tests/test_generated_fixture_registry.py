@@ -4,7 +4,6 @@ from tests.generated_media import (
     GENERATED_FIXTURE_REGISTRY,
 )
 
-
 EXPECTED_SEEDS = {
     "long-screenshot-receipt": 2026061401,
     "structured-product-table": 2026061402,
@@ -18,6 +17,7 @@ EXPECTED_FUNCTIONAL_OCR_SEEDS = {
     "generated-product-table": 2026061452,
     "generated-low-contrast-noise": 2026061453,
     "generated-small-skew": 2026061454,
+    "generated-tiny-score-list": 2026061455,
 }
 
 
@@ -47,9 +47,7 @@ def test_generated_fixture_invariants_are_non_empty_and_pr_safe():
 
 def test_generated_fixture_generator_version_is_explicit_and_stable():
     assert GENERATED_FIXTURE_GENERATOR_VERSION == EXPECTED_GENERATOR_VERSION
-    assert {
-        spec.id: spec.generator_version for spec in GENERATED_FIXTURE_REGISTRY
-    } == {
+    assert {spec.id: spec.generator_version for spec in GENERATED_FIXTURE_REGISTRY} == {
         fixture_id: EXPECTED_GENERATOR_VERSION for fixture_id in EXPECTED_SEEDS
     }
 
@@ -61,6 +59,7 @@ def test_functional_ocr_fixture_matrix_is_explicit_and_stable():
         "simple_paragraph",
         "skewed_text",
         "table",
+        "tiny_score_list",
     }
     for spec in FUNCTIONAL_OCR_FIXTURE_REGISTRY:
         assert spec.tier == "quality"

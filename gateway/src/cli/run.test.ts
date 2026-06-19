@@ -102,6 +102,30 @@ test("CLI endpoint override bypasses the default URL", async () => {
   assert.deepEqual(stdout, ["custom"]);
 });
 
+test("CLI exposes forced PDF raster mode through the public endpoint", async () => {
+  const { io } = fakeIo();
+  let calledUrl = "";
+  const client = new HeadlessExtractionClient(async (input) => {
+    calledUrl = String(input);
+    return new Response("raster text", {
+      headers: { "content-type": "text/plain" },
+    });
+  });
+
+  assert.equal(await runCli(["-", "--pdf-mode=raster"], io, client), 0);
+  assert.equal(
+    calledUrl,
+    "http://localhost:3000/api/extract/text?pdf_mode=raster",
+  );
+});
+
+test("CLI rejects unknown PDF modes before reading input", async () => {
+  const { io, stderr } = fakeIo();
+
+  assert.equal(await runCli(["-", "--pdf-mode=magic"], io), 2);
+  assert.match(stderr.join(""), /pdf-mode=auto\|raster/);
+});
+
 test("CLI stream mode falls back to the legacy endpoint when task routes are absent", async () => {
   const { io, stdout } = fakeIo();
   const calledUrls: string[] = [];

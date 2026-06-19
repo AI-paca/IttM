@@ -24,6 +24,62 @@ from app.pipeline_config import LayoutPipelineConfig, OcrPipelineProfile
 from app.services import convert_service
 
 
+@pytest.mark.parametrize("engine_type", ["browser", "tesserat"])
+def test_engine_factory_rejects_unknown_selectors(engine_type):
+    with pytest.raises(ValueError, match="Unknown OCR engine"):
+        convert_service._create_engine(engine_type, OcrPipelineProfile(name="test"))
+
+
+def test_iter_convert_bytes_reports_empty_pages(monkeypatch):
+    image = Image.new("RGB", (100, 50), "white")
+
+    class FakeEngine:
+        def info(self):
+            return {"engine": "fake"}
+
+    monkeypatch.setattr(
+        convert_service,
+        "_create_engine",
+        lambda _engine_type, _profile: FakeEngine(),
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "_iter_document_images",
+        lambda _content, _filename, _pipeline: iter([image]),
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "_convert_page",
+        lambda _image, _engine, _profile: (
+            "",
+            {
+                "chunks": 1,
+                "cards_found": 0,
+                "tables_found": 0,
+                "table_cells": 0,
+            },
+        ),
+    )
+
+    events = list(
+        convert_service.iter_convert_bytes(
+            b"image bytes",
+            "test.png",
+            pipeline_profile=OcrPipelineProfile(name="test"),
+        )
+    )
+
+    assert events[0] == {
+        "type": "warning",
+        "code": "EMPTY_PAGE",
+        "message": "No text was recognized on page 1.",
+        "page": 1,
+    }
+    assert events[1] == {"type": "page", "page": 1, "markdown": ""}
+    assert events[2]["type"] == "complete"
+    assert events[2]["meta"]["empty_pages"] == [1]
+
+
 def test_dedupe_chunks_removes_exact_normalized_duplicates():
     chunks = ["Hello   world", "Hello world", "Unique line"]
 
@@ -98,7 +154,9 @@ def test_blank_band_chunking_coalesces_small_content_instead_of_dropping_it():
 
     try:
         pixels = [_image_colors(chunk.convert("RGB")) for chunk in chunks]
-        assert all(any(marker in colors for colors in pixels) for marker in marker_colors)
+        assert all(
+            any(marker in colors for colors in pixels) for marker in marker_colors
+        )
         assert all(chunk.height >= 300 for chunk in chunks[:-1])
     finally:
         for chunk in chunks:
@@ -138,7 +196,214 @@ def test_convert_page_segments_extreme_long_screenshot_before_layout(monkeypatch
     assert meta["chunks"] == len(recognized)
 
 
-def test_convert_page_uses_spatial_layout_before_long_screenshot_fallback(
+def test_overlapping_starts_cover_final_edge_without_duplicates():
+    assert convert_service._overlapping_starts(100, 40, 10) == [0, 30, 60]
+    assert convert_service._overlapping_starts(101, 40, 10) == [0, 30, 60, 61]
+    assert convert_service._overlapping_starts(20, 40, 10) == [0]
+
+
+def test_wide_sparse_cover_uses_document_psm():
+    image = Image.new("RGB", (3500, 2480), "white")
+    ImageDraw.Draw(image).text((100, 100), "Учебный план", fill="black")
+    profile = OcrPipelineProfile(
+        name="test",
+        document_region_psm=3,
+        wide_text_region_psm=11,
+    )
+
+    try:
+        assert convert_service._text_psm_for_image_region(image, profile) == 3
+    finally:
+        image.close()
+
+
+def test_wide_dense_page_uses_sparse_layout_psm():
+    image = Image.new("RGB", (3500, 2480), (200, 200, 200))
+    profile = OcrPipelineProfile(
+        name="test",
+        document_region_psm=3,
+        wide_text_region_psm=11,
+    )
+
+    try:
+        assert convert_service._text_psm_for_image_region(image, profile) == 11
+    finally:
+        image.close()
+
+
+def test_dense_grid_detection_accepts_large_landscape_table():
+    pytest.importorskip("cv2")
+    image = Image.new("RGB", (2000, 1400), "white")
+    draw = ImageDraw.Draw(image)
+    for x in range(40, 1961, 120):
+        draw.line((x, 40, x, 1360), fill="black", width=3)
+    for y in range(40, 1361, 80):
+        draw.line((40, y, 1960, y), fill="black", width=3)
+
+    try:
+        assert convert_service._looks_like_dense_grid_page(image) is True
+    finally:
+        image.close()
+
+
+def test_dense_grid_detection_rejects_large_plain_image():
+    pytest.importorskip("cv2")
+    image = Image.new("RGB", (2000, 1400), "white")
+    draw = ImageDraw.Draw(image)
+    draw.text((100, 100), "ordinary landscape document", fill="black")
+
+    try:
+        assert convert_service._looks_like_dense_grid_page(image) is False
+    finally:
+        image.close()
+
+
+def test_sparse_cover_detection_accepts_wide_low_ink_page():
+    image = Image.new("RGB", (2400, 1600), "white")
+    draw = ImageDraw.Draw(image)
+    draw.text((100, 100), "Sparse cover", fill="black")
+
+    try:
+        assert convert_service._looks_like_sparse_cover_page(image) is True
+    finally:
+        image.close()
+
+
+def test_sparse_cover_detection_rejects_dense_page():
+    image = Image.new("RGB", (2400, 1600), "black")
+    try:
+        assert convert_service._looks_like_sparse_cover_page(image) is False
+    finally:
+        image.close()
+
+
+def test_convert_page_appends_dense_grid_fallback(monkeypatch):
+    image = Image.new("RGB", (2400, 1600), "white")
+    totals = {
+        "chunks": 2,
+        "cards_found": 0,
+        "tables_found": 1,
+        "table_cells": 20,
+    }
+    monkeypatch.setattr(
+        convert_service,
+        "_convert_page_segment",
+        lambda _image, _engine, _profile: ("primary text", totals.copy()),
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "_looks_like_dense_grid_page",
+        lambda _image: True,
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "_recognize_dense_grid_page",
+        lambda fallback_engine, _image, _profile: (
+            "fallback text" if fallback_engine is engine else "wrong engine",
+            7,
+        ),
+    )
+    engine = object()
+
+    try:
+        markdown, meta = convert_service._convert_page(
+            image,
+            engine,
+            OcrPipelineProfile(name="test", dense_grid_fallback=True),
+        )
+    finally:
+        image.close()
+
+    assert "primary text" in markdown
+    assert "fallback text" in markdown
+    assert meta["chunks"] == 9
+    assert meta["tables_found"] == 1
+
+
+def test_convert_page_appends_sparse_cover_fallback(monkeypatch):
+    image = Image.new("RGB", (2400, 1600), "white")
+    totals = {
+        "chunks": 1,
+        "cards_found": 0,
+        "tables_found": 0,
+        "table_cells": 0,
+    }
+    monkeypatch.setattr(
+        convert_service,
+        "_convert_page_segment",
+        lambda _image, _engine, _profile: ("primary text", totals.copy()),
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "_looks_like_dense_grid_page",
+        lambda _image: False,
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "_looks_like_sparse_cover_page",
+        lambda _image: True,
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "_recognize_sparse_cover_page",
+        lambda fallback_engine, _image, _profile: (
+            "fallback text" if fallback_engine is engine else "wrong engine",
+            4,
+        ),
+    )
+    engine = object()
+
+    try:
+        markdown, meta = convert_service._convert_page(
+            image,
+            engine,
+            OcrPipelineProfile(name="test", dense_grid_fallback=True),
+        )
+    finally:
+        image.close()
+
+    assert "primary text" in markdown
+    assert "fallback text" in markdown
+    assert meta["chunks"] == 5
+
+
+def test_convert_page_appends_projector_slide_language_fallback(monkeypatch):
+    image = Image.new("RGB", (2000, 1200), "white")
+    totals = {
+        "chunks": 1,
+        "cards_found": 0,
+        "tables_found": 0,
+        "table_cells": 0,
+    }
+    monkeypatch.setattr(
+        convert_service,
+        "_convert_page_segment",
+        lambda _image, _engine, _profile: ("primary text", totals.copy()),
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "_recognize_projector_slide_fallback",
+        lambda fallback_engine, _image, _profile: (
+            "fallback text" if fallback_engine is engine else "wrong engine"
+        ),
+    )
+    engine = object()
+
+    try:
+        markdown, meta = convert_service._convert_page(
+            image,
+            engine,
+            OcrPipelineProfile(name="test", dense_grid_fallback=True),
+        )
+    finally:
+        image.close()
+
+    assert "primary text" in markdown
+    assert "fallback text" in markdown
+    assert meta["chunks"] == 2
+
+
+def test_convert_page_bounds_long_screenshot_before_spatial_layout(
     monkeypatch,
 ):
     image, _ = _generated_long_screenshot(card_count=64)
@@ -184,7 +449,7 @@ def test_convert_page_uses_spatial_layout_before_long_screenshot_fallback(
 
     monkeypatch.setattr(convert_service, "analyze_layout", fake_analyze_layout)
 
-    def fake_recognize_region(_engine, region):
+    def fake_recognize_region(_engine, region, _profile):
         region_inputs.append(region.size)
         return [f"region-{len(region_inputs)}"], 1, 0
 
@@ -212,11 +477,13 @@ def test_convert_page_uses_spatial_layout_before_long_screenshot_fallback(
     finally:
         image.close()
 
-    assert layout_inputs == [(620, 12032)]
-    assert region_inputs == [(620, 6016), (620, 6016)]
+    assert len(layout_inputs) > 1
+    assert max(height for _, height in layout_inputs) <= 1600
+    assert len(region_inputs) == len(layout_inputs) * 2
+    assert max(height for _, height in region_inputs) <= 800
     assert "region-1" in markdown
     assert "region-2" in markdown
-    assert meta["chunks"] == 2
+    assert meta["chunks"] == len(region_inputs)
     for crop in layout_crops:
         with pytest.raises(ValueError):
             crop.getpixel((0, 0))
@@ -249,6 +516,225 @@ def test_convert_layout_region_honors_direct_ocr_decision_parameter():
     assert parts == ["direct region text"]
     assert calls == [((600, 2400), "text_mode", 6)]
     assert meta["chunks"] == 1
+
+
+def test_upscaled_mobile_screen_region_uses_sparse_page_psm():
+    calls = []
+
+    class FakeEngine:
+        def recognize(self, image, mode="text_mode", psm=6):
+            calls.append((image.size, mode, psm))
+            return "coupon text"
+
+    image = Image.new("RGB", (1510, 2144), "white")
+    try:
+        parts, chunks, cards = convert_service._recognize_image_region(
+            FakeEngine(),
+            image,
+            OcrPipelineProfile(name="test"),
+        )
+    finally:
+        image.close()
+
+    assert parts == ["coupon text"]
+    assert chunks == 1
+    assert cards == 0
+    assert calls == [((1510, 2144), "text_mode", 3)]
+
+
+def test_dewarped_projector_slide_region_uses_sparse_page_psm():
+    calls = []
+
+    class FakeEngine:
+        def recognize(self, image, mode="text_mode", psm=6):
+            calls.append((image.size, mode, psm))
+            return "projector slide text"
+
+    image = Image.new("RGB", (2000, 1200), "white")
+    try:
+        parts, chunks, cards = convert_service._recognize_image_region(
+            FakeEngine(),
+            image,
+            OcrPipelineProfile(name="test"),
+        )
+    finally:
+        image.close()
+
+    assert parts == ["projector slide text"]
+    assert chunks == 1
+    assert cards == 0
+    assert calls == [((2000, 1200), "text_mode", 3)]
+
+
+def test_sparse_easyocr_region_uses_profile_tesseract_fallback(monkeypatch):
+    calls = []
+
+    class PrimaryEngine:
+        def info(self):
+            return {"engine": "easyocr"}
+
+        def recognize(self, image, mode="text_mode", psm=6):
+            calls.append(("primary", image.size, mode, psm))
+            return "weak"
+
+    class FallbackEngine:
+        def recognize(self, image, mode="text_mode", psm=6):
+            calls.append(("fallback", image.size, mode, psm))
+            return (
+                "Схема сбора статистической отчетности о работе судов "
+                "Судебный департамент Федеральное хранилище судебной статистики "
+                "Районные суды Мировые судьи"
+            )
+
+    monkeypatch.setattr(
+        convert_service,
+        "_create_sparse_text_fallback_engine",
+        lambda profile: FallbackEngine(),
+    )
+    image = Image.new("RGB", (2000, 1200), "white")
+    try:
+        parts, chunks, cards = convert_service._recognize_image_region(
+            PrimaryEngine(),
+            image,
+            OcrPipelineProfile(
+                name="test",
+                sparse_text_fallback_engine="tesseract",
+                sparse_text_fallback_min_tokens=8,
+                sparse_text_fallback_min_ratio=1.25,
+            ),
+        )
+    finally:
+        image.close()
+
+    assert parts == [
+        (
+            "weak\n\n"
+            "Схема сбора статистической отчетности о работе судов "
+            "Судебный департамент Федеральное хранилище судебной статистики "
+            "Районные суды Мировые судьи"
+        )
+    ]
+    assert chunks == 1
+    assert cards == 0
+    assert calls == [
+        ("primary", (2000, 1200), "text_mode", 3),
+        ("fallback", (2000, 1200), "text_mode", 3),
+    ]
+
+
+def test_extra_pass_engine_uses_declared_recovery_engine(monkeypatch):
+    class PrimaryEngine:
+        def info(self):
+            return {"engine": "easyocr"}
+
+    recovery = object()
+    monkeypatch.setattr(
+        "app.engines.tesseract_engine.TesseractEngine",
+        lambda **kwargs: (recovery, kwargs),
+    )
+    profile = OcrPipelineProfile(
+        name="easyocr-with-recovery",
+        sparse_text_fallback_engine="tesseract",
+    )
+
+    selected, kwargs = convert_service._extra_pass_engine(
+        PrimaryEngine(),
+        profile,
+        language_priority=("rus", "eng"),
+        ocr_border_pixels=0,
+    )
+
+    assert selected is recovery
+    assert kwargs["language_priority"] == ("rus", "eng")
+    assert kwargs["ocr_border_pixels"] == 0
+    assert convert_service._engine_chain(PrimaryEngine(), profile) == [
+        "easyocr",
+        "tesseract",
+    ]
+
+
+def test_edge_word_uses_single_token_profile_fallback(monkeypatch):
+    calls = []
+
+    class PrimaryEngine:
+        def info(self):
+            return {"engine": "easyocr"}
+
+        def recognize(self, image, mode="text_mode", psm=6):
+            calls.append(("primary", mode, psm))
+            return ""
+
+    class FallbackEngine:
+        def recognize(self, image, mode="text_mode", psm=6):
+            calls.append(("fallback", mode, psm))
+            return "SAMPLE"
+
+    monkeypatch.setattr(
+        convert_service,
+        "_create_sparse_text_fallback_engine",
+        lambda profile: FallbackEngine(),
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "_looks_like_edge_to_edge_word",
+        lambda image: True,
+    )
+    image = Image.new("RGB", (3840, 2160), "white")
+    try:
+        markdown, meta = convert_service._convert_page_segment(
+            image,
+            PrimaryEngine(),
+            OcrPipelineProfile(
+                name="edge-word",
+                sparse_text_fallback_engine="tesseract",
+                sparse_text_fallback_min_tokens=18,
+                edge_word_fallback_min_tokens=1,
+            ),
+        )
+    finally:
+        image.close()
+
+    assert markdown == "SAMPLE"
+    assert meta["chunks"] == 1
+    assert calls == [
+        ("primary", "text_mode", 3),
+        ("fallback", "text_mode", 3),
+    ]
+
+
+def test_dewarped_projector_slide_bypasses_spatial_layout(monkeypatch):
+    calls = []
+
+    class FakeEngine:
+        def recognize(self, image, mode="text_mode", psm=6):
+            calls.append((image.size, mode, psm))
+            return "full projector slide text"
+
+    def fail_layout(*_args, **_kwargs):
+        raise AssertionError("dewarped projector slides should not be split")
+
+    monkeypatch.setattr(convert_service, "analyze_layout", fail_layout)
+    profile = OcrPipelineProfile(
+        name="projector-spatial",
+        layout=LayoutPipelineConfig(
+            feature_extractors=("projection_geometry",),
+            selector="uniform_spatial_v1",
+            allowed_stages=("spatial_regions",),
+        ),
+    )
+    image = Image.new("RGB", (2000, 1200), "white")
+    try:
+        markdown, meta = convert_service._convert_page_segment(
+            image,
+            FakeEngine(),
+            profile,
+        )
+    finally:
+        image.close()
+
+    assert markdown == "full projector slide text"
+    assert meta["chunks"] == 1
+    assert calls == [((2000, 1200), "text_mode", 3)]
 
 
 def _table_fixture() -> Image.Image:
@@ -326,7 +812,9 @@ def _bar_chart_fixture() -> Image.Image:
     return image
 
 
-def _dense_table_layout(width: int, height: int, *, rows: int, cols: int) -> TableLayout:
+def _dense_table_layout(
+    width: int, height: int, *, rows: int, cols: int
+) -> TableLayout:
     x_lines = tuple(round(index * (width - 1) / cols) for index in range(cols + 1))
     y_lines = tuple(round(index * (height - 1) / rows) for index in range(rows + 1))
     cells = tuple(
@@ -386,7 +874,9 @@ def test_table_layout_to_markdown_ocr_cells_in_reading_order():
     layout = detect_table_layouts(_table_fixture())[0]
     texts = iter(["Предмет", "Часы", "Math", "42"])
 
-    markdown = table_layout_to_markdown(_table_fixture(), layout, lambda _cell: next(texts))
+    markdown = table_layout_to_markdown(
+        _table_fixture(), layout, lambda _cell: next(texts)
+    )
 
     assert markdown == "| Предмет | Часы |\n| --- | --- |\n| Math | 42 |"
 
@@ -419,6 +909,194 @@ def test_table_words_to_markdown_normalizes_curriculum_index_column():
     markdown = table_words_to_markdown(layout, words)
 
     assert "| Б1.О.01 | Иностранный |" in markdown
+
+
+def test_mixed_10x14_table_keeps_placeholder_cells_and_raw_fallback():
+    image = Image.new("RGB", (1000, 1400), "white")
+    layout = _dense_table_layout(1000, 1400, rows=14, cols=10)
+    words = []
+    for col in range(10):
+        left = col * 100 + 10
+        words.append(
+            {
+                "text": f"H{col + 1}",
+                "bbox": (left, 20, left + 40, 50),
+                "conf": 98,
+            }
+        )
+    words.extend(
+        [
+            {"text": "й-A1-EN-001", "bbox": (110, 125, 190, 150), "conf": 98},
+            {"text": "Привет", "bbox": (210, 125, 270, 150), "conf": 98},
+            {"text": "Sample", "bbox": (310, 125, 370, 150), "conf": 98},
+            {"text": "中文", "bbox": (410, 125, 450, 150), "conf": 98},
+            {
+                "text": "РАЗДЕЛ A SECTION ALPHA merged subsection й-ALPHA-2026",
+                "bbox": (10, 225, 990, 255),
+                "conf": 98,
+            },
+        ]
+    )
+
+    class FakeEngine:
+        def recognize_words(self, image, psm=6, min_conf=20):
+            assert psm == 6
+            return words
+
+        def recognize(self, image, mode="text_mode", psm=6):
+            assert psm == 11
+            return "raw mixed fallback 中文 Fake blocks 909"
+
+    profile = OcrPipelineProfile(
+        name="test",
+        table_layout_normalization="preserve_grid",
+        table_min_word_cell_coverage=0.0,
+        table_raw_text_fallback=True,
+        table_raw_text_fallback_min_rows=10,
+        table_raw_text_fallback_min_cols=8,
+        table_raw_text_fallback_max_cols=14,
+    )
+    parts, meta = convert_service._convert_layout_region(
+        LayoutRegion(kind="table", image=image, bbox=layout.bbox, table=layout),
+        FakeEngine(),
+        profile,
+    )
+
+    markdown = "\n\n".join(parts)
+    table_lines = [line for line in markdown.splitlines() if line.startswith("|")]
+    section_line = next(
+        line for line in table_lines if "РАЗДЕЛ A SECTION ALPHA" in line
+    )
+
+    assert len(section_line.strip()[1:-1].split("|")) == 10
+    assert "raw mixed fallback 中文 Fake blocks 909" in markdown
+    assert meta["tables_found"] == 1
+    assert meta["table_cells"] == 140
+
+
+def test_wide_easyocr_table_raw_fallback_uses_sparse_tesseract(monkeypatch):
+    image = Image.new("RGB", (2600, 1000), "white")
+    layout = _dense_table_layout(2600, 1000, rows=10, cols=26)
+    words = [
+        {
+            "text": f"Б1.О.{index:02d}",
+            "bbox": (index * 90 + 8, 18, index * 90 + 74, 42),
+            "conf": 95,
+        }
+        for index in range(26)
+    ]
+    calls = []
+
+    class PrimaryEngine:
+        def info(self):
+            return {"engine": "easyocr"}
+
+        def recognize_words(self, image, psm=6, min_conf=20):
+            return words
+
+        def recognize(self, image, mode="text_mode", psm=6):
+            calls.append(("primary", psm))
+            return "weak"
+
+    class FallbackEngine:
+        def recognize(self, image, mode="text_mode", psm=6):
+            calls.append(("fallback", psm))
+            return (
+                "Математический анализ Линейная алгебра "
+                "Дифференциальные уравнения Дискретная математика "
+                "Теория вероятностей Методы оптимизации Теория управления"
+            )
+
+    monkeypatch.setattr(
+        convert_service,
+        "_create_sparse_text_fallback_engine",
+        lambda profile: FallbackEngine(),
+    )
+
+    profile = OcrPipelineProfile(
+        name="test",
+        table_layout_normalization="preserve_grid",
+        table_min_word_cell_coverage=0.0,
+        table_raw_text_fallback=True,
+        table_raw_text_fallback_min_rows=10,
+        table_raw_text_fallback_min_cols=8,
+        table_raw_text_fallback_max_cols=30,
+        table_raw_text_fallback_psm=11,
+        sparse_text_fallback_engine="tesseract",
+        sparse_text_fallback_min_tokens=6,
+        sparse_text_fallback_min_ratio=1.25,
+    )
+    parts, meta = convert_service._convert_layout_region(
+        LayoutRegion(kind="table", image=image, bbox=layout.bbox, table=layout),
+        PrimaryEngine(),
+        profile,
+    )
+
+    markdown = "\n\n".join(parts)
+
+    assert "Дифференциальные уравнения" in markdown
+    assert calls == [("primary", 11), ("fallback", 11)]
+    assert meta["chunks"] >= 2
+    assert meta["tables_found"] == 1
+
+
+def test_wide_easyocr_table_without_markdown_uses_table_raw_sparse_fallback(
+    monkeypatch,
+):
+    image = Image.new("RGB", (2600, 1000), "white")
+    layout = _dense_table_layout(2600, 1000, rows=10, cols=26)
+    calls = []
+
+    class PrimaryEngine:
+        def info(self):
+            return {"engine": "easyocr"}
+
+        def recognize_words(self, image, psm=6, min_conf=20):
+            return []
+
+        def recognize(self, image, mode="text_mode", psm=6):
+            calls.append(("primary", psm))
+            return "weak"
+
+    class FallbackEngine:
+        def recognize(self, image, mode="text_mode", psm=6):
+            calls.append(("fallback", psm))
+            return (
+                "Математический анализ Линейная алгебра "
+                "Дифференциальные уравнения Дискретная математика "
+                "Теория вероятностей Методы оптимизации Теория управления"
+            )
+
+    monkeypatch.setattr(
+        convert_service,
+        "_create_sparse_text_fallback_engine",
+        lambda profile: FallbackEngine(),
+    )
+
+    profile = OcrPipelineProfile(
+        name="test",
+        table_layout_normalization="preserve_grid",
+        table_raw_text_fallback=True,
+        table_raw_text_fallback_min_rows=10,
+        table_raw_text_fallback_min_cols=8,
+        table_raw_text_fallback_max_cols=30,
+        table_raw_text_fallback_min_ratio=0.75,
+        table_raw_text_fallback_psm=11,
+        sparse_text_fallback_engine="tesseract",
+        sparse_text_fallback_min_tokens=6,
+    )
+    parts, meta = convert_service._convert_layout_region(
+        LayoutRegion(kind="table", image=image, bbox=layout.bbox, table=layout),
+        PrimaryEngine(),
+        profile,
+    )
+
+    markdown = "\n\n".join(parts)
+
+    assert "Дифференциальные уравнения" in markdown
+    assert calls == [("primary", 11), ("fallback", 11)]
+    assert meta["chunks"] >= 2
+    assert meta["tables_found"] == 1
 
 
 def test_wide_curriculum_table_markdown_repairs_ocr_index_noise():
@@ -488,7 +1166,9 @@ def test_detect_table_layouts_rejects_bar_chart_as_grid():
     )
 
 
-def test_convert_service_uses_table_layout_before_vertical_chunks(monkeypatch, tmp_path):
+def test_convert_service_uses_table_layout_before_vertical_chunks(
+    monkeypatch, tmp_path
+):
     pytest.importorskip("cv2")
     values = iter(["Предмет", "Часы", "Math", "42"])
 
@@ -499,12 +1179,21 @@ def test_convert_service_uses_table_layout_before_vertical_chunks(monkeypatch, t
         def info(self):
             return {"engine": "fake"}
 
-    monkeypatch.setattr(convert_service, "AutoEngine", lambda prefer_tesseract=True: FakeEngine())
+    monkeypatch.setattr(convert_service, "AutoEngine", lambda **_kwargs: FakeEngine())
 
     image_path = tmp_path / "table.png"
     _table_fixture().save(image_path)
 
-    markdown, meta = asyncio.run(convert_service.convert(image_path, engine_type="auto"))
+    markdown, meta = asyncio.run(
+        convert_service.convert(
+            image_path,
+            engine_type="auto",
+            pipeline_profile=OcrPipelineProfile(
+                name="test",
+                layout=LayoutPipelineConfig(allowed_stages=("table_regions",)),
+            ),
+        )
+    )
 
     assert "| Предмет | Часы |" in markdown
     assert "| Math | 42 |" in markdown
@@ -531,7 +1220,7 @@ def test_convert_service_segments_implausibly_tall_table_region(monkeypatch, tmp
         layout = _dense_table_layout(image.width, image.height, rows=21, cols=25)
         return [LayoutRegion(kind="table", image=image, bbox=layout.bbox, table=layout)]
 
-    monkeypatch.setattr(convert_service, "AutoEngine", lambda prefer_tesseract=True: FakeEngine())
+    monkeypatch.setattr(convert_service, "AutoEngine", lambda **_kwargs: FakeEngine())
     monkeypatch.setattr(convert_service, "analyze_document_layout", fake_layout)
 
     image_path = tmp_path / "long-screenshot.png"
@@ -579,7 +1268,7 @@ def test_convert_service_bounds_large_table_fallback(monkeypatch, tmp_path):
         layout = _dense_table_layout(image.width, image.height, rows=21, cols=25)
         return [LayoutRegion(kind="table", image=image, bbox=layout.bbox, table=layout)]
 
-    monkeypatch.setattr(convert_service, "AutoEngine", lambda prefer_tesseract=True: FakeEngine())
+    monkeypatch.setattr(convert_service, "AutoEngine", lambda **_kwargs: FakeEngine())
     monkeypatch.setattr(convert_service, "analyze_document_layout", fake_layout)
 
     image_path = tmp_path / "large-table.png"
@@ -633,7 +1322,7 @@ def test_convert_service_rejects_sparse_table_markdown(monkeypatch, tmp_path):
     monkeypatch.setattr(
         convert_service,
         "AutoEngine",
-        lambda prefer_tesseract=True: FakeEngine(),
+        lambda **_kwargs: FakeEngine(),
     )
     monkeypatch.setattr(convert_service, "analyze_document_layout", fake_layout)
 
@@ -694,7 +1383,7 @@ def test_convert_service_rejects_sparse_cell_markdown(monkeypatch, tmp_path):
     monkeypatch.setattr(
         convert_service,
         "AutoEngine",
-        lambda prefer_tesseract=True: FakeEngine(),
+        lambda **_kwargs: FakeEngine(),
     )
     monkeypatch.setattr(convert_service, "analyze_document_layout", fake_layout)
 
@@ -744,7 +1433,7 @@ def test_convert_service_checks_wide_table_coverage_before_formatting(
     monkeypatch.setattr(
         convert_service,
         "AutoEngine",
-        lambda prefer_tesseract=True: FakeEngine(),
+        lambda **_kwargs: FakeEngine(),
     )
     monkeypatch.setattr(
         convert_service,

@@ -26,7 +26,7 @@ def test_auto_engine_does_not_fall_back_to_probe_stub(monkeypatch):
 
     monkeypatch.setattr(
         "app.engines.tesseract_engine.TesseractEngine",
-        lambda: tesseract,
+        lambda **_kwargs: tesseract,
     )
     monkeypatch.setattr(
         "app.engines.easyocr_engine.EasyOcrEngine",

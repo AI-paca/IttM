@@ -9,6 +9,7 @@ from tests.quality_metrics import (
     ordered_phrase_recall,
     token_recall,
 )
+from app.chunking.vertical import table_rows_to_markdown
 
 
 def test_character_error_rate_separates_quality_from_non_empty_output():
@@ -37,7 +38,9 @@ def test_name_value_pairs_must_survive_on_the_same_output_row():
     assert (
         name_value_pair_recall(
             pairs,
-            "| Poco X7 Pro | 1863133 |\n" "| Poco X6 Pro | 1532816 |\n" "| Redmi Note 13 Pro+ | 950814 |",
+            "| Poco X7 Pro | 1863133 |\n"
+            "| Poco X6 Pro | 1532816 |\n"
+            "| Redmi Note 13 Pro+ | 950814 |",
         )
         == 1
     )
@@ -67,6 +70,19 @@ def test_markdown_table_shape_ignores_separator_and_counts_real_cells():
 
     assert markdown_table_shape(markdown) == (3, 3)
     assert markdown_table_shape("plain text") == (0, 0)
+
+
+def test_table_markdown_keeps_empty_placeholder_columns():
+    markdown = table_rows_to_markdown(
+        [
+            ["Name", "", "Score"],
+            ["Poco X7 Pro", "", "1863133"],
+            ["Poco X6 Pro", "", "1532816"],
+        ]
+    )
+
+    assert markdown_table_shape(markdown) == (3, 3)
+    assert "| Poco X7 Pro |  | 1863133 |" in markdown
 
 
 def test_token_recall_normalizes_spacing_and_punctuation():

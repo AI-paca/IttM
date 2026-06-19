@@ -5,12 +5,16 @@ from pydantic import BaseModel, Field
 
 class ConvertMeta(BaseModel):
     engine: str
+    engine_chain: List[str] = Field(default_factory=list)
     chunks: int
     cards_found: int = 0
     tables_found: int = 0
     table_cells: int = 0
     pages: int
+    empty_pages: List[int] = Field(default_factory=list)
     pipeline: str = ""
+    pdf_mode: str = "auto"
+    flags: List[str] = Field(default_factory=list)
     preprocess_steps: List[str] = Field(default_factory=list)
     layout_steps: List[str] = Field(default_factory=list)
     elapsed_ms: int

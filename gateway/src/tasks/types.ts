@@ -33,6 +33,7 @@ export interface ExtractionRequest {
   filename: string;
   engine: ExtractionEngine;
   profile?: string;
+  pdfMode?: "auto" | "raster";
   source?: ExtractionSource;
   budgets?: ExtractionBudgets;
   privacy?: PrivacyPolicy;
@@ -47,6 +48,7 @@ interface SequencedEvent {
 
 export interface ExtractionMeta {
   engine?: string;
+  engine_chain?: string[];
   profile?: string;
   pages?: number;
   chunks?: number;
@@ -54,6 +56,7 @@ export interface ExtractionMeta {
   tablesFound?: number;
   tableCells?: number;
   pipeline?: string;
+  pdf_mode?: "auto" | "raster";
   preprocessSteps?: string[];
   layoutSteps?: string[];
   elapsedMs?: number;

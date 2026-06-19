@@ -224,7 +224,7 @@ def test_generated_long_receipt_reaches_engine_as_bounded_segments(monkeypatch):
     monkeypatch.setattr(
         convert_service,
         "_create_engine",
-        lambda _engine_type: FakeEngine(),
+        lambda _engine_type, _profile: FakeEngine(),
     )
 
     events = list(

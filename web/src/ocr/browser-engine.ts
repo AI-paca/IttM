@@ -37,7 +37,10 @@ export async function runBrowserOcrLowMemory(
           `Обработка сегмента ${prepared.index + 1}/${prepared.total}...`,
         );
       }
-      const text = await workerLease.recognize(prepared.input);
+      const text = await workerLease.recognize(
+        prepared.input,
+        prepared.pageSegmentationMode,
+      );
       chunks.push(text);
       const nextMerged = mergeOcrTextChunks(chunks);
       onChunkExtracted?.(nextMerged.slice(merged.length));

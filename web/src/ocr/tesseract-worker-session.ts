@@ -9,6 +9,7 @@ interface TesseractLoggerMessage {
 }
 
 interface TesseractWorkerLike {
+  setParameters?(params: Record<string, string>): Promise<unknown>;
   recognize(input: unknown): Promise<{ data: { text: string } }>;
   terminate(): Promise<void>;
 }
@@ -71,6 +72,9 @@ function cacheKey(profile: BrowserOcrProfile): string {
     langPath: profile.langPath || "",
     cachePath: profile.cachePath || "",
     gzip: profile.gzip ?? null,
+    textRegionPsm: profile.textRegionPsm,
+    edgeWordFallbackPsm: profile.edgeWordFallbackPsm,
+    edgeWordFallbackMinTokens: profile.edgeWordFallbackMinTokens,
   });
 }
 
@@ -102,6 +106,7 @@ function normalizeWorkerError(error: unknown, workerPath?: string): Error {
 
 class BrowserOcrWorkerSession {
   private readonly key: string;
+  private readonly profile: BrowserOcrProfile;
   private readonly workerPromise: Promise<TesseractWorkerLike>;
   private progressSink: ProgressSink;
   private busy = false;
@@ -112,6 +117,7 @@ class BrowserOcrWorkerSession {
     createWorkerFn: CreateWorkerFn,
   ) {
     this.key = cacheKey(profile);
+    this.profile = profile;
     this.progressSink = onProgress;
     const workerOptions: TesseractWorkerOptions = {
       ...browserTesseractOptions(),
@@ -141,15 +147,34 @@ class BrowserOcrWorkerSession {
     this.progressSink = onProgress;
   }
 
-  async recognize(input: File | Blob): Promise<string> {
+  async recognize(
+    input: File | Blob,
+    pageSegmentationMode?: string,
+  ): Promise<string> {
     this.busy = true;
     try {
       const worker = await this.workerPromise;
       const recognizeInput = await toTesseractRecognizeInput(input);
+      await worker.setParameters?.({
+        tessedit_pageseg_mode:
+          pageSegmentationMode || this.profile.textRegionPsm,
+      });
       const {
         data: { text },
       } = await worker.recognize(recognizeInput);
-      return text;
+      if (text.trim() || pageSegmentationMode) return text;
+
+      await worker.setParameters?.({
+        tessedit_pageseg_mode: this.profile.edgeWordFallbackPsm,
+      });
+      const {
+        data: { text: fallbackText },
+      } = await worker.recognize(recognizeInput);
+      const fallbackTokens =
+        fallbackText.match(/[\p{L}\p{N}_]+/gu)?.length ?? 0;
+      return fallbackTokens >= this.profile.edgeWordFallbackMinTokens
+        ? fallbackText
+        : text;
     } finally {
       this.busy = false;
     }
@@ -187,8 +212,11 @@ export class BrowserOcrWorkerLease {
     private readonly keepAlive: boolean,
   ) {}
 
-  recognize(input: File | Blob): Promise<string> {
-    return this.session.recognize(input);
+  recognize(
+    input: File | Blob,
+    pageSegmentationMode?: string,
+  ): Promise<string> {
+    return this.session.recognize(input, pageSegmentationMode);
   }
 
   async release(): Promise<void> {

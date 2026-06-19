@@ -13,7 +13,7 @@ from PIL import Image
 
 from app import upload_limits
 from app.main import app
-from app.routers import install
+from app.routers import convert, install
 from app.services import convert_service
 
 client = TestClient(app)
@@ -45,6 +45,41 @@ def test_health_v1_alias():
     response = client.get("/v1/health")
     assert response.status_code == 200
     assert response.json()["ok"] is True
+
+
+def test_pipeline_flags_catalog_is_available_but_overrides_disabled():
+    response = client.get("/v1/pipeline/flags")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["overrides_enabled"] is False
+    assert payload["override_parameter"] == "pipeline_flags"
+    assert "backend_tesseract_standard" in payload["profiles"]
+    assert any(
+        flag == "ocr_language_priority:rus+eng+kaz+kir+chi_sim"
+        for flag in payload["profiles"]["backend_tesseract_standard"]
+    )
+    assert any(entry["key"] == "pipeline_flags" for entry in payload["available_flags"])
+
+
+def test_convert_rejects_disabled_pipeline_flag_overrides(monkeypatch):
+    def fail_convert(*_args, **_kwargs):
+        raise AssertionError("disabled pipeline_flags must be rejected before OCR")
+
+    monkeypatch.setattr(convert_service, "convert_bytes", fail_convert)
+
+    img = Image.new("RGB", (20, 20), color=(255, 255, 255))
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format="PNG")
+    img_bytes.seek(0)
+
+    response = client.post(
+        "/convert?pipeline_flags=ocr_text_region_psm:11",
+        files={"file": ("test.png", img_bytes, "image/png")},
+    )
+
+    assert response.status_code == 400
+    assert "disabled" in response.json()["detail"]
 
 
 def test_readiness():
@@ -130,7 +165,8 @@ def test_install_easyocr_starts_background_worker(monkeypatch):
 def test_convert_invalid_pdf():
     # Sending a broken pdf
     response = client.post(
-        "/convert?engine_type=auto", files={"file": ("test.pdf", b"%PDF-1.4...invalid", "application/pdf")}
+        "/convert?engine_type=auto",
+        files={"file": ("test.pdf", b"%PDF-1.4...invalid", "application/pdf")},
     )
     # Our new exception handler should return 400 Bad Request
     assert response.status_code == 400
@@ -139,23 +175,34 @@ def test_convert_invalid_pdf():
 
 def test_convert_invalid_image():
     # Sending a totally invalid text file as an image
-    response = client.post("/convert?engine_type=auto", files={"file": ("test.png", b"not an image", "image/png")})
+    response = client.post(
+        "/convert?engine_type=auto",
+        files={"file": ("test.png", b"not an image", "image/png")},
+    )
     # Our new exception handler should return 400 Bad Request
     assert response.status_code == 400
     assert "Could not load image" in response.json()["detail"]
 
 
 def test_convert_uses_service_contract(monkeypatch):
-    def fake_convert(content, filename, engine_type="auto", pipeline_profile=None):
+    def fake_convert(
+        content,
+        filename,
+        engine_type="auto",
+        pipeline_profile=None,
+        pdf_mode="auto",
+    ):
         assert content.startswith(b"\x89PNG")
         assert filename == "test.png"
         assert engine_type == "auto"
         assert pipeline_profile is not None
+        assert pdf_mode == "raster"
         return "FAKE OCR MARKDOWN", {
             "engine": "fake",
             "chunks": 1,
             "cards_found": 0,
             "pages": 1,
+            "pdf_mode": pdf_mode,
             "elapsed_ms": 0,
         }
 
@@ -166,20 +213,41 @@ def test_convert_uses_service_contract(monkeypatch):
     img.save(img_bytes, format="PNG")
     img_bytes.seek(0)
 
-    response = client.post("/convert?engine_type=auto", files={"file": ("test.png", img_bytes, "image/png")})
+    response = client.post(
+        "/convert?engine_type=auto&pdf_mode=raster",
+        files={"file": ("test.png", img_bytes, "image/png")},
+    )
     assert response.status_code == 200
     json_data = response.json()
     assert json_data["markdown"] == "FAKE OCR MARKDOWN"
     assert json_data["meta"]["engine"] == "fake"
     assert json_data["meta"]["chunks"] == 1
+    assert json_data["meta"]["pdf_mode"] == "raster"
+
+
+def test_convert_rejects_unknown_pdf_mode():
+    response = client.post(
+        "/convert?pdf_mode=magic",
+        files={"file": ("test.pdf", b"%PDF-1.7", "application/pdf")},
+    )
+
+    assert response.status_code == 400
+    assert "Known modes: auto, raster" in response.json()["detail"]
 
 
 def test_convert_stream_emits_pages_before_completion(monkeypatch):
-    def fake_iter(content, filename, engine_type="auto", pipeline_profile=None):
+    def fake_iter(
+        content,
+        filename,
+        engine_type="auto",
+        pipeline_profile=None,
+        pdf_mode="auto",
+    ):
         assert content == b"image bytes"
         assert filename == "test.png"
         assert engine_type == "tesseract"
         assert pipeline_profile is not None
+        assert pdf_mode == "raster"
         yield {"type": "page", "page": 1, "markdown": "first"}
         yield {"type": "page", "page": 2, "markdown": "second"}
         yield {
@@ -192,6 +260,7 @@ def test_convert_stream_emits_pages_before_completion(monkeypatch):
                 "table_cells": 0,
                 "pages": 2,
                 "pipeline": "backend_tesseract_standard",
+                "pdf_mode": pdf_mode,
                 "preprocess_steps": [],
                 "layout_steps": [],
                 "elapsed_ms": 0,
@@ -201,7 +270,7 @@ def test_convert_stream_emits_pages_before_completion(monkeypatch):
     monkeypatch.setattr(convert_service, "iter_convert_bytes", fake_iter)
 
     response = client.post(
-        "/convert/stream?engine_type=tesseract",
+        "/convert/stream?engine_type=tesseract&pdf_mode=raster",
         files={"file": ("test.png", b"image bytes", "image/png")},
     )
     events = [json.loads(line) for line in response.text.splitlines()]
@@ -211,13 +280,105 @@ def test_convert_stream_emits_pages_before_completion(monkeypatch):
     assert [event["type"] for event in events] == ["page", "page", "complete"]
     assert events[0]["markdown"] == "first"
     assert events[1]["page"] == 2
+    assert events[2]["meta"]["pdf_mode"] == "raster"
     assert events[2]["meta"]["elapsed_ms"] >= 0
+
+
+def test_convert_stream_emits_heartbeat_while_page_is_busy(monkeypatch):
+    release = threading.Event()
+
+    def slow_iter(
+        content,
+        filename,
+        engine_type="auto",
+        pipeline_profile=None,
+        pdf_mode="auto",
+    ):
+        assert pdf_mode == "auto"
+        release.wait(0.2)
+        yield {"type": "page", "page": 1, "markdown": "done"}
+        yield {
+            "type": "complete",
+            "meta": {
+                "engine": "fake",
+                "chunks": 1,
+                "cards_found": 0,
+                "tables_found": 0,
+                "table_cells": 0,
+                "pages": 1,
+                "pipeline": "backend_tesseract_standard",
+                "preprocess_steps": [],
+                "layout_steps": [],
+                "elapsed_ms": 0,
+            },
+        }
+
+    monkeypatch.setattr(convert.convert_service, "iter_convert_bytes", slow_iter)
+    monkeypatch.setattr(convert, "STREAM_HEARTBEAT_SECONDS", 0.01, raising=False)
+
+    stream = convert._stream_conversion(
+        b"image bytes",
+        "test.png",
+        "tesseract",
+        object(),
+        "auto",
+    )
+    first = json.loads(next(stream))
+    release.set()
+    remaining = [json.loads(line) for line in stream]
+
+    assert first == {"type": "progress", "stage": "ocr"}
+    assert [event["type"] for event in remaining] == ["page", "complete"]
+
+
+def test_convert_stream_stops_producer_after_client_disconnect(monkeypatch):
+    second_page_started = threading.Event()
+    release_second_page = threading.Event()
+    continued_after_second_page = threading.Event()
+
+    def two_page_iter(
+        content,
+        filename,
+        engine_type="auto",
+        pipeline_profile=None,
+        pdf_mode="auto",
+    ):
+        assert pdf_mode == "raster"
+        yield {"type": "page", "page": 1, "markdown": "first"}
+        second_page_started.set()
+        release_second_page.wait(1)
+        yield {"type": "page", "page": 2, "markdown": "second"}
+        continued_after_second_page.set()
+        yield {"type": "complete", "meta": {"elapsed_ms": 0}}
+
+    monkeypatch.setattr(convert.convert_service, "iter_convert_bytes", two_page_iter)
+
+    stream = convert._stream_conversion(
+        b"image bytes",
+        "test.pdf",
+        "tesseract",
+        object(),
+        "raster",
+    )
+    assert json.loads(next(stream))["page"] == 1
+    stream.close()
+    release_second_page.set()
+
+    assert not second_page_started.wait(0.1)
+    assert not continued_after_second_page.wait(0.1)
 
 
 def test_convert_does_not_block_health_endpoint(monkeypatch):
     started = threading.Event()
 
-    def slow_convert(content, filename, engine_type="auto", pipeline_profile=None):
+    def slow_convert(
+        content,
+        filename,
+        engine_type="auto",
+        pipeline_profile=None,
+        pdf_mode="auto",
+    ):
+        assert pdf_mode == "auto"
         started.set()
         time.sleep(1)
         return "done", {
@@ -232,7 +393,9 @@ def test_convert_does_not_block_health_endpoint(monkeypatch):
 
     async def scenario():
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as async_client:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test"
+        ) as async_client:
             convert_task = asyncio.create_task(
                 async_client.post(
                     "/convert?engine_type=auto",
@@ -286,14 +449,18 @@ def test_image_bytes_do_not_use_pdf_temp_directory(monkeypatch):
     def fail_temp_directory(*args, **kwargs):
         pytest.fail("image conversion must not create a PDF temp directory")
 
-    monkeypatch.setattr(convert_service, "AutoEngine", lambda prefer_tesseract=True: FakeEngine())
-    monkeypatch.setattr(convert_service.tempfile, "TemporaryDirectory", fail_temp_directory)
+    monkeypatch.setattr(convert_service, "AutoEngine", lambda **_kwargs: FakeEngine())
+    monkeypatch.setattr(
+        convert_service.tempfile, "TemporaryDirectory", fail_temp_directory
+    )
 
     image = Image.new("RGB", (100, 30), color="white")
     content = io.BytesIO()
     image.save(content, format="PNG")
 
-    markdown, meta = convert_service.convert_bytes(content.getvalue(), filename="test.png", engine_type="auto")
+    markdown, meta = convert_service.convert_bytes(
+        content.getvalue(), filename="test.png", engine_type="auto"
+    )
 
     assert markdown == "image text"
     assert meta["pages"] == 1

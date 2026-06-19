@@ -3,7 +3,9 @@
 [Документация](./README.md) |
 [Границы ответственности](./course/boundaries.md)
 
-Text Extractor разделен на четыре основные части: браузерный интерфейс, стратегии распознавания на стороне браузера, TypeScript gateway и Python OCR-сервис. В локальном режиме `server.ts` одновременно обслуживает API и frontend. В Docker-режиме наружу опубликован только nginx: он раздает собранный frontend и проксирует `/api/*` во внутренний gateway. Python OCR-сервис остается закрытым внутри runtime-сети и доступен gateway по `OCR_URL`.
+IttM — **gateway-first** инструмент: ядром является Extraction contract (gateway API), а браузерный интерфейс, CLI-обёртка и `curl` — равноправные клиенты над одним backend-ом. Архитектурно проект делится на браузерный клиент, браузерные стратегии распознавания, TypeScript gateway и Python OCR-сервис. Способ запуска (Docker / bare-metal / статическая сборка) и способ обращения к сервису (Web UI / `curl` / CLI) режимами обработки не являются — обработкой управляют четыре движка (Local Tesseract, Local EasyOCR, Browser OCR, External LLM).
+
+При локальном запуске `server.ts` одновременно обслуживает API и frontend. В Docker-режиме наружу опубликован только nginx: он раздает собранный frontend и проксирует `/api/*` во внутренний gateway. Python OCR-сервис остается закрытым внутри runtime-сети и доступен gateway по `OCR_URL`.
 
 ```mermaid
 flowchart TB

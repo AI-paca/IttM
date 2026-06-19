@@ -20,6 +20,7 @@
     "test:contract": "bash scripts/run-contract-tests.sh",
     "test:smoke": "bash scripts/run-smoke-tests.sh",
     "test:pages": "node scripts/verify-pages-build.mjs dist /IttM/",
+    "test:engine-docs": "python3 scripts/verify_engine_profile_docs.py && python3 scripts/verify_pipeline_flag_docs.py",
     "test:pages:live": "node scripts/smoke-pages.mjs",
     "test:compose": "bash scripts/smoke-compose.sh",
     "test:resources": "bash scripts/run-resource-tests.sh",

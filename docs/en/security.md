@@ -44,7 +44,9 @@ files.
 ## Open Risks
 
 - The local API has no authentication and relies on loopback/network binding.
-- There is no task ID, durable queue, retention policy, or server-side cancel.
+- The in-memory task queue (`maxWorkers: 1`, `maxQueued: 32`) provides a task ID
+  and server-side cancel (`POST /api/tasks/:id/cancel`), but does not survive a
+  restart: durable queue, retry, and retention are absent.
 - The complete upload exists in Python memory.
 - Not every decompression/image bomb pattern is rejected.
 - Streaming failures after headers are represented as NDJSON `error` events

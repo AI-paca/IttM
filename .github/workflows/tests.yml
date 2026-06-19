@@ -32,6 +32,9 @@ jobs:
       - name: TypeScript typecheck
         run: npm run typecheck
 
+      - name: Engine profile documentation contract
+        run: npm run test:engine-docs
+
       - name: Build OCR Docker image
         run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci ./ocr
 

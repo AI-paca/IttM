@@ -1,0 +1,185 @@
+{
+  "models": [
+    {
+      "id": "glm-ocr",
+      "label": "Z.ai GLM-OCR",
+      "hf_repo": "zai-org/GLM-OCR",
+      "default_backend": "ollama",
+      "api_family": "vision-language",
+      "backends": {
+        "ollama": {
+          "kind": "ollama",
+          "ollama_model": "glm-ocr",
+          "api_url": "http://127.0.0.1:11434/v1/chat/completions"
+        },
+        "vllm": {
+          "kind": "vllm",
+          "port": 8080,
+          "docker_image": "vllm/vllm-openai:nightly",
+          "extra_args": ["--allowed-local-media-path", "/"]
+        }
+      },
+      "flag_contract": [
+        {
+          "group": "alignment",
+          "key": "document_orientation",
+          "requirement": "quality",
+          "reason": "Useful for camera/PDF raster inputs, but GLM-OCR can still accept a normal image without it."
+        },
+        {
+          "group": "positioning",
+          "key": "layout_detector",
+          "requirement": "required",
+          "reason": "The model card recommends a full document parsing pipeline with layout analysis for Markdown output."
+        },
+        {
+          "group": "composition",
+          "key": "output_task_prompt",
+          "requirement": "required",
+          "reason": "The model uses task prompts such as Text Recognition, Formula Recognition, and Table Recognition."
+        },
+        {
+          "group": "recognition",
+          "key": "max_new_tokens",
+          "requirement": "quality",
+          "reason": "Dense documents need longer generation, but the flag should not change preprocessing."
+        }
+      ]
+    },
+    {
+      "id": "paddle-ocrv6-medium",
+      "label": "PaddlePaddle PP-OCRv6 medium detector",
+      "hf_repo": "PaddlePaddle/PP-OCRv6_medium_det_safetensors",
+      "default_backend": "paddleocr",
+      "api_family": "detector-recognizer",
+      "backends": {
+        "paddleocr": {
+          "kind": "local-fastapi",
+          "server_backend": "paddle",
+          "port": 18080,
+          "det_model": "PP-OCRv6_medium_det",
+          "rec_model": "PP-OCRv6_medium_rec"
+        }
+      },
+      "flag_contract": [
+        {
+          "group": "alignment",
+          "key": "use_doc_orientation_classify",
+          "requirement": "quality",
+          "reason": "PaddleOCR exposes orientation classification as an optional pipeline module."
+        },
+        {
+          "group": "alignment",
+          "key": "use_doc_unwarping",
+          "requirement": "quality",
+          "reason": "Unwarping is optional and belongs before detection, not inside recognition."
+        },
+        {
+          "group": "positioning",
+          "key": "text_detection_model_name",
+          "requirement": "required",
+          "reason": "This model is a detector; choosing the detector is the core positioning flag."
+        },
+        {
+          "group": "recognition",
+          "key": "text_recognition_model_name",
+          "requirement": "required",
+          "reason": "The detector alone does not read text; a recognizer is required for OCR text output."
+        },
+        {
+          "group": "composition",
+          "key": "table_or_list_formatter",
+          "requirement": "quality",
+          "reason": "PaddleOCR returns OCR elements; Markdown table/list composition must remain a separate layer."
+        }
+      ]
+    },
+    {
+      "id": "qianfan-ocr",
+      "label": "Baidu Qianfan-OCR",
+      "hf_repo": "baidu/Qianfan-OCR",
+      "default_backend": "vllm",
+      "api_family": "vision-language",
+      "backends": {
+        "vllm": {
+          "kind": "vllm",
+          "port": 8080,
+          "docker_image": "vllm/vllm-openai:nightly",
+          "trust_remote_code": true,
+          "extra_args": [
+            "--trust-remote-code",
+            "--hf-overrides",
+            "{\"architectures\": [\"InternVLChatModel\"]}"
+          ]
+        }
+      },
+      "flag_contract": [
+        {
+          "group": "alignment",
+          "key": "image_normalization",
+          "requirement": "quality",
+          "reason": "The model accepts images directly; normalization should be a profile improvement, not a hidden requirement."
+        },
+        {
+          "group": "positioning",
+          "key": "enable_thinking",
+          "requirement": "quality",
+          "reason": "Layout-as-Thought can expose layout reasoning, but basic Markdown parsing works without it."
+        },
+        {
+          "group": "composition",
+          "key": "parse_prompt",
+          "requirement": "required",
+          "reason": "The model card uses explicit prompts such as Parse this document to Markdown."
+        },
+        {
+          "group": "postprocess",
+          "key": "markdown_schema",
+          "requirement": "quality",
+          "reason": "Schema constraints should validate/shape output after recognition, not alter text detection."
+        }
+      ]
+    },
+    {
+      "id": "nemotron-ocr-v2",
+      "label": "NVIDIA Nemotron OCR v2",
+      "hf_repo": "nvidia/nemotron-ocr-v2",
+      "default_backend": "nemotron",
+      "api_family": "detector-recognizer",
+      "backends": {
+        "nemotron": {
+          "kind": "local-fastapi",
+          "server_backend": "nemotron",
+          "port": 18080,
+          "download_include": "v2_multilingual/*"
+        }
+      },
+      "flag_contract": [
+        {
+          "group": "alignment",
+          "key": "lang",
+          "requirement": "quality",
+          "reason": "The constructor can choose multilingual or English weights; this is model selection, not layout."
+        },
+        {
+          "group": "positioning",
+          "key": "detector_only",
+          "requirement": "quality",
+          "reason": "Detector-only mode tests positioning without recognition."
+        },
+        {
+          "group": "composition",
+          "key": "merge_level",
+          "requirement": "required",
+          "reason": "The API exposes word/paragraph grouping; this directly changes Markdown block composition."
+        },
+        {
+          "group": "recognition",
+          "key": "skip_relational",
+          "requirement": "quality",
+          "reason": "Skipping relational grouping trades quality and speed after text has been found."
+        }
+      ]
+    }
+  ]
+}

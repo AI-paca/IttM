@@ -6,24 +6,28 @@ usage() {
 Usage:
   scripts/benchmark-browser-testtables.sh \
     --source /path/to/commit-worktree \
-    --fixtures /path/to/testtables \
-    --output /path/to/testtables/tmp/<label> \
+    --fixtures /path/to/debug-inputs \
+    --output /path/to/debug/tmp/browser-tesseract \
     [--fixture 'photo*.jpg'] \
-    [--timeout 120] \
+    [--profile browser_tesseract_dewarp] \
+    [--timeout 900] \
     [--resume]
 
 The script runs the browser Tesseract.js/WASM engine in a fresh Node process
-for every image. It covers browser OCR and layout reconstruction, but not the
-DOM/Canvas preprocessing path. PDF and full-browser memory tests are separate.
+for every image. A Node Canvas shim executes the same image preprocessing used
+by the browser UI. PDF worker and full-browser memory tests are separate.
 EOF
 }
 
 source_root=""
 fixtures_root=""
 output_root=""
-timeout_seconds=120
+timeout_seconds=900
 fixture_patterns=()
 resume=0
+tessdata_image="${OCR_BROWSER_TESSDATA_IMAGE:-ittm-ocr}"
+browser_profile="${BROWSER_OCR_PROFILE:-browser_tesseract_dewarp}"
+original_args=("$@")
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -41,6 +45,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --fixture)
       fixture_patterns+=("$2")
+      shift 2
+      ;;
+    --profile)
+      browser_profile="$2"
       shift 2
       ;;
     --timeout)
@@ -103,6 +111,37 @@ commit="$(git -C "$source_root" rev-parse HEAD)"
 subject="$(git -C "$source_root" show -s --format=%s HEAD)"
 summary="$output_root/summary.tsv"
 manifest="$output_root/manifest.md"
+lang_path="${BROWSER_OCR_LANG_PATH:-$source_root/.cache/tessdata}"
+profile_json="$output_root/profile.json"
+
+mkdir -p "$lang_path"
+for lang in eng rus chi_sim; do
+  if [[ -s "$lang_path/$lang.traineddata" ]]; then
+    continue
+  fi
+  if ! docker image inspect "$tessdata_image" >/dev/null 2>&1; then
+    echo "Missing $lang.traineddata and Docker image $tessdata_image" >&2
+    exit 2
+  fi
+  docker run --rm \
+    -v "$lang_path:/out" \
+    "$tessdata_image" \
+    sh -c 'set -eu
+      lang="$1"
+      for dir in /usr/share/tesseract-ocr/5/tessdata /usr/share/tesseract-ocr/4.00/tessdata; do
+        if [ -s "$dir/$lang.traineddata" ]; then
+          cp "$dir/$lang.traineddata" "/out/$lang.traineddata"
+          exit 0
+        fi
+      done
+      echo "Missing $lang.traineddata in OCR image" >&2
+      exit 1' sh "$lang"
+done
+
+(
+  cd "$source_root"
+  node --import tsx scripts/browser-benchmark-profile-json.ts "$browser_profile"
+) >"$profile_json"
 
 cat >"$manifest" <<EOF
 # Browser OCR benchmark
@@ -110,14 +149,17 @@ cat >"$manifest" <<EOF
 - commit: \`$commit\`
 - subject: $subject
 - runtime: Node.js \`$(node --version)\` with Tesseract.js/WASM
+- tessdata: \`$lang_path\`
+- browser profile: \`$browser_profile\`
 - timeout per image: ${timeout_seconds}s
 - fixtures: ${#fixtures[@]}
-- scope: OCR worker and browser layout reconstruction
-- excluded: DOM/Canvas preprocessing and browser PDF worker
+- scope: Canvas preprocessing, OCR worker, and browser layout reconstruction
+- excluded: browser PDF worker
+- command: \`$(printf '%q ' "$0" "${original_args[@]}")\`
 EOF
 
 if [[ $resume -ne 1 || ! -s "$summary" ]]; then
-  printf 'commit\tfile\texit\twall_ms\tengine_elapsed_ms\trss_before_bytes\trss_after_bytes\n' >"$summary"
+  printf 'commit\tfile\texit\twall_ms\tengine_elapsed_ms\trss_before_bytes\trss_after_bytes\tprofile\tflags\n' >"$summary"
 fi
 
 for fixture in "${fixtures[@]}"; do
@@ -133,8 +175,10 @@ for fixture in "${fixtures[@]}"; do
   set +e
   (
     cd "$source_root"
-    timeout --signal=TERM "${timeout_seconds}s" \
-      node --import tsx scripts/benchmark-browser-ocr.ts "$fixture"
+    BROWSER_OCR_LANG_PATH="$lang_path" \
+    BROWSER_OCR_PREPROCESS_RUNTIME=node_canvas \
+      timeout --signal=TERM "${timeout_seconds}s" \
+      node --import tsx scripts/benchmark-browser-ocr.ts --profile "$browser_profile" "$fixture"
   ) >"$response_file" 2>"$error_file"
   exit_code=$?
   set -e
@@ -186,6 +230,8 @@ fields = [
     elapsed_ms,
     payload.get("rss_before_bytes", ""),
     payload.get("rss_after_bytes", ""),
+    payload.get("profile", ""),
+    payload.get("flags", ""),
 ]
 with pathlib.Path(summary_path).open("a", encoding="utf-8") as output:
     output.write("\t".join(str(value).replace("\t", " ") for value in fields))

@@ -110,6 +110,21 @@ logs/
 probes/actual*.json
 ocr/tests/fixtures/
 testtables/
+debug/*
+!debug/.gitkeep
+!debug/.env.sample
+!debug/README.md
+!debug/fixtures/
+debug/fixtures/*
+!debug/fixtures/.gitkeep
+!debug/fixtures/SAMPLE_4k.png
+!debug/fixtures/SAMPLE_mixed_ru_en_zh_table_image.pdf
+!debug/reference/
+debug/reference/*
+!debug/reference/.gitkeep
+!debug/reference/*.md
+!debug/private-report.md
+
 # LLM review drafts
 docs/ревью от LLM/
 .review-from-llm/

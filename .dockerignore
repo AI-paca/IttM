@@ -25,6 +25,7 @@ edge
 ocr
 scripts
 testtables/
+debug/
 .env
 .env.*
 !.env.example

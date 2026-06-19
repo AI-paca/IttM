@@ -76,7 +76,7 @@ test(
     const fixture = resolve(fixtureRoot, "multilingual.png");
     if (!existsSync(fixture)) {
       try {
-        execFileSync("python3", ["ocr/tests/quality_fixtures.py"], {
+        execFileSync("python3", ["ocr/tests/support/quality_fixtures.py"], {
           stdio: "pipe",
         });
       } catch (error) {

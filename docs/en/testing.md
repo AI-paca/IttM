@@ -69,17 +69,17 @@ real local fixtures stay ignored. Runtime A/B output stays
 under ignored `debug/tmp/`, while final matrices are written to
 `debug/result.csv` and `debug/time.csv`. Legacy `testtables/` inputs are only a
 fallback for old local worktrees.
-`ocr/tests/test_debug_sample_corpus.py` runs the tracked SAMPLE fixtures through
+`ocr/tests/debug/test_sample_corpus.py` runs the tracked SAMPLE fixtures through
 backend Tesseract: the 4K edge-to-edge word sample and the hard image-only
 10x14 mixed-script table PDF must both stay above the debug gate.
 
 Reusable runners:
 
-- `scripts/debug-all.sh`
-- `scripts/run-debug.sh`
-- `scripts/run-browser-debug.sh`
-- `scripts/benchmark-browser-testtables.sh`
-- `scripts/benchmark-browser-pdf-memory.mjs`
+- `scripts/debug/debug-all.sh`
+- `scripts/debug/run-debug.sh`
+- `scripts/debug/run-browser-debug.sh`
+- `scripts/benchmark/benchmark-browser-testtables.sh`
+- `scripts/benchmark/benchmark-browser-pdf-memory.mjs`
 
 The browser image benchmark executes the UI preprocessing path through a Node
 Canvas shim. Dense-grid curriculum pages are intentionally slow multi-pass

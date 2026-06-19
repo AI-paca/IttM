@@ -6,27 +6,27 @@
 
 ## Реестр точек входа
 
-| Сценарий           | Внешний вход                     | Первый исполняемый файл                       | Следующая граница                           |
-| ------------------ | -------------------------------- | --------------------------------------------- | ------------------------------------------- |
-| Browser UI         | открытие страницы                | `web/index.html` -> `web/src/main.tsx`        | `App.tsx` -> `OcrProvider` -> `AppShell`    |
-| Загрузка документа | file input, drop, paste          | `web/src/ocr/OcrContext.tsx`                  | `file-utils.ts` -> `use-extraction.ts`      |
-| Browser OCR        | выбор `browser` или fallback     | `web/src/ocr/use-extraction.ts`               | `browser-engine.ts` -> Tesseract.js         |
-| Server OCR         | `POST /api/convert/stream`       | `server.ts`                                   | `gateway/src/core/handle.ts` -> Python OCR  |
-| Gateway API        | HTTP `/api/*`                    | `gateway/src/core/handle.ts`                  | `core/routes.ts` -> `clients/ocrClient.ts`  |
-| Python OCR API     | ASGI `app.main:app`              | `ocr/app/main.py`                             | `routers/*` -> `services/*` -> `engines/*`  |
-| Edge proxy         | Cloudflare Worker `fetch`        | `edge/cloudflare-worker.ts`                   | Gemini API или `ORIGIN_URL`                 |
-| Local full runtime | `bash scripts/run-local.sh`      | `scripts/run-local.sh`                        | Bun `server.ts` + Uvicorn `app.main:app`    |
-| Static build       | `bash scripts/build-lite.sh`     | `scripts/build-lite.sh`                       | `npm run build:web` -> Vite -> `dist/`      |
-| Node development   | `npm run dev`                    | `package.json` -> `tsx server.ts`             | Express + Vite middleware                   |
-| Node production    | `npm run build && npm start`     | `dist/server.js`                              | Express API + static `dist/`                |
-| Docker stack       | `docker compose up -d`           | `docker-compose.yml`                          | nginx -> gateway -> OCR                     |
-| Gateway container  | Docker `CMD`                     | `docker/gateway.Dockerfile`                   | `node dist/server.cjs`                      |
-| Frontend container | Docker `CMD`                     | `docker/nginx.Dockerfile`                     | nginx config -> static files and API proxy  |
-| OCR container      | Compose `command` / Docker `CMD` | `docker-compose.yml`, `docker/ocr.Dockerfile` | `uvicorn app.main:app`                      |
-| CI quality gate    | push, pull request, manual run   | `.github/workflows/tests.yml`                 | lint, tests, builds, OCR quality            |
-| GitHub Pages       | push to `main`, manual run       | `.github/workflows/static.yml`                | Vite build -> Pages artifact                |
-| Local CI mirror    | `npm run debug`                  | `scripts/debug.sh`                            | Compose, JS/Python checks, optional `act`   |
-| Test fixtures      | CI/debug script                  | `ocr/tests/quality_fixtures.py`               | generated files under ignored test fixtures |
+| Сценарий           | Внешний вход                         | Первый исполняемый файл                       | Следующая граница                           |
+| ------------------ | ------------------------------------ | --------------------------------------------- | ------------------------------------------- |
+| Browser UI         | открытие страницы                    | `web/index.html` -> `web/src/main.tsx`        | `App.tsx` -> `OcrProvider` -> `AppShell`    |
+| Загрузка документа | file input, drop, paste              | `web/src/ocr/OcrContext.tsx`                  | `file-utils.ts` -> `use-extraction.ts`      |
+| Browser OCR        | выбор `browser` или fallback         | `web/src/ocr/use-extraction.ts`               | `browser-engine.ts` -> Tesseract.js         |
+| Server OCR         | `POST /api/convert/stream`           | `server.ts`                                   | `gateway/src/core/handle.ts` -> Python OCR  |
+| Gateway API        | HTTP `/api/*`                        | `gateway/src/core/handle.ts`                  | `core/routes.ts` -> `clients/ocrClient.ts`  |
+| Python OCR API     | ASGI `app.main:app`                  | `ocr/app/main.py`                             | `routers/*` -> `services/*` -> `engines/*`  |
+| Edge proxy         | Cloudflare Worker `fetch`            | `edge/cloudflare-worker.ts`                   | Gemini API или `ORIGIN_URL`                 |
+| Local full runtime | `bash scripts/runtime/run-local.sh`  | `scripts/runtime/run-local.sh`                | Bun `server.ts` + Uvicorn `app.main:app`    |
+| Static build       | `bash scripts/runtime/build-lite.sh` | `scripts/runtime/build-lite.sh`               | `npm run build:web` -> Vite -> `dist/`      |
+| Node development   | `npm run dev`                        | `package.json` -> `tsx server.ts`             | Express + Vite middleware                   |
+| Node production    | `npm run build && npm start`         | `dist/server.js`                              | Express API + static `dist/`                |
+| Docker stack       | `docker compose up -d`               | `docker-compose.yml`                          | nginx -> gateway -> OCR                     |
+| Gateway container  | Docker `CMD`                         | `docker/gateway.Dockerfile`                   | `node dist/server.cjs`                      |
+| Frontend container | Docker `CMD`                         | `docker/nginx.Dockerfile`                     | nginx config -> static files and API proxy  |
+| OCR container      | Compose `command` / Docker `CMD`     | `docker-compose.yml`, `docker/ocr.Dockerfile` | `uvicorn app.main:app`                      |
+| CI quality gate    | push, pull request, manual run       | `.github/workflows/tests.yml`                 | lint, tests, builds, OCR quality            |
+| GitHub Pages       | push to `main`, manual run           | `.github/workflows/static.yml`                | Vite build -> Pages artifact                |
+| Local CI mirror    | `npm run debug`                      | `scripts/ci/debug.sh`                         | Compose, JS/Python checks, optional `act`   |
+| Test fixtures      | CI/debug script                      | `ocr/tests/support/quality_fixtures.py`       | generated files under ignored test fixtures |
 
 ## 1. Browser UI
 
@@ -211,12 +211,12 @@ docker compose up -d
 
 ### Bare-metal local
 
-**Точка входа:** `scripts/run-local.sh`
+**Точка входа:** `scripts/runtime/run-local.sh`
 
 ```text
-scripts/run-local.sh
+scripts/runtime/run-local.sh
 ├─ checks Bun, Python 3.10+, tesseract, pdftoppm
-├─ scripts/install-local-python.sh, если ocr/.venv отсутствует или неполный
+├─ scripts/runtime/install-local-python.sh, если ocr/.venv отсутствует или неполный
 ├─ uvicorn app.main:app --app-dir ocr --host 127.0.0.1
 └─ bun server.ts
 ```
@@ -225,10 +225,10 @@ scripts/run-local.sh
 
 ### Static / Lite
 
-**Точка входа:** `scripts/build-lite.sh`
+**Точка входа:** `scripts/runtime/build-lite.sh`
 
 ```text
-scripts/build-lite.sh
+scripts/runtime/build-lite.sh
 ├─ npm ci
 └─ npm run build:web
    └─ web/vite.config.ts
@@ -264,7 +264,7 @@ Worker:
 ├─ python: OCR pytest inside docker image
 └─ ocr-quality: browser OCR and backend OCR quality tests
 
-scripts/debug.sh
+scripts/ci/debug.sh
 ├─ local mirror of CI checks
 ├─ optional docker compose lifecycle
 ├─ OCR fixtures/tessdata preparation
@@ -345,9 +345,9 @@ ocr/app/
 ```text
 Runtime/config:
 ├─ server.ts                # Node entrypoint: API middleware, Vite dev, prod static
-├─ scripts/run-local.sh     # локальный запуск gateway + OCR через host/venv
-├─ scripts/build-lite.sh    # статическая Lite-сборка
-├─ scripts/debug.sh         # локальный вход для CI/debug проверок
+├─ scripts/runtime/run-local.sh     # локальный запуск gateway + OCR через host/venv
+├─ scripts/runtime/build-lite.sh    # статическая Lite-сборка
+├─ scripts/ci/debug.sh         # локальный вход для CI/debug проверок
 ├─ edge/cloudflare-worker.ts
 │                           # edge adapter для статического frontend и API proxy
 ├─ eslint.config.js         # ESLint + Prettier plugin для web/gateway TS

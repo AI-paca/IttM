@@ -37,7 +37,7 @@ _Для проверки работы API:_ `curl -fsS "http://localhost:<пор
 1. **Полная версия (Web UI + backend):**
 
    ```bash
-   bash scripts/run-local.sh
+   bash scripts/runtime/run-local.sh
    ```
 
 2. **Статический фронтенд без backend OCR:**
@@ -45,7 +45,7 @@ _Для проверки работы API:_ `curl -fsS "http://localhost:<пор
    Вся обработка происходит в браузере (Tesseract.js/WASM) или через внешние LLM API.
 
    ```bash
-   bash scripts/build-lite.sh
+   bash scripts/runtime/build-lite.sh
    ```
 
 ### Linux / Hyprland: скриншот прямо в буфер обмена

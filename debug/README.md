@@ -14,10 +14,10 @@ Ignored files:
 
 - Real OCR inputs copied into `debug/fixtures/`, except the two tracked SAMPLE files.
 - `result.csv` and `time.csv` - final per-method matrices; they are runtime
-  output written by `scripts/debug_matrix_report.py` and are regenerated on
-  every `scripts/debug-all.sh` run, so they are not part of the repository.
+  output written by `scripts/debug/debug_matrix_report.py` and are regenerated on
+  every `scripts/debug/debug-all.sh` run, so they are not part of the repository.
 - The whole `debug/tmp/` runtime tree. It is not part of the repository and
-  `scripts/debug-all.sh` recreates it, including engine subdirectories, when
+  `scripts/debug/debug-all.sh` recreates it, including engine subdirectories, when
   it does not exist.
 - Local `debug/.env`.
 
@@ -30,7 +30,7 @@ default, so `*.pdf.raster.png` and `*.pdf.raster.jpg` appear as separate rows in
 `result.csv` and `time.csv`.
 
 ```bash
-scripts/debug-all.sh
+scripts/debug/debug-all.sh
 ```
 
 This writes:
@@ -71,13 +71,13 @@ Selecting an API engine fails with a clear error instead of silently producing
 fake OCR:
 
 ```bash
-scripts/debug-all.sh --engines api-ollama
+scripts/debug/debug-all.sh --engines api-ollama
 ```
 
 ## Run One File
 
 ```bash
-scripts/debug-all.sh --fixture 'image (6).png'
+scripts/debug/debug-all.sh --fixture 'image (6).png'
 ```
 
 `--fixture` accepts shell globs matched against names under
@@ -88,25 +88,25 @@ looked up under `debug/reference/` using the same basename plus
 Limit backend PDF pages:
 
 ```bash
-scripts/debug-all.sh --fixture 'Adobe Scan Oct 26, 2022 (1).pdf' --max-pages 5
+scripts/debug/debug-all.sh --fixture 'Adobe Scan Oct 26, 2022 (1).pdf' --max-pages 5
 ```
 
 Use a per-file rule when running a mixed set:
 
 ```bash
-scripts/debug-all.sh --fixture-max-pages 'Adobe Scan Oct 26, 2022 (1).pdf=5'
+scripts/debug/debug-all.sh --fixture-max-pages 'Adobe Scan Oct 26, 2022 (1).pdf=5'
 ```
 
 Disable PDF raster rows for a faster PDF-only backend check:
 
 ```bash
-scripts/debug-all.sh --fixture '*.pdf' --no-pdf-raster
+scripts/debug/debug-all.sh --fixture '*.pdf' --no-pdf-raster
 ```
 
 Change raster formats or the page limit:
 
 ```bash
-scripts/debug-all.sh \
+scripts/debug/debug-all.sh \
   --fixture '*.pdf' \
   --pdf-raster-formats png,jpg \
   --pdf-raster-max-pages 5
@@ -117,25 +117,25 @@ scripts/debug-all.sh \
 All non-API engines are used by default:
 
 ```bash
-scripts/debug-all.sh --engines tesseract,easyocr,browser-tesseract
+scripts/debug/debug-all.sh --engines tesseract,easyocr,browser-tesseract
 ```
 
 One backend engine:
 
 ```bash
-scripts/debug-all.sh --engines tesseract
+scripts/debug/debug-all.sh --engines tesseract
 ```
 
 Backend without browser:
 
 ```bash
-scripts/debug-all.sh --engines tesseract,easyocr
+scripts/debug/debug-all.sh --engines tesseract,easyocr
 ```
 
 Browser only is supported for image fixtures:
 
 ```bash
-scripts/debug-all.sh --engines browser-tesseract --fixture '*.png'
+scripts/debug/debug-all.sh --engines browser-tesseract --fixture '*.png'
 ```
 
 ## Select Flags
@@ -145,7 +145,7 @@ By default every backend engine uses its automatic profile.
 Use one backend profile for every backend engine:
 
 ```bash
-scripts/debug-all.sh \
+scripts/debug/debug-all.sh \
   --engines tesseract,easyocr \
   --pipeline-profile backend_plain_text
 ```
@@ -153,7 +153,7 @@ scripts/debug-all.sh \
 Override flags for only one backend engine:
 
 ```bash
-scripts/debug-all.sh \
+scripts/debug/debug-all.sh \
   --engine-profile tesseract=backend_tesseract_standard \
   --engine-profile easyocr=backend_easyocr_table
 ```
@@ -161,7 +161,7 @@ scripts/debug-all.sh \
 Select the browser OCR profile:
 
 ```bash
-scripts/debug-all.sh --browser-profile browser_tesseract_dewarp
+scripts/debug/debug-all.sh --browser-profile browser_tesseract_dewarp
 ```
 
 The browser benchmark uses a Node Canvas shim for the same resize, dewarp,
@@ -173,7 +173,7 @@ tables run overlapping PSM passes, so the default browser timeout is 900s.
 Normal result files are CSV-only. XLSX is reserved for flag selection reports.
 
 ```bash
-python3 scripts/debug_flag_sweep.py \
+python3 scripts/debug/debug_flag_sweep.py \
   'debug/fixtures/image (7).png' \
   --output debug/tmp/flag-sweep-image7.csv \
   --xlsx-output debug/tmp/flag-sweep-image7.xlsx \
@@ -192,16 +192,16 @@ snapshots are not comma-separated CSV.
 
 ## PDF As Images
 
-The default `scripts/debug-all.sh` run already adds selected PDF fixtures as
+The default `scripts/debug/debug-all.sh` run already adds selected PDF fixtures as
 PNG and JPEG image rows. Use the lower-level probe only when you need to create
 those image fixtures without running the full matrix:
 
 ```bash
-scripts/debug_pdf_image_probe.py \
+scripts/debug/debug_pdf_image_probe.py \
   'debug/fixtures/09.03.03_05(ИУ1).pdf' \
   --max-pages 5 \
   --format png,jpg
-scripts/run-debug.sh \
+scripts/debug/run-debug.sh \
   --fixtures debug/tmp/pdf-image-fixtures \
   --expected-root debug/tmp/pdf-image-reference \
   --output debug/tmp/pdf-image-probe-run \

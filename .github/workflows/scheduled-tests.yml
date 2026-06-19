@@ -32,4 +32,4 @@ jobs:
           OCR_SOAK_ITERATIONS: "5"
           OCR_TEST_MEMORY: 768m
           OCR_TEST_CPUS: "2"
-        run: bash scripts/run-resource-tests.sh
+        run: bash scripts/ci/run-resource-tests.sh

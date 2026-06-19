@@ -129,7 +129,7 @@ jobs:
 
           mkdir -p .cache/tessdata ocr/tests/fixtures
 
-          container_id="$(docker create ittm-ocr-ci python tests/quality_fixtures.py)"
+          container_id="$(docker create ittm-ocr-ci python tests/support/quality_fixtures.py)"
           cleanup() {
             docker rm -f "$container_id" >/dev/null 2>&1 || true
           }
@@ -142,7 +142,7 @@ jobs:
             docker run --rm \
               -v "${PWD}/ocr/tests/fixtures:/app/tests/fixtures" \
               ittm-ocr-ci \
-              python tests/quality_fixtures.py
+              python tests/support/quality_fixtures.py
           fi
 
           for lang in eng rus chi_sim; do
@@ -216,4 +216,4 @@ jobs:
             -e RUN_OCR_QUALITY="${RUN_OCR_QUALITY}" \
             -v "${PWD}/ocr/tests/fixtures:/app/tests/fixtures" \
             ittm-ocr-ci \
-            python -m pytest tests/test_ocr_quality.py -q
+            python -m pytest tests/quality/test_ocr_quality.py -q

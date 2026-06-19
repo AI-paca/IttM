@@ -30,7 +30,7 @@
 ## Extraction contract
 
 IttM — **gateway-first** инструмент: ядром является Extraction contract (gateway
-API), а Web UI, CLI-обёртка (`scripts/ittm-extract.ts`) и `curl` — равноправные
+API), а Web UI, CLI-обёртка (`scripts/cli/ittm-extract.ts`) и `curl` — равноправные
 клиенты над одним и тем же backend-ом. Контракт не зависит ни от движка, ни от
 клиента.
 

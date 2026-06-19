@@ -30,7 +30,7 @@ debug/
 `fixtures/name.ext` связан с ручным эталоном `reference/name.ext.md`.
 В git остаются два SAMPLE-входа и все ручные `.md`; реальные fixtures
 сохраняются локально, но игнорируются.
-`tmp/` целиком игнорируется и не имеет `.gitkeep`: `scripts/debug-all.sh`
+`tmp/` целиком игнорируется и не имеет `.gitkeep`: `scripts/debug/debug-all.sh`
 создает его и вложенные каталоги движков при первом запуске в новом worktree.
 SAMPLE никогда не записываются в `tmp/`.
 
@@ -39,7 +39,7 @@ SAMPLE никогда не записываются в `tmp/`.
 Полный локальный прогон по умолчанию:
 
 ```bash
-scripts/debug-all.sh
+scripts/debug/debug-all.sh
 ```
 
 По умолчанию запускаются `tesseract,easyocr,browser-tesseract`; API-движки не
@@ -89,7 +89,7 @@ placeholder-ячейки не схлопываются. CSV для самих т
 ## Один Файл
 
 ```bash
-scripts/debug-all.sh --fixture 'image (7).png'
+scripts/debug/debug-all.sh --fixture 'image (7).png'
 ```
 
 `--fixture` принимает glob и может повторяться.
@@ -97,25 +97,25 @@ scripts/debug-all.sh --fixture 'image (7).png'
 Ограничить страницы PDF для backend:
 
 ```bash
-scripts/debug-all.sh --fixture 'Adobe Scan Oct 26, 2022 (1).pdf' --max-pages 5
+scripts/debug/debug-all.sh --fixture 'Adobe Scan Oct 26, 2022 (1).pdf' --max-pages 5
 ```
 
 Для смешанного набора используйте правило на конкретный файл:
 
 ```bash
-scripts/debug-all.sh --fixture-max-pages 'Adobe Scan Oct 26, 2022 (1).pdf=5'
+scripts/debug/debug-all.sh --fixture-max-pages 'Adobe Scan Oct 26, 2022 (1).pdf=5'
 ```
 
 Отключить raster-строки для быстрого PDF-only прогона:
 
 ```bash
-scripts/debug-all.sh --fixture '*.pdf' --no-pdf-raster
+scripts/debug/debug-all.sh --fixture '*.pdf' --no-pdf-raster
 ```
 
 Изменить форматы или лимит страниц для raster-строк:
 
 ```bash
-scripts/debug-all.sh \
+scripts/debug/debug-all.sh \
   --fixture '*.pdf' \
   --pdf-raster-formats png,jpg \
   --pdf-raster-max-pages 5
@@ -126,25 +126,25 @@ scripts/debug-all.sh \
 Все non-API движки:
 
 ```bash
-scripts/debug-all.sh --engines tesseract,easyocr,browser-tesseract
+scripts/debug/debug-all.sh --engines tesseract,easyocr,browser-tesseract
 ```
 
 Один backend-движок:
 
 ```bash
-scripts/debug-all.sh --engines tesseract
+scripts/debug/debug-all.sh --engines tesseract
 ```
 
 Только backend без browser:
 
 ```bash
-scripts/debug-all.sh --engines tesseract,easyocr
+scripts/debug/debug-all.sh --engines tesseract,easyocr
 ```
 
 Только browser для image fixtures:
 
 ```bash
-scripts/debug-all.sh --engines browser-tesseract --fixture '*.png'
+scripts/debug/debug-all.sh --engines browser-tesseract --fixture '*.png'
 ```
 
 API-движки пока являются каркасом. Выбор `api-ollama`, `api-openrouter` или
@@ -157,7 +157,7 @@ API-движки пока являются каркасом. Выбор `api-oll
 Один профиль для всех backend-движков:
 
 ```bash
-scripts/debug-all.sh \
+scripts/debug/debug-all.sh \
   --engines tesseract,easyocr \
   --pipeline-profile backend_plain_text
 ```
@@ -165,7 +165,7 @@ scripts/debug-all.sh \
 Профиль только для одного backend-движка:
 
 ```bash
-scripts/debug-all.sh \
+scripts/debug/debug-all.sh \
   --engine-profile tesseract=backend_tesseract_standard \
   --engine-profile easyocr=backend_easyocr_table
 ```
@@ -173,7 +173,7 @@ scripts/debug-all.sh \
 Browser-профиль:
 
 ```bash
-scripts/debug-all.sh --browser-profile browser_tesseract_dewarp
+scripts/debug/debug-all.sh --browser-profile browser_tesseract_dewarp
 ```
 
 Browser benchmark использует Node Canvas shim и выполняет тот же image
@@ -201,7 +201,7 @@ file,threshold,tesseract %,easyocr %,browser-tesseract %,tesseract gate,...
 ## Подбор Флагов
 
 ```bash
-python3 scripts/debug_flag_sweep.py \
+python3 scripts/debug/debug_flag_sweep.py \
   'debug/fixtures/image (7).png' \
   --output debug/tmp/flag-sweep-image7.csv \
   --xlsx-output debug/tmp/flag-sweep-image7.xlsx \
@@ -215,16 +215,16 @@ CSV содержит все проверенные варианты. XLSX нуж
 
 ## PDF Как Картинки
 
-Обычный `scripts/debug-all.sh` уже добавляет выбранные PDF как PNG и JPEG
+Обычный `scripts/debug/debug-all.sh` уже добавляет выбранные PDF как PNG и JPEG
 image-строки. Низкоуровневый probe нужен только если надо создать такие
 fixtures без полного matrix-прогона:
 
 ```bash
-scripts/debug_pdf_image_probe.py \
+scripts/debug/debug_pdf_image_probe.py \
   'debug/fixtures/09.03.03_05(ИУ1).pdf' \
   --max-pages 5 \
   --format png,jpg
-scripts/run-debug.sh \
+scripts/debug/run-debug.sh \
   --fixtures debug/tmp/pdf-image-fixtures \
   --expected-root debug/tmp/pdf-image-reference \
   --output debug/tmp/pdf-image-probe-run \

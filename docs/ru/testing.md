@@ -31,23 +31,23 @@
   `gateway/src/services/staticFiles.test.ts`,
   `gateway/src/cli/run.test.ts`,
   `gateway/src/cli/extraction-client.test.ts`.
-- `ocr/tests/test_main.py`, `ocr/tests/test_upload_processing.py`,
-  `ocr/tests/test_layout_pipeline_contracts.py`,
-  `ocr/tests/test_layout_geometry.py`, `ocr/tests/test_layout_stages.py`,
-  `ocr/tests/test_preprocessing.py`, `ocr/tests/test_ocr_quality.py`,
-  `ocr/tests/test_quality_metrics.py`,
-  `ocr/tests/test_table_fixtures.py`, `ocr/tests/test_text_processing.py`,
-  `ocr/tests/test_auto_engine.py`, `ocr/tests/test_visual_mutations.py`,
-  `ocr/tests/test_generated_fixture_registry.py`,
-  `ocr/tests/test_generated_media_matrix.py`,
-  `ocr/tests/test_document_templates.py`,
-  `ocr/tests/test_pdf_progress.py`.
-- Generated fixture registry в `ocr/tests/generated_media.py` уже даёт
+- `ocr/tests/api/test_main.py`, `ocr/tests/api/test_upload_processing.py`,
+  `ocr/tests/layout/test_layout_pipeline_contracts.py`,
+  `ocr/tests/layout/test_layout_geometry.py`, `ocr/tests/layout/test_layout_stages.py`,
+  `ocr/tests/engines/test_preprocessing.py`, `ocr/tests/quality/test_ocr_quality.py`,
+  `ocr/tests/quality/test_quality_metrics.py`,
+  `ocr/tests/layout/test_table_fixtures.py`, `ocr/tests/layout/test_text_processing.py`,
+  `ocr/tests/engines/test_auto_engine.py`, `ocr/tests/quality/test_visual_mutations.py`,
+  `ocr/tests/quality/test_generated_fixture_registry.py`,
+  `ocr/tests/quality/test_generated_media_matrix.py`,
+  `ocr/tests/quality/test_document_templates.py`,
+  `ocr/tests/api/test_pdf_progress.py`.
+- Generated fixture registry в `ocr/tests/support/generated_media.py` уже даёт
   детерминированные случаи (`long-screenshot-receipt`, `structured-product-table`,
   `full-width-banner`, `mixed-language-card`, `generated-simple-paragraph`,
   `generated-product-table`, `generated-low-contrast-noise`,
   `generated-small-skew`).
-- Метрики качества живут в `ocr/tests/quality_metrics.py`:
+- Метрики качества живут в `ocr/tests/support/quality_metrics.py`:
   `token_recall`, `pair_recall`, `digit_sequence_recall`,
   `ordered_phrase_recall`, `markdown_table_shape`, `character_error_rate`.
 
@@ -98,10 +98,10 @@ Runtime-артефакты остаются в игнорируемом `debug/t
 [debug](./debug.md).
 Browser matrix использует Node Canvas preprocessing, но всё равно остаётся
 ручной тяжёлой отладкой, а не автоматическим тестом.
-`ocr/tests/test_debug_sample_corpus.py` прогоняет tracked SAMPLE fixtures через
+`ocr/tests/debug/test_sample_corpus.py` прогоняет tracked SAMPLE fixtures через
 backend Tesseract: 4K edge-to-edge слово и hard image-only 10x14 mixed-script
 PDF должны оставаться выше debug gate.
-`ocr/tests/test_upload_processing.py`, `ocr/tests/test_main.py`,
+`ocr/tests/api/test_upload_processing.py`, `ocr/tests/api/test_main.py`,
 `gateway/src/core/routes.test.ts` и `gateway/src/cli/run.test.ts` отдельно
 проверяют PDF-маршрутизацию: default `auto` берет пригодный text layer без
 создания OCR engine, `raster` пропускает text layer и доходит до OCR, а
@@ -142,10 +142,10 @@ PDF должны оставаться выше debug gate.
 
 Когда добавляется новый кейс, нужно:
 
-1. Описать его в `ocr/tests/generated_media.py` как `GeneratedFixtureSpec` или
+1. Описать его в `ocr/tests/support/generated_media.py` как `GeneratedFixtureSpec` или
    `FunctionalOcrFixtureSpec` с `seed`, `category`, `tier`, `expected_tokens` и
    `expected_pairs`.
-2. Подключить метрики в `ocr/tests/test_ocr_quality.py` через
+2. Подключить метрики в `ocr/tests/quality/test_ocr_quality.py` через
    `FUNCTIONAL_QUALITY_MATRIX`.
 3. Зафиксировать `min_token_recall`/`min_pair_recall` явно — без них кейс
    считается не покрытым.

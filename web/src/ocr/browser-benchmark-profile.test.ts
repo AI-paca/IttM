@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_BROWSER_BENCHMARK_PROFILE,
   resolveBrowserBenchmarkProfile,
-} from "../../../scripts/browser-benchmark-profile";
+} from "../../../scripts/benchmark/browser-benchmark-profile";
 import { browserPipelineProfileForSource } from "./pipeline-config";
 
 test("browser benchmark defaults to the same profile as browser UI source", () => {

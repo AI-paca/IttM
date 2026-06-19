@@ -89,7 +89,7 @@ Markdown-reference файлы и `.gitkeep`; остальные реальные
 - `npm test` — 182 passed.
 - Targeted Python OCR/debug suite — 81 passed, 1 skipped.
   Skip относится к optional XLSX test при отсутствии `openpyxl`.
-- `scripts/debug_quality_gate.py` — passed.
+- `scripts/debug/debug_quality_gate.py` — passed.
 - `git diff --check`, Python compile и shell syntax — passed.
 
 Документация готовилась параллельно в worktree

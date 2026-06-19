@@ -196,10 +196,10 @@ wide tables редко являются одним ровным текстовы
 - gateway/CLI tests проверяют передачу `engine_type` и `pipeline_profile`;
 - backend tests проверяют resolution, layout/table behavior и fail-closed
   неизвестных значений;
-- `scripts/run-debug.sh` пишет effective flags в `profiles.json` и
+- `scripts/debug/run-debug.sh` пишет effective flags в `profiles.json` и
   `summary.tsv`;
-- CI запускает `scripts/verify_engine_profile_docs.py` и
-  `scripts/verify_pipeline_flag_docs.py`; второй verifier сверяет каталог
+- CI запускает `scripts/ci/verify_engine_profile_docs.py` и
+  `scripts/ci/verify_pipeline_flag_docs.py`; второй verifier сверяет каталог
   `pipeline_flags.py` и flag-ключи, найденные в browser/debug scripts.
 
 Ручной вызов:

@@ -11,6 +11,7 @@ from app.chunking.vertical import (
     TableLayout,
     analyze_document_layout,
     detect_table_layouts,
+    erase_table_lines_for_ocr,
     logical_table_layout,
     split_by_blank_bands,
     split_vertical,
@@ -22,6 +23,7 @@ from app.formatting.markdown_formatter import MarkdownFormatter
 from app.layout.contracts import LayoutDecision, LayoutStageSpec
 from app.pipeline_config import LayoutPipelineConfig, OcrPipelineProfile
 from app.services import convert_service
+from tests.generated_media import functional_ocr_fixture_image
 
 
 @pytest.mark.parametrize("engine_type", ["browser", "tesserat"])
@@ -1138,6 +1140,41 @@ def test_detect_table_layouts_handles_scan_like_noise():
     assert len(layouts) == 1
     assert layouts[0].rows == 3
     assert layouts[0].cols == 3
+
+
+def test_detect_table_layouts_ignores_text_contours_inside_generated_grid():
+    pytest.importorskip("cv2")
+    image = functional_ocr_fixture_image("generated-product-table")
+    try:
+        layouts = detect_table_layouts(
+            image,
+            min_confirmed_cell_ratio=0.35,
+        )
+    finally:
+        image.close()
+
+    assert len(layouts) == 1
+    assert layouts[0].rows == 3
+    assert layouts[0].cols == 4
+
+
+def test_erase_table_lines_preserves_generated_table_text_strokes():
+    pytest.importorskip("cv2")
+    image = functional_ocr_fixture_image("generated-product-table")
+    cleaned = erase_table_lines_for_ocr(image)
+    try:
+        original_gray = np.asarray(image.convert("L"))
+        cleaned_gray = np.asarray(cleaned.convert("L"))
+        original_text_ink = original_gray[250:350, 80:350] < 180
+        cleaned_text_ink = cleaned_gray[250:350, 80:350] < 180
+
+        assert np.count_nonzero(original_text_ink) > 100
+        assert np.count_nonzero(cleaned_text_ink) >= np.count_nonzero(original_text_ink) * 0.75
+        assert np.mean(cleaned_gray[90:500, 58:64]) > 245
+    finally:
+        if cleaned is not image:
+            cleaned.close()
+        image.close()
 
 
 def test_detect_table_layouts_ignores_blank_page():

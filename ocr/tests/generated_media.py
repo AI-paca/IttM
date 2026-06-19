@@ -6,7 +6,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
 GENERATED_FIXTURE_GENERATOR_VERSION = "2026.06.14-1"
-FUNCTIONAL_OCR_GENERATOR_VERSION = "2026.06.14-functional-1"
+FUNCTIONAL_OCR_GENERATOR_VERSION = "2026.06.14-functional-2"
 
 
 @dataclass(frozen=True)
@@ -88,8 +88,8 @@ FUNCTIONAL_OCR_FIXTURE_REGISTRY = (
         seed=2026061453,
         category="degraded_text",
         tier="quality",
-        expected_tokens=("GAMMA CHECK", "NOISE-2048", "45678", "TOKEN"),
-        expected_pairs=(("TOKEN", "45678"),),
+        expected_tokens=("GAMMA CHECK", "NOISE-2048", "45678", "FIELD"),
+        expected_pairs=(("FIELD", "45678"),),
     ),
     FunctionalOcrFixtureSpec(
         id="generated-small-skew",
@@ -220,7 +220,7 @@ def _low_contrast_noise_fixture(seed: int) -> Image.Image:
         image,
         [
             "GAMMA CHECK",
-            "TOKEN 45678",
+            "FIELD 45678",
             "NOISE-2048 remains readable",
         ],
         size=62,
@@ -260,12 +260,11 @@ def _small_skew_fixture() -> Image.Image:
 
 
 def _tiny_score_list_fixture() -> Image.Image:
-    image = Image.new("RGB", (180, 330), "white")
+    image = Image.new("RGB", (220, 330), "white")
     draw = ImageDraw.Draw(image)
     font = _font(16, bold=True)
     small = _font(14)
-    draw.text((12, 12), "NAME", fill="black", font=small)
-    draw.text((124, 12), "SCORE", fill="black", font=small)
+    draw.text((12, 12), "NAME:SCORE", fill="black", font=small)
     rows = (
         ("ALPHA", "10"),
         ("BRAVO", "8"),
@@ -275,8 +274,7 @@ def _tiny_score_list_fixture() -> Image.Image:
     )
     for index, (name, score) in enumerate(rows):
         y = 52 + index * 48
-        draw.text((12, y), name, fill="black", font=font)
-        draw.text((140, y), score, fill="black", font=font)
+        draw.text((12, y), f"{name}:{score}", fill="black", font=font)
     return image
 
 

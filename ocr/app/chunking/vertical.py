@@ -105,7 +105,7 @@ def _line_positions(mask: np.ndarray, *, axis: int, min_coverage: int) -> list[i
     return [int(round((start + end) / 2)) for start, end in _group_indexes(indexes)]
 
 
-def _with_edges(positions: list[int], size: int, tolerance: int = 8) -> tuple[int, ...]:
+def _with_edges(positions: list[int], size: int, tolerance: int = 12) -> tuple[int, ...]:
     if size <= 1:
         return tuple(sorted(set(positions)))
 
@@ -224,16 +224,18 @@ def _cell_line_hints_from_contours(
         if area >= max_cell_area:
             continue
 
-        # Contours returned for cell interiors sit just inside the grid lines.
-        # Their edges are still valuable as near-line positions after clustering.
+        if hierarchy[0][index][3] < 0:
+            continue
+        contour_area = cv2.contourArea(contour)
+        rectangularity = contour_area / area if area else 0.0
+        if rectangularity < 0.82:
+            continue
+
+        # Only confirmed rectangular holes are cell interiors. Using every
+        # contour here lets surviving text strokes become fake row/column lines.
         x_positions.extend([x, x + width])
         y_positions.extend([y, y + height])
-
-        if hierarchy[0][index][3] >= 0:
-            contour_area = cv2.contourArea(contour)
-            rectangularity = contour_area / area if area else 0.0
-            if rectangularity >= 0.82:
-                confirmed_cells += 1
+        confirmed_cells += 1
 
     return x_positions, y_positions, confirmed_cells
 
@@ -310,26 +312,22 @@ def detect_table_layouts(
             local_height,
         )
 
+        projected_y_lines = _line_positions(
+            table_horizontal,
+            axis=1,
+            min_coverage=max(18, int(local_width * 0.35)),
+        )
+        projected_x_lines = _line_positions(
+            table_vertical,
+            axis=0,
+            min_coverage=max(18, int(local_height * 0.35)),
+        )
         y_lines_local = _with_edges(
-            [
-                *_line_positions(
-                    table_horizontal,
-                    axis=1,
-                    min_coverage=max(18, int(local_width * 0.22)),
-                ),
-                *contour_y_lines,
-            ],
+            projected_y_lines if len(projected_y_lines) >= 3 else [*projected_y_lines, *contour_y_lines],
             local_height,
         )
         x_lines_local = _with_edges(
-            [
-                *_line_positions(
-                    table_vertical,
-                    axis=0,
-                    min_coverage=max(18, int(local_height * 0.22)),
-                ),
-                *contour_x_lines,
-            ],
+            projected_x_lines if len(projected_x_lines) >= 3 else [*projected_x_lines, *contour_x_lines],
             local_width,
         )
 
@@ -537,7 +535,7 @@ def erase_table_lines_for_ocr(image: Image.Image) -> Image.Image:
     _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     height, width = gray.shape[:2]
     horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(40, width // 12), 1))
-    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(18, height // 16)))
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(40, height // 4)))
     horizontal = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
     vertical = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vertical_kernel, iterations=1)
     line_mask = cv2.add(horizontal, vertical)

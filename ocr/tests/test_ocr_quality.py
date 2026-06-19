@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import pytest
 
@@ -126,7 +126,10 @@ def _assert_tokens(markdown: str, source: str):
 def _convert_generated_fixture(case: FunctionalQualityCase):
     spec = functional_ocr_fixture_spec(case.fixture_id)
     payload = functional_ocr_fixture_bytes(case.fixture_id)
-    profile = resolve_pipeline_profile(case.engine, case.profile)
+    profile = replace(
+        resolve_pipeline_profile(case.engine, case.profile),
+        tesseract_language_priority=("eng",),
+    )
     events = list(
         convert_service.iter_convert_bytes(
             payload,

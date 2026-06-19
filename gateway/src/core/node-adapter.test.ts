@@ -81,3 +81,55 @@ test("Node gateway waits for response drain before reading the next chunk", asyn
   );
   assert.equal(response.ended, true);
 });
+
+test("Node gateway cancels a web response body after the client disconnects", async () => {
+  class DisconnectedResponse extends EventEmitter {
+    statusCode = 0;
+    statusMessage = "";
+    writes = 0;
+    ended = false;
+
+    setHeader() {
+      return this;
+    }
+
+    write() {
+      this.writes += 1;
+      return true;
+    }
+
+    end() {
+      this.ended = true;
+      return this;
+    }
+  }
+
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("first"));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  const response = new DisconnectedResponse();
+  const sendPromise = send_web_response(
+    response as unknown as ServerResponse,
+    new Response(body),
+  );
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(response.writes, 1);
+  response.emit("close");
+
+  const outcome = await Promise.race([
+    sendPromise.then(() => "completed"),
+    new Promise<string>((resolve) =>
+      setTimeout(() => resolve("timed-out"), 50),
+    ),
+  ]);
+  assert.equal(outcome, "completed");
+  assert.equal(cancelled, true);
+  assert.equal(response.ended, false);
+});

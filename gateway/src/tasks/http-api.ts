@@ -24,11 +24,10 @@ import type {
 
 type SyncMode = "async" | "events" | "text" | "markdown" | "json";
 
-const VALID_ENGINES = new Set<ExtractionEngine>([
+const LOCAL_TASK_ENGINES = new Set<ExtractionEngine>([
   "auto",
   "tesseract",
   "easyocr",
-  "browser",
 ]);
 const TERMINAL_EVENT_TYPES = new Set(["complete", "error"]);
 const VALID_TASK_STATES = new Set<TaskState>([
@@ -323,8 +322,13 @@ async function toExtractionRequest(
 
   const body = await request.arrayBuffer();
   if (!body.byteLength) throw new Error("Task upload is empty.");
-  const binaryContentType =
+  const declaredContentType =
     contentType.split(";")[0] || "application/octet-stream";
+  const inferredContentType = inferBinaryContentType(new Uint8Array(body));
+  const binaryContentType =
+    isGenericBinaryContentType(declaredContentType) && inferredContentType
+      ? inferredContentType
+      : declaredContentType;
   const filename =
     url.searchParams.get("filename") || defaultFilename(binaryContentType);
   const file = new File([body], filename, { type: binaryContentType });
@@ -348,15 +352,71 @@ function readEngine(
     request.headers.get("x-ocr-engine") ??
     (typeof fallback === "string" ? fallback : undefined) ??
     "auto";
-  if (!VALID_ENGINES.has(raw as ExtractionEngine)) {
-    throw new Error("Unsupported OCR engine.");
+  if (!LOCAL_TASK_ENGINES.has(raw as ExtractionEngine)) {
+    throw new Error("Unsupported OCR engine for local task API.");
   }
   return raw as ExtractionEngine;
+}
+
+function isGenericBinaryContentType(contentType: string): boolean {
+  return (
+    contentType === "application/octet-stream" ||
+    contentType === "application/x-www-form-urlencoded"
+  );
+}
+
+function inferBinaryContentType(bytes: Uint8Array): string | undefined {
+  if (
+    bytes.length >= 5 &&
+    bytes[0] === 0x25 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x44 &&
+    bytes[3] === 0x46 &&
+    bytes[4] === 0x2d
+  ) {
+    return "application/pdf";
+  }
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return "image/png";
+  }
+  if (
+    bytes.length >= 3 &&
+    bytes[0] === 0xff &&
+    bytes[1] === 0xd8 &&
+    bytes[2] === 0xff
+  ) {
+    return "image/jpeg";
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  return undefined;
 }
 
 function defaultFilename(contentType: string): string {
   if (contentType === "image/png") return "screenshot.png";
   if (contentType === "image/jpeg") return "screenshot.jpg";
+  if (contentType === "image/webp") return "screenshot.webp";
   if (contentType === "application/pdf") return "document.pdf";
   return "upload.bin";
 }

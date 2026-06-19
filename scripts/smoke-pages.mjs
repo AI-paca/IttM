@@ -10,6 +10,13 @@ const requiredAssets = [
   "vendor/tesseract/tesseract-core-lstm.wasm.js",
   "vendor/tesseract/tesseract-core-simd-lstm.wasm.js",
   "vendor/tesseract/tesseract-core-relaxedsimd-lstm.wasm.js",
+  "vendor/pdfjs/wasm/jbig2.wasm",
+  "vendor/pdfjs/wasm/jbig2_nowasm_fallback.js",
+  "vendor/pdfjs/wasm/openjpeg.wasm",
+  "vendor/pdfjs/wasm/openjpeg_nowasm_fallback.js",
+  "vendor/pdfjs/wasm/qcms_bg.wasm",
+  "vendor/pdfjs/wasm/quickjs-eval.js",
+  "vendor/pdfjs/wasm/quickjs-eval.wasm",
 ];
 
 function normalizeBase(base) {

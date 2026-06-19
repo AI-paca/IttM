@@ -596,7 +596,7 @@ test("task API sync text mode returns plain markdown for Hyprland curl pipelines
   try {
     const response = await route(
       new Request(
-        "http://localhost/api/tasks?sync=text&engine=auto&profile=tesseract",
+        "http://localhost/api/tasks?sync=text&engine=tesseract&profile=backend_tesseract_standard",
         {
           method: "POST",
           headers: { "content-type": "image/png", accept: "text/plain" },
@@ -612,8 +612,98 @@ test("task API sync text mode returns plain markdown for Hyprland curl pipelines
     assert.equal(await response.text(), "copied text");
     assert.match(
       calledUrl,
-      /\/v1\/convert\/stream\?engine_type=auto&pipeline_profile=tesseract/,
+      /\/v1\/convert\/stream\?engine_type=tesseract&pipeline_profile=backend_tesseract_standard/,
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetTaskApiForTests();
+  }
+});
+
+test("raw curl uploads infer supported file types without MIME or filename flags", async () => {
+  resetTaskApiForTests();
+  const originalFetch = globalThis.fetch;
+  let uploadedFile: File | null = null;
+  globalThis.fetch = async (
+    _input: string | URL | Request,
+    init?: RequestInit,
+  ) => {
+    uploadedFile = (init?.body as FormData | undefined)?.get("file") as File;
+    return new Response(
+      '{"type":"page","page":1,"markdown":"recognized text"}\n' +
+        '{"type":"complete","meta":{"pages":1}}\n',
+      { headers: { "content-type": "application/x-ndjson" } },
+    );
+  };
+
+  try {
+    const fixtures = [
+      {
+        bytes: new TextEncoder().encode("%PDF-1.7\nfixture"),
+        filename: "document.pdf",
+        contentType: "application/pdf",
+      },
+      {
+        bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        filename: "screenshot.png",
+        contentType: "image/png",
+      },
+      {
+        bytes: new Uint8Array([0xff, 0xd8, 0xff]),
+        filename: "screenshot.jpg",
+        contentType: "image/jpeg",
+      },
+      {
+        bytes: new TextEncoder().encode("RIFFsizeWEBP"),
+        filename: "screenshot.webp",
+        contentType: "image/webp",
+      },
+    ];
+
+    for (const fixture of fixtures) {
+      const response = await route(
+        new Request("http://localhost/api/extract/text", {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+          },
+          body: fixture.bytes,
+        }),
+        env,
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(await response.text(), "recognized text");
+      assert.equal(uploadedFile?.name, fixture.filename);
+      assert.equal(uploadedFile?.type, fixture.contentType);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetTaskApiForTests();
+  }
+});
+
+test("local task API rejects browser engine instead of silently running auto", async () => {
+  resetTaskApiForTests();
+  const originalFetch = globalThis.fetch;
+  let backendCalled = false;
+  globalThis.fetch = async () => {
+    backendCalled = true;
+    return new Response();
+  };
+
+  try {
+    const response = await route(
+      new Request("http://localhost/api/extract/text?engine=browser", {
+        method: "POST",
+        headers: { "content-type": "image/png" },
+        body: new Uint8Array([1, 2, 3]),
+      }),
+      env,
+    );
+
+    assert.equal(response.status, 400);
+    assert.equal(backendCalled, false);
   } finally {
     globalThis.fetch = originalFetch;
     resetTaskApiForTests();
@@ -760,6 +850,47 @@ test("task API sync json preserves retryability and partial metadata from backen
       partial: true,
       httpStatus: 502,
     });
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetTaskApiForTests();
+  }
+});
+
+test("task API marks completed results partial when OCR reports an empty page", async () => {
+  resetTaskApiForTests();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(
+      '{"type":"warning","code":"EMPTY_PAGE","message":"No text was recognized on page 1.","page":1}\n' +
+        '{"type":"page","page":1,"markdown":""}\n' +
+        '{"type":"complete","meta":{"pages":1,"empty_pages":[1]}}\n',
+      { headers: { "content-type": "application/x-ndjson" } },
+    );
+
+  try {
+    const response = await route(
+      new Request("http://localhost/api/tasks?sync=json", {
+        method: "POST",
+        headers: { "content-type": "image/png" },
+        body: new Uint8Array([1]),
+      }),
+      env,
+    );
+    const payload = (await response.json()) as {
+      partial: boolean;
+      warnings: Array<{ code: string; message: string }>;
+      meta: { empty_pages: number[] };
+    };
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.partial, true);
+    assert.deepEqual(payload.warnings, [
+      {
+        code: "EMPTY_PAGE",
+        message: "No text was recognized on page 1.",
+      },
+    ]);
+    assert.deepEqual(payload.meta.empty_pages, [1]);
   } finally {
     globalThis.fetch = originalFetch;
     resetTaskApiForTests();

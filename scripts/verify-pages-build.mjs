@@ -6,12 +6,22 @@ import process from "node:process";
 
 const distRoot = path.resolve(process.argv[2] || "dist");
 const expectedBase = normalizeBase(process.argv[3] || "/IttM/");
-const vendorRoot = path.join(distRoot, "vendor", "tesseract");
+const tesseractVendorRoot = path.join(distRoot, "vendor", "tesseract");
+const pdfJsWasmVendorRoot = path.join(distRoot, "vendor", "pdfjs", "wasm");
 const requiredTesseractAssets = [
   "worker.min.js",
   "tesseract-core-lstm.wasm.js",
   "tesseract-core-simd-lstm.wasm.js",
   "tesseract-core-relaxedsimd-lstm.wasm.js",
+];
+const requiredPdfJsWasmAssets = [
+  "jbig2.wasm",
+  "jbig2_nowasm_fallback.js",
+  "openjpeg.wasm",
+  "openjpeg_nowasm_fallback.js",
+  "qcms_bg.wasm",
+  "quickjs-eval.js",
+  "quickjs-eval.wasm",
 ];
 
 function normalizeBase(base) {
@@ -111,7 +121,10 @@ assert.match(
 );
 
 for (const asset of requiredTesseractAssets) {
-  await assertNonEmpty(path.join(vendorRoot, asset));
+  await assertNonEmpty(path.join(tesseractVendorRoot, asset));
+}
+for (const asset of requiredPdfJsWasmAssets) {
+  await assertNonEmpty(path.join(pdfJsWasmVendorRoot, asset));
 }
 
 const javascriptFiles = (await listFiles(path.join(distRoot, "assets"))).filter(
@@ -124,6 +137,8 @@ const bundleText = (
 ).join("\n");
 const expectedWorkerPath = `${expectedBase}vendor/tesseract/worker.min.js`;
 const incorrectRootWorkerPath = "/vendor/tesseract/worker.min.js";
+const expectedPdfJsWasmPath = `${expectedBase}vendor/pdfjs/wasm/`;
+const pdfJsWasmRoute = "vendor/pdfjs/wasm/";
 
 assert.ok(
   bundleText.includes(expectedWorkerPath),
@@ -135,14 +150,21 @@ if (expectedBase !== "/") {
     `compiled bundle still contains root-relative ${incorrectRootWorkerPath}`,
   );
 }
+assert.ok(
+  bundleText.includes(expectedBase) && bundleText.includes(pdfJsWasmRoute),
+  `compiled bundle does not compose ${expectedPdfJsWasmPath}`,
+);
 
 await verifyServedPagesAssets([
   expectedBase,
   ...requiredTesseractAssets.map(
     (asset) => `${expectedBase}vendor/tesseract/${asset}`,
   ),
+  ...requiredPdfJsWasmAssets.map(
+    (asset) => `${expectedBase}vendor/pdfjs/wasm/${asset}`,
+  ),
 ]);
 
 console.log(
-  `Pages build verified over HTTP: ${expectedWorkerPath} and ${requiredTesseractAssets.length} local Tesseract assets`,
+  `Pages build verified over HTTP: ${requiredTesseractAssets.length} Tesseract assets and ${requiredPdfJsWasmAssets.length} PDF.js decoder assets`,
 );

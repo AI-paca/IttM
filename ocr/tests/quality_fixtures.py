@@ -7,7 +7,9 @@ QUALITY_TEXT = {
     "english": "ENGLISH ABCXYZ abcxyz 0123456789",
     "russian": "РУССКИЙ АБВГДЕЖЗ абвгдежз",
     "chinese": "中文测试 汉字识别",
-    "mixed": "MIXED ABC Д 12345 中文",
+    # Keep the Latin segment distinguishable from Cyrillic when rus+eng are
+    # active together. ABC and АВС are glyph-identical in the fixture font.
+    "mixed": "MIXED LATIN Д 12345 中文",
 }
 
 
@@ -16,6 +18,7 @@ def _font(size: int) -> ImageFont.FreeTypeFont:
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
     ]
     for path in candidates:
         if Path(path).exists():

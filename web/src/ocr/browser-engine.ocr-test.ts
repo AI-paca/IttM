@@ -19,7 +19,7 @@ const expectedTokens = [
   "абвгдежз",
   "中文测试",
   "汉字识别",
-  "MIXEDABCД12345中文",
+  "MIXEDLATINД12345中文",
   "12345",
 ];
 

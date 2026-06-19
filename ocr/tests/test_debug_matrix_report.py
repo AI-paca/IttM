@@ -49,9 +49,7 @@ def test_debug_matrix_report_writes_per_method_csv(tmp_path):
     )
     expected_root = tmp_path / "expected"
     expected_root.mkdir()
-    (expected_root / "sample.png.md").write_text(
-        "Useful browser text\n", encoding="utf-8"
-    )
+    (expected_root / "sample.png.md").write_text("Useful browser text\n", encoding="utf-8")
     browser_root = tmp_path / "browser"
     browser_root.mkdir()
     (browser_root / "summary.tsv").write_text(
@@ -109,9 +107,7 @@ def test_debug_matrix_report_writes_per_method_csv(tmp_path):
         sample["browser-tesseract flags"]
         == "ocr_runtime:tesseract.js; ocr_languages:rus+eng+chi_sim; preprocess:projector_slide_dewarp"
     )
-    assert (
-        "preprocess:projected_document_dewarp" not in sample["browser-tesseract flags"]
-    )
+    assert "preprocess:projected_document_dewarp" not in sample["browser-tesseract flags"]
     assert raster["threshold"] == "70"
     assert raster["tesseract gate"] == "pass"
     assert (output_root / "time.csv").exists()

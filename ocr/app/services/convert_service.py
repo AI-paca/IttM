@@ -73,9 +73,7 @@ def _validate_decoded_image_size(image: Image.Image) -> None:
         DEFAULT_MAX_DECODED_IMAGE_PIXELS,
     )
     if pixel_count > limit:
-        raise ValueError(
-            f"Decoded image contains {pixel_count} pixels; limit is {limit}"
-        )
+        raise ValueError(f"Decoded image contains {pixel_count} pixels; limit is {limit}")
 
 
 def _pdf_render_options(page_info: dict) -> dict:
@@ -110,10 +108,7 @@ def _pdf_render_options(page_info: dict) -> dict:
 def _pdf_text_page_is_usable(text: str) -> bool:
     compact = " ".join(text.split())
     words = re.findall(r"[A-Za-zА-Яа-яЁё]{3,}", compact)
-    return (
-        len(compact) >= PDF_TEXT_LAYER_MIN_CHARS
-        and len(words) >= PDF_TEXT_LAYER_MIN_WORDS
-    )
+    return len(compact) >= PDF_TEXT_LAYER_MIN_CHARS and len(words) >= PDF_TEXT_LAYER_MIN_WORDS
 
 
 def _usable_pdf_text_pages(pages: list[str]) -> list[str]:
@@ -175,15 +170,11 @@ def _extract_pdf_text_layer_pages(content: bytes, filename: str) -> list[str]:
         return []
 
 
-def _prepared_image(
-    image: Image.Image, image_pipeline: OcrPreprocessingPipeline
-) -> Image.Image:
+def _prepared_image(image: Image.Image, image_pipeline: OcrPreprocessingPipeline) -> Image.Image:
     oriented = ImageOps.exif_transpose(image)
     _validate_decoded_image_size(oriented)
     oriented.load()
-    if oriented.mode in ("RGBA", "LA") or (
-        oriented.mode == "P" and "transparency" in oriented.info
-    ):
+    if oriented.mode in ("RGBA", "LA") or (oriented.mode == "P" and "transparency" in oriented.info):
         rgba_image = oriented.convert("RGBA")
         try:
             base_image = Image.new("RGB", rgba_image.size, (255, 255, 255))
@@ -228,9 +219,7 @@ def _iter_document_images(
                 DEFAULT_MAX_PDF_PAGES,
             )
             if page_count > page_limit:
-                raise ValueError(
-                    f"PDF contains {page_count} pages; limit is {page_limit}"
-                )
+                raise ValueError(f"PDF contains {page_count} pages; limit is {page_limit}")
 
             for page_number in range(1, page_count + 1):
                 print(f"[PDF] Rendering page {page_number}/{page_count}", flush=True)
@@ -329,13 +318,7 @@ def _looks_like_edge_to_edge_word(image: Image.Image) -> bool:
         for strip in strips:
             strip.close()
 
-    return (
-        0.02 <= top <= 0.20
-        and 0.02 <= bottom <= 0.20
-        and left >= 0.10
-        and right >= 0.10
-        and overall <= 0.80
-    )
+    return 0.02 <= top <= 0.20 and 0.02 <= bottom <= 0.20 and left >= 0.10 and right >= 0.10 and overall <= 0.80
 
 
 def _is_dewarped_projector_slide(image: Image.Image) -> bool:
@@ -432,20 +415,13 @@ def _looks_like_dense_grid_page(image: Image.Image) -> bool:
     )
     foreground_ratio = float(np.mean(binary > 0))
     return horizontal_lines >= DENSE_GRID_MIN_HORIZONTAL_LINES and (
-        vertical_lines >= DENSE_GRID_MIN_VERTICAL_LINES
-        or foreground_ratio <= 0.08
-        or horizontal_lines >= 30
+        vertical_lines >= DENSE_GRID_MIN_VERTICAL_LINES or foreground_ratio <= 0.08 or horizontal_lines >= 30
     )
 
 
 def _looks_like_sparse_cover_page(image: Image.Image) -> bool:
     width, height = image.size
-    return (
-        width >= 2200
-        and height >= 1500
-        and height / max(1, width) <= 0.9
-        and _ink_ratio(image) <= 0.05
-    )
+    return width >= 2200 and height >= 1500 and height / max(1, width) <= 0.9 and _ink_ratio(image) <= 0.05
 
 
 def _overlapping_starts(limit: int, size: int, overlap: int) -> list[int]:
@@ -763,10 +739,7 @@ def _recognize_text_with_sparse_fallback(
     min_fallback_tokens: int | None = None,
 ) -> str:
     primary_text = engine.recognize(image, mode=mode, psm=psm)
-    if (
-        not profile.sparse_text_fallback_engine
-        or _engine_name(engine) == profile.sparse_text_fallback_engine
-    ):
+    if not profile.sparse_text_fallback_engine or _engine_name(engine) == profile.sparse_text_fallback_engine:
         return primary_text
 
     primary_tokens = _ocr_token_count(primary_text)
@@ -776,11 +749,7 @@ def _recognize_text_with_sparse_fallback(
 
     fallback_text = fallback_engine.recognize(image, mode=mode, psm=psm)
     fallback_tokens = _ocr_token_count(fallback_text)
-    minimum_tokens = (
-        profile.sparse_text_fallback_min_tokens
-        if min_fallback_tokens is None
-        else min_fallback_tokens
-    )
+    minimum_tokens = profile.sparse_text_fallback_min_tokens if min_fallback_tokens is None else min_fallback_tokens
     if fallback_tokens < minimum_tokens:
         return primary_text
     if fallback_tokens < max(
@@ -800,11 +769,7 @@ def _recognize_image_region(
 ) -> Tuple[list[str], int, int]:
     width, height = image.size
     text_psm = _text_psm_for_image_region(image, profile)
-    min_fallback_tokens = (
-        profile.edge_word_fallback_min_tokens
-        if _looks_like_edge_to_edge_word(image)
-        else None
-    )
+    min_fallback_tokens = profile.edge_word_fallback_min_tokens if _looks_like_edge_to_edge_word(image) else None
     if height <= 1600 or (width > 0 and height / width <= 1.8):
         return (
             [
@@ -874,9 +839,7 @@ def _recognize_table_cell(engine, image: Image.Image) -> str:
     return engine.recognize(image, mode="text_mode", psm=psm)
 
 
-def _line_bounded_segments(
-    lines: tuple[int, ...], limit: int, max_span: int
-) -> list[tuple[int, int]]:
+def _line_bounded_segments(lines: tuple[int, ...], limit: int, max_span: int) -> list[tuple[int, int]]:
     if len(lines) < 2:
         return [(0, limit)]
 
@@ -890,10 +853,7 @@ def _line_bounded_segments(
     start_index = 0
     while start_index < len(normalized) - 1:
         end_index = start_index + 1
-        while (
-            end_index + 1 < len(normalized)
-            and normalized[end_index + 1] - normalized[start_index] <= max_span
-        ):
+        while end_index + 1 < len(normalized) and normalized[end_index + 1] - normalized[start_index] <= max_span:
             end_index += 1
 
         if normalized[end_index] <= normalized[start_index]:
@@ -913,9 +873,7 @@ def _recognize_scaled_words(
         return []
 
     resample = getattr(Image, "Resampling", Image).LANCZOS
-    scaled = image.resize(
-        (max(1, image.size[0] * scale), max(1, image.size[1] * scale)), resample
-    )
+    scaled = image.resize((max(1, image.size[0] * scale), max(1, image.size[1] * scale)), resample)
     prepared = erase_table_lines_for_ocr(scaled)
     try:
         words = recognize_words(prepared, psm=psm, min_conf=min_conf)
@@ -1003,9 +961,7 @@ def _recognize_table_words(
     }:
         raise ValueError(f"Unknown table word recognition strategy '{strategy}'")
 
-    single_pass = (
-        strategy == "single_pass_with_left_strip" and height <= MAX_DIRECT_TABLE_HEIGHT
-    )
+    single_pass = strategy == "single_pass_with_left_strip" and height <= MAX_DIRECT_TABLE_HEIGHT
     if single_pass or (table.cols <= 4 and height <= 3600):
         prepared = erase_table_lines_for_ocr(image)
         try:
@@ -1026,11 +982,7 @@ def _recognize_table_words(
 
     x_segments = _line_bounded_segments(table.x_lines, width, max_span=1700)
     y_segments = _line_bounded_segments(table.y_lines, height, max_span=1300)
-    psm = (
-        profile.large_table_word_psm
-        if len(table.cells) > 200
-        else profile.table_word_psm
-    )
+    psm = profile.large_table_word_psm if len(table.cells) > 200 else profile.table_word_psm
     min_conf = 18 if len(table.cells) <= 200 else 25
 
     words = []
@@ -1121,9 +1073,7 @@ def _append_sparse_table_raw_fallback(
         psm=profile.table_raw_text_fallback_psm,
     )
     fallback_calls = 0
-    if profile.sparse_text_fallback_engine and (
-        _engine_name(engine) != profile.sparse_text_fallback_engine
-    ):
+    if profile.sparse_text_fallback_engine and (_engine_name(engine) != profile.sparse_text_fallback_engine):
         fallback_engine = _create_sparse_text_fallback_engine(profile)
         if fallback_engine is not None:
             fallback_calls = 1
@@ -1140,9 +1090,7 @@ def _append_sparse_table_raw_fallback(
             )
             if fallback_tokens >= min_fallback_tokens:
                 raw_text = (
-                    fallback_text
-                    if not raw_text.strip()
-                    else "\n\n".join(dedupe_chunks([raw_text, fallback_text]))
+                    fallback_text if not raw_text.strip() else "\n\n".join(dedupe_chunks([raw_text, fallback_text]))
                 )
     if not raw_text.strip():
         return 1 + fallback_calls
@@ -1216,13 +1164,9 @@ def _create_engine(engine_type: str, profile: OcrPipelineProfile):
 
         engine = EasyOcrEngine()
         if not engine.available():
-            raise ValueError(
-                f"EasyOCR is not installed or initialization failed: {engine.info().get('init_error')}"
-            )
+            raise ValueError(f"EasyOCR is not installed or initialization failed: {engine.info().get('init_error')}")
         return engine
-    raise ValueError(
-        f"Unknown OCR engine '{engine_type}'. Known engines: auto, easyocr, tesseract"
-    )
+    raise ValueError(f"Unknown OCR engine '{engine_type}'. Known engines: auto, easyocr, tesseract")
 
 
 def _convert_layout_region(
@@ -1262,10 +1206,7 @@ def _convert_layout_region(
                 region.table,
             )
         else:
-            raise ValueError(
-                "Unknown table layout normalization "
-                f"'{profile.table_layout_normalization}'"
-            )
+            raise ValueError("Unknown table layout normalization " f"'{profile.table_layout_normalization}'")
         tables_found += 1
         table_cells += len(table_layout.cells)
         table_md = ""
@@ -1339,10 +1280,7 @@ def _convert_layout_region(
                 recognize_cell,
             )
             total_chunks += cell_ocr_calls
-            if (
-                _table_row_cell_coverage(table_layout, cell_rows)
-                >= profile.table_min_cell_coverage
-            ):
+            if _table_row_cell_coverage(table_layout, cell_rows) >= profile.table_min_cell_coverage:
                 table_md = table_rows_to_markdown(cell_rows)
         if table_md.strip():
             page_parts.append(table_md)
@@ -1363,9 +1301,7 @@ def _convert_layout_region(
                 )
                 total_chunks += region_chunks
                 cards_found += region_cards
-        if table_md.strip() and _should_append_table_raw_text_fallback(
-            profile, table_layout
-        ):
+        if table_md.strip() and _should_append_table_raw_text_fallback(profile, table_layout):
             total_chunks += _append_sparse_table_raw_fallback(
                 page_parts,
                 engine,
@@ -1451,9 +1387,7 @@ def _convert_page_segment(
             profile.layout,
             min_confirmed_cell_ratio=profile.grid_min_confirmed_cell_ratio,
         )
-        layout_parameters = (
-            layout_decision.stages[0].parameters if layout_decision.stages else ()
-        )
+        layout_parameters = layout_decision.stages[0].parameters if layout_decision.stages else ()
     else:
         layout_parameters = ()
         regions = (
@@ -1498,8 +1432,7 @@ def _convert_page(
 ) -> tuple[str, dict]:
     width, height = main_image.size
     is_long_screenshot = (
-        height >= LONG_SCREENSHOT_MIN_HEIGHT
-        and height / max(1, width) >= LONG_SCREENSHOT_MIN_ASPECT_RATIO
+        height >= LONG_SCREENSHOT_MIN_HEIGHT and height / max(1, width) >= LONG_SCREENSHOT_MIN_ASPECT_RATIO
     )
     if not is_long_screenshot:
         markdown, totals = _convert_page_segment(main_image, engine, profile)
@@ -1528,11 +1461,7 @@ def _convert_page(
             totals["chunks"] += fallback_calls
             if fallback_text.strip():
                 markdown = MarkdownFormatter.format_text(
-                    "\n\n".join(
-                        dedupe_chunks(
-                            [part for part in (markdown, fallback_text) if part.strip()]
-                        )
-                    )
+                    "\n\n".join(dedupe_chunks([part for part in (markdown, fallback_text) if part.strip()]))
                 )
         return markdown, totals
 
@@ -1607,9 +1536,7 @@ def iter_convert_bytes(
         }
         return
 
-    image_pipeline = OcrPreprocessingPipeline.from_step_names(
-        profile.image_preprocessing
-    )
+    image_pipeline = OcrPreprocessingPipeline.from_step_names(profile.image_preprocessing)
     engine = _create_engine(engine_type, profile)
     total_chunks = 0
     cards_found = 0

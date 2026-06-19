@@ -154,9 +154,7 @@ def test_blank_band_chunking_coalesces_small_content_instead_of_dropping_it():
 
     try:
         pixels = [_image_colors(chunk.convert("RGB")) for chunk in chunks]
-        assert all(
-            any(marker in colors for colors in pixels) for marker in marker_colors
-        )
+        assert all(any(marker in colors for colors in pixels) for marker in marker_colors)
         assert all(chunk.height >= 300 for chunk in chunks[:-1])
     finally:
         for chunk in chunks:
@@ -383,9 +381,7 @@ def test_convert_page_appends_projector_slide_language_fallback(monkeypatch):
     monkeypatch.setattr(
         convert_service,
         "_recognize_projector_slide_fallback",
-        lambda fallback_engine, _image, _profile: (
-            "fallback text" if fallback_engine is engine else "wrong engine"
-        ),
+        lambda fallback_engine, _image, _profile: ("fallback text" if fallback_engine is engine else "wrong engine"),
     )
     engine = object()
 
@@ -812,9 +808,7 @@ def _bar_chart_fixture() -> Image.Image:
     return image
 
 
-def _dense_table_layout(
-    width: int, height: int, *, rows: int, cols: int
-) -> TableLayout:
+def _dense_table_layout(width: int, height: int, *, rows: int, cols: int) -> TableLayout:
     x_lines = tuple(round(index * (width - 1) / cols) for index in range(cols + 1))
     y_lines = tuple(round(index * (height - 1) / rows) for index in range(rows + 1))
     cells = tuple(
@@ -874,9 +868,7 @@ def test_table_layout_to_markdown_ocr_cells_in_reading_order():
     layout = detect_table_layouts(_table_fixture())[0]
     texts = iter(["Предмет", "Часы", "Math", "42"])
 
-    markdown = table_layout_to_markdown(
-        _table_fixture(), layout, lambda _cell: next(texts)
-    )
+    markdown = table_layout_to_markdown(_table_fixture(), layout, lambda _cell: next(texts))
 
     assert markdown == "| Предмет | Часы |\n| --- | --- |\n| Math | 42 |"
 
@@ -964,9 +956,7 @@ def test_mixed_10x14_table_keeps_placeholder_cells_and_raw_fallback():
 
     markdown = "\n\n".join(parts)
     table_lines = [line for line in markdown.splitlines() if line.startswith("|")]
-    section_line = next(
-        line for line in table_lines if "РАЗДЕЛ A SECTION ALPHA" in line
-    )
+    section_line = next(line for line in table_lines if "РАЗДЕЛ A SECTION ALPHA" in line)
 
     assert len(section_line.strip()[1:-1].split("|")) == 10
     assert "raw mixed fallback 中文 Fake blocks 909" in markdown
@@ -1166,9 +1156,7 @@ def test_detect_table_layouts_rejects_bar_chart_as_grid():
     )
 
 
-def test_convert_service_uses_table_layout_before_vertical_chunks(
-    monkeypatch, tmp_path
-):
+def test_convert_service_uses_table_layout_before_vertical_chunks(monkeypatch, tmp_path):
     pytest.importorskip("cv2")
     values = iter(["Предмет", "Часы", "Math", "42"])
 

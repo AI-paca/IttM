@@ -89,7 +89,13 @@ jobs:
         run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci ./ocr
 
       - name: Python tests
-        run: docker run --rm ittm-ocr-ci python -m pytest tests -q
+        run: |
+          docker run --rm \
+            -v "${PWD}/scripts:/scripts:ro" \
+            -v "${PWD}/debug:/debug:ro" \
+            -v "${PWD}/LLM-OCR:/LLM-OCR:ro" \
+            ittm-ocr-ci \
+            python -m pytest tests -q
 
   ocr-quality:
     runs-on: ubuntu-24.04

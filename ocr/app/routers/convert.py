@@ -82,23 +82,15 @@ def _stream_conversion(content, filename, engine_type, pipeline, pdf_mode):
 @router.post("/v1/convert", response_model=ConvertResponse)
 async def convert_endpoint(
     file: UploadFile = File(...),
-    engine_type: str = Query(
-        "auto", description="Engine type: auto, tesseract, or easyocr"
-    ),
-    pipeline_profile: str | None = Query(
-        None, description="High-level OCR pipeline profile name"
-    ),
-    pipeline_flags: str | None = Query(
-        None, description="Reserved pipeline flag overrides. Disabled for now."
-    ),
+    engine_type: str = Query("auto", description="Engine type: auto, tesseract, or easyocr"),
+    pipeline_profile: str | None = Query(None, description="High-level OCR pipeline profile name"),
+    pipeline_flags: str | None = Query(None, description="Reserved pipeline flag overrides. Disabled for now."),
     pdf_mode: str = Query(
         "auto",
         description="PDF handling: auto uses a trustworthy text layer; raster forces page OCR.",
     ),
 ):
-    print(
-        f"[CONVERT] Received request: {file.filename} (content_type={file.content_type}), engine={engine_type}"
-    )
+    print(f"[CONVERT] Received request: {file.filename} (content_type={file.content_type}), engine={engine_type}")
     # This function handles both /convert and /v1/convert
     start_time = time.time()
 
@@ -143,15 +135,9 @@ async def convert_endpoint(
 @router.post("/v1/convert/stream")
 async def convert_stream_endpoint(
     file: UploadFile = File(...),
-    engine_type: str = Query(
-        "auto", description="Engine type: auto, tesseract, or easyocr"
-    ),
-    pipeline_profile: str | None = Query(
-        None, description="High-level OCR pipeline profile name"
-    ),
-    pipeline_flags: str | None = Query(
-        None, description="Reserved pipeline flag overrides. Disabled for now."
-    ),
+    engine_type: str = Query("auto", description="Engine type: auto, tesseract, or easyocr"),
+    pipeline_profile: str | None = Query(None, description="High-level OCR pipeline profile name"),
+    pipeline_flags: str | None = Query(None, description="Reserved pipeline flag overrides. Disabled for now."),
     pdf_mode: str = Query(
         "auto",
         description="PDF handling: auto uses a trustworthy text layer; raster forces page OCR.",

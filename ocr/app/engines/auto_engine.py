@@ -26,9 +26,7 @@ class AutoEngine(OcrEngine):
         else:
             self.engines = [self.easy, self.tesseract]
 
-        self.active_engine = next(
-            (engine for engine in self.engines if engine.available()), None
-        )
+        self.active_engine = next((engine for engine in self.engines if engine.available()), None)
 
     def recognize(self, image, mode: str = "text_mode", psm: int = 6) -> str:
         for engine in self.engines:
@@ -58,11 +56,7 @@ class AutoEngine(OcrEngine):
         return self.tesseract.available() or self.easy.available()
 
     def info(self) -> dict:
-        info = (
-            self.active_engine.info()
-            if self.active_engine is not None
-            else {"engine": "none", "available": False}
-        )
+        info = self.active_engine.info() if self.active_engine is not None else {"engine": "none", "available": False}
         info["strategy"] = "auto_fallback"
         info["tesseract_available"] = self.tesseract.available()
         info["easyocr_available"] = self.easy.available()

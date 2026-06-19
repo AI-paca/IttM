@@ -9,9 +9,7 @@ PREPARE_PATH = REPO_ROOT / "scripts" / "prepare-browser-ocr-fixture.py"
 
 
 def _load_prepare_module():
-    spec = importlib.util.spec_from_file_location(
-        "prepare_browser_ocr_fixture", PREPARE_PATH
-    )
+    spec = importlib.util.spec_from_file_location("prepare_browser_ocr_fixture", PREPARE_PATH)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(module)

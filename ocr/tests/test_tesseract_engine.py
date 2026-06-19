@@ -22,10 +22,7 @@ def test_tesseract_language_order_keeps_explicit_kazakh_priority(monkeypatch):
         staticmethod(lambda: ["eng", "rus", "chi_sim", "kaz", "kir"]),
     )
 
-    assert (
-        TesseractEngine.ocr_language_string_for(("kaz", "rus", "eng"))
-        == "kaz+rus+eng"
-    )
+    assert TesseractEngine.ocr_language_string_for(("kaz", "rus", "eng")) == "kaz+rus+eng"
 
 
 def test_tesseract_language_order_falls_back_to_english(monkeypatch):

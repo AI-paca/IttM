@@ -393,9 +393,7 @@ def test_convert_does_not_block_health_endpoint(monkeypatch):
 
     async def scenario():
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(
-            transport=transport, base_url="http://test"
-        ) as async_client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as async_client:
             convert_task = asyncio.create_task(
                 async_client.post(
                     "/convert?engine_type=auto",
@@ -450,17 +448,13 @@ def test_image_bytes_do_not_use_pdf_temp_directory(monkeypatch):
         pytest.fail("image conversion must not create a PDF temp directory")
 
     monkeypatch.setattr(convert_service, "AutoEngine", lambda **_kwargs: FakeEngine())
-    monkeypatch.setattr(
-        convert_service.tempfile, "TemporaryDirectory", fail_temp_directory
-    )
+    monkeypatch.setattr(convert_service.tempfile, "TemporaryDirectory", fail_temp_directory)
 
     image = Image.new("RGB", (100, 30), color="white")
     content = io.BytesIO()
     image.save(content, format="PNG")
 
-    markdown, meta = convert_service.convert_bytes(
-        content.getvalue(), filename="test.png", engine_type="auto"
-    )
+    markdown, meta = convert_service.convert_bytes(content.getvalue(), filename="test.png", engine_type="auto")
 
     assert markdown == "image text"
     assert meta["pages"] == 1

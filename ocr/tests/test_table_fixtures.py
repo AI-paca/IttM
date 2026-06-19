@@ -26,20 +26,12 @@ else:
         (
             candidate
             for candidate in fixture_candidates
-            if candidate.exists()
-            and any(
-                path.suffix.lower() in SUPPORTED_SUFFIXES
-                for path in candidate.iterdir()
-            )
+            if candidate.exists() and any(path.suffix.lower() in SUPPORTED_SUFFIXES for path in candidate.iterdir())
         ),
         fixture_candidates[0],
     )
 FIXTURES = (
-    sorted(
-        path
-        for path in FIXTURE_DIR.iterdir()
-        if path.suffix.lower() in SUPPORTED_SUFFIXES
-    )
+    sorted(path for path in FIXTURE_DIR.iterdir() if path.suffix.lower() in SUPPORTED_SUFFIXES)
     if FIXTURE_DIR.exists()
     else []
 )
@@ -60,9 +52,7 @@ FIXTURE_ROLES = {
     "УП2022 09.03.03 МиКМПиС ФГОС3++.pdf": "grid-table",
 }
 PROJECTED_SLIDE_PHOTO = FIXTURE_DIR / "photo_10_2026-05-12_22-26-36.jpg"
-TABLE_FIXTURES = [
-    path for path in FIXTURES if FIXTURE_ROLES.get(path.name) == "grid-table"
-]
+TABLE_FIXTURES = [path for path in FIXTURES if FIXTURE_ROLES.get(path.name) == "grid-table"]
 
 pytestmark = pytest.mark.skipif(
     os.environ.get(
@@ -91,16 +81,12 @@ def _fixture_pages(path: Path) -> list[Image.Image]:
 def _first_page_with_table(path: Path) -> tuple[Image.Image, list]:
     for image in _fixture_pages(path):
         tables = [
-            region
-            for region in analyze_document_layout(image)
-            if region.kind == "table" and region.table is not None
+            region for region in analyze_document_layout(image) if region.kind == "table" and region.table is not None
         ]
         if tables:
             return image, tables
 
-    raise AssertionError(
-        f"{path.name} did not expose a table in the first scanned pages"
-    )
+    raise AssertionError(f"{path.name} did not expose a table in the first scanned pages")
 
 
 def test_fixture_manifest_covers_the_local_debug_set():
@@ -132,9 +118,7 @@ def test_projected_slide_photo_is_dewarped_not_tableified():
     if not PROJECTED_SLIDE_PHOTO.exists():
         pytest.skip("projected slide photo fixture is not available")
 
-    markdown, meta = asyncio.run(
-        convert_service.convert(PROJECTED_SLIDE_PHOTO, engine_type="tesseract")
-    )
+    markdown, meta = asyncio.run(convert_service.convert(PROJECTED_SLIDE_PHOTO, engine_type="tesseract"))
 
     assert meta["tables_found"] == 0
     assert "Основные аналитические показатели" in markdown

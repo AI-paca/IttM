@@ -38,9 +38,7 @@ def test_name_value_pairs_must_survive_on_the_same_output_row():
     assert (
         name_value_pair_recall(
             pairs,
-            "| Poco X7 Pro | 1863133 |\n"
-            "| Poco X6 Pro | 1532816 |\n"
-            "| Redmi Note 13 Pro+ | 950814 |",
+            "| Poco X7 Pro | 1863133 |\n" "| Poco X6 Pro | 1532816 |\n" "| Redmi Note 13 Pro+ | 950814 |",
         )
         == 1
     )

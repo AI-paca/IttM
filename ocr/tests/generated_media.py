@@ -125,15 +125,9 @@ FUNCTIONAL_OCR_FIXTURE_REGISTRY = (
 )
 
 
-def _font(
-    size: int, *, bold: bool = False
-) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+def _font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     candidates = (
-        (
-            "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf"
-            if bold
-            else "/usr/share/fonts/TTF/DejaVuSans.ttf"
-        ),
+        ("/usr/share/fonts/TTF/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/TTF/DejaVuSans.ttf"),
         (
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
             if bold
@@ -163,9 +157,7 @@ def _font(
         return ImageFont.load_default()
 
 
-def _draw_lines(
-    image, lines, *, x=80, y=70, spacing=92, size=54, fill=None, bold=False
-):
+def _draw_lines(image, lines, *, x=80, y=70, spacing=92, size=54, fill=None, bold=False):
     if fill is None:
         fill = "black"
     draw = ImageDraw.Draw(image)
@@ -262,9 +254,7 @@ def _small_skew_fixture() -> Image.Image:
         spacing=136,
         bold=True,
     )
-    rotated = image.rotate(
-        1.4, resample=Image.Resampling.BICUBIC, expand=True, fillcolor="white"
-    )
+    rotated = image.rotate(1.4, resample=Image.Resampling.BICUBIC, expand=True, fillcolor="white")
     image.close()
     return rotated
 
@@ -295,9 +285,7 @@ def functional_ocr_fixture_spec(fixture_id: str) -> FunctionalOcrFixtureSpec:
         if spec.id == fixture_id:
             return spec
     known = ", ".join(spec.id for spec in FUNCTIONAL_OCR_FIXTURE_REGISTRY)
-    raise KeyError(
-        f"Unknown functional OCR fixture '{fixture_id}'. Known fixtures: {known}"
-    )
+    raise KeyError(f"Unknown functional OCR fixture '{fixture_id}'. Known fixtures: {known}")
 
 
 def functional_ocr_fixture_image(fixture_id: str) -> Image.Image:
@@ -315,9 +303,7 @@ def functional_ocr_fixture_image(fixture_id: str) -> Image.Image:
     raise ValueError(f"Unsupported functional OCR fixture category '{spec.category}'")
 
 
-def functional_ocr_fixture_bytes(
-    fixture_id: str, *, image_format="PNG", **save_options
-):
+def functional_ocr_fixture_bytes(fixture_id: str, *, image_format="PNG", **save_options):
     image = functional_ocr_fixture_image(fixture_id)
     try:
         output = io.BytesIO()
@@ -384,10 +370,7 @@ def animated_gif_bytes(frame_count=5):
 
 
 def multipage_tiff_bytes(page_count=3):
-    pages = [
-        Image.new("RGB", (120, 80), (240 - index * 10,) * 3)
-        for index in range(page_count)
-    ]
+    pages = [Image.new("RGB", (120, 80), (240 - index * 10,) * 3) for index in range(page_count)]
     output = io.BytesIO()
     pages[0].save(
         output,

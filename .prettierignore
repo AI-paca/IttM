@@ -4,3 +4,7 @@ dist/
 build/
 ocr/tests/fixtures/
 .cache/
+.zoo/plan.md
+debug/private-report.md
+debug/reference/
+report.md

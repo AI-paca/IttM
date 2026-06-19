@@ -17,16 +17,12 @@ def _image_bytes(image: Image.Image) -> bytes:
     return output.getvalue()
 
 
-def test_pdf_pages_are_rendered_one_at_a_time_and_spool_is_removed(
-    monkeypatch, tmp_path
-):
+def test_pdf_pages_are_rendered_one_at_a_time_and_spool_is_removed(monkeypatch, tmp_path):
     calls = []
 
     class ImageOnlyPipeline:
         def apply(self, image):
-            raise AssertionError(
-                "image-only preprocessing must not alter rendered PDF pages"
-            )
+            raise AssertionError("image-only preprocessing must not alter rendered PDF pages")
 
     def fake_pdfinfo(path, first_page=None, last_page=None):
         assert Path(path).exists()
@@ -39,9 +35,7 @@ def test_pdf_pages_are_rendered_one_at_a_time_and_spool_is_removed(
         assert Path(path).exists()
         assert kwargs["dpi"] == 300
         assert "size" not in kwargs
-        calls.append(
-            (kwargs["first_page"], kwargs["last_page"], kwargs["thread_count"])
-        )
+        calls.append((kwargs["first_page"], kwargs["last_page"], kwargs["thread_count"]))
         return [Image.new("RGB", (40, 30), "white")]
 
     monkeypatch.setattr(pdf2image, "pdfinfo_from_path", fake_pdfinfo)
@@ -49,9 +43,7 @@ def test_pdf_pages_are_rendered_one_at_a_time_and_spool_is_removed(
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
 
     pipeline = ImageOnlyPipeline()
-    pages = list(
-        convert_service._iter_document_images(b"%PDF-fake", "test.pdf", pipeline)
-    )
+    pages = list(convert_service._iter_document_images(b"%PDF-fake", "test.pdf", pipeline))
     try:
         assert calls == [
             (1, 1, 1),
@@ -89,12 +81,8 @@ def test_decoded_image_limit_rejects_before_loading_pixels(monkeypatch):
 def test_pdf_render_dpi_only_downscales_oversized_pages(monkeypatch):
     monkeypatch.setenv("OCR_MAX_PDF_RENDER_DIMENSION", "6000")
 
-    assert convert_service._pdf_render_options({"Page size": "864 x 432 pts"}) == {
-        "dpi": 300
-    }
-    assert convert_service._pdf_render_options({"Page size": "14400 x 7200 pts"}) == {
-        "dpi": 30
-    }
+    assert convert_service._pdf_render_options({"Page size": "864 x 432 pts"}) == {"dpi": 300}
+    assert convert_service._pdf_render_options({"Page size": "14400 x 7200 pts"}) == {"dpi": 30}
 
 
 def test_pdf_text_layer_bypasses_ocr_when_usable(monkeypatch):
@@ -106,9 +94,7 @@ def test_pdf_text_layer_bypasses_ocr_when_usable(monkeypatch):
     monkeypatch.setattr(
         convert_service,
         "_create_engine",
-        lambda _engine_type: pytest.fail(
-            "OCR engine should not be created for usable PDF text layer"
-        ),
+        lambda _engine_type: pytest.fail("OCR engine should not be created for usable PDF text layer"),
     )
 
     markdown, meta = convert_service.convert_bytes(

@@ -53,8 +53,7 @@ def _flag(key: str, value, source: str) -> PipelineFlag:
 def profile_flag_items(profile: OcrPipelineProfile) -> list[PipelineFlag]:
     flags: list[PipelineFlag] = []
     flags.extend(
-        _flag("preprocess", step, "OcrPipelineProfile.image_preprocessing")
-        for step in profile.image_preprocessing
+        _flag("preprocess", step, "OcrPipelineProfile.image_preprocessing") for step in profile.image_preprocessing
     )
     flags.extend(
         [
@@ -196,8 +195,7 @@ def profile_flag_items(profile: OcrPipelineProfile) -> list[PipelineFlag]:
         ]
     )
     flags.extend(
-        _flag("layout_stage", stage, "LayoutPipelineConfig.allowed_stages")
-        for stage in profile.layout.allowed_stages
+        _flag("layout_stage", stage, "LayoutPipelineConfig.allowed_stages") for stage in profile.layout.allowed_stages
     )
     flags.extend(
         _flag(
@@ -231,9 +229,7 @@ def pipeline_flag_catalog() -> list[dict[str, str]]:
     for profile in OCR_PIPELINE_PROFILES.values():
         for flag in profile_flag_items(profile):
             by_key.setdefault(flag.key, flag)
-    by_key.setdefault(
-        "pipeline_flags", _flag("pipeline_flags", "disabled", "API query contract")
-    )
+    by_key.setdefault("pipeline_flags", _flag("pipeline_flags", "disabled", "API query contract"))
     by_key.setdefault(
         "overrides_enabled",
         _flag("overrides_enabled", flag_overrides_enabled(), "API query contract"),
@@ -246,9 +242,7 @@ def pipeline_flag_catalog() -> list[dict[str, str]]:
         "ocr_languages",
         _flag("ocr_languages", "rus+eng+chi_sim", "browser/debug runner"),
     )
-    by_key.setdefault(
-        "ocr_max_dimension", _flag("ocr_max_dimension", "3200", "browser profile")
-    )
+    by_key.setdefault("ocr_max_dimension", _flag("ocr_max_dimension", "3200", "browser profile"))
     by_key.setdefault(
         "ocr_max_image_pixels",
         _flag("ocr_max_image_pixels", "8000000", "browser profile"),
@@ -261,18 +255,14 @@ def pipeline_flag_catalog() -> list[dict[str, str]]:
         "browser_profile_reason",
         _flag("browser_profile_reason", "balanced-browser-fallback", "browser profile"),
     )
-    by_key.setdefault(
-        "pdf_render_scale", _flag("pdf_render_scale", "1.25", "browser profile")
-    )
+    by_key.setdefault("pdf_render_scale", _flag("pdf_render_scale", "1.25", "browser profile"))
     by_key.setdefault(
         "pdf_mode",
         _flag("pdf_mode", "auto|raster", "API query contract"),
     )
     by_key.setdefault(
         "preprocess_runtime",
-        _flag(
-            "preprocess_runtime", "browser_canvas|python_compat|none", "debug runner"
-        ),
+        _flag("preprocess_runtime", "browser_canvas|python_compat|none", "debug runner"),
     )
     return [
         {
@@ -289,8 +279,5 @@ def pipeline_flags_payload() -> dict:
         "overrides_enabled": flag_overrides_enabled(),
         "override_parameter": "pipeline_flags",
         "available_flags": pipeline_flag_catalog(),
-        "profiles": {
-            name: sorted(profile_flags(profile))
-            for name, profile in sorted(OCR_PIPELINE_PROFILES.items())
-        },
+        "profiles": {name: sorted(profile_flags(profile)) for name, profile in sorted(OCR_PIPELINE_PROFILES.items())},
     }

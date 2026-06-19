@@ -57,9 +57,7 @@ class ProjectedDocumentDewarpStep(ImagePreprocessingStep):
             mask = cv2.inRange(blurred, threshold, 255)
             kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-            contours, _ = cv2.findContours(
-                mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-            )
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
             for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:5]:
                 area = float(cv2.contourArea(contour))
@@ -116,9 +114,7 @@ class ProjectedDocumentDewarpStep(ImagePreprocessingStep):
             borderValue=(255, 255, 255),
         )
         warped_gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
-        warped_gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(
-            warped_gray
-        )
+        warped_gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(warped_gray)
         return Image.fromarray(warped_gray).convert("RGB")
 
 
@@ -159,9 +155,7 @@ class ProjectorSlideDewarpStep(ImagePreprocessingStep):
     def apply(self, image: Image.Image) -> Image.Image:
         width, height = image.size
         aspect = height / max(1, width)
-        if not (
-            850 <= width <= 1200 and 1100 <= height <= 1500 and 1.2 <= aspect <= 1.6
-        ):
+        if not (850 <= width <= 1200 and 1100 <= height <= 1500 and 1.2 <= aspect <= 1.6):
             return image
 
         gray = image.convert("L")
@@ -169,10 +163,7 @@ class ProjectorSlideDewarpStep(ImagePreprocessingStep):
         if center.resize((1, 1)).getpixel((0, 0)) < 120:
             return image
 
-        source = tuple(
-            (int(width * x), int(height * y))
-            for x, y in _projector_slide_source_ratios(gray)
-        )
+        source = tuple((int(width * x), int(height * y)) for x, y in _projector_slide_source_ratios(gray))
         target_width, target_height = 2000, 1200
         destination = (
             (0, 0),
@@ -201,9 +192,7 @@ class OcrPreprocessingPipeline:
             step = IMAGE_PREPROCESSING_STEPS.get(name)
             if step is None:
                 known_steps = ", ".join(sorted(IMAGE_PREPROCESSING_STEPS))
-                raise ValueError(
-                    f"Unknown image preprocessing step '{name}'. Known steps: {known_steps}"
-                )
+                raise ValueError(f"Unknown image preprocessing step '{name}'. Known steps: {known_steps}")
             steps.append(step())
         return cls(steps)
 
@@ -236,9 +225,7 @@ def _perspective_coefficients(destination, source):
     for (x, y), (u, v) in zip(destination, source):
         matrix.append([x, y, 1, 0, 0, 0, -u * x, -u * y])
         matrix.append([0, 0, 0, x, y, 1, -v * x, -v * y])
-    return tuple(
-        np.linalg.solve(np.array(matrix, dtype=float), np.array(source).reshape(8))
-    )
+    return tuple(np.linalg.solve(np.array(matrix, dtype=float), np.array(source).reshape(8)))
 
 
 def _is_dewarped_projector_slide_size(size: tuple[int, int]) -> bool:
@@ -271,9 +258,7 @@ def _projector_slide_source_ratios(
     gray: Image.Image,
 ) -> tuple[tuple[float, float], ...]:
     width, height = gray.size
-    content = gray.crop(
-        (int(width * 0.05), int(height * 0.15), int(width * 0.95), int(height * 0.88))
-    )
+    content = gray.crop((int(width * 0.05), int(height * 0.15), int(width * 0.95), int(height * 0.88)))
     density = _edge_density(content)
     if density >= TEXT_PROJECTOR_EDGE_DENSITY:
         return (
@@ -290,9 +275,7 @@ def _projector_slide_source_ratios(
     )
 
 
-def _is_near_full_frame_quad(
-    corners, width: int, height: int, area_ratio: float
-) -> bool:
+def _is_near_full_frame_quad(corners, width: int, height: int, area_ratio: float) -> bool:
     if area_ratio < 0.85:
         return False
 

@@ -114,16 +114,10 @@ def _with_edges(positions: list[int], size: int, tolerance: int = 8) -> tuple[in
         result.append(0)
     if not any(pos >= size - 1 - tolerance for pos in result):
         result.append(size - 1)
-    return tuple(
-        _merge_positions(
-            [max(0, min(size - 1, pos)) for pos in result], tolerance=tolerance
-        )
-    )
+    return tuple(_merge_positions([max(0, min(size - 1, pos)) for pos in result], tolerance=tolerance))
 
 
-def _cells_from_lines(
-    x_lines: tuple[int, ...], y_lines: tuple[int, ...]
-) -> tuple[TableCell, ...]:
+def _cells_from_lines(x_lines: tuple[int, ...], y_lines: tuple[int, ...]) -> tuple[TableCell, ...]:
     cells = []
     for row, (top, bottom) in enumerate(zip(y_lines, y_lines[1:])):
         for col, (left, right) in enumerate(zip(x_lines, x_lines[1:])):
@@ -157,10 +151,7 @@ def _dedupe_tables(tables: list[TableLayout]) -> list[TableLayout]:
         tables,
         key=lambda t: (-(t.bbox[2] - t.bbox[0]) * (t.bbox[3] - t.bbox[1]), t.bbox[1]),
     ):
-        if any(
-            _intersection_over_union(table.bbox, existing.bbox) > 0.65
-            for existing in selected
-        ):
+        if any(_intersection_over_union(table.bbox, existing.bbox) > 0.65 for existing in selected):
             continue
         selected.append(table)
     return sorted(selected, key=lambda t: (t.bbox[1], t.bbox[0]))
@@ -192,23 +183,13 @@ def _grid_line_masks(binary: np.ndarray):
     import cv2
 
     height, width = binary.shape[:2]
-    horizontal_kernel = cv2.getStructuringElement(
-        cv2.MORPH_RECT, (max(18, width // 28), 1)
-    )
-    vertical_kernel = cv2.getStructuringElement(
-        cv2.MORPH_RECT, (1, max(18, height // 28))
-    )
-    horizontal = cv2.morphologyEx(
-        binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1
-    )
+    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(18, width // 28), 1))
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(18, height // 28)))
+    horizontal = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
     vertical = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vertical_kernel, iterations=1)
 
-    horizontal = cv2.dilate(
-        horizontal, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 1)), iterations=1
-    )
-    vertical = cv2.dilate(
-        vertical, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 3)), iterations=1
-    )
+    horizontal = cv2.dilate(horizontal, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 1)), iterations=1)
+    vertical = cv2.dilate(vertical, cv2.getStructuringElement(cv2.MORPH_RECT, (1, 3)), iterations=1)
     return horizontal, vertical
 
 
@@ -227,9 +208,7 @@ def _cell_line_hints_from_contours(
     y_positions: list[int] = []
     confirmed_cells = 0
 
-    contours, hierarchy = cv2.findContours(
-        table_grid, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE
-    )
+    contours, hierarchy = cv2.findContours(table_grid, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     if hierarchy is None:
         return x_positions, y_positions, confirmed_cells
 
@@ -269,9 +248,7 @@ def _build_grid_mask(horizontal: np.ndarray, vertical: np.ndarray):
         cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
         iterations=1,
     )
-    return cv2.dilate(
-        grid, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1
-    )
+    return cv2.dilate(grid, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
 
 
 def detect_table_layouts(
@@ -305,9 +282,7 @@ def detect_table_layouts(
         cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7)),
         iterations=2,
     )
-    contours, _ = cv2.findContours(
-        contour_grid, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-    )
+    contours, _ = cv2.findContours(contour_grid, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     image_area = width * height
     tables: list[TableLayout] = []
 
@@ -329,12 +304,10 @@ def detect_table_layouts(
         table_grid = grid[y:y2, x:x2]
         local_width = x2 - x
         local_height = y2 - y
-        contour_x_lines, contour_y_lines, confirmed_cells = (
-            _cell_line_hints_from_contours(
-                table_grid,
-                local_width,
-                local_height,
-            )
+        contour_x_lines, contour_y_lines, confirmed_cells = _cell_line_hints_from_contours(
+            table_grid,
+            local_width,
+            local_height,
         )
 
         y_lines_local = _with_edges(
@@ -362,10 +335,7 @@ def detect_table_layouts(
 
         if len(x_lines_local) < 3 or len(y_lines_local) < 3:
             continue
-        if (
-            local_width / max(1, len(x_lines_local) - 1) < 6
-            or local_height / max(1, len(y_lines_local) - 1) < 6
-        ):
+        if local_width / max(1, len(x_lines_local) - 1) < 6 or local_height / max(1, len(y_lines_local) - 1) < 6:
             continue
 
         x_lines = tuple(x + pos for pos in x_lines_local)
@@ -421,9 +391,7 @@ def shift_table_layout(table: TableLayout, dx: int, dy: int) -> TableLayout:
     )
 
 
-def logical_table_layout(
-    image: Image.Image, table: TableLayout, min_major_coverage: float = 0.72
-) -> TableLayout:
+def logical_table_layout(image: Image.Image, table: TableLayout, min_major_coverage: float = 0.72) -> TableLayout:
     """
     Collapse partial indentation lines into logical columns.
 
@@ -452,9 +420,7 @@ def logical_table_layout(
         local = max(0, min(width - 1, int(position)))
         left = max(0, local - 3)
         right = min(width, local + 4)
-        coverage = (
-            float(np.max(projection[left:right])) / height if right > left else 0.0
-        )
+        coverage = float(np.max(projection[left:right])) / height if right > left else 0.0
         line_coverages[int(position)] = coverage
         if coverage >= min_major_coverage:
             major_lines.append(local)
@@ -467,21 +433,14 @@ def logical_table_layout(
     first_line = int(table.x_lines[0]) if table.x_lines else 0
     left_edge = (
         first_line
-        if table.x_lines
-        and (
-            first_line <= edge_tolerance
-            or line_coverages.get(first_line, 0.0) >= min_major_coverage
-        )
+        if table.x_lines and (first_line <= edge_tolerance or line_coverages.get(first_line, 0.0) >= min_major_coverage)
         else 0
     )
     last_line = int(table.x_lines[-1]) if table.x_lines else width - 1
     right_edge = (
         last_line
         if table.x_lines
-        and (
-            last_line >= width - edge_tolerance
-            or line_coverages.get(last_line, 0.0) >= min_major_coverage
-        )
+        and (last_line >= width - edge_tolerance or line_coverages.get(last_line, 0.0) >= min_major_coverage)
         else width - 1
     )
 
@@ -536,11 +495,7 @@ def analyze_document_layout(
         if y1 - cursor_y > 40:
             text_crop = cropped.crop((0, cursor_y, width, y1))
             if _has_visible_content(text_crop):
-                regions.append(
-                    LayoutRegion(
-                        kind="image", image=text_crop, bbox=(0, cursor_y, width, y1)
-                    )
-                )
+                regions.append(LayoutRegion(kind="image", image=text_crop, bbox=(0, cursor_y, width, y1)))
 
         table_crop = cropped.crop(table.bbox)
         regions.append(
@@ -556,11 +511,7 @@ def analyze_document_layout(
     if height - cursor_y > 40:
         text_crop = cropped.crop((0, cursor_y, width, height))
         if _has_visible_content(text_crop):
-            regions.append(
-                LayoutRegion(
-                    kind="image", image=text_crop, bbox=(0, cursor_y, width, height)
-                )
-            )
+            regions.append(LayoutRegion(kind="image", image=text_crop, bbox=(0, cursor_y, width, height)))
 
     return regions
 
@@ -585,20 +536,12 @@ def erase_table_lines_for_ocr(image: Image.Image) -> Image.Image:
     blurred = cv2.GaussianBlur(gray, (3, 3), 0)
     _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     height, width = gray.shape[:2]
-    horizontal_kernel = cv2.getStructuringElement(
-        cv2.MORPH_RECT, (max(40, width // 12), 1)
-    )
-    vertical_kernel = cv2.getStructuringElement(
-        cv2.MORPH_RECT, (1, max(18, height // 16))
-    )
-    horizontal = cv2.morphologyEx(
-        binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1
-    )
+    horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(40, width // 12), 1))
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(18, height // 16)))
+    horizontal = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
     vertical = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vertical_kernel, iterations=1)
     line_mask = cv2.add(horizontal, vertical)
-    line_mask = cv2.dilate(
-        line_mask, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)), iterations=1
-    )
+    line_mask = cv2.dilate(line_mask, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)), iterations=1)
     rgb[line_mask > 0] = (255, 255, 255)
     return Image.fromarray(rgb)
 
@@ -655,9 +598,7 @@ def table_words_to_markdown(table: TableLayout, words: list[dict]) -> str:
 
 
 def table_words_to_rows(table: TableLayout, words: list[dict]) -> list[list[str]]:
-    rows: list[list[list[dict]]] = [
-        [[] for _ in range(table.cols)] for _ in range(table.rows)
-    ]
+    rows: list[list[list[dict]]] = [[[] for _ in range(table.cols)] for _ in range(table.rows)]
 
     for word in words:
         text = _clean_ocr_word(str(word.get("text", "")))
@@ -673,9 +614,7 @@ def table_words_to_rows(table: TableLayout, words: list[dict]) -> list[list[str]
         if row is None or col is None or row >= table.rows or col >= table.cols:
             continue
 
-        rows[row][col].append(
-            {"text": text.replace("|", "\\|"), "bbox": (left, top, right, bottom)}
-        )
+        rows[row][col].append({"text": text.replace("|", "\\|"), "bbox": (left, top, right, bottom)})
 
     return [[_words_to_cell_text(cell_words) for cell_words in row] for row in rows]
 
@@ -738,9 +677,7 @@ def wide_curriculum_table_to_markdown(table: TableLayout, words: list[dict]) -> 
         "З.е.",
     ]
     semester_start = 16
-    semester_count = max(
-        0, min(8, (table.cols - semester_start - 3) // len(semester_labels))
-    )
+    semester_count = max(0, min(8, (table.cols - semester_start - 3) // len(semester_labels)))
     tail_start = semester_start + semester_count * len(semester_labels)
 
     markdown_rows = [
@@ -763,11 +700,7 @@ def wide_curriculum_table_to_markdown(table: TableLayout, words: list[dict]) -> 
         name = row[1].strip() if len(row) > 1 else ""
         index = _normalize_curriculum_index(raw_index, name)
         if not _is_curriculum_index(index):
-            if (
-                not name
-                and _looks_like_text_fragment(raw_index)
-                and not _looks_like_wide_header_noise(raw_index)
-            ):
+            if not name and _looks_like_text_fragment(raw_index) and not _looks_like_wide_header_noise(raw_index):
                 name = raw_index
             index = ""
         else:
@@ -792,20 +725,9 @@ def wide_curriculum_table_to_markdown(table: TableLayout, words: list[dict]) -> 
             elif tail:
                 competencies = tail[0].strip()
 
-        if (
-            not index
-            and not name
-            and not summary
-            and not semesters
-            and not department
-            and not competencies
-        ):
+        if not index and not name and not summary and not semesters and not department and not competencies:
             continue
-        if (
-            not index
-            and not name
-            and _looks_like_wide_header_noise(" ".join(row[: min(len(row), 8)]))
-        ):
+        if not index and not name and _looks_like_wide_header_noise(" ".join(row[: min(len(row), 8)])):
             continue
 
         markdown_rows.append(
@@ -907,28 +829,16 @@ def _is_curriculum_section_index(text: str) -> bool:
 
 def _is_curriculum_index(text: str) -> bool:
     value = text.strip()
-    return bool(
-        value
-        and (
-            _is_curriculum_section_index(value)
-            or _parse_numbered_curriculum_index(value)
-        )
-    )
+    return bool(value and (_is_curriculum_section_index(value) or _parse_numbered_curriculum_index(value)))
 
 
 def _normalize_curriculum_section_name(index: str, raw_index: str, name: str) -> str:
     if index == "Б1" and "дисциплин" in raw_index.lower():
-        section_name = re.sub(
-            r"^блок\s*1\.?", "", raw_index, flags=re.IGNORECASE
-        ).strip()
+        section_name = re.sub(r"^блок\s*1\.?", "", raw_index, flags=re.IGNORECASE).strip()
         if name and name not in section_name:
             section_name = f"{section_name} {name}"
         return section_name or name
-    if (
-        index in {"Б1.О", "Б1.В"}
-        and raw_index
-        and not _parse_numbered_curriculum_index(index)
-    ):
+    if index in {"Б1.О", "Б1.В"} and raw_index and not _parse_numbered_curriculum_index(index):
         if name and name.lower() not in raw_index.lower():
             return f"{raw_index} {name}"
         return raw_index or name
@@ -1024,16 +934,10 @@ def _normalize_curriculum_index(text: str, name_cell: str = "") -> str:
 
     lower_name = name_cell.lower()
     combined = f"{raw} {name_cell}".lower()
-    if (
-        "дисциплин" in combined
-        and "модул" in combined
-        and (len(compact) <= 24 or "блок" in combined)
-    ):
+    if "дисциплин" in combined and "модул" in combined and (len(compact) <= 24 or "блок" in combined):
         return "Б1"
     if "обязательн" in combined and (
-        not compact
-        or "част" in combined
-        or compact.lower() in {"si0", "s10", "510", "610", "51o", "61o"}
+        not compact or "част" in combined or compact.lower() in {"si0", "s10", "510", "610", "51o", "61o"}
     ):
         return "Б1.О"
     if (
@@ -1180,9 +1084,7 @@ def table_layout_to_rows(
                 continue
             prepared = _prepare_cell_for_ocr(cell_image)
             try:
-                rows[cell.row][cell.col] = _normalize_cell_text(
-                    recognize_cell(prepared)
-                )
+                rows[cell.row][cell.col] = _normalize_cell_text(recognize_cell(prepared))
             finally:
                 prepared.close()
         finally:
@@ -1308,9 +1210,7 @@ def split_by_blank_bands(
     return [image.crop((0, start, width, end)) for start, end in boxes if end > start]
 
 
-def fallback_split_with_overlap(
-    image: Image.Image, chunk_height: int = 1600, overlap: int = 120
-) -> list:
+def fallback_split_with_overlap(image: Image.Image, chunk_height: int = 1600, overlap: int = 120) -> list:
     """
     Fallback: splits image with fixed height and overlap if no blank bands found.
     """
@@ -1328,9 +1228,7 @@ def fallback_split_with_overlap(
     return chunks
 
 
-def split_vertical(
-    image: Image.Image, chunk_height: int = 1600, overlap: int = 120
-) -> list:
+def split_vertical(image: Image.Image, chunk_height: int = 1600, overlap: int = 120) -> list:
     """
     Main entry point: splits image vertically using card-aware chunking.
     First tries to find blank horizontal bands between cards.

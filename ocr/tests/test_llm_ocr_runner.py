@@ -21,14 +21,8 @@ def run_runner(*args):
 def test_manifest_groups_flags_by_pipeline_responsibility():
     catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
 
-    groups = {
-        flag["group"] for model in catalog["models"] for flag in model["flag_contract"]
-    }
-    requirements = {
-        flag["requirement"]
-        for model in catalog["models"]
-        for flag in model["flag_contract"]
-    }
+    groups = {flag["group"] for model in catalog["models"] for flag in model["flag_contract"]}
+    requirements = {flag["requirement"] for model in catalog["models"] for flag in model["flag_contract"]}
 
     assert {"alignment", "positioning", "composition"} <= groups
     assert {"required", "quality"} <= requirements

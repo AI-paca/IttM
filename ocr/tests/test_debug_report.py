@@ -16,9 +16,7 @@ def _load_debug_report():
 def test_expected_lines_skip_manual_page_markers():
     debug_report = _load_debug_report()
 
-    assert debug_report.expected_lines("## Page 1\nUseful text\n### Page 25\n") == [
-        "Useful text"
-    ]
+    assert debug_report.expected_lines("## Page 1\nUseful text\n### Page 25\n") == ["Useful text"]
 
 
 def test_expected_lines_skip_single_column_table_separator():
@@ -121,23 +119,8 @@ def test_expected_match_accepts_mixed_script_identifier_confusables():
 def test_expected_match_accepts_cover_text_cyrillic_confusables():
     debug_report = _load_debug_report()
 
-    actual = (
-        "УДОБНЫИ\n"
-        "СПОСОБ\n"
-        "ВЫУЧИТЬ\n"
-        "НЕМЕЦКИИ ЯЗЫК\n"
-        "BCЕ ПРАВИАА\n"
-        "Москва\n"
-        "Издатехьство ACT"
-    )
-    expected = (
-        "УДОБНЫЙ СПОСОБ ВЫУЧИТЬ\n"
-        "Lingua\n"
-        "НЕМЕЦКИЙ ЯЗЫК\n"
-        "ВСЕ ПРАВИЛА\n"
-        "Москва\n"
-        "Издательство АСТ"
-    )
+    actual = "УДОБНЫИ\n" "СПОСОБ\n" "ВЫУЧИТЬ\n" "НЕМЕЦКИИ ЯЗЫК\n" "BCЕ ПРАВИАА\n" "Москва\n" "Издатехьство ACT"
+    expected = "УДОБНЫЙ СПОСОБ ВЫУЧИТЬ\n" "Lingua\n" "НЕМЕЦКИЙ ЯЗЫК\n" "ВСЕ ПРАВИЛА\n" "Москва\n" "Издательство АСТ"
 
     assert debug_report.expected_match(actual, expected) == ("83.33", "5", "6")
 
@@ -145,14 +128,8 @@ def test_expected_match_accepts_cover_text_cyrillic_confusables():
 def test_expected_match_accepts_kazakh_ocr_confusables():
     debug_report = _load_debug_report()
 
-    actual = (
-        "Баспа Аст ЖШК, 129085, Мэскеу к., Звёздный гулзар, "
-        "21-уй, 1-курылыс, 705-белме, 7-кабат."
-    )
-    expected = (
-        "«Баспа Аст» ЖШҚ, 129085, Мəскеу қ., Звёздный гүлзар, "
-        "21-үй, 1-құрылыс, 705-бөлме, 7 қабат."
-    )
+    actual = "Баспа Аст ЖШК, 129085, Мэскеу к., Звёздный гулзар, " "21-уй, 1-курылыс, 705-белме, 7-кабат."
+    expected = "«Баспа Аст» ЖШҚ, 129085, Мəскеу қ., Звёздный гүлзар, " "21-үй, 1-құрылыс, 705-бөлме, 7 қабат."
 
     assert debug_report.expected_match(actual, expected) == ("100.00", "1", "1")
 
@@ -216,8 +193,7 @@ def test_expected_match_accepts_noisy_curriculum_practice_rows():
     debug_report = _load_debug_report()
 
     actual = (
-        "52.8.01¢H) Производственная практика исследовательская работа 7 5 "
-        "36 180 180 5 12 Прикладная математика"
+        "52.8.01¢H) Производственная практика исследовательская работа 7 5 " "36 180 180 5 12 Прикладная математика"
     )
     expected = (
         "| Б2.В.01(Н) | Производственная практика "
@@ -238,8 +214,6 @@ def test_table_debug_artifact_uses_markdown_pipes(tmp_path):
     tables = tmp_path / "tables"
 
     assert debug_report.write_table_markdown_files(result, tables) == 1
-    assert (tables / "result.tables.md").read_text(encoding="utf-8") == (
-        "| Name | Score |\n" "| Alice | 10 |\n"
-    )
+    assert (tables / "result.tables.md").read_text(encoding="utf-8") == ("| Name | Score |\n" "| Alice | 10 |\n")
     assert list(tables.glob("*.csv")) == []
     assert list(tables.glob("*.table-*.md")) == []

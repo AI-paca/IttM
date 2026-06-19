@@ -58,9 +58,7 @@ class TesseractEngine(OcrEngine):
         return "+".join(languages or ["eng"])
 
     def configured_ocr_language_string(self) -> str:
-        priority = self.language_priority or (
-            self.BASE_LANGUAGES + self.OPTIONAL_LANGUAGES
-        )
+        priority = self.language_priority or (self.BASE_LANGUAGES + self.OPTIONAL_LANGUAGES)
         return self.ocr_language_string_for(priority)
 
     def _add_ocr_border(self, image: Image.Image) -> Image.Image:
@@ -106,9 +104,7 @@ class TesseractEngine(OcrEngine):
             return -1.0
 
     @staticmethod
-    def crop_garbage_zones(
-        image: Image.Image, left_percent: float = 0.15, right_percent: float = 0.20
-    ) -> Image.Image:
+    def crop_garbage_zones(image: Image.Image, left_percent: float = 0.15, right_percent: float = 0.20) -> Image.Image:
         """
         Crops garbage zones from product card image.
         Removes left part (product image) and right part (buttons like - 1 +).
@@ -364,10 +360,7 @@ class TesseractEngine(OcrEngine):
                 text = self.recognize_to_string(image, psm)
                 if text:
                     return text
-                if (
-                    psm not in self.edge_word_fallback_psms
-                    and self._edge_ink_touches_all_sides(image)
-                ):
+                if psm not in self.edge_word_fallback_psms and self._edge_ink_touches_all_sides(image):
                     for fallback_psm in self.edge_word_fallback_psms:
                         text = self.recognize_to_string(image, fallback_psm)
                         if text:

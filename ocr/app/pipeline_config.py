@@ -186,16 +186,10 @@ DEFAULT_ENGINE_PIPELINE_PROFILES = {
 }
 
 
-def resolve_pipeline_profile(
-    engine_type: str, profile_name: str | None = None
-) -> OcrPipelineProfile:
-    name = profile_name or DEFAULT_ENGINE_PIPELINE_PROFILES.get(
-        engine_type, "backend_auto_standard"
-    )
+def resolve_pipeline_profile(engine_type: str, profile_name: str | None = None) -> OcrPipelineProfile:
+    name = profile_name or DEFAULT_ENGINE_PIPELINE_PROFILES.get(engine_type, "backend_auto_standard")
     profile = OCR_PIPELINE_PROFILES.get(name)
     if profile is None:
         known_profiles = ", ".join(sorted(OCR_PIPELINE_PROFILES))
-        raise ValueError(
-            f"Unknown OCR pipeline profile '{name}'. Known profiles: {known_profiles}"
-        )
+        raise ValueError(f"Unknown OCR pipeline profile '{name}'. Known profiles: {known_profiles}")
     return profile

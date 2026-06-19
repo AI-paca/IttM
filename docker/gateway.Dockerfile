@@ -1,5 +1,5 @@
 ARG NODE_BUILD_IMAGE=node:22-slim
-ARG NODE_RUNTIME_IMAGE=alpine:3.21
+ARG NODE_RUNTIME_IMAGE=node:22-alpine
 
 FROM ${NODE_BUILD_IMAGE} AS builder
 
@@ -14,10 +14,6 @@ FROM ${NODE_RUNTIME_IMAGE}
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
-
-RUN apk add --no-cache nodejs \
-    && addgroup -S node \
-    && adduser -S -G node node
 
 COPY --from=builder /app/dist ./dist
 

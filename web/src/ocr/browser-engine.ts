@@ -2,11 +2,12 @@ import {
   createBrowserOcrProfile,
   type BrowserOcrProfile,
 } from "./browser-profile";
-import { resizeImageForBrowserOcr } from "./browser-image-preprocessor";
+import { streamImagesForBrowserOcr } from "./browser-image-preprocessor";
 import {
   acquireBrowserOcrWorker,
   releaseBrowserOcrWorkers,
 } from "./tesseract-worker-session";
+import { mergeOcrTextChunks } from "./merge-ocr-chunks";
 import type { OcrResult, ProgressSink } from "./types";
 
 export { createBrowserOcrProfile };
@@ -24,14 +25,28 @@ export async function runBrowserOcrLowMemory(
 ): Promise<OcrResult> {
   onProgress(`Загрузка OCR (${profile.languages}, ${profile.reason})...`);
 
-  const input = await resizeImageForBrowserOcr(file, profile);
   const workerLease = await acquireBrowserOcrWorker(profile, onProgress);
   onProgress("Обработка изображения...");
 
   try {
-    const text = await workerLease.recognize(input);
-    onChunkExtracted?.(text);
-    return { markdown: text };
+    const chunks: string[] = [];
+    let merged = "";
+    for await (const prepared of streamImagesForBrowserOcr(file, profile)) {
+      if (prepared.total > 1) {
+        onProgress(
+          `Обработка сегмента ${prepared.index + 1}/${prepared.total}...`,
+        );
+      }
+      const text = await workerLease.recognize(
+        prepared.input,
+        prepared.pageSegmentationMode,
+      );
+      chunks.push(text);
+      const nextMerged = mergeOcrTextChunks(chunks);
+      onChunkExtracted?.(nextMerged.slice(merged.length));
+      merged = nextMerged;
+    }
+    return { markdown: merged };
   } finally {
     if (!profile.cacheWorker) onProgress("Зачистка памяти...");
     await workerLease.release();

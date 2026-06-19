@@ -65,6 +65,21 @@ test("readJsonOrThrow turns backend error payload into exception", async () => {
   );
 });
 
+test("readJsonOrThrow rejects captive portal HTML returned with HTTP 200", async () => {
+  const response = new Response(
+    "<html><body><form>Connect to Wi-Fi</form></body></html>",
+    {
+      status: 200,
+      headers: { "content-type": "text/html" },
+    },
+  );
+
+  await assert.rejects(
+    () => readJsonOrThrow(response, "Diagnostics"),
+    /ответ не является JSON/,
+  );
+});
+
 test("buildApiUrl supports relative and custom gateway URLs", () => {
   assert.equal(buildApiUrl("", "/api/convert"), "/api/convert");
   assert.equal(
@@ -294,4 +309,96 @@ test("readBackendOcrStream rejects truncated responses", async () => {
       partialResult: true,
     },
   );
+});
+
+test("readBackendOcrStream cancels the reader after client cancellation", async () => {
+  const active = { current: true };
+  let cancelled = false;
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode('{"type":"page","page":1,"markdown":"first"}\n'),
+      );
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+
+  const result = await readBackendOcrStream(
+    new Response(body, {
+      headers: { "content-type": "application/x-ndjson" },
+    }),
+    active,
+    undefined,
+    () => {
+      active.current = false;
+    },
+  );
+
+  assert.equal(cancelled, true);
+  assert.equal(result.markdown, "first");
+});
+
+test("readBackendOcrStream rejects unknown protocol events", async () => {
+  const response = new Response('{"type":"version-99","payload":{}}\n', {
+    headers: { "content-type": "application/x-ndjson" },
+  });
+
+  await assert.rejects(
+    () => readBackendOcrStream(response, { current: true }),
+    /неизвестное событие/,
+  );
+});
+
+test("streaming API falls back to legacy JSON only for missing routes", async () => {
+  const originalFetch = globalThis.fetch;
+  const urls: string[] = [];
+  globalThis.fetch = async (input: string | URL | Request) => {
+    urls.push(String(input));
+    if (urls.length === 1) {
+      return new Response("Not Found", { status: 404 });
+    }
+    return new Response(
+      JSON.stringify({
+        markdown: "legacy result",
+        meta: { pages: 1 },
+      }),
+      { headers: { "content-type": "application/json" } },
+    );
+  };
+
+  try {
+    const chunks: string[] = [];
+    const result = await executeBackendOcrStreaming(
+      new File(["x"], "sample.png", { type: "image/png" }),
+      "/api/convert/stream?engine_type=tesseract",
+      { current: true },
+      undefined,
+      (chunk) => chunks.push(chunk),
+    );
+
+    assert.deepEqual(urls, [
+      "/api/convert/stream?engine_type=tesseract",
+      "/api/convert?engine_type=tesseract",
+    ]);
+    assert.equal(result.markdown, "legacy result");
+    assert.deepEqual(chunks, ["legacy result"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("stream reader handles a million-character page without recursion", async () => {
+  const markdown = "x".repeat(1_000_000);
+  const response = new Response(
+    `${JSON.stringify({ type: "page", page: 1, markdown })}\n` +
+      '{"type":"complete","meta":{"pages":1}}\n',
+    { headers: { "content-type": "application/x-ndjson" } },
+  );
+
+  const result = await readBackendOcrStream(response, { current: true });
+
+  assert.equal(result.markdown.length, 1_000_000);
 });

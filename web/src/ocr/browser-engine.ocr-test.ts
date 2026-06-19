@@ -7,6 +7,7 @@ import {
   releaseBrowserOcrCache,
   runBrowserOcrLowMemory,
 } from "./browser-engine";
+import { BROWSER_PIPELINE_PROFILES } from "./pipeline-config";
 
 const fixtureRoot = resolve("ocr/tests/fixtures");
 const expectedTokens = [
@@ -18,7 +19,7 @@ const expectedTokens = [
   "абвгдежз",
   "中文测试",
   "汉字识别",
-  "MIXEDABCД12345中文",
+  "MIXEDLATINД12345中文",
   "12345",
 ];
 
@@ -70,13 +71,25 @@ async function withTimeout<T>(
 test(
   "browser OCR recognizes strict English/Russian/Chinese fixture",
   { timeout: 180_000 },
-  async () => {
+  async (context) => {
     const tessdataPath = resolveTessdataPath();
     const fixture = resolve(fixtureRoot, "multilingual.png");
     if (!existsSync(fixture)) {
-      execFileSync("python3", ["ocr/tests/quality_fixtures.py"], {
-        stdio: "inherit",
-      });
+      try {
+        execFileSync("python3", ["ocr/tests/support/quality_fixtures.py"], {
+          stdio: "pipe",
+        });
+      } catch (error) {
+        const stderr = String((error as { stderr?: Buffer }).stderr ?? "");
+        const stdout = String((error as { stdout?: Buffer }).stdout ?? "");
+        if (`${stdout}\n${stderr}`.includes("Noto CJK fonts")) {
+          context.skip(
+            "Noto CJK fonts are required to generate strict OCR fixtures.",
+          );
+          return;
+        }
+        throw error;
+      }
     }
     const data = readFileSync(fixture);
     const file = new File([data], "multilingual.png", { type: "image/png" });
@@ -89,14 +102,21 @@ test(
           (message) => messages.push(message),
           undefined,
           {
-            languages: "chi_sim+eng+rus",
+            languages: "rus+eng+chi_sim",
             cacheWorker: false,
             maxImagePixels: 20_000_000,
             maxDimension: 5000,
             pdfRenderScale: 1.5,
             reason: "ci-strict-multilingual",
             preprocessingProfile: "browser_tesseract_raw",
-            imagePreprocessing: ["browser_resize"],
+            imagePreprocessing: ["browser_resize", "ocr_border"],
+            textRegionPsm: "6",
+            denseGridFallback: true,
+            denseGridTargetWidth: 3300,
+            ocrBorderPixels: 10,
+            edgeWordFallbackPsm: "7",
+            edgeWordFallbackMinTokens: 1,
+            layout: BROWSER_PIPELINE_PROFILES.browser_tesseract_raw.layout,
             langPath: tessdataPath,
             cachePath: resolve(".cache/tesseract-js"),
             gzip: false,

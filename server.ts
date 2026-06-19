@@ -5,7 +5,6 @@ import express, {
 } from "express";
 import * as http from "http";
 import * as path from "path";
-import { once } from "node:events";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "url";
 import { handle, isGatewayApiRequest } from "./gateway/src/core/handle";
@@ -17,6 +16,8 @@ export function read_node_env(): Env {
   return {
     PORT: process.env.PORT || "3000",
     OCR_URL: process.env.OCR_URL || "http://127.0.0.1:8000",
+    TASK_EVENTS_DISCONNECT_GRACE_MS:
+      process.env.TASK_EVENTS_DISCONNECT_GRACE_MS,
   };
 }
 
@@ -54,15 +55,56 @@ export async function send_web_response(
     res.setHeader(name, value);
   });
 
+  let responseClosed = Boolean(res.destroyed);
   if (webRes.body) {
     const reader = webRes.body.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!res.write(value)) await once(res, "drain");
+    let cancelPromise: Promise<void> | null = null;
+    const cancelReader = () => {
+      responseClosed = true;
+      cancelPromise ??= reader
+        .cancel("Node response closed before the web stream completed.")
+        .catch(() => undefined);
+    };
+    res.once("close", cancelReader);
+
+    try {
+      while (!responseClosed) {
+        const { done, value } = await reader.read();
+        if (done || responseClosed) break;
+        if (!res.write(value)) {
+          await wait_for_drain_or_close(res);
+        }
+      }
+    } finally {
+      res.off("close", cancelReader);
+      if (responseClosed) {
+        cancelReader();
+        await cancelPromise;
+      }
     }
   }
-  res.end();
+  if (!responseClosed && !res.destroyed && !res.writableEnded) res.end();
+}
+
+function wait_for_drain_or_close(
+  res: http.ServerResponse,
+): Promise<"drain" | "close"> {
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      res.off("drain", onDrain);
+      res.off("close", onClose);
+    };
+    const onDrain = () => {
+      cleanup();
+      resolve("drain");
+    };
+    const onClose = () => {
+      cleanup();
+      resolve("close");
+    };
+    res.once("drain", onDrain);
+    res.once("close", onClose);
+  });
 }
 
 function apiMiddleware(env: Env) {

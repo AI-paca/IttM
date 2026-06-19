@@ -72,6 +72,7 @@ web/node_modules/
 
 # Environment variables
 .env
+.evn
 .env.local
 .env.development.local
 .env.test.local
@@ -109,6 +110,20 @@ logs/
 probes/actual*.json
 ocr/tests/fixtures/
 testtables/
+debug/*
+!debug/.gitkeep
+!debug/.env.sample
+!debug/README.md
+!debug/fixtures/
+debug/fixtures/*
+!debug/fixtures/.gitkeep
+!debug/fixtures/SAMPLE_4k.png
+!debug/fixtures/SAMPLE_mixed_ru_en_zh_table_image.pdf
+!debug/reference/
+debug/reference/*
+!debug/reference/.gitkeep
+!debug/reference/*.md
+!debug/private-report.md
 
 # LLM review drafts
 docs/ревью от LLM/
@@ -121,3 +136,12 @@ docs/ревью от LLM/
 *.pt
 *.pth
 *.weights
+
+# Local LLM OCR experiments
+LLM-OCR/.env
+LLM-OCR/.evn
+LLM-OCR/.hf-cache/
+LLM-OCR/cache/
+LLM-OCR/models/
+LLM-OCR/output/
+LLM-OCR/tmp/

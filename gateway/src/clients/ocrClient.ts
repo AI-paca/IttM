@@ -36,6 +36,7 @@ export class OcrClient {
         method: "POST",
         headers,
         body: req.body,
+        signal: req.signal,
         // @ts-ignore
         duplex: "half",
       });
@@ -58,6 +59,7 @@ export class OcrClient {
         method: "POST",
         headers,
         body: req.body,
+        signal: req.signal,
         // @ts-ignore
         duplex: "half",
       });

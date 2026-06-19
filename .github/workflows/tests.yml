@@ -13,9 +13,9 @@ jobs:
   linters:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -31,6 +31,9 @@ jobs:
 
       - name: TypeScript typecheck
         run: npm run typecheck
+
+      - name: Engine profile documentation contract
+        run: npm run test:engine-docs
 
       - name: Build OCR Docker image
         run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci ./ocr
@@ -48,9 +51,9 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [linters]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -80,27 +83,36 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [linters]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Build OCR Docker image
         run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci ./ocr
 
       - name: Python tests
-        run: docker run --rm ittm-ocr-ci python -m pytest tests -q
+        run: |
+          docker run --rm \
+            -v "${PWD}/scripts:/scripts:ro" \
+            -v "${PWD}/debug:/debug:ro" \
+            -v "${PWD}/LLM-OCR:/LLM-OCR:ro" \
+            ittm-ocr-ci \
+            python -m pytest tests -q
 
   ocr-quality:
     runs-on: ubuntu-24.04
     needs: [linters, frontend-gateway, python]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
 
+      - name: Prepare Tesseract.js cache directory
+        run: mkdir -p .cache/tesseract-js
+
       - name: Cache Tesseract.js data
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .cache/tesseract-js
           key: tesseract-js-${{ runner.os }}-eng-rus-chi-sim-v2
@@ -117,7 +129,7 @@ jobs:
 
           mkdir -p .cache/tessdata ocr/tests/fixtures
 
-          container_id="$(docker create ittm-ocr-ci python tests/quality_fixtures.py)"
+          container_id="$(docker create ittm-ocr-ci python tests/support/quality_fixtures.py)"
           cleanup() {
             docker rm -f "$container_id" >/dev/null 2>&1 || true
           }
@@ -130,7 +142,7 @@ jobs:
             docker run --rm \
               -v "${PWD}/ocr/tests/fixtures:/app/tests/fixtures" \
               ittm-ocr-ci \
-              python tests/quality_fixtures.py
+              python tests/support/quality_fixtures.py
           fi
 
           for lang in eng rus chi_sim; do
@@ -192,6 +204,7 @@ jobs:
           npm run test:ocr:browser || {
             echo "Browser OCR failed once; clearing Tesseract.js cache and retrying."
             rm -rf .cache/tesseract-js
+            mkdir -p .cache/tesseract-js
             npm run test:ocr:browser
           }
 
@@ -203,4 +216,4 @@ jobs:
             -e RUN_OCR_QUALITY="${RUN_OCR_QUALITY}" \
             -v "${PWD}/ocr/tests/fixtures:/app/tests/fixtures" \
             ittm-ocr-ci \
-            python -m pytest tests/test_ocr_quality.py -q
+            python -m pytest tests/quality/test_ocr_quality.py -q

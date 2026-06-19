@@ -105,7 +105,7 @@ def _line_positions(mask: np.ndarray, *, axis: int, min_coverage: int) -> list[i
     return [int(round((start + end) / 2)) for start, end in _group_indexes(indexes)]
 
 
-def _with_edges(positions: list[int], size: int, tolerance: int = 8) -> tuple[int, ...]:
+def _with_edges(positions: list[int], size: int, tolerance: int = 12) -> tuple[int, ...]:
     if size <= 1:
         return tuple(sorted(set(positions)))
 
@@ -147,7 +147,10 @@ def _intersection_over_union(left: Box, right: Box) -> float:
 
 def _dedupe_tables(tables: list[TableLayout]) -> list[TableLayout]:
     selected: list[TableLayout] = []
-    for table in sorted(tables, key=lambda t: (-(t.bbox[2] - t.bbox[0]) * (t.bbox[3] - t.bbox[1]), t.bbox[1])):
+    for table in sorted(
+        tables,
+        key=lambda t: (-(t.bbox[2] - t.bbox[0]) * (t.bbox[3] - t.bbox[1]), t.bbox[1]),
+    ):
         if any(_intersection_over_union(table.bbox, existing.bbox) > 0.65 for existing in selected):
             continue
         selected.append(table)
@@ -221,16 +224,18 @@ def _cell_line_hints_from_contours(
         if area >= max_cell_area:
             continue
 
-        # Contours returned for cell interiors sit just inside the grid lines.
-        # Their edges are still valuable as near-line positions after clustering.
+        if hierarchy[0][index][3] < 0:
+            continue
+        contour_area = cv2.contourArea(contour)
+        rectangularity = contour_area / area if area else 0.0
+        if rectangularity < 0.82:
+            continue
+
+        # Only confirmed rectangular holes are cell interiors. Using every
+        # contour here lets surviving text strokes become fake row/column lines.
         x_positions.extend([x, x + width])
         y_positions.extend([y, y + height])
-
-        if hierarchy[0][index][3] >= 0:
-            contour_area = cv2.contourArea(contour)
-            rectangularity = contour_area / area if area else 0.0
-            if rectangularity >= 0.82:
-                confirmed_cells += 1
+        confirmed_cells += 1
 
     return x_positions, y_positions, confirmed_cells
 
@@ -239,7 +244,12 @@ def _build_grid_mask(horizontal: np.ndarray, vertical: np.ndarray):
     import cv2
 
     grid = cv2.add(horizontal, vertical)
-    grid = cv2.morphologyEx(grid, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
+    grid = cv2.morphologyEx(
+        grid,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
+        iterations=1,
+    )
     return cv2.dilate(grid, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=1)
 
 
@@ -269,7 +279,10 @@ def detect_table_layouts(
     grid = _build_grid_mask(horizontal, vertical)
 
     contour_grid = cv2.morphologyEx(
-        grid, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7)), iterations=2
+        grid,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7)),
+        iterations=2,
     )
     contours, _ = cv2.findContours(contour_grid, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     image_area = width * height
@@ -299,18 +312,22 @@ def detect_table_layouts(
             local_height,
         )
 
+        projected_y_lines = _line_positions(
+            table_horizontal,
+            axis=1,
+            min_coverage=max(18, int(local_width * 0.35)),
+        )
+        projected_x_lines = _line_positions(
+            table_vertical,
+            axis=0,
+            min_coverage=max(18, int(local_height * 0.35)),
+        )
         y_lines_local = _with_edges(
-            [
-                *_line_positions(table_horizontal, axis=1, min_coverage=max(18, int(local_width * 0.22))),
-                *contour_y_lines,
-            ],
+            projected_y_lines if len(projected_y_lines) >= 3 else [*projected_y_lines, *contour_y_lines],
             local_height,
         )
         x_lines_local = _with_edges(
-            [
-                *_line_positions(table_vertical, axis=0, min_coverage=max(18, int(local_height * 0.22))),
-                *contour_x_lines,
-            ],
+            projected_x_lines if len(projected_x_lines) >= 3 else [*projected_x_lines, *contour_x_lines],
             local_width,
         )
 
@@ -360,7 +377,12 @@ def shift_table_layout(table: TableLayout, dx: int, dy: int) -> TableLayout:
             TableCell(
                 row=cell.row,
                 col=cell.col,
-                bbox=(cell.bbox[0] + dx, cell.bbox[1] + dy, cell.bbox[2] + dx, cell.bbox[3] + dy),
+                bbox=(
+                    cell.bbox[0] + dx,
+                    cell.bbox[1] + dy,
+                    cell.bbox[2] + dx,
+                    cell.bbox[3] + dy,
+                ),
             )
             for cell in table.cells
         ),
@@ -513,7 +535,7 @@ def erase_table_lines_for_ocr(image: Image.Image) -> Image.Image:
     _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     height, width = gray.shape[:2]
     horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(40, width // 12), 1))
-    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(18, height // 16)))
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(40, height // 4)))
     horizontal = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
     vertical = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vertical_kernel, iterations=1)
     line_mask = cv2.add(horizontal, vertical)
@@ -536,7 +558,10 @@ def _words_to_cell_text(words: list[dict]) -> str:
     if not words:
         return ""
 
-    sorted_words = sorted(words, key=lambda word: ((word["bbox"][1] + word["bbox"][3]) / 2, word["bbox"][0]))
+    sorted_words = sorted(
+        words,
+        key=lambda word: ((word["bbox"][1] + word["bbox"][3]) / 2, word["bbox"][0]),
+    )
     heights = [max(1, word["bbox"][3] - word["bbox"][1]) for word in sorted_words]
     y_tolerance = max(4, int(np.median(heights) * 0.65))
 
@@ -638,12 +663,31 @@ def wide_curriculum_table_to_markdown(table: TableLayout, words: list[dict]) -> 
         "Контроль",
         "З.е.",
     ]
-    semester_labels = ["Итого", "Лек", "Лаб", "Пр", "КСР", "КРП", "СР", "Контроль", "З.е."]
+    semester_labels = [
+        "Итого",
+        "Лек",
+        "Лаб",
+        "Пр",
+        "КСР",
+        "КРП",
+        "СР",
+        "Контроль",
+        "З.е.",
+    ]
     semester_start = 16
     semester_count = max(0, min(8, (table.cols - semester_start - 3) // len(semester_labels)))
     tail_start = semester_start + semester_count * len(semester_labels)
 
-    markdown_rows = [["Индекс", "Наименование", "Контроль/часы", "План по семестрам", "Кафедра", "Компетенции"]]
+    markdown_rows = [
+        [
+            "Индекс",
+            "Наименование",
+            "Контроль/часы",
+            "План по семестрам",
+            "Кафедра",
+            "Компетенции",
+        ]
+    ]
 
     for row in rows[data_start:]:
         if not any(cell.strip() for cell in row):
@@ -732,14 +776,6 @@ def _rows_to_markdown(rows: list[list[str]]) -> str:
 
     max_cols = max(len(row) for row in rows)
     rows = [row + [""] * (max_cols - len(row)) for row in rows]
-
-    non_empty_columns = [
-        col_index
-        for col_index in range(max_cols)
-        if any(col_index < len(row) and row[col_index].strip() for row in rows)
-    ]
-    if non_empty_columns:
-        rows = [[row[col_index] for col_index in non_empty_columns] for row in rows]
 
     rows = _normalize_known_table_columns(rows)
 
@@ -915,7 +951,14 @@ def _normalize_curriculum_index(text: str, name_cell: str = "") -> str:
     lower_compact = compact.lower()
     if "дисциплин" in lower_name and len(compact) <= 3:
         return "Б1"
-    if "обязательная" in lower_name and lower_compact in {"si0", "s10", "510", "610", "51o", "61o"}:
+    if "обязательная" in lower_name and lower_compact in {
+        "si0",
+        "s10",
+        "510",
+        "610",
+        "51o",
+        "61o",
+    }:
         return "Б1.О"
 
     compact = compact.replace("б", "Б")
@@ -1129,7 +1172,11 @@ def find_blank_horizontal_bands(image: Image.Image, min_gap: int = 10) -> list:
     return bands
 
 
-def split_by_blank_bands(image: Image.Image, min_gap: int = 10) -> list:
+def split_by_blank_bands(
+    image: Image.Image,
+    min_gap: int = 10,
+    min_chunk_height: int = 0,
+) -> list:
     """
     Splits screenshot by empty horizontal places between cards.
     Returns list of image chunks cropped at blank bands.
@@ -1140,20 +1187,25 @@ def split_by_blank_bands(image: Image.Image, min_gap: int = 10) -> list:
     if not bands:
         return []
 
-    chunks = []
-    last_end = 0
+    boxes = []
+    segment_start = 0
 
     for start, end in bands:
-        # Cut from last_end to start of blank band
-        if start > last_end:
-            chunks.append(image.crop((0, last_end, width, start)))
-        last_end = end
+        if start <= segment_start:
+            segment_start = max(segment_start, end)
+            continue
+        if start - segment_start < min_chunk_height:
+            continue
+        boxes.append([segment_start, start])
+        segment_start = end
 
-    # Add remaining part after last blank band
-    if last_end < height:
-        chunks.append(image.crop((0, last_end, width, height)))
+    if segment_start < height:
+        if boxes and height - segment_start < min_chunk_height:
+            boxes[-1][1] = height
+        else:
+            boxes.append([segment_start, height])
 
-    return chunks
+    return [image.crop((0, start, width, end)) for start, end in boxes if end > start]
 
 
 def fallback_split_with_overlap(image: Image.Image, chunk_height: int = 1600, overlap: int = 120) -> list:
@@ -1187,15 +1239,13 @@ def split_vertical(image: Image.Image, chunk_height: int = 1600, overlap: int = 
             return [image]
 
         # Try card-aware splitting first
-        chunks = split_by_blank_bands(image)
+        chunks = split_by_blank_bands(
+            image,
+            min_chunk_height=max(1, chunk_height // 4),
+        )
 
-        # If we found meaningful chunks (more than 1, and each is reasonable size)
         if len(chunks) > 1:
-            # Filter out very small chunks (likely noise)
-            min_chunk_height = chunk_height // 4
-            filtered_chunks = [c for c in chunks if c.size[1] >= min_chunk_height]
-            if filtered_chunks:
-                return filtered_chunks
+            return chunks
 
         # Fallback to overlap-based splitting
         return fallback_split_with_overlap(image, chunk_height, overlap)

@@ -12,10 +12,14 @@ export function method_not_allowed(): Response {
   });
 }
 
-export function json_response(data: unknown, status: number = 200): Response {
+export function json_response(
+  data: unknown,
+  status: number = 200,
+  headers: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
   });
 }
 

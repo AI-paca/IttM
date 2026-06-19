@@ -1,6 +1,7 @@
 export interface Env {
   PORT: string;
   OCR_URL: string;
+  TASK_EVENTS_DISCONNECT_GRACE_MS?: string;
 }
 
 export interface ConvertMeta {

@@ -4,11 +4,21 @@ from app.engines.base import OcrEngine
 class AutoEngine(OcrEngine):
     """Auto-fallback engine that tries Tesseract first (core), then Easy OCR (optional high-quality)."""
 
-    def __init__(self, prefer_tesseract: bool = True):
+    def __init__(
+        self,
+        prefer_tesseract: bool = True,
+        tesseract_language_priority: tuple[str, ...] | None = None,
+        tesseract_ocr_border_pixels: int = 10,
+        tesseract_edge_word_fallback_psms: tuple[int, ...] = (8, 13),
+    ):
         from app.engines.easyocr_engine import EasyOcrEngine
         from app.engines.tesseract_engine import TesseractEngine
 
-        self.tesseract = TesseractEngine()
+        self.tesseract = TesseractEngine(
+            language_priority=tesseract_language_priority,
+            ocr_border_pixels=tesseract_ocr_border_pixels,
+            edge_word_fallback_psms=tesseract_edge_word_fallback_psms,
+        )
         self.easy = EasyOcrEngine()
 
         if prefer_tesseract:

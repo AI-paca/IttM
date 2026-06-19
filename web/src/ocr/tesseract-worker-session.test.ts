@@ -5,6 +5,7 @@ import {
   BrowserOcrWorkerPool,
   normalizeAppBaseUrl,
 } from "./tesseract-worker-session";
+import { BROWSER_PIPELINE_PROFILES } from "./pipeline-config";
 
 function profile(): BrowserOcrProfile {
   return {
@@ -15,7 +16,14 @@ function profile(): BrowserOcrProfile {
     pdfRenderScale: 1,
     reason: "unit-test",
     preprocessingProfile: "browser_tesseract_raw",
-    imagePreprocessing: ["browser_resize"],
+    imagePreprocessing: ["browser_resize", "ocr_border"],
+    textRegionPsm: "6",
+    denseGridFallback: true,
+    denseGridTargetWidth: 3300,
+    ocrBorderPixels: 10,
+    edgeWordFallbackPsm: "7",
+    edgeWordFallbackMinTokens: 1,
+    layout: BROWSER_PIPELINE_PROFILES.browser_tesseract_raw.layout,
   };
 }
 
@@ -111,6 +119,34 @@ test("worker pool explains worker startup failures without a browser message", a
       globalRecord.window = previousWindow;
     }
   }
+});
+
+test("empty primary OCR retries with the profile edge-word PSM", async () => {
+  const parameters: Record<string, string>[] = [];
+  let recognition = 0;
+  const pool = new BrowserOcrWorkerPool(async () => ({
+    async setParameters(params) {
+      parameters.push(params);
+    },
+    async recognize() {
+      recognition += 1;
+      return {
+        data: {
+          text: recognition === 1 ? "" : "SAMPLE",
+        },
+      };
+    },
+    async terminate() {},
+  }));
+
+  const lease = await pool.acquire(profile(), () => {});
+  assert.equal(await lease.recognize(new Blob(["image"])), "SAMPLE");
+  assert.deepEqual(parameters, [
+    { tessedit_pageseg_mode: "6" },
+    { tessedit_pageseg_mode: "7" },
+  ]);
+  await lease.release();
+  await pool.releaseCached();
 });
 
 test("worker pool keeps concurrent progress callbacks isolated", async () => {

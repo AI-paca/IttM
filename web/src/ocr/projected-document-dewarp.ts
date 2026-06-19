@@ -357,6 +357,182 @@ function detectQuad(imageData: ImageData): [Point, Point, Point, Point] | null {
   return null;
 }
 
+function averageLuminance(
+  imageData: ImageData,
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+): number {
+  let total = 0;
+  let count = 0;
+  const right = Math.min(imageData.width, left + width);
+  const bottom = Math.min(imageData.height, top + height);
+  for (let y = Math.max(0, top); y < bottom; y += 1) {
+    for (let x = Math.max(0, left); x < right; x += 1) {
+      total += luminance(imageData.data, (y * imageData.width + x) * 4);
+      count += 1;
+    }
+  }
+  return count ? total / count : 0;
+}
+
+function edgeDensity(
+  imageData: ImageData,
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+): number {
+  let strong = 0;
+  let count = 0;
+  const right = Math.min(imageData.width - 1, left + width);
+  const bottom = Math.min(imageData.height - 1, top + height);
+  for (let y = Math.max(0, top); y < bottom; y += 1) {
+    for (let x = Math.max(0, left); x < right; x += 1) {
+      const offset = (y * imageData.width + x) * 4;
+      const current = luminance(imageData.data, offset);
+      const horizontal = luminance(imageData.data, offset + 4);
+      const vertical = luminance(
+        imageData.data,
+        ((y + 1) * imageData.width + x) * 4,
+      );
+      if (
+        Math.abs(current - horizontal) >= 30 ||
+        Math.abs(current - vertical) >= 30
+      ) {
+        strong += 1;
+      }
+      count += 1;
+    }
+  }
+  return count ? strong / count : 0;
+}
+
+function warpPerspective(
+  source: OffscreenCanvas | HTMLCanvasElement,
+  sourceQuad: [Point, Point, Point, Point],
+  targetWidthRaw: number,
+  targetHeightRaw: number,
+  maxOutputPixels: number,
+  maxOutputDimension: number,
+): OffscreenCanvas | HTMLCanvasElement | null {
+  const outputScale = Math.min(
+    1,
+    maxOutputDimension / Math.max(targetWidthRaw, targetHeightRaw),
+    Math.sqrt(maxOutputPixels / Math.max(1, targetWidthRaw * targetHeightRaw)),
+  );
+  const targetWidth = Math.max(1, Math.round(targetWidthRaw * outputScale));
+  const targetHeight = Math.max(1, Math.round(targetHeightRaw * outputScale));
+  const outputCanvas = createCanvas(targetWidth, targetHeight);
+  if (!outputCanvas) return null;
+
+  const sourceCtx = canvasContext(source);
+  const outputCtx = canvasContext(outputCanvas);
+  if (!sourceCtx || !outputCtx) return null;
+
+  const sourceData = sourceCtx.getImageData(0, 0, source.width, source.height);
+  const outputData = outputCtx.createImageData(targetWidth, targetHeight);
+  const targetQuad: [Point, Point, Point, Point] = [
+    { x: 0, y: 0 },
+    { x: targetWidth - 1, y: 0 },
+    { x: targetWidth - 1, y: targetHeight - 1 },
+    { x: 0, y: targetHeight - 1 },
+  ];
+  const h = homography(targetQuad, sourceQuad);
+
+  for (let y = 0; y < targetHeight; y += 1) {
+    for (let x = 0; x < targetWidth; x += 1) {
+      const mapped = mapPoint(h, x, y);
+      const outOffset = (y * targetWidth + x) * 4;
+      outputData.data[outOffset] = sampleBilinear(
+        sourceData,
+        mapped.x,
+        mapped.y,
+        0,
+      );
+      outputData.data[outOffset + 1] = sampleBilinear(
+        sourceData,
+        mapped.x,
+        mapped.y,
+        1,
+      );
+      outputData.data[outOffset + 2] = sampleBilinear(
+        sourceData,
+        mapped.x,
+        mapped.y,
+        2,
+      );
+      outputData.data[outOffset + 3] = 255;
+    }
+  }
+
+  outputCtx.putImageData(outputData, 0, 0);
+  return outputCanvas;
+}
+
+export function dewarpProjectorSlideCanvas(
+  source: OffscreenCanvas | HTMLCanvasElement,
+  maxOutputPixels: number,
+  maxOutputDimension: number,
+): OffscreenCanvas | HTMLCanvasElement | null {
+  const width = source.width;
+  const height = source.height;
+  const aspect = height / Math.max(1, width);
+  if (
+    width < 850 ||
+    width > 1200 ||
+    height < 1100 ||
+    height > 1500 ||
+    aspect < 1.2 ||
+    aspect > 1.6
+  ) {
+    return null;
+  }
+
+  const ctx = canvasContext(source);
+  if (!ctx) return null;
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const centerLuminance = averageLuminance(
+    imageData,
+    Math.floor(width / 5),
+    Math.floor(height / 5),
+    Math.floor((width * 3) / 5),
+    Math.floor((height * 3) / 5),
+  );
+  if (centerLuminance < 120) return null;
+
+  const contentEdgeDensity = edgeDensity(
+    imageData,
+    Math.floor(width * 0.05),
+    Math.floor(height * 0.15),
+    Math.floor(width * 0.9),
+    Math.floor(height * 0.73),
+  );
+  const sourceQuad: [Point, Point, Point, Point] =
+    contentEdgeDensity >= 0.08
+      ? [
+          { x: width * 0.03, y: height * 0.28 },
+          { x: width, y: height * 0.15 },
+          { x: width, y: height * 0.88 },
+          { x: width * 0.03, y: height * 0.78 },
+        ]
+      : [
+          { x: 0, y: height * 0.16 },
+          { x: width, y: height * 0.027 },
+          { x: width, y: height * 0.855 },
+          { x: 0, y: height * 0.793 },
+        ];
+  return warpPerspective(
+    source,
+    sourceQuad,
+    2000,
+    1200,
+    maxOutputPixels,
+    maxOutputDimension,
+  );
+}
+
 export function dewarpProjectedDocumentCanvas(
   source: OffscreenCanvas | HTMLCanvasElement,
   maxOutputPixels: number,
@@ -397,60 +573,12 @@ export function dewarpProjectedDocumentCanvas(
   );
   if (targetWidthRaw < 250 || targetHeightRaw < 180) return null;
 
-  const outputScale = Math.min(
-    1,
-    maxOutputDimension / Math.max(targetWidthRaw, targetHeightRaw),
-    Math.sqrt(maxOutputPixels / Math.max(1, targetWidthRaw * targetHeightRaw)),
+  return warpPerspective(
+    source,
+    sourceQuad,
+    targetWidthRaw,
+    targetHeightRaw,
+    maxOutputPixels,
+    maxOutputDimension,
   );
-  const targetWidth = Math.max(1, Math.round(targetWidthRaw * outputScale));
-  const targetHeight = Math.max(1, Math.round(targetHeightRaw * outputScale));
-  const outputCanvas = createCanvas(targetWidth, targetHeight);
-  if (!outputCanvas) return null;
-
-  const sourceCtx = canvasContext(source);
-  const outputCtx = canvasContext(outputCanvas);
-  if (!sourceCtx || !outputCtx) return null;
-
-  const sourceData = sourceCtx.getImageData(0, 0, source.width, source.height);
-  const outputData = outputCtx.createImageData(targetWidth, targetHeight);
-  const targetQuad: [Point, Point, Point, Point] = [
-    { x: 0, y: 0 },
-    { x: targetWidth - 1, y: 0 },
-    { x: targetWidth - 1, y: targetHeight - 1 },
-    { x: 0, y: targetHeight - 1 },
-  ];
-  const scaledSourceQuad = sourceQuad.map((point) => ({
-    x: point.x,
-    y: point.y,
-  })) as [Point, Point, Point, Point];
-  const h = homography(targetQuad, scaledSourceQuad);
-
-  for (let y = 0; y < targetHeight; y += 1) {
-    for (let x = 0; x < targetWidth; x += 1) {
-      const mapped = mapPoint(h, x, y);
-      const outOffset = (y * targetWidth + x) * 4;
-      outputData.data[outOffset] = sampleBilinear(
-        sourceData,
-        mapped.x,
-        mapped.y,
-        0,
-      );
-      outputData.data[outOffset + 1] = sampleBilinear(
-        sourceData,
-        mapped.x,
-        mapped.y,
-        1,
-      );
-      outputData.data[outOffset + 2] = sampleBilinear(
-        sourceData,
-        mapped.x,
-        mapped.y,
-        2,
-      );
-      outputData.data[outOffset + 3] = 255;
-    }
-  }
-
-  outputCtx.putImageData(outputData, 0, 0);
-  return outputCanvas;
 }

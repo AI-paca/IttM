@@ -5,6 +5,7 @@ import {
   PdfWorkerCanvasFactory,
   PdfWorkerFilterFactory,
 } from "./pdf-worker-platform";
+import { pdfJsDocumentOptions } from "./pdfjs-options";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -145,7 +146,7 @@ self.onmessage = async (event: MessageEvent<PdfWorkerRequest>) => {
         maxDimension: request.maxDimension,
       };
       documentTask = pdfjsLib.getDocument({
-        data: await request.file.arrayBuffer(),
+        ...pdfJsDocumentOptions(await request.file.arrayBuffer()),
         CanvasFactory: PdfWorkerCanvasFactory as never,
         FilterFactory: PdfWorkerFilterFactory as never,
         disableFontFace: true,

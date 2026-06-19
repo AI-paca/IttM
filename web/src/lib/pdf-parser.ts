@@ -1,8 +1,10 @@
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { findContentBounds } from "./image-content-bounds";
+import { assertBrowserPdfSize } from "./pdf-limits";
 import { boundedViewportScale, processPreparedPages } from "./pdf-processing";
 import type { PdfProcessingOptions, PreparedPdfPage } from "./pdf-processing";
+import { pdfJsDocumentOptions } from "./pdfjs-options";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -179,7 +181,9 @@ async function processPdfOnMainThread(
   onTotalPages: ((total: number) => void) | undefined,
   options: PdfProcessingOptions,
 ): Promise<string> {
-  const loadingTask = pdfjsLib.getDocument({ data: await file.arrayBuffer() });
+  const loadingTask = pdfjsLib.getDocument(
+    pdfJsDocumentOptions(await file.arrayBuffer()),
+  );
   const pdf = await loadingTask.promise;
   onTotalPages?.(pdf.numPages);
 
@@ -252,6 +256,7 @@ export async function processPdfIntelligently(
   onTotalPages?: (total: number) => void,
   options: PdfProcessingOptions = {},
 ): Promise<string> {
+  assertBrowserPdfSize(file);
   onProgress("Загрузка PDF...");
   if (typeof Worker !== "undefined" && typeof OffscreenCanvas !== "undefined") {
     return await processPdfInWorker(

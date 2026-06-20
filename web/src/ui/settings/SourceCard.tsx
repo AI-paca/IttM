@@ -48,7 +48,7 @@ export function SourceCard({
     <div
       className={`group relative w-full text-left rounded-xl border-0 overflow-visible ${
         disabled ? "opacity-40 grayscale" : ""
-      } h-[64px] sm:h-[76px]`}
+      } h-[72px] sm:h-[76px]`}
     >
       {/* Слой 1: фон (инфо о безопасности, виден при отклеивании) */}
       {badge && (
@@ -84,7 +84,7 @@ export function SourceCard({
         curve={0.15}
         shadow={0.33}
         animMode="peel"
-        initialSize={{ w: 320, h: isMobile ? 64 : 76 }}
+        initialSize={{ w: 320, h: isMobile ? 72 : 76 }}
         oversizePct={0.02}
       >
         <div
@@ -99,13 +99,13 @@ export function SourceCard({
             </div>
             <div className="flex flex-col flex-1 min-w-0">
               <span
-                className={`text-[13px] font-semibold truncate ${
+                className={`text-[14px] font-semibold truncate sm:text-[13px] ${
                   isActive ? "text-accent-strong" : "text-secondary"
                 }`}
               >
                 {src.label} {disabled ? "(Не для моб.)" : ""}
               </span>
-              <span className="text-[11px] text-muted leading-tight mt-0.5 truncate">
+              <span className="text-[11.5px] text-muted leading-tight mt-0.5 truncate sm:text-[11px]">
                 {src.desc}
               </span>
             </div>

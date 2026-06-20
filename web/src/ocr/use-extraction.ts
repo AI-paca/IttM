@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { processPdfIntelligently } from "../lib/pdf-parser";
+import { effectivePdfCropMode, readCropMode } from "../lib/crop-preference";
 import {
   buildApiUrl,
   buildBackendGatewayCandidates,
@@ -112,6 +113,7 @@ export function useOcrExtraction({
           diagnostics,
           browserPipelineProfileForSource("browser"),
         );
+        const pdfCropMode = effectivePdfCropMode(readCropMode());
 
         const handleChunk = (chunk: string, pageIndex?: number) => {
           console.log(
@@ -160,6 +162,7 @@ export function useOcrExtraction({
                 renderScale: browserProfile.pdfRenderScale,
                 maxPagePixels: browserProfile.maxImagePixels,
                 maxDimension: browserProfile.maxDimension,
+                cropMode: pdfCropMode,
                 shouldContinue: () => active.current,
               },
             );

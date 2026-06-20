@@ -391,14 +391,28 @@ interface BackendStreamCompleteEvent {
 
 interface BackendStreamErrorEvent {
   type: "error";
+  code?: string;
+  message?: string;
   detail?: string;
   error?: string;
+  retryable?: boolean;
 }
 
-type BackendStreamEvent =
-  | BackendStreamPageEvent
-  | BackendStreamCompleteEvent
-  | BackendStreamErrorEvent;
+interface BackendStreamProgressEvent {
+  type: "progress";
+  stage?: string;
+  message?: string;
+  page?: number;
+  percent?: number;
+}
+
+interface BackendStreamWarningEvent {
+  type: "warning";
+  code?: string;
+  message?: string;
+  detail?: string;
+  page?: number;
+}
 
 function backendJsonUrl(streamUrl: string): string {
   return streamUrl.replace(/\/convert\/stream(?=[?#]|$)/, "/convert");
@@ -422,14 +436,19 @@ export async function readBackendOcrStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   const markdownParts: string[] = [];
+  const warnings: Array<Record<string, unknown>> = [];
   let meta: Record<string, unknown> | undefined;
   let buffered = "";
 
   const consumeLine = (line: string) => {
     if (!line.trim()) return;
-    let event: BackendStreamEvent;
+    let event: Record<string, unknown>;
     try {
-      event = JSON.parse(line) as BackendStreamEvent;
+      const parsed = JSON.parse(line) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("NDJSON event is not an object.");
+      }
+      event = parsed as Record<string, unknown>;
     } catch (error) {
       throw new PlatformError({
         message: `OCR API: повреждённая строка NDJSON (${normalizePlatformError(error).message}).`,
@@ -439,26 +458,67 @@ export async function readBackendOcrStream(
     }
 
     if (event.type === "error") {
+      const errorEvent = event as unknown as BackendStreamErrorEvent;
       throw new PlatformError({
-        message: `OCR API: ${event.detail || event.error || "неизвестная ошибка потока."}`,
+        message: `OCR API: ${
+          errorEvent.message ||
+          errorEvent.detail ||
+          errorEvent.error ||
+          "неизвестная ошибка потока."
+        }`,
         source: "OCR API",
+        raw: line.slice(0, 2000),
       });
     }
     if (event.type === "complete") {
-      meta = event.meta;
+      const completeEvent = event as unknown as BackendStreamCompleteEvent;
+      meta =
+        completeEvent.meta && typeof completeEvent.meta === "object"
+          ? completeEvent.meta
+          : {};
+      return;
+    }
+    if (event.type === "progress") {
+      const progressEvent = event as unknown as BackendStreamProgressEvent;
+      if (
+        typeof progressEvent.message === "string" &&
+        progressEvent.message.trim()
+      ) {
+        onProgress?.(
+          progressEvent.message.trim(),
+          typeof progressEvent.percent === "number"
+            ? progressEvent.percent
+            : undefined,
+        );
+      }
+      return;
+    }
+    if (event.type === "warning") {
+      const warningEvent = event as unknown as BackendStreamWarningEvent;
+      const message =
+        warningEvent.message || warningEvent.detail || "OCR warning.";
+      warnings.push({
+        code: warningEvent.code,
+        message,
+        page: warningEvent.page,
+      });
+      onProgress?.(message);
       return;
     }
     if (event.type !== "page" || typeof event.markdown !== "string") {
+      const typeLabel =
+        typeof event.type === "string" ? ` '${event.type}'` : "";
       throw new PlatformError({
-        message: "OCR API: неизвестное событие потока.",
+        message: `OCR API: неизвестное событие потока${typeLabel}.`,
         source: "OCR API",
         raw: line.slice(0, 2000),
       });
     }
 
-    markdownParts.push(event.markdown);
-    onProgress?.(`Получена страница ${event.page}...`);
-    onChunk?.(`${event.markdown}\n\n---\n\n`, event.page);
+    const pageEvent = event as unknown as BackendStreamPageEvent;
+    markdownParts.push(pageEvent.markdown);
+    onProgress?.(`Получена страница ${pageEvent.page}...`);
+    onChunk?.(`${pageEvent.markdown}\n\n---\n\n`, pageEvent.page);
   };
 
   try {
@@ -498,7 +558,9 @@ export async function readBackendOcrStream(
   }
   return {
     markdown: markdownParts.join("\n\n---\n\n"),
-    ...(meta ? { meta } : {}),
+    ...(meta || warnings.length
+      ? { meta: { ...(meta ?? {}), ...(warnings.length ? { warnings } : {}) } }
+      : {}),
   };
 }
 

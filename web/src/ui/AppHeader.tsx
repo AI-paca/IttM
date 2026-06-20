@@ -35,13 +35,19 @@ export function AppHeader({
 }: AppHeaderProps) {
   const selectedSourceLabel =
     SOURCES.find((s) => s.id === selectedSource)?.label ?? selectedSource;
-  const sourceShortcuts: { id: SourceType; label: string; mark: string }[] = [
-    { id: "auto", label: "Auto", mark: "A" },
-    { id: "browser", label: "Browser", mark: "B" },
+  const sourceShortcuts: { id: SourceType; label: string }[] = [
+    { id: "auto", label: "Auto" },
+    { id: "browser", label: "Browser" },
   ];
 
   const ghostButton =
     "inline-flex h-7 items-center justify-center rounded-md text-[var(--color-text-muted)] opacity-75 transition-all hover:bg-[var(--color-bg-elevated)]/70 hover:text-[var(--color-text-primary)] hover:opacity-100 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ring)]";
+  const sourceButton = (id: SourceType) =>
+    `inline-flex h-7 items-center justify-center rounded-md px-2.5 text-[11px] font-semibold transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ring)] ${
+      selectedSource === id
+        ? "border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)]/70 text-[var(--color-text-primary)] opacity-95"
+        : "text-[var(--color-text-muted)] opacity-58 hover:bg-[var(--color-bg-elevated)]/55 hover:text-[var(--color-text-primary)] hover:opacity-90"
+    }`;
 
   return (
     <AnimatePresence>
@@ -61,7 +67,7 @@ export function AppHeader({
           } backdrop-blur-md`}
         >
           <div
-            className={`mx-auto grid w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 px-3 sm:px-5 md:px-7 ${
+            className={`mx-auto grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 sm:px-5 md:px-7 ${
               appState === "upload" ? "h-10 md:h-11" : "h-9 md:h-10"
             }`}
           >
@@ -118,49 +124,33 @@ export function AppHeader({
               </AnimatePresence>
             </button>
 
-            <div className="hidden min-w-0 items-center justify-center gap-2 sm:flex">
-              {appState !== "upload" &&
-                sourceShortcuts.map((source) => {
-                  const active = selectedSource === source.id;
-                  return (
-                    <button
-                      key={source.id}
-                      type="button"
-                      onClick={() => onSourceSelect(source.id)}
-                      className={`relative flex h-7 min-w-7 items-center justify-center rounded-md px-2 text-[11px] font-bold transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ring)] ${
-                        active
-                          ? "text-[var(--color-text-primary)] opacity-100"
-                          : "text-[var(--color-text-muted)] opacity-55 hover:bg-[var(--color-bg-elevated)]/65 hover:opacity-95"
-                      }`}
-                      title={source.label}
-                      aria-label={source.label}
-                    >
-                      {source.mark}
-                      <span
-                        className={`absolute bottom-0.5 h-0.5 rounded-full transition-all ${
-                          active
-                            ? "w-3 bg-[var(--color-accent)]"
-                            : "w-1 bg-[var(--color-border-strong)]"
-                        }`}
-                      />
-                    </button>
-                  );
-                })}
-            </div>
-
             <div className="flex min-w-0 items-center justify-end gap-1.5">
               {appState !== "upload" && (
-                <button
-                  type="button"
-                  onClick={onOpenSidebar}
-                  className={`${ghostButton} hidden max-w-[170px] px-2 sm:inline-flex`}
-                  title={selectedSourceLabel}
-                >
-                  <span className="mr-1 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]" />
-                  <span className="truncate text-[11px] font-medium">
-                    {selectedSourceLabel}
-                  </span>
-                </button>
+                <>
+                  <div className="hidden items-center gap-1 sm:flex">
+                    {sourceShortcuts.map((source) => (
+                      <button
+                        key={source.id}
+                        type="button"
+                        onClick={() => onSourceSelect(source.id)}
+                        className={sourceButton(source.id)}
+                      >
+                        {source.label}
+                      </button>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onOpenSidebar}
+                    className={`${ghostButton} hidden max-w-[170px] px-2 sm:inline-flex`}
+                    title={selectedSourceLabel}
+                  >
+                    <span className="mr-1 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]" />
+                    <span className="truncate text-[11px] font-medium">
+                      {selectedSourceLabel}
+                    </span>
+                  </button>
+                </>
               )}
               <button
                 type="button"

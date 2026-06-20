@@ -4,6 +4,7 @@ export interface PdfProcessingOptions {
   renderScale?: number;
   maxPagePixels?: number;
   maxDimension?: number;
+  cropMode?: "auto" | "none";
   shouldContinue?: () => boolean;
 }
 

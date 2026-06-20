@@ -127,21 +127,22 @@ export function SettingsSidebar({
             exit="exit"
             className={`fixed ${
               isMobile
-                ? "bottom-0 left-0 right-0 h-auto max-h-[85vh] rounded-t-3xl border-t"
+                ? "bottom-0 left-0 right-0 h-auto max-h-[88dvh] rounded-t-[1.65rem] border-t"
                 : "top-0 right-0 bottom-0 w-[90%] max-w-[360px] border-l"
             } bg-surface shadow-2xl z-[100] border-default flex flex-col font-sans`}
           >
             {isMobile && (
               <div
-                className="w-full flex justify-center pt-3 pb-1"
+                className="w-full flex justify-center pt-4 pb-2"
                 onClick={onClose}
               >
-                <div className="w-12 h-1.5 bg-strong rounded-full" />
+                <div className="w-12 h-1.5 bg-strong rounded-full opacity-70" />
               </div>
             )}
             <button
               onClick={onClose}
-              className="absolute top-4 right-4 p-1.5 text-faint hover:text-primary bg-elevated hover:bg-inset rounded-full transition-colors z-[110]"
+              className="absolute top-4 right-4 flex h-11 w-11 items-center justify-center text-faint hover:text-primary bg-elevated hover:bg-inset rounded-full transition-colors z-[110] sm:h-auto sm:w-auto sm:p-1.5"
+              aria-label="Закрыть настройки"
             >
               <X className="w-6 h-6" />
             </button>
@@ -164,20 +165,20 @@ export function SettingsSidebar({
                     : "transform 0.3s cubic-bezier(0.25, 1, 0.5, 1)",
                 }}
               >
-                <div className="p-4 sm:p-6 pt-14 flex flex-col gap-4 sm:gap-6 pb-6 flex-1 min-h-full">
+                <div className="p-5 sm:p-6 pt-14 flex flex-col gap-5 sm:gap-6 pb-7 flex-1 min-h-full">
                   {/* Верхняя секция: источники + конфигурация. flex-1 растягивает,
                       чтобы нижние контролы (тема/запоминание) прижимались к низу
                       сайдбара, когда контента мало. */}
                   <div className="flex flex-col gap-4 flex-1 min-h-0">
-                    <section className="flex flex-col gap-2">
-                      <h3 className="text-[10px] font-bold text-faint uppercase tracking-widest pl-1">
+                    <section className="flex flex-col gap-2.5 sm:gap-2">
+                      <h3 className="text-[10.5px] font-bold text-faint uppercase tracking-widest pl-1 sm:text-[10px]">
                         Local & Browser
                       </h3>
                       {LOCAL_SOURCE_IDS.map(renderSource)}
                     </section>
 
-                    <section className="flex flex-col gap-2 mt-2">
-                      <h3 className="text-[10px] font-bold text-faint uppercase tracking-widest pl-1">
+                    <section className="flex flex-col gap-2.5 sm:gap-2 mt-2">
+                      <h3 className="text-[10.5px] font-bold text-faint uppercase tracking-widest pl-1 sm:text-[10px]">
                         API & Cloud
                       </h3>
                       {CLOUD_SOURCE_IDS.map(renderSource)}

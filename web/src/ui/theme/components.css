@@ -222,12 +222,12 @@
 
   /* ----------------------------------------------- Ползунок темы (liquid glass) */
   .theme-slider {
-    @apply flex items-center gap-2 rounded-full select-none;
+    @apply flex min-h-12 items-center gap-2 rounded-full select-none sm:min-h-0;
     /* тонкая полоска между иконками, без рамки/фона — компактно */
   }
 
   .theme-slider__icon {
-    @apply w-4 h-4 shrink-0 cursor-pointer transition-colors;
+    @apply w-5 h-5 shrink-0 cursor-pointer transition-colors sm:w-4 sm:h-4;
     color: var(--color-text-muted);
   }
   .theme-slider__icon:hover {
@@ -238,7 +238,7 @@
   }
 
   .theme-slider__canvas {
-    @apply flex-1 h-[24px] min-w-[40px] cursor-grab active:cursor-grabbing block rounded-full;
+    @apply flex-1 h-[38px] min-w-[120px] cursor-grab active:cursor-grabbing block rounded-full sm:h-[24px] sm:min-w-[40px];
     -webkit-tap-highlight-color: transparent;
     touch-action: none;
   }

@@ -27,11 +27,14 @@ export function OverscrollReveal({
   touchActive,
   onClose,
 }: OverscrollRevealProps) {
+  const previewProgress = Math.min(overscroll / 60, 1);
+  const panelOffset = isRevealed ? 0 : REVEAL_HEIGHT * (1 - previewProgress);
+
   return (
     <div
-      className="w-full relative shrink-0"
+      className="w-full relative shrink-0 overflow-hidden"
       style={{
-        height: isRevealed ? REVEAL_HEIGHT : 0,
+        height: isRevealed ? REVEAL_HEIGHT : overscroll,
         transition: touchActive ? "none" : "height 0.3s ease-out",
       }}
     >
@@ -39,8 +42,8 @@ export function OverscrollReveal({
         className="absolute bottom-0 left-0 w-full flex flex-col items-center justify-center border-t border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
         style={{
           height: REVEAL_HEIGHT,
-          opacity: isRevealed ? 1 : Math.min(overscroll / 60, 1),
-          transition: touchActive ? "none" : "opacity 0.3s ease-out",
+          transform: `translateY(${panelOffset}px)`,
+          transition: touchActive ? "none" : "transform 0.3s ease-out",
           pointerEvents: isRevealed ? "auto" : "none",
         }}
       >

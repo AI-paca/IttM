@@ -3,12 +3,17 @@
  *  ПАЛИТРЫ ТЕМЫ + ЦВЕТОВАЯ МАТЕМАТИКА (ЭРГОНОМИЧНЫЙ ЭТАЛОН)
  * ============================================================================
  *
- * Источник истины для цветов интерфейса.
- * Ползунок плавно скользит по шкале профессиональных рабочих тем WORKING_THEMES.
- * Порядок оптимизирован под долгую работу: привычные тёмные IDE → приглушённый
- * Monokai/olive → нейтральные mid-gray workbench → спокойные светлые IDE.
+ * Источник истины для базовой темы интерфейса.
+ * WORKING_THEMES описывает только среду: фон, surfaces, borders, текст и общий
+ * accent. Цвета стикеров источников задаются через семантическую шкалу
+ * безопасности в ../source-security и дальше выводятся под текущую тему.
  * ============================================================================
  */
+
+import {
+  SOURCE_SAFETY_BY_SOURCE,
+  SOURCE_SAFETY_TIER_SEEDS,
+} from "../source-security";
 
 export interface ThemePalette {
   base_background: string;
@@ -389,6 +394,95 @@ function deriveStatus(
   };
 }
 
+type DerivedTone = StatusSet & {
+  on: string;
+};
+
+type StickerFoldSet = {
+  dark: string;
+  mid: string;
+  light: string;
+  white: string;
+  edge: string;
+};
+
+function deriveStickerFold(p: ThemePalette, isDark: boolean): StickerFoldSet {
+  const bg = p.base_background;
+  const accent = p.accent_feedback;
+  const paper = mix(bg, accent, isDark ? 0.22 : 0.12);
+  const [hue, sat, lit] = hexToHsl(paper);
+  const foldSat = clampS(
+    Math.max(isDark ? 12 : 8, Math.min(isDark ? 42 : 28, sat * 0.72)),
+  );
+
+  if (isDark) {
+    return {
+      dark: hslToHex(hue, foldSat, clampL(lit + 3)),
+      mid: hslToHex(hue, foldSat, clampL(lit + 9)),
+      light: hslToHex(hue, foldSat, clampL(lit + 16)),
+      white: hslToHex(hue, foldSat * 0.82, clampL(lit + 25)),
+      edge: hslToHex(hue, foldSat * 0.65, clampL(lit + 34)),
+    };
+  }
+
+  return {
+    dark: hslToHex(hue, foldSat, clampL(lit - 17)),
+    mid: hslToHex(hue, foldSat, clampL(lit - 8)),
+    light: hslToHex(hue, foldSat * 0.9, clampL(lit + 2)),
+    white: hslToHex(hue, foldSat * 0.65, clampL(lit + 10)),
+    edge: hslToHex(hue, foldSat * 0.45, clampL(lit + 16)),
+  };
+}
+
+/**
+ * Back-compat alias для UI-токенов: source id -> seed цвета его safety tier.
+ * Если нужно поменять смысловой цвет, править SOURCE_SAFETY_TIER_SEEDS.
+ */
+export const SOURCE_STICKER_SEEDS = Object.fromEntries(
+  Object.entries(SOURCE_SAFETY_BY_SOURCE).map(([sourceId, tier]) => [
+    sourceId,
+    SOURCE_SAFETY_TIER_SEEDS[tier],
+  ]),
+) as Record<keyof typeof SOURCE_SAFETY_BY_SOURCE, string>;
+
+function deriveSourceTone(
+  p: ThemePalette,
+  seedColor: string,
+  isDark: boolean,
+): DerivedTone {
+  const bg = p.base_background;
+  const base = isDark ? lighten(seedColor, 0.12) : darken(seedColor, 0.05);
+  return {
+    base,
+    soft: mix(bg, seedColor, isDark ? 0.22 : 0.14),
+    border: mix(seedColor, p.border, isDark ? 0.46 : 0.56),
+    text: isDark ? lighten(seedColor, 0.26) : darken(seedColor, 0.26),
+    on: contrastOn(base),
+  };
+}
+
+function sourceStickerTokens(
+  p: ThemePalette,
+  isDark: boolean,
+): Record<string, string> {
+  const result: Record<string, string> = {};
+
+  for (const [sourceId, safetyTier] of Object.entries(
+    SOURCE_SAFETY_BY_SOURCE,
+  )) {
+    const key = sourceId.replace(/_/g, "-");
+    const seed = SOURCE_SAFETY_TIER_SEEDS[safetyTier];
+    const tone = deriveSourceTone(p, seed, isDark);
+    result[`source-${key}`] = tone.base;
+    result[`source-${key}-soft`] = tone.soft;
+    result[`source-${key}-border`] = tone.border;
+    result[`source-${key}-text`] = tone.text;
+    result[`source-${key}-on`] = tone.on;
+  }
+
+  return result;
+}
+
 const STATUS_LIGHT = {
   success: "#16a34a",
   danger: "#dc2626",
@@ -414,6 +508,7 @@ export function deriveTokens(p: ThemePalette): Record<string, string> {
   const dang = deriveStatus(p, statusSrc.danger, dark);
   const warn = deriveStatus(p, statusSrc.warning, dark);
   const info = deriveStatus(p, statusSrc.info, dark);
+  const stickerFold = deriveStickerFold(p, dark);
 
   return {
     accent,
@@ -461,11 +556,13 @@ export function deriveTokens(p: ThemePalette): Record<string, string> {
     "info-border": info.border,
     "info-text": info.text,
 
-    "sticker-fold-dark": dark ? darken(bg, 0.02) : "#cbd5e1",
-    "sticker-fold-mid": dark ? lighten(bg, 0.05) : "#e2e8f0",
-    "sticker-fold-light": dark ? lighten(bg, 0.1) : "#f1f5f9",
-    "sticker-fold-white": dark ? lighten(bg, 0.16) : "#ffffff",
-    "sticker-edge": dark ? lighten(bg, 0.22) : "#ffffff",
+    "sticker-fold-dark": stickerFold.dark,
+    "sticker-fold-mid": stickerFold.mid,
+    "sticker-fold-light": stickerFold.light,
+    "sticker-fold-white": stickerFold.white,
+    "sticker-edge": stickerFold.edge,
+
+    ...sourceStickerTokens(p, dark),
   };
 }
 

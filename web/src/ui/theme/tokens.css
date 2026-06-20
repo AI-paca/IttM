@@ -85,11 +85,43 @@
     --shadow-accent-glow: 0 0 30px rgba(37, 99, 235, 0.6);
 
     /* 3D-стикер: складки (используется в StickerBg) */
-    --color-sticker-fold-dark: #cbd5e1;
-    --color-sticker-fold-mid: #e2e8f0;
-    --color-sticker-fold-light: #f1f5f9;
-    --color-sticker-fold-white: #ffffff;
+    --color-sticker-fold-dark: #a0adbe;
+    --color-sticker-fold-mid: #bbc4d1;
+    --color-sticker-fold-light: #dadfe5;
+    --color-sticker-fold-white: #f3f4f5;
     --color-sticker-edge: #ffffff;
+
+    /* Стикеры источников: fallback, runtime пересчитывает из palettes.ts */
+    --color-source-auto: #5f6e84;
+    --color-source-auto-soft: #d4d8de;
+    --color-source-auto-border: #9ba5b4;
+    --color-source-auto-text: #4a5667;
+    --color-source-auto-on: #ffffff;
+    --color-source-browser: #209866;
+    --color-source-browser-soft: #cbdeda;
+    --color-source-browser-border: #7eb9a6;
+    --color-source-browser-text: #19764f;
+    --color-source-browser-on: #ffffff;
+    --color-source-local-tess: #ce8b1d;
+    --color-source-local-tess-soft: #e4dccf;
+    --color-source-local-tess-border: #ceb284;
+    --color-source-local-tess-text: #a16c16;
+    --color-source-local-tess-on: #ffffff;
+    --color-source-local-easy: #ce8b1d;
+    --color-source-local-easy-soft: #e4dccf;
+    --color-source-local-easy-border: #ceb284;
+    --color-source-local-easy-text: #a16c16;
+    --color-source-local-easy-on: #ffffff;
+    --color-source-gateway: #ce8b1d;
+    --color-source-gateway-soft: #e4dccf;
+    --color-source-gateway-border: #ceb284;
+    --color-source-gateway-text: #a16c16;
+    --color-source-gateway-on: #ffffff;
+    --color-source-llm: #ce4642;
+    --color-source-llm-soft: #e4d2d5;
+    --color-source-llm-border: #ce9395;
+    --color-source-llm-text: #a13733;
+    --color-source-llm-on: #ffffff;
   }
 
   /* ----------  DARK THEME (= AUTO_DARK)  ----------
@@ -141,10 +173,41 @@
     --color-info-text: #c7d2fe;
 
     /* 3D-стикер: тёмные складки */
-    --color-sticker-fold-dark: #0f172a;
-    --color-sticker-fold-mid: #1e293b;
-    --color-sticker-fold-light: #334155;
-    --color-sticker-fold-white: #475569;
-    --color-sticker-edge: #64748b;
+    --color-sticker-fold-dark: #25363e;
+    --color-sticker-fold-mid: #304752;
+    --color-sticker-fold-light: #3e5a68;
+    --color-sticker-fold-white: #537180;
+    --color-sticker-edge: #6c8896;
+
+    --color-source-auto: #778599;
+    --color-source-auto-soft: #24282e;
+    --color-source-auto-border: #49525f;
+    --color-source-auto-text: #8c98a9;
+    --color-source-auto-on: #ffffff;
+    --color-source-browser: #3dab7d;
+    --color-source-browser-soft: #163227;
+    --color-source-browser-border: #266a4e;
+    --color-source-browser-text: #5bb991;
+    --color-source-browser-on: #ffffff;
+    --color-source-local-tess: #de9f39;
+    --color-source-local-tess-soft: #3e2f16;
+    --color-source-local-tess-border: #896324;
+    --color-source-local-tess-text: #e3ae59;
+    --color-source-local-tess-on: #ffffff;
+    --color-source-local-easy: #de9f39;
+    --color-source-local-easy-soft: #3e2f16;
+    --color-source-local-easy-border: #896324;
+    --color-source-local-easy-text: #e3ae59;
+    --color-source-local-easy-on: #ffffff;
+    --color-source-gateway: #de9f39;
+    --color-source-gateway-soft: #3e2f16;
+    --color-source-gateway-border: #896324;
+    --color-source-gateway-text: #e3ae59;
+    --color-source-gateway-on: #ffffff;
+    --color-source-llm: #de605b;
+    --color-source-llm-soft: #3e1f1f;
+    --color-source-llm-border: #893c3a;
+    --color-source-llm-text: #e37975;
+    --color-source-llm-on: #ffffff;
   }
 }

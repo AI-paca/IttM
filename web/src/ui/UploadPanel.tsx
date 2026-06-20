@@ -37,7 +37,7 @@ export function UploadPanel({
       className="w-full flex-1 flex flex-col gap-6 justify-center transition-all duration-300 relative z-0"
     >
       <div
-        className={`w-full flex-1 min-h-[40vh] max-h-[60vh] rounded-[2.5rem] mt-4 md:mt-12 border-3 border-dashed relative flex flex-col items-center justify-center overflow-visible cursor-pointer transition-colors duration-200 ${
+        className={`w-full h-[clamp(360px,58svh,600px)] md:h-[clamp(440px,62svh,680px)] rounded-[2.5rem] mt-4 md:mt-8 border-3 border-dashed relative flex flex-col items-center justify-center overflow-visible cursor-pointer transition-colors duration-200 ${
           isDragging
             ? "border-[var(--color-info)] bg-[var(--color-info-soft)]"
             : "border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:border-[var(--color-info)] hover:bg-[var(--color-bg-elevated)]"

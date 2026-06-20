@@ -1,6 +1,7 @@
-import { ClipboardPaste } from "lucide-react";
+import { useRef } from "react";
 import type { EngineControls } from "../layout/engine-controls.types";
 import type { LlmProvider } from "../../ocr/types";
+import { PasteButton } from "./PasteButton";
 
 interface LlmPanelProps {
   controls: EngineControls;
@@ -16,6 +17,7 @@ interface LlmPanelProps {
  * и токены из ui/theme/tokens.css.
  */
 export function LlmPanel({ controls }: LlmPanelProps) {
+  const keyInputRef = useRef<HTMLInputElement>(null);
   const {
     externalLlmConsent,
     llmKey,
@@ -60,26 +62,18 @@ export function LlmPanel({ controls }: LlmPanelProps) {
         <label className="form-label">API Ключ</label>
         <div className="flex gap-2">
           <input
+            ref={keyInputRef}
             type="password"
             value={llmKey}
             onChange={(e) => setLlmKey(e.target.value)}
             placeholder="Введите ключ..."
-            className="input-field flex-1 min-w-0 font-mono"
+            className="input-field h-10 flex-1 min-w-0 font-mono"
           />
-          <button
-            onClick={async () => {
-              try {
-                const text = await navigator.clipboard.readText();
-                setLlmKey(text);
-              } catch (e) {
-                console.debug("Clipboard read failed", e);
-              }
-            }}
-            className="btn-secondary"
-            title="Вставить"
-          >
-            <ClipboardPaste className="w-4 h-4" />
-          </button>
+          <PasteButton
+            targetRef={keyInputRef}
+            onPaste={setLlmKey}
+            title="Вставить ключ"
+          />
         </div>
       </div>
 

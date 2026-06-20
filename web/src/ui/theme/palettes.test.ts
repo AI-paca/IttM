@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { interpolateWorkingScale } from "./palettes";
+import {
+  deriveTokens,
+  interpolateWorkingScale,
+  SOURCE_STICKER_SEEDS,
+  VSCODE_LIGHT,
+} from "./palettes";
 
 function parseHex(hex: string): [number, number, number] {
   const n = parseInt(hex.replace("#", ""), 16);
@@ -79,4 +84,23 @@ test("theme background ramp has no abrupt luminance jump", () => {
   }
 
   assert.ok(maxDelta < 0.015, `background ramp is too sharp: ${maxDelta}`);
+});
+
+test("source sticker colors follow security tiers", () => {
+  assert.equal(SOURCE_STICKER_SEEDS.browser, "#22A06B");
+  assert.equal(SOURCE_STICKER_SEEDS.llm, "#D94A45");
+  assert.equal(
+    SOURCE_STICKER_SEEDS.local_tess,
+    SOURCE_STICKER_SEEDS.local_easy,
+  );
+  assert.equal(SOURCE_STICKER_SEEDS.local_tess, SOURCE_STICKER_SEEDS.gateway);
+
+  const tokens = deriveTokens(VSCODE_LIGHT);
+  assert.equal(
+    tokens["source-local-tess"],
+    tokens["source-local-easy"],
+    "same safety tier should produce same sticker color",
+  );
+  assert.equal(tokens["source-local-tess"], tokens["source-gateway"]);
+  assert.notEqual(tokens["source-browser"], tokens["source-llm"]);
 });

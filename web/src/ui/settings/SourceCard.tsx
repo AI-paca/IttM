@@ -38,6 +38,11 @@ export function SourceCard({
 }: SourceCardProps) {
   const disabled = isMobile && ["local_tess", "local_easy"].includes(src.id);
   const badge = getSourceBadge(src.id);
+  const selectSource = () => {
+    if (disabled) return;
+    onSelect(src.id as SourceType);
+    if (isPeeled) onTogglePeel("");
+  };
 
   return (
     <div
@@ -48,21 +53,21 @@ export function SourceCard({
       {/* Слой 1: фон (инфо о безопасности, виден при отклеивании) */}
       {badge && (
         <div
-          className="absolute inset-0 rounded-xl flex flex-col items-start justify-center pt-1 pl-4 pr-12 cursor-pointer z-0 pointer-events-auto"
+          className={`absolute inset-0 rounded-xl flex flex-col items-start justify-center pt-1 pl-4 pr-12 z-0 pointer-events-auto ${
+            disabled ? "cursor-not-allowed" : "cursor-pointer"
+          }`}
           style={{ background: badge.bgVar }}
-          onClick={() => onTogglePeel("")}
+          onClick={selectSource}
         >
           <span
-            className={`text-[11px] font-bold uppercase tracking-wide opacity-90 ${
-              badge.isNeutral ? "text-secondary" : "text-on-accent"
-            }`}
+            className="text-[11px] font-bold uppercase tracking-wide opacity-90"
+            style={{ color: badge.textVar }}
           >
             {badge.text}
           </span>
           <span
-            className={`text-[10px] text-left leading-snug mt-0.5 line-clamp-3 whitespace-pre-wrap ${
-              badge.isNeutral ? "text-muted" : "text-on-accent opacity-90"
-            }`}
+            className="text-[10px] text-left leading-snug mt-0.5 line-clamp-3 whitespace-pre-wrap opacity-90"
+            style={{ color: badge.descVar }}
           >
             {badge.desc}
           </span>
@@ -72,6 +77,7 @@ export function SourceCard({
       <StickerBg
         peeled={isPeeled}
         active={isActive}
+        className={isPeeled ? "pointer-events-none" : undefined}
         r={12}
         baseDx={54}
         baseDy={22}
@@ -82,16 +88,10 @@ export function SourceCard({
         oversizePct={0.02}
       >
         <div
-          onClick={() => {
-            if (isPeeled) {
-              onTogglePeel("");
-              return;
-            }
-            if (!disabled) onSelect(src.id as SourceType);
-          }}
-          className={`absolute inset-0 flex items-center justify-between pl-3 pr-[40px] z-10 cursor-pointer ${
-            isPeeled ? "pointer-events-none" : "pointer-events-auto"
-          }`}
+          onClick={selectSource}
+          className={`absolute inset-0 flex items-center justify-between pl-3 pr-[40px] z-10 ${
+            disabled ? "cursor-not-allowed" : "cursor-pointer"
+          } ${isPeeled ? "pointer-events-none" : "pointer-events-auto"}`}
         >
           <div className="flex items-center gap-3 w-full">
             <div className={isActive ? "text-accent" : "text-faint"}>

@@ -29,7 +29,11 @@ export function OcrWorkspace() {
 
   return (
     <main className="flex-1 flex flex-col items-center px-4 md:px-8 py-6 md:py-8 w-full max-w-7xl mx-auto relative z-10 overflow-x-hidden">
-      <div className="w-full max-w-[800px] flex flex-col transition-all duration-500 flex-1">
+      <div
+        className={`w-full flex flex-col transition-all duration-500 flex-1 ${
+          appState === "reading" ? "max-w-5xl" : "max-w-[900px]"
+        }`}
+      >
         <AnimatePresence mode="popLayout">
           {appState === "upload" && (
             <UploadPanel

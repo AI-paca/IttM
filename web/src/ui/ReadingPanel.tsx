@@ -80,7 +80,7 @@ export function ReadingPanel({
           </div>
         )}
 
-        <div className="max-w-prose mx-auto text-[17px] sm:text-[18px] leading-[1.8] sm:leading-[2.0] space-y-[24px] sm:space-y-[28px] text-[var(--color-text-secondary)] selection:bg-[var(--color-info-soft)] pb-12 whitespace-pre-wrap font-sans w-full bg-[var(--color-bg-surface)] p-6 sm:p-10 rounded-2xl border border-[var(--color-border-subtle)]">
+        <div className="mx-auto w-full max-w-[860px] min-h-[52svh] text-[17px] sm:text-[18px] leading-[1.8] sm:leading-[2.0] space-y-[24px] sm:space-y-[28px] text-[var(--color-text-secondary)] selection:bg-[var(--color-info-soft)] pb-12 whitespace-pre-wrap font-sans bg-[var(--color-bg-surface)] p-6 sm:p-10 rounded-2xl border border-[var(--color-border-subtle)]">
           {extractedText}
         </div>
 

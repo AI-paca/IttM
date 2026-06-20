@@ -18,8 +18,9 @@ function readInitialMode(): CropMode {
 
 /**
  * Переключатель режима обрезки изображения: «Как есть» / «Автообрезка» / «Вручную».
- * Выбор сохраняется в localStorage. Само действие пока заглушка (UI-only),
- * реальная обработка будет подключена позже.
+ * Выбор сохраняется в localStorage.
+ *
+ * Рефакторинг: gray классы заменены на .segmented-control / .segmented-btn.
  */
 export function CropModeToggle() {
   const [cropMode, setCropMode] = useState<CropMode>(readInitialMode);
@@ -41,18 +42,14 @@ export function CropModeToggle() {
 
   return (
     <div
-      className="absolute bottom-6 flex bg-gray-100/80 dark:bg-gray-800/80 backdrop-blur-sm p-1 rounded-xl w-11/12 sm:w-1/2 lg:w-1/3 xl:w-1/4 z-10 pointer-events-auto border border-gray-200 dark:border-gray-700/50"
+      className="segmented-control absolute bottom-6 w-11/12 sm:w-1/2 lg:w-1/3 xl:w-1/4 z-10 pointer-events-auto"
       onClick={(e) => e.stopPropagation()}
     >
       {modes.map((mode) => (
         <button
           key={mode.id}
           onClick={() => handleCropChange(mode.id)}
-          className={`flex-1 py-1.5 text-[11px] sm:text-xs font-bold rounded-lg transition-all ${
-            cropMode === mode.id
-              ? "bg-white dark:bg-gray-700 shadow-sm text-gray-900 dark:text-white"
-              : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
-          }`}
+          className={`segmented-btn text-[11px] sm:text-xs ${cropMode === mode.id ? "segmented-btn-active" : ""}`}
         >
           {mode.label}
         </button>

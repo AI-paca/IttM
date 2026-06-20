@@ -5,6 +5,8 @@ interface RememberToggleProps {
 
 /**
  * Чекбокс "Запомнить выбор (Cookies)" с кастомным стилем.
+ *
+ * Рефакторинг: gray/blue классы заменены на .checkbox-card из components.css.
  */
 export function RememberToggle({ checked, onChange }: RememberToggleProps) {
   return (
@@ -16,9 +18,9 @@ export function RememberToggle({ checked, onChange }: RememberToggleProps) {
           checked={checked}
           onChange={(e) => onChange(e.target.checked)}
         />
-        <div className="w-5 h-5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 peer-checked:bg-blue-600 peer-checked:border-blue-600 dark:peer-checked:bg-blue-600 dark:peer-checked:border-blue-600 transition-colors flex items-center justify-center shrink-0">
+        <div className="checkbox-indicator">
           <svg
-            className="w-3.5 h-3.5 text-white opacity-0 peer-checked:opacity-100 transition-opacity"
+            className="w-3.5 h-3.5 text-on-accent opacity-0 peer-checked:opacity-100 transition-opacity"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -31,9 +33,7 @@ export function RememberToggle({ checked, onChange }: RememberToggleProps) {
             />
           </svg>
         </div>
-        <span className="text-[14px] font-semibold text-gray-700 dark:text-gray-300 select-none group-hover:text-gray-900 dark:group-hover:text-gray-100 transition-colors">
-          Запомнить выбор (Cookies)
-        </span>
+        <span className="checkbox-label">Запомнить выбор (Cookies)</span>
       </label>
     </div>
   );

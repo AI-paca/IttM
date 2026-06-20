@@ -19,7 +19,10 @@ interface SourceCardProps {
 
 /**
  * Карточка источника OCR: 3D-стикер с эффектом "отклеивания".
- * При отклеивании показывает бейдж безопасности.
+ * При отклеивании показывает бейдж безопасности (цвет из tokens.css).
+ *
+ * Рефакторинг: цвета переведены на семантические токены (text-secondary,
+ * text-muted, accent, surface) — хардкодные gray/blue классы удалены.
  */
 export function SourceCard({
   src,
@@ -42,19 +45,24 @@ export function SourceCard({
         disabled ? "opacity-40 grayscale" : ""
       } h-[64px] sm:h-[76px]`}
     >
-      {/* Layer 1: Background (Safety info exposed when peeled) */}
+      {/* Слой 1: фон (инфо о безопасности, виден при отклеивании) */}
       {badge && (
         <div
-          className={`absolute inset-0 ${badge.bgDark} rounded-xl flex flex-col items-start justify-center pt-1 pl-4 pr-12 cursor-pointer z-0 pointer-events-auto`}
+          className="absolute inset-0 rounded-xl flex flex-col items-start justify-center pt-1 pl-4 pr-12 cursor-pointer z-0 pointer-events-auto"
+          style={{ background: badge.bgVar }}
           onClick={() => onTogglePeel("")}
         >
           <span
-            className={`text-[11px] font-bold uppercase tracking-wide opacity-90 ${badge.isNeutral ? "text-gray-700 dark:text-gray-200" : "text-white"}`}
+            className={`text-[11px] font-bold uppercase tracking-wide opacity-90 ${
+              badge.isNeutral ? "text-secondary" : "text-on-accent"
+            }`}
           >
             {badge.text}
           </span>
           <span
-            className={`text-[10px] text-left leading-snug mt-0.5 line-clamp-3 whitespace-pre-wrap ${badge.isNeutral ? "text-gray-600 dark:text-gray-400" : "text-white/90"}`}
+            className={`text-[10px] text-left leading-snug mt-0.5 line-clamp-3 whitespace-pre-wrap ${
+              badge.isNeutral ? "text-muted" : "text-on-accent opacity-90"
+            }`}
           >
             {badge.desc}
           </span>
@@ -84,22 +92,18 @@ export function SourceCard({
           }`}
         >
           <div className="flex items-center gap-3 w-full">
-            <div
-              className={
-                isActive
-                  ? "text-blue-600 dark:text-blue-400"
-                  : "text-gray-400 dark:text-gray-500"
-              }
-            >
+            <div className={isActive ? "text-accent" : "text-faint"}>
               {src.icon}
             </div>
             <div className="flex flex-col flex-1 min-w-0">
               <span
-                className={`text-[13px] font-semibold truncate ${isActive ? "text-blue-700 dark:text-blue-300" : "text-gray-700 dark:text-gray-200"}`}
+                className={`text-[13px] font-semibold truncate ${
+                  isActive ? "text-accent-strong" : "text-secondary"
+                }`}
               >
                 {src.label} {disabled ? "(Не для моб.)" : ""}
               </span>
-              <span className="text-[11px] text-gray-500 dark:text-gray-400 leading-tight mt-0.5 truncate">
+              <span className="text-[11px] text-muted leading-tight mt-0.5 truncate">
                 {src.desc}
               </span>
             </div>
@@ -113,7 +117,7 @@ export function SourceCard({
                 e.stopPropagation();
                 onInstallEasyOcr();
               }}
-              className="p-1 min-w-[28px] h-[28px] flex justify-center items-center pointer-events-auto cursor-pointer bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-400 hover:text-blue-500 hover:border-blue-300 dark:hover:border-blue-700 shadow-sm active:scale-95 transition-all text-center"
+              className="p-1 min-w-[28px] h-[28px] flex justify-center items-center pointer-events-auto cursor-pointer bg-surface border border-default rounded-lg text-faint hover:text-accent hover:border-accent-soft-border shadow-sm active:scale-95 transition-all text-center"
               title="Скачать EasyOCR (~5ГБ)"
             >
               <DownloadCloud className="w-4 h-4" />
@@ -121,18 +125,18 @@ export function SourceCard({
           )}
           {src.id === "local_easy" && easyOcrInstalling && (
             <div
-              className="w-[84px] px-2 py-1 bg-blue-50 dark:bg-blue-900 border border-blue-200 dark:border-blue-700 rounded text-[9px] text-blue-700 dark:text-blue-200 pointer-events-auto"
+              className="w-[84px] px-2 py-1 bg-accent-soft border border-accent-soft-border rounded text-[9px] text-accent-strong pointer-events-auto"
               title={easyOcrInstallMessage}
             >
               <div className="flex items-center justify-between gap-1">
                 <span className="truncate">
                   {Math.round(easyOcrInstallProgress)}%
                 </span>
-                <div className="w-2 h-2 border-[1.5px] border-blue-500 border-t-transparent rounded-full animate-spin shrink-0" />
+                <div className="w-2 h-2 border-[1.5px] border-accent border-t-transparent rounded-full animate-spin shrink-0" />
               </div>
-              <div className="mt-1 h-[2px] overflow-hidden rounded-full bg-blue-100 dark:bg-blue-950">
+              <div className="mt-1 h-[2px] overflow-hidden rounded-full bg-accent-soft">
                 <div
-                  className="h-full rounded-full bg-blue-500 transition-all duration-500"
+                  className="h-full rounded-full bg-accent transition-all duration-500"
                   style={{
                     width: `${Math.max(3, Math.min(100, easyOcrInstallProgress))}%`,
                   }}
@@ -140,9 +144,7 @@ export function SourceCard({
               </div>
             </div>
           )}
-          {isActive && (
-            <Check className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-          )}
+          {isActive && <Check className="w-4 h-4 text-accent shrink-0" />}
         </div>
       </StickerBg>
 

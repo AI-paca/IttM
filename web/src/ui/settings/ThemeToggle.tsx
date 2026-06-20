@@ -14,21 +14,20 @@ const MODES: { id: ThemeMode; label?: string; icon?: typeof Sun }[] = [
 
 /**
  * Segmented control переключателя темы: Default / Light / Dark.
+ *
+ * Рефакторинг: gray-* классы заменены на .segmented-control и токены
+ * (surface, text-secondary, accent) из ui/theme/components.css.
  */
 export function ThemeToggle({ themeMode, onChange }: ThemeToggleProps) {
   return (
-    <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-xl w-full">
+    <div className="segmented-control w-full">
       {MODES.map(({ id, label, icon: Icon }) => {
         const active = themeMode === id;
         return (
           <button
             key={id}
             onClick={() => onChange(id)}
-            className={`flex-1 flex justify-center items-center py-1.5 text-xs font-bold rounded-lg transition-all ${
-              active
-                ? "bg-white dark:bg-gray-700 shadow-sm text-gray-900 dark:text-white"
-                : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
-            }`}
+            className={`segmented-btn ${active ? "segmented-btn-active" : ""}`}
           >
             {label ?? (Icon ? <Icon className="w-4 h-4" /> : null)}
           </button>

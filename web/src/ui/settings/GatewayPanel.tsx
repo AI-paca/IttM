@@ -12,6 +12,8 @@ const GATEWAY_OPTIONS = [
 /**
  * Панель выбора endpoint для источника Gateway:
  * текущий gateway, прямое подключение к Ollama или кастомный URL (Edge).
+ *
+ * Рефакторинг: Tailwind-цвета заменены на .input-field из components.css.
  */
 export function GatewayPanel({ pingUrl, setPingUrl }: GatewayPanelProps) {
   const value = GATEWAY_OPTIONS.includes(pingUrl) ? pingUrl : "custom";
@@ -23,7 +25,7 @@ export function GatewayPanel({ pingUrl, setPingUrl }: GatewayPanelProps) {
           const v = e.target.value;
           setPingUrl(v === "custom" ? "" : v);
         }}
-        className="p-2 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-lg text-sm text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-blue-500 transition-all font-sans"
+        className="input-field"
         value={value}
       >
         <option value="">Текущий Gateway</option>
@@ -38,7 +40,7 @@ export function GatewayPanel({ pingUrl, setPingUrl }: GatewayPanelProps) {
           placeholder="Edge / Custom URL: https://..."
           value={pingUrl}
           onChange={(e) => setPingUrl(e.target.value)}
-          className="w-full p-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 outline-none text-gray-800 dark:text-gray-200 transition-all font-mono shadow-sm"
+          className="input-field w-full text-xs sm:text-sm font-mono shadow-sm"
         />
       )}
     </div>

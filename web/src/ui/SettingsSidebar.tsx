@@ -29,6 +29,9 @@ const CLOUD_SOURCE_IDS = ["gateway", "llm"];
  * Раньше был "божественным" компонентом (~615 строк) — теперь разбит на
  * одноотвественные модули в `./settings/`. Здесь только оркестрация:
  * мобильный bottom-sheet, overscroll reveal и композиция секций.
+ *
+ * Рефакторинг: хардкодные gray-* классы заменены на семантические токены
+ * (bg-surface, bg-overlay, text-faint, bg-strong, border-default).
  */
 export function SettingsSidebar({
   controls,
@@ -109,7 +112,7 @@ export function SettingsSidebar({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.24, ease: "easeInOut" }}
-            className="fixed inset-0 bg-gray-900/40 z-[90] backdrop-blur-sm"
+            className="fixed inset-0 bg-overlay z-[90] backdrop-blur-sm"
             onClick={onClose}
           />
           <motion.div
@@ -121,26 +124,26 @@ export function SettingsSidebar({
               isMobile
                 ? "bottom-0 left-0 right-0 h-auto max-h-[85vh] rounded-t-3xl border-t"
                 : "top-0 right-0 bottom-0 w-[90%] max-w-[360px] border-l"
-            } bg-white dark:bg-gray-900 shadow-2xl z-[100] border-gray-200 dark:border-gray-800 flex flex-col font-sans`}
+            } bg-surface shadow-2xl z-[100] border-default flex flex-col font-sans`}
           >
             {isMobile && (
               <div
                 className="w-full flex justify-center pt-3 pb-1"
                 onClick={onClose}
               >
-                <div className="w-12 h-1.5 bg-gray-300 dark:bg-gray-700 rounded-full" />
+                <div className="w-12 h-1.5 bg-strong rounded-full" />
               </div>
             )}
             <button
               onClick={onClose}
-              className="absolute top-4 right-4 p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 bg-gray-100/50 dark:bg-gray-800/50 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full transition-colors z-[110]"
+              className="absolute top-4 right-4 p-1.5 text-faint hover:text-primary bg-elevated hover:bg-inset rounded-full transition-colors z-[110]"
             >
               <X className="w-6 h-6" />
             </button>
 
             <div
               ref={scrollRef}
-              className="flex-1 overflow-y-auto no-scrollbar relative z-10 bg-white dark:bg-gray-900"
+              className="flex-1 overflow-y-auto no-scrollbar relative z-10 bg-surface"
               onScroll={handlers.onScroll}
               onWheel={handlers.onWheel}
               onTouchStart={handlers.onTouchStart}
@@ -162,14 +165,14 @@ export function SettingsSidebar({
                       сайдбара, когда контента мало. */}
                   <div className="flex flex-col gap-4 flex-1">
                     <section className="flex flex-col gap-2">
-                      <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-1">
+                      <h3 className="text-[10px] font-bold text-faint uppercase tracking-widest pl-1">
                         Local & Browser
                       </h3>
                       {LOCAL_SOURCE_IDS.map(renderSource)}
                     </section>
 
                     <section className="flex flex-col gap-2 mt-2">
-                      <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-1">
+                      <h3 className="text-[10px] font-bold text-faint uppercase tracking-widest pl-1">
                         API & Cloud
                       </h3>
                       {CLOUD_SOURCE_IDS.map(renderSource)}
@@ -187,7 +190,7 @@ export function SettingsSidebar({
                     </section>
                   </div>
 
-                  <div className="h-px bg-gray-100 dark:bg-gray-800 my-2 sm:my-4" />
+                  <div className="divider" />
 
                   {/* Нижняя секция: прижата к низу сайдбара */}
                   <div className="flex flex-col gap-3 shrink-0">

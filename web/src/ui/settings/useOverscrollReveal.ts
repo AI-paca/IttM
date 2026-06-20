@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TouchEvent, UIEvent, WheelEvent } from "react";
+import { flushSync } from "react-dom";
+import { REVEAL_HEIGHT } from "./OverscrollReveal";
 
 const REVEAL_THRESHOLD = 60;
 const MAX_OVERSCROLL = 120;
-const REVEAL_HEIGHT = 120;
 
 interface OverscrollRevealHandlers {
   onWheel: (e: WheelEvent<HTMLDivElement>) => void;
@@ -18,15 +19,12 @@ interface OverscrollRevealHandlers {
  * при прокрутке вниз за пределы контента накапливает overscroll,
  * и при превышении порога разворачивает дополнительный блок (Issue Tracker).
  *
- * Ключевые отличия от предыдущей реализации:
- * - При раскрытии scrollTop устанавливается ровно в scrollHeight (а не += currentOver),
- *   чтобы reveal-блок оказывался привязан к низу видимой области без «прыжка».
- * - Скрытие происходит по надёжному порогу: reveal сворачивается, только если
- *   пользователь проскроллил вверх дальше, чем высота reveal-блока + запас.
- * - Добавлен явный колбэк close() для кнопки закрытия.
+ * Reveal сам добавляет высоту внизу scroll-area. Основной контент остаётся
+ * min-h-full, поэтому гибкое пространство над темой не сжимается, а при
+ * переполнении вся нижняя секция продолжает уезжать вниз естественным скроллом.
  */
 export function useOverscrollReveal(
-  scrollRef: React.RefObject<HTMLDivElement | null>,
+  scrollNode: HTMLDivElement | null,
 ): {
   overscroll: number;
   isRevealed: boolean;
@@ -39,76 +37,136 @@ export function useOverscrollReveal(
   const [touchStart, setTouchStart] = useState(0);
 
   const isRevealedRef = useRef(isRevealed);
+  const overscrollRef = useRef(overscroll);
+  const revealSettlingRef = useRef(false);
   const wheelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     isRevealedRef.current = isRevealed;
   }, [isRevealed]);
 
-  const scrollToBottom = useCallback(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    // Прыгаем в самый низ, чтобы reveal-блок (последний элемент потока)
-    // оказался в видимой области, прижатым к низу.
-    el.scrollTop = el.scrollHeight - el.clientHeight;
-  }, [scrollRef]);
-
-  const reveal = useCallback(() => {
-    setIsRevealed(true);
-    setOverscroll(0);
-    // Сбрасываем transform (overscroll=0) и прижимаем скролл к низу
-    // в следующем кадре — после того, как reveal-блок получит высоту.
-    requestAnimationFrame(() => scrollToBottom());
-  }, [scrollToBottom]);
-
-  const close = useCallback(() => {
-    setIsRevealed(false);
-    setOverscroll(0);
+  const setOverscrollValue = useCallback((value: number) => {
+    overscrollRef.current = value;
+    setOverscroll(value);
   }, []);
 
-  const onWheel = useCallback(
-    (e: WheelEvent<HTMLDivElement>) => {
-      const el = scrollRef.current;
+  const scrollToBottom = useCallback(() => {
+    const el = scrollNode;
+    if (!el) return;
+    el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+  }, [scrollNode]);
+
+  useEffect(() => {
+    if (!isRevealed) return;
+    let frame = 0;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    revealSettlingRef.current = true;
+    const started = performance.now();
+    const followReveal = (now: number) => {
+      scrollToBottom();
+      if (now - started < 320) {
+        frame = requestAnimationFrame(followReveal);
+      }
+    };
+    frame = requestAnimationFrame(followReveal);
+    timeout = setTimeout(() => {
+      revealSettlingRef.current = false;
+      scrollToBottom();
+    }, 340);
+    return () => {
+      revealSettlingRef.current = false;
+      cancelAnimationFrame(frame);
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [isRevealed, scrollToBottom]);
+
+  useEffect(() => {
+    return () => {
+      if (wheelTimeoutRef.current) clearTimeout(wheelTimeoutRef.current);
+    };
+  }, []);
+
+  const closeIfAwayFromBottom = useCallback(() => {
+    const el = scrollNode;
+    if (!el) return;
+    const bottomOffset = el.scrollHeight - el.clientHeight - el.scrollTop;
+    if (bottomOffset > 4) {
+      setIsRevealed(false);
+    }
+  }, [scrollNode]);
+
+  const closeAfterNativeScroll = useCallback(() => {
+    requestAnimationFrame(() => {
+      if (isRevealedRef.current) {
+        closeIfAwayFromBottom();
+      }
+    });
+  }, [closeIfAwayFromBottom]);
+
+  const reveal = useCallback(() => {
+    flushSync(() => {
+      setOverscrollValue(0);
+      setIsRevealed(true);
+    });
+  }, [setOverscrollValue]);
+
+  const close = useCallback(() => {
+    flushSync(() => {
+      setOverscrollValue(0);
+      setIsRevealed(false);
+    });
+  }, [setOverscrollValue]);
+
+  const handleWheelDelta = useCallback(
+    (deltaY: number) => {
+      const el = scrollNode;
       if (!el) return;
 
-      // Уже раскрыто — нативный скролл сам управляет позицией,
-      // onScroll обработает скрытие при необходимости.
-      if (isRevealedRef.current) return;
+      if (isRevealedRef.current) {
+        if (deltaY < 0) closeAfterNativeScroll();
+        return;
+      }
 
       const maxScroll = el.scrollHeight - el.clientHeight;
       const atBottom = el.scrollTop >= maxScroll - 1;
 
-      if (atBottom && e.deltaY > 0) {
-        // Накапливаем overscroll при прокрутке вниз за пределы контента.
-        setOverscroll((prev) =>
-          Math.min(prev + e.deltaY * 0.5, MAX_OVERSCROLL),
+      if (atBottom && deltaY > 0) {
+        const next = Math.min(
+          overscrollRef.current + deltaY * 0.5,
+          MAX_OVERSCROLL,
         );
-      } else if (e.deltaY < 0) {
-        // Скролл вверх внутри контента гасит накопленный overscroll.
-        setOverscroll((prev) => Math.max(0, prev + e.deltaY * 0.5));
+        if (next >= REVEAL_THRESHOLD) {
+          reveal();
+          return;
+        }
+        setOverscrollValue(next);
+      } else if (deltaY < 0) {
+        setOverscrollValue(
+          Math.max(0, overscrollRef.current + deltaY * 0.5),
+        );
       }
 
       if (wheelTimeoutRef.current) clearTimeout(wheelTimeoutRef.current);
       wheelTimeoutRef.current = setTimeout(() => {
-        setOverscroll((latest) => {
-          if (!isRevealedRef.current && latest >= REVEAL_THRESHOLD) {
-            reveal();
-          }
-          return 0;
-        });
+        if (!isRevealedRef.current) setOverscrollValue(0);
       }, 150);
     },
-    [reveal, scrollRef],
+    [closeAfterNativeScroll, reveal, scrollNode, setOverscrollValue],
+  );
+
+  const onWheel = useCallback(
+    (e: WheelEvent<HTMLDivElement>) => {
+      handleWheelDelta(e.deltaY);
+    },
+    [handleWheelDelta],
   );
 
   const onScroll = useCallback((e: UIEvent<HTMLDivElement>) => {
     if (!isRevealedRef.current) return;
+    if (revealSettlingRef.current) return;
     const el = e.currentTarget;
     const bottomOffset = el.scrollHeight - el.clientHeight - el.scrollTop;
-    // Сворачиваем reveal только если пользователь явно ушёл вверх
-    // дальше высоты reveal-блока + запас. Это предотвращает случайное
-    // закрытие и позволяет корректно скроллить контент над reveal.
-    if (bottomOffset > REVEAL_HEIGHT + 40) {
+    if (bottomOffset > 4) {
       setIsRevealed(false);
     }
   }, []);
@@ -119,12 +177,16 @@ export function useOverscrollReveal(
 
   const onTouchMove = useCallback(
     (e: TouchEvent<HTMLDivElement>) => {
-      const el = scrollRef.current;
+      const el = scrollNode;
       if (!el) return;
-      if (isRevealedRef.current) return;
 
       const maxScroll = el.scrollHeight - el.clientHeight;
       const deltaY = touchStart - e.touches[0].clientY;
+      if (isRevealedRef.current) {
+        if (deltaY < -8) setIsRevealed(false);
+        return;
+      }
+
       const atBottom = el.scrollTop >= maxScroll - 1;
 
       setOverscroll((current) => {
@@ -134,7 +196,7 @@ export function useOverscrollReveal(
         return current > 0 ? Math.max(0, current + deltaY * 0.8) : 0;
       });
     },
-    [scrollRef, touchStart],
+    [scrollNode, touchStart],
   );
 
   const onTouchEnd = useCallback(() => {

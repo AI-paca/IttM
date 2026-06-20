@@ -78,6 +78,8 @@ export function SourceCard({
         curve={0.15}
         shadow={0.33}
         animMode="peel"
+        initialSize={{ w: 320, h: isMobile ? 64 : 76 }}
+        oversizePct={0.02}
       >
         <div
           onClick={() => {

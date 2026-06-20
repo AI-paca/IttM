@@ -27,6 +27,21 @@
  * ============================================================================
  */
 
+@layer utilities {
+  /* Скрывает полосу прокрутки, не занимая место (предотвращает скачки ширины
+     контейнера при появлении/исчезновении скроллбара). Важно для контейнеров
+     с абсолютными дочерними элементами, рассчитанными на полную ширину
+     (например, 3D-стикеры в SourceCard внутри SettingsSidebar). */
+  .no-scrollbar {
+    scrollbar-gutter: stable;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE/Edge legacy */
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none; /* Chrome/Safari/Edge */
+  }
+}
+
 @layer components {
   /* ---------------------------------------------------------- Поверхности */
   .surface-card {

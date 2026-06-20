@@ -25,6 +25,8 @@ export function StickerBg({
   active,
   className,
   children,
+  initialSize,
+  oversizePct = 0,
   corner = "tr",
   baseDx = 54,
   baseDy = 22,
@@ -36,16 +38,14 @@ export function StickerBg({
   const containerRef = useRef<HTMLDivElement>(null);
   const idPrefix = useId().replace(/:/g, "");
 
-  const { size, anim } = useStickerAnimation(peeled, containerRef);
-  const { w, h } = size;
-
-  if (w === 0 || h === 0) {
-    return (
-      <div ref={containerRef} className={`absolute inset-0 ${className || ""}`}>
-        {children}
-      </div>
-    );
-  }
+  const { size, anim } = useStickerAnimation(peeled, containerRef, initialSize);
+  const { w: rawW, h: rawH } = size;
+  // До первого валидного измерения держим DOM-структуру стабильной, но не
+  // прячем содержимое карточки. Иначе короткий нулевой замер превращается в
+  // заметный blink всей строки источника.
+  const measured = rawW > 0 && rawH > 0;
+  const w = measured ? rawW : 1;
+  const h = measured ? rawH : 1;
 
   const diag = Math.hypot(w, h);
   const maxPeel = diag * 1.6;
@@ -76,11 +76,24 @@ export function StickerBg({
     <div
       ref={containerRef}
       className={`absolute inset-0 z-0 overflow-visible ${className || ""}`}
+      style={{
+        borderRadius: r,
+        transform: oversizePct ? `scale(${1 + oversizePct})` : undefined,
+        transformOrigin: "center",
+      }}
     >
+      <div
+        className={`absolute inset-0 transition-colors duration-300 ${
+          active
+            ? "bg-accent-soft border border-accent-soft-border"
+            : "bg-surface border border-default group-hover:bg-elevated"
+        }`}
+        style={{ borderRadius: r, opacity: measured ? 0 : 1 }}
+      />
       <svg
         viewBox={`0 0 ${w} ${h}`}
         className="absolute inset-0 w-full h-full overflow-visible"
-        style={{ pointerEvents: "none" }}
+        style={{ pointerEvents: "none", opacity: measured ? 1 : 0 }}
       >
         <defs>
           <clipPath id={fullClipId} clipPathUnits="userSpaceOnUse">
@@ -248,11 +261,15 @@ export function StickerBg({
       {/* Контейнер переднего плана, обрезанный по форме */}
       <div
         className="absolute inset-0 z-10 pointer-events-none"
-        style={{ clipPath: `url(#${fullClipId})`, opacity: rollStickerOpacity }}
+        style={
+          measured
+            ? { clipPath: `url(#${fullClipId})`, opacity: rollStickerOpacity }
+            : undefined
+        }
       >
         <div
           className="absolute inset-0 pointer-events-none"
-          style={{ clipPath: `url(#${clipId})` }}
+          style={measured ? { clipPath: `url(#${clipId})` } : undefined}
         >
           <div className="w-full h-full pointer-events-auto">{children}</div>
         </div>

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { Variants } from "motion/react";
@@ -57,10 +57,13 @@ export function SettingsSidebar({
 
   const isMobile = useIsMobile();
   const [peeledId, setPeeledId] = useState<string | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollNode, setScrollNode] = useState<HTMLDivElement | null>(null);
+  const bindScrollNode = useCallback((node: HTMLDivElement | null) => {
+    setScrollNode(node);
+  }, []);
 
   const { overscroll, isRevealed, touchActive, handlers, close } =
-    useOverscrollReveal(scrollRef);
+    useOverscrollReveal(scrollNode);
 
   const togglePeel = (id: string) => setPeeledId(id || null);
 
@@ -144,7 +147,7 @@ export function SettingsSidebar({
             </button>
 
             <div
-              ref={scrollRef}
+              ref={bindScrollNode}
               className="flex-1 overflow-y-auto no-scrollbar relative z-10 bg-surface"
               onScroll={handlers.onScroll}
               onWheel={handlers.onWheel}
@@ -161,11 +164,11 @@ export function SettingsSidebar({
                     : "transform 0.3s cubic-bezier(0.25, 1, 0.5, 1)",
                 }}
               >
-                <div className="p-4 sm:p-6 pt-14 flex flex-col gap-4 sm:gap-6 pb-6 flex-1">
+                <div className="p-4 sm:p-6 pt-14 flex flex-col gap-4 sm:gap-6 pb-6 flex-1 min-h-full">
                   {/* Верхняя секция: источники + конфигурация. flex-1 растягивает,
                       чтобы нижние контролы (тема/запоминание) прижимались к низу
                       сайдбара, когда контента мало. */}
-                  <div className="flex flex-col gap-4 flex-1">
+                  <div className="flex flex-col gap-4 flex-1 min-h-0">
                     <section className="flex flex-col gap-2">
                       <h3 className="text-[10px] font-bold text-faint uppercase tracking-widest pl-1">
                         Local & Browser
@@ -194,8 +197,8 @@ export function SettingsSidebar({
 
                   <div className="divider" />
 
-                  {/* Нижняя секция: прижата к низу сайдбара */}
-                  <div className="flex flex-col gap-3 shrink-0">
+                  {/* Нижняя секция: reveal ниже не влияет на позицию темы. */}
+                  <div className="mt-auto flex flex-col gap-3 shrink-0">
                     <RememberToggle
                       checked={rememberChoice}
                       onChange={onRememberChange}
@@ -208,14 +211,13 @@ export function SettingsSidebar({
                     />
                   </div>
                 </div>
-
-                <OverscrollReveal
-                  isRevealed={isRevealed}
-                  overscroll={overscroll}
-                  touchActive={touchActive}
-                  onClose={close}
-                />
               </div>
+              <OverscrollReveal
+                isRevealed={isRevealed}
+                overscroll={overscroll}
+                touchActive={touchActive}
+                onClose={close}
+              />
             </div>
           </motion.div>
         </>

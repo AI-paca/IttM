@@ -35,6 +35,8 @@ export interface StickerBgProps {
   active: boolean;
   className?: string;
   children?: React.ReactNode;
+  initialSize?: { w: number; h: number };
+  oversizePct?: number;
   corner?: Corner;
   baseDx?: number;
   baseDy?: number;

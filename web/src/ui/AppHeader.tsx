@@ -17,7 +17,6 @@ interface AppHeaderProps {
   onDrop: (event: DragEvent<HTMLDivElement>, autoStart?: boolean) => void;
   onNewFile: () => void;
   onOpenSidebar: () => void;
-  onSourceSelect: (source: SourceType) => void;
 }
 
 export function AppHeader({
@@ -36,7 +35,8 @@ export function AppHeader({
     SOURCES.find((s) => s.id === selectedSource)?.label ?? selectedSource;
 
   const ghostButton =
-    "inline-flex h-7 items-center justify-center rounded-md text-[var(--color-text-muted)] opacity-75 transition-all hover:bg-[var(--color-bg-elevated)]/70 hover:text-[var(--color-text-primary)] hover:opacity-100 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ring)]";
+    "inline-flex items-center justify-center rounded-md text-[var(--color-text-muted)] opacity-75 transition-all hover:bg-[var(--color-bg-elevated)]/70 hover:text-[var(--color-text-primary)] hover:opacity-100 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ring)]";
+  const settingsButton = `${ghostButton} absolute inset-y-0 right-0 z-10 w-1/4 min-w-[104px] justify-end rounded-none pr-4 sm:static sm:min-w-0 sm:w-7 sm:h-7 sm:rounded-md sm:p-0`;
 
   return (
     <AnimatePresence>
@@ -56,8 +56,10 @@ export function AppHeader({
           } backdrop-blur-md`}
         >
           <div
-            className={`mx-auto grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-3 sm:px-5 md:px-7 ${
-              appState === "upload" ? "h-10 md:h-11" : "h-9 md:h-10"
+            className={`relative mx-auto grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 pl-3 pr-2 sm:px-5 md:px-7 ${
+              appState === "upload"
+                ? "h-[52px] sm:h-10 md:h-11"
+                : "h-[52px] sm:h-9 md:h-10"
             }`}
           >
             <button
@@ -65,7 +67,7 @@ export function AppHeader({
               onClick={() => {
                 if (appState !== "upload") onNewFile();
               }}
-              className={`min-w-0 justify-self-start text-left ${
+              className={`-ml-1.5 flex h-11 min-w-[128px] max-w-[72vw] items-center justify-self-start rounded-md px-1.5 text-left sm:ml-0 sm:h-auto sm:min-w-0 sm:max-w-none sm:px-0 ${
                 appState !== "upload"
                   ? "cursor-pointer hover:opacity-100"
                   : "cursor-default"
@@ -85,7 +87,7 @@ export function AppHeader({
                     <span className="truncate text-[13px] font-semibold text-[var(--color-text-primary)] md:text-sm">
                       Text Extractor
                     </span>
-                    <BugReportLink />
+                    <BugReportLink className="hidden sm:inline-flex" />
                   </motion.div>
                 ) : (
                   <motion.div
@@ -122,11 +124,11 @@ export function AppHeader({
               <button
                 type="button"
                 onClick={onOpenSidebar}
-                className={`${ghostButton} w-7 shrink-0`}
+                className={settingsButton}
                 title="Настройки"
                 aria-label="Настройки"
               >
-                <Settings className="h-4 w-4" />
+                <Settings className="h-5 w-5 sm:h-4 sm:w-4" />
               </button>
             </div>
           </div>

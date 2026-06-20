@@ -82,7 +82,14 @@ export function normalizePlatformError(
       (error as Record<string, unknown>).reason,
     ]);
     if (message) {
-      return new PlatformError({ message, source });
+      return new PlatformError({
+        code:
+          typeof (error as Record<string, unknown>).code === "string"
+            ? ((error as Record<string, unknown>).code as string)
+            : undefined,
+        message,
+        source,
+      });
     }
   }
   return new PlatformError({ message: "Неизвестная ошибка.", source });
@@ -327,6 +334,7 @@ export async function executeBackendOcrWithFallback(
   onProgress?: ProgressSink,
   params?: Record<string, string>,
   onChunk?: (text: string, pageIndex?: number) => void,
+  options?: BackendStreamOptions,
 ): Promise<OcrResult> {
   let lastError: unknown = new PlatformError({
     message: "Нет доступных OCR gateway endpoint-ов.",
@@ -345,6 +353,7 @@ export async function executeBackendOcrWithFallback(
         activeContent,
         onProgress,
         onChunk,
+        options,
       );
     } catch (error) {
       lastError = error;
@@ -418,11 +427,16 @@ function backendJsonUrl(streamUrl: string): string {
   return streamUrl.replace(/\/convert\/stream(?=[?#]|$)/, "/convert");
 }
 
+interface BackendStreamOptions {
+  stallTimeoutMs?: number;
+}
+
 export async function readBackendOcrStream(
   response: Response,
   activeContent: { current: boolean },
   onProgress?: ProgressSink,
   onChunk?: (text: string, pageIndex?: number) => void,
+  options?: BackendStreamOptions,
 ): Promise<OcrResult> {
   if (!response.ok) throw await parsePlatformError(response, "OCR API");
   if (!response.body) {
@@ -439,6 +453,43 @@ export async function readBackendOcrStream(
   const warnings: Array<Record<string, unknown>> = [];
   let meta: Record<string, unknown> | undefined;
   let buffered = "";
+  let failed = false;
+  let lastMeaningfulEventAt = Date.now();
+
+  const markMeaningfulEvent = () => {
+    lastMeaningfulEventAt = Date.now();
+  };
+
+  const streamStallError = () =>
+    new PlatformError({
+      code: "OCR_STREAM_STALLED",
+      message:
+        "OCR API: поток завис без новых страниц. Переключаемся на браузерный OCR.",
+      source: "OCR API",
+      partialResult: markdownParts.length > 0,
+    });
+
+  const readChunk = async () => {
+    const stallTimeoutMs = options?.stallTimeoutMs;
+    if (!stallTimeoutMs) return await reader.read();
+
+    const remainingMs = stallTimeoutMs - (Date.now() - lastMeaningfulEventAt);
+    if (remainingMs <= 0) throw streamStallError();
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        reader.read(),
+        new Promise<"timeout">((resolve) => {
+          timeoutId = setTimeout(() => resolve("timeout"), remainingMs);
+        }),
+      ]);
+      if (result === "timeout") throw streamStallError();
+      return result;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  };
 
   const consumeLine = (line: string) => {
     if (!line.trim()) return;
@@ -460,6 +511,7 @@ export async function readBackendOcrStream(
     if (event.type === "error") {
       const errorEvent = event as unknown as BackendStreamErrorEvent;
       throw new PlatformError({
+        code: errorEvent.code,
         message: `OCR API: ${
           errorEvent.message ||
           errorEvent.detail ||
@@ -472,6 +524,7 @@ export async function readBackendOcrStream(
     }
     if (event.type === "complete") {
       const completeEvent = event as unknown as BackendStreamCompleteEvent;
+      markMeaningfulEvent();
       meta =
         completeEvent.meta && typeof completeEvent.meta === "object"
           ? completeEvent.meta
@@ -484,6 +537,7 @@ export async function readBackendOcrStream(
         typeof progressEvent.message === "string" &&
         progressEvent.message.trim()
       ) {
+        markMeaningfulEvent();
         onProgress?.(
           progressEvent.message.trim(),
           typeof progressEvent.percent === "number"
@@ -497,6 +551,7 @@ export async function readBackendOcrStream(
       const warningEvent = event as unknown as BackendStreamWarningEvent;
       const message =
         warningEvent.message || warningEvent.detail || "OCR warning.";
+      markMeaningfulEvent();
       warnings.push({
         code: warningEvent.code,
         message,
@@ -516,6 +571,7 @@ export async function readBackendOcrStream(
     }
 
     const pageEvent = event as unknown as BackendStreamPageEvent;
+    markMeaningfulEvent();
     markdownParts.push(pageEvent.markdown);
     onProgress?.(`Получена страница ${pageEvent.page}...`);
     onChunk?.(`${pageEvent.markdown}\n\n---\n\n`, pageEvent.page);
@@ -523,7 +579,7 @@ export async function readBackendOcrStream(
 
   try {
     while (activeContent.current) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readChunk();
       if (done) break;
       buffered += decoder.decode(value, { stream: true });
       const lines = buffered.split("\n");
@@ -533,9 +589,11 @@ export async function readBackendOcrStream(
     buffered += decoder.decode();
     if (buffered.trim()) consumeLine(buffered);
   } catch (error) {
+    failed = true;
     const normalized = normalizePlatformError(error, "OCR API");
     if (markdownParts.length > 0) {
       throw new PlatformError({
+        code: normalized.code,
         message: normalized.message,
         status: normalized.status,
         source: normalized.source,
@@ -545,7 +603,13 @@ export async function readBackendOcrStream(
     }
     throw error;
   } finally {
-    if (!activeContent.current) await reader.cancel();
+    if (!activeContent.current || failed) {
+      try {
+        await reader.cancel();
+      } catch {
+        // Preserve the original stream failure or cancellation result.
+      }
+    }
     reader.releaseLock();
   }
 
@@ -570,6 +634,7 @@ export async function executeBackendOcrStreaming(
   activeContent: { current: boolean },
   onProgress?: ProgressSink,
   onChunk?: (text: string, pageIndex?: number) => void,
+  options?: BackendStreamOptions,
 ): Promise<OcrResult> {
   const formData = new FormData();
   formData.append("file", targetFile);
@@ -595,7 +660,13 @@ export async function executeBackendOcrStreaming(
     if (result.markdown) onChunk?.(result.markdown);
     return result;
   }
-  return readBackendOcrStream(response, activeContent, onProgress, onChunk);
+  return readBackendOcrStream(
+    response,
+    activeContent,
+    onProgress,
+    onChunk,
+    options,
+  );
 }
 
 export function noticeFromError(error: unknown): PlatformErrorShape {
@@ -605,6 +676,7 @@ export function noticeFromError(error: unknown): PlatformErrorShape {
     status: normalized.status,
     source: normalized.source,
     raw: normalized.raw,
+    code: normalized.code,
     partialResult: normalized.partialResult,
   };
 }

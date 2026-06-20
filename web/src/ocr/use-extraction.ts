@@ -45,6 +45,7 @@ interface UseOcrExtractionArgs {
   setAppState: Dispatch<SetStateAction<AppState>>;
   setExtractedText: Dispatch<SetStateAction<string>>;
   setExtractionProgress: Dispatch<SetStateAction<string>>;
+  setActiveSource: Dispatch<SetStateAction<SourceType | null>>;
   setIsExtracting: Dispatch<SetStateAction<boolean>>;
   setLastExtractedPage: Dispatch<SetStateAction<number>>;
   setTotalPdfPages: Dispatch<SetStateAction<number | null>>;
@@ -66,6 +67,7 @@ export function useOcrExtraction({
   setAppState,
   setExtractedText,
   setExtractionProgress,
+  setActiveSource,
   setIsExtracting,
   setLastExtractedPage,
   setTotalPdfPages,
@@ -114,6 +116,9 @@ export function useOcrExtraction({
           browserPipelineProfileForSource("browser"),
         );
         const pdfCropMode = effectivePdfCropMode(readCropMode());
+        const activateSource = (source: SourceType) => {
+          if (active.current) setActiveSource(source);
+        };
 
         const handleChunk = (chunk: string, pageIndex?: number) => {
           console.log(
@@ -135,6 +140,7 @@ export function useOcrExtraction({
         };
 
         const runBrowserFallback = async () => {
+          activateSource("browser");
           if (file.type === "application/pdf") {
             const md = await processPdfIntelligently(
               file,
@@ -200,6 +206,7 @@ export function useOcrExtraction({
           effectiveSource === "local_tess" ||
           effectiveSource === "local_easy"
         ) {
+          activateSource(effectiveSource);
           const engineType =
             effectiveSource === "local_tess" ? "tesseract" : "easyocr";
           const url = buildApiUrl("", "/api/convert/stream", {
@@ -217,6 +224,7 @@ export function useOcrExtraction({
             handleChunk,
           );
         } else if (effectiveSource === "llm") {
+          activateSource("llm");
           result = await executeLlmOcr(
             file,
             {
@@ -235,6 +243,7 @@ export function useOcrExtraction({
             browserProfile.pdfRenderScale,
           );
         } else if (effectiveSource === "gateway") {
+          activateSource("gateway");
           if (isOllamaBaseUrl(pingUrl)) {
             result = await executeOllamaOcr(
               file,
@@ -268,6 +277,7 @@ export function useOcrExtraction({
           }
         } else if (effectiveSource === "auto") {
           try {
+            activateSource("gateway");
             result = await executeBackendOcrWithFallback(
               file,
               autoBackendCandidates,
@@ -277,12 +287,25 @@ export function useOcrExtraction({
               },
               backendPipelineParams("auto"),
               handleChunk,
+              { stallTimeoutMs: 35_000 },
             );
           } catch (backendError) {
-            if (normalizePlatformError(backendError).partialResult) {
+            const normalizedBackendError = normalizePlatformError(backendError);
+            if (normalizedBackendError.code === "OCR_STREAM_STALLED") {
+              progressiveText = "";
+              setExtractedText("");
+              setLastExtractedPage(1);
+              if (active.current) {
+                setExtractionProgress(
+                  "Gateway завис, выполняем в браузере (WASM)...",
+                );
+              }
+              result = await runBrowserFallback();
+            } else if (normalizedBackendError.partialResult) {
               throw backendError;
             }
-            if (llmKey.trim() && externalLlmConsent) {
+            if (!result && llmKey.trim() && externalLlmConsent) {
+              activateSource("llm");
               setExtractionProgress(
                 "Cloud/локальный gateway недоступен, пробуем LLM OCR...",
               );

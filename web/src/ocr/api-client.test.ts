@@ -380,6 +380,42 @@ test("readBackendOcrStream cancels the reader after client cancellation", async 
   assert.equal(result.markdown, "first");
 });
 
+test("readBackendOcrStream rejects and cancels stalled partial streams", async () => {
+  let cancelled = false;
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode('{"type":"page","page":1,"markdown":"first"}\n'),
+      );
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      readBackendOcrStream(
+        new Response(body, {
+          headers: { "content-type": "application/x-ndjson" },
+        }),
+        { current: true },
+        undefined,
+        undefined,
+        { stallTimeoutMs: 5 },
+      ),
+    (error: unknown) => {
+      const normalized = normalizePlatformError(error);
+      assert.equal(normalized.code, "OCR_STREAM_STALLED");
+      assert.equal(normalized.partialResult, true);
+      return true;
+    },
+  );
+
+  assert.equal(cancelled, true);
+});
+
 test("readBackendOcrStream rejects unknown protocol events", async () => {
   const response = new Response('{"type":"version-99","payload":{}}\n', {
     headers: { "content-type": "application/x-ndjson" },

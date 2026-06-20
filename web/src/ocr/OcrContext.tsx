@@ -112,6 +112,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
   const [selectedSource, setSelectedSource] = useState<SourceType>(() =>
     getSavedSource(),
   );
+  const [activeSource, setActiveSource] = useState<SourceType | null>(null);
   const [pingUrl, setPingUrl] = useState("");
   const [rememberChoice, setRememberChoice] = useState(
     () => getCookie("text-extractor-remember") === "true",
@@ -218,6 +219,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
 
   const handleSourceSelect = useCallback(
     (src: SourceType) => {
+      setActiveSource(null);
       setSelectedSource(src);
       if (rememberChoice) {
         setCookie("text-extractor-source", src);
@@ -274,6 +276,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       }
 
       setFile(selected);
+      setActiveSource(null);
       if (autoStart) {
         setLastExtractedPage(1);
         setTotalPdfPages(null);
@@ -324,6 +327,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
   const handleNewFile = useCallback(() => {
     setAppState("upload");
     setFile(null);
+    setActiveSource(null);
   }, []);
 
   const handleStartExtraction = useCallback(() => {
@@ -334,6 +338,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
     setLastExtractedPage(1);
     setTotalPdfPages(null);
     setExtractedText("");
+    setActiveSource(null);
     setAppState("loading");
     setTriggerCount((prev) => prev + 1);
   }, [externalLlmConsent, selectedSource, showNotice]);
@@ -344,6 +349,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       return;
     }
     setAppState("loading");
+    setActiveSource(null);
     setTriggerCount((prev) => prev + 1);
   }, [externalLlmConsent, selectedSource, showNotice]);
 
@@ -417,6 +423,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
     setAppState,
     setExtractedText,
     setExtractionProgress,
+    setActiveSource,
     setIsExtracting,
     setLastExtractedPage,
     setTotalPdfPages,
@@ -492,6 +499,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
 
   const navigationValue = useMemo<NavigationAreaContextValue>(
     () => ({
+      activeSource,
       appState,
       dragHandlers,
       file,
@@ -499,7 +507,15 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       showHeader,
       onNewFile: handleNewFile,
     }),
-    [appState, dragHandlers, file, handleNewFile, isDragging, showHeader],
+    [
+      activeSource,
+      appState,
+      dragHandlers,
+      file,
+      handleNewFile,
+      isDragging,
+      showHeader,
+    ],
   );
 
   const workspaceValue = useMemo<OcrWorkspaceContextValue>(

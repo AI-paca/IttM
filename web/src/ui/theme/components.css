@@ -220,6 +220,92 @@
            border-t-[var(--color-accent)];
   }
 
+  /* ----------------------------------------------------------- Markdown output */
+  .markdown-content {
+    @apply max-w-none break-words text-[var(--color-text-secondary)];
+  }
+
+  .markdown-content > * + * {
+    margin-top: 1.15em;
+  }
+
+  .markdown-content h1,
+  .markdown-content h2,
+  .markdown-content h3,
+  .markdown-content h4 {
+    @apply font-bold leading-tight text-[var(--color-text-primary)];
+  }
+
+  .markdown-content h1 {
+    @apply text-[1.55em];
+  }
+
+  .markdown-content h2 {
+    @apply text-[1.28em];
+  }
+
+  .markdown-content h3 {
+    @apply text-[1.12em];
+  }
+
+  .markdown-content a {
+    @apply font-semibold text-[var(--color-info)] underline decoration-[var(--color-info-border)] underline-offset-4 transition-colors hover:text-[var(--color-info-text)];
+  }
+
+  .markdown-content ul,
+  .markdown-content ol {
+    @apply ps-6;
+  }
+
+  .markdown-content ul {
+    @apply list-disc;
+  }
+
+  .markdown-content ol {
+    @apply list-decimal;
+  }
+
+  .markdown-content li + li {
+    margin-top: 0.35em;
+  }
+
+  .markdown-content blockquote {
+    @apply border-s-4 border-[var(--color-border-strong)] ps-4 italic text-[var(--color-text-muted)];
+  }
+
+  .markdown-content hr {
+    @apply my-8 border-0 border-t border-[var(--color-border-subtle)];
+  }
+
+  .markdown-content code {
+    @apply rounded-md bg-[var(--color-bg-inset)] px-1.5 py-0.5 font-mono text-[0.9em] text-[var(--color-text-primary)];
+  }
+
+  .markdown-content pre {
+    @apply overflow-x-auto rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-inset)] p-4 text-[0.88em] leading-relaxed;
+  }
+
+  .markdown-content pre code {
+    @apply rounded-none bg-transparent p-0 text-inherit;
+  }
+
+  .markdown-content__table-wrap {
+    @apply w-full overflow-x-auto rounded-xl border border-[var(--color-border-subtle)];
+  }
+
+  .markdown-content table {
+    @apply w-full min-w-[520px] border-collapse text-left text-[0.92em];
+  }
+
+  .markdown-content th,
+  .markdown-content td {
+    @apply border-b border-[var(--color-border-subtle)] px-3 py-2 align-top;
+  }
+
+  .markdown-content th {
+    @apply bg-[var(--color-bg-elevated)] font-bold text-[var(--color-text-primary)];
+  }
+
   /* ----------------------------------------------- Ползунок темы (liquid glass) */
   .theme-slider {
     @apply flex min-h-12 items-center gap-2 rounded-full select-none sm:min-h-0;

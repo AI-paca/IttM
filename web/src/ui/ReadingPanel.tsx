@@ -80,7 +80,7 @@ export function ReadingPanel({
           </div>
         )}
 
-        <div className="text-[17px] sm:text-[18px] leading-[1.7] sm:leading-[1.8] space-y-[24px] sm:space-y-[28px] text-gray-800 dark:text-gray-300 selection:bg-blue-100 dark:selection:bg-blue-900 pb-12 whitespace-pre-wrap font-sans">
+        <div className="max-w-prose mx-auto text-[17px] sm:text-[18px] leading-[1.8] sm:leading-[2.0] space-y-[24px] sm:space-y-[28px] text-gray-800 dark:text-gray-300 selection:bg-blue-100 dark:selection:bg-blue-900 pb-12 whitespace-pre-wrap font-sans w-full bg-[#fdfcf8] dark:bg-gray-900 p-6 sm:p-10 rounded-2xl shadow-[inset_0_0_20px_rgba(0,0,0,0.02)] border border-gray-100 dark:border-gray-800/60">
           {extractedText}
         </div>
 
@@ -102,7 +102,7 @@ export function ReadingPanel({
         )}
 
         <div className="fixed bottom-0 left-0 right-0 p-4 pb-6 bg-gradient-to-t from-gray-50 dark:from-gray-950 via-gray-50/95 dark:via-gray-950/95 to-transparent md:static md:bg-none md:p-0 md:mt-4 md:flex md:flex-row items-center md:border-t md:border-gray-100 dark:md:border-gray-800 md:pt-8 z-30">
-          <div className="flex gap-3 max-w-[800px] mx-auto w-full px-0 md:px-0">
+          <div className="flex gap-3 w-full mx-auto px-0 md:px-0">
             <button
               onClick={onNewFile}
               className="hidden md:flex w-auto flex-none py-2.5 px-6 text-center text-gray-700 dark:text-gray-300 font-bold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors shadow-sm text-sm items-center justify-center gap-2 active:scale-95"

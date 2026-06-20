@@ -3,6 +3,7 @@ import { FileText, RefreshCw, Settings } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { AppState } from "../types/app.types";
 import type { SourceType } from "../ocr/types";
+import { BugReportLink } from "./BugReportLink";
 import { SOURCES } from "./sources";
 
 interface AppHeaderProps {
@@ -49,7 +50,7 @@ export function AppHeader({
           transition={{ duration: 0.3, ease: "easeInOut" }}
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
-          onDrop={(e) => onDrop(e, true)}
+          onDrop={(e) => onDrop(e as DragEvent<HTMLDivElement>, true)}
           className={`sticky top-0 z-40 flex justify-center w-full transition-all duration-500 ease-out shadow-sm ${
             appState === "upload"
               ? "bg-transparent shadow-none dark:bg-transparent"
@@ -57,10 +58,10 @@ export function AppHeader({
           } ${isDragging && appState !== "upload" ? "bg-blue-50/50 dark:bg-blue-900/20" : ""}`}
         >
           <div
-            className={`flex items-center justify-between w-full max-w-7xl mx-auto px-4 ${appState === "upload" ? "py-4" : "py-3"} transition-colors duration-200`}
+            className={`flex items-center justify-between w-[95%] xl:w-[90%] mx-auto px-6 ${appState === "upload" ? "py-4 md:py-6" : "py-3 md:py-4"} transition-all duration-300`}
           >
             <div
-              className={`flex items-center gap-3 flex-shrink-0 ${appState !== "upload" ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
+              className={`flex items-center gap-4 flex-shrink-0 ${appState !== "upload" ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
               onClick={() => {
                 if (appState !== "upload") onNewFile();
               }}
@@ -76,13 +77,19 @@ export function AppHeader({
                     transition={{ duration: 0.3 }}
                     className="flex items-center gap-3"
                   >
-                    <div className="w-9 h-9 md:w-10 md:h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold shadow-sm">
+                    <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold shadow-md text-lg">
                       TE
                     </div>
                     <div className="flex flex-col min-w-0 justify-center">
-                      <h1 className="font-bold tracking-tight text-gray-900 dark:text-gray-100 leading-none truncate text-xl">
-                        Text Extractor
-                      </h1>
+                      <div className="flex items-center gap-2">
+                        <h1 className="font-bold tracking-tight text-gray-900 dark:text-gray-100 leading-none truncate text-xl md:text-2xl">
+                          Text Extractor
+                        </h1>
+                        <BugReportLink />
+                      </div>
+                      <span className="text-xs text-gray-500 font-medium tracking-wide mt-1 hidden sm:block">
+                        Intelligent Text Migration
+                      </span>
                     </div>
                   </motion.div>
                 ) : (

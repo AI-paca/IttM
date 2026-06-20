@@ -13,9 +13,7 @@ import type {
 import {
   AUTO_DARK,
   AUTO_LIGHT,
-  PURE_LIGHT,
   applyPalette,
-  interpolatePalette,
   interpolateWorkingScale,
 } from "../ui/theme/palettes";
 import type {
@@ -182,17 +180,13 @@ export function OcrProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Текущее положение ползунка с учётом авто-режима:
-  //  • Ручной режим: вся шкала WORKING_THEMES (Black -> Slate -> Sage -> Mocha -> Paper -> White)
-  //    через interpolateWorkingScale — путь проходит только по валидным рабочим темам.
-  //  • Авто-режим: системная тема задаёт край пары {AUTO_DARK, AUTO_LIGHT}, уровень уточняет
-  //    положение внутри неё, а при level > 0.5 мягко уходит к PURE_LIGHT.
+  //  • Ручной режим: вся шкала WORKING_THEMES через рабочие IDE-чекпоинты
+  //    (dark IDE -> muted workbench gray -> light IDE).
+  //  • Авто-режим: напрямую повторяет системную тему браузера.
   const computePalette = useCallback(
-    (auto: boolean, level: number, _prefersDark: boolean) => {
+    (auto: boolean, level: number, prefersDark: boolean) => {
       if (auto) {
-        if (level <= 0.5) {
-          return interpolatePalette(AUTO_DARK, AUTO_LIGHT, level * 2);
-        }
-        return interpolatePalette(AUTO_LIGHT, PURE_LIGHT, (level - 0.5) * 2);
+        return prefersDark ? AUTO_DARK : AUTO_LIGHT;
       }
       return interpolateWorkingScale(level);
     },

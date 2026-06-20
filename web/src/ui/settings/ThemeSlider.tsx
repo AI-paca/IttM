@@ -13,11 +13,8 @@ import { interpolateWorkingScale } from "../theme/palettes";
  *     хроматической аберрацией, бликами Френеля и specular.
  *   • Иконка-индикатор плавно морфирует между луной 🌙 и солнцем ☀️.
  *
- * **Визуальный трек — это сама шкала рабочих тем.** Цвет в каждой точке X
- * берётся из 1D-текстуры, в которую один раз запечён реальный результат
- * `interpolateWorkingScale(t)`. Трек проходит только по валидным рабочим темам
- * (Black -> Slate -> Sage -> Mocha -> Paper -> White) без хроматического
- * мусора. Левый конец — чистый Pro Black, правый — чистый Pure White.
+ * Визуальный трек показывает реальный цвет темы в каждой точке шкалы. Цвета
+ * семплируются плотной непрерывной полосой, без отдельных маркеров-чекпоинтов.
  *
  * Управление темой:
  *   • `level` (0..1) — положение ползунка.
@@ -31,6 +28,19 @@ interface ThemeSliderProps {
   onLevelChange: (level: number) => void;
   onAutoChange: (auto: boolean) => void;
 }
+
+function themeColorAt(t: number): string {
+  return interpolateWorkingScale(t).base_background;
+}
+
+const TRACK_BACKGROUND_STOPS = 96;
+const TRACK_BACKGROUND = `linear-gradient(90deg, ${Array.from(
+  { length: TRACK_BACKGROUND_STOPS },
+  (_, idx) => {
+    const t = idx / (TRACK_BACKGROUND_STOPS - 1);
+    return `${themeColorAt(t)} ${(t * 100).toFixed(2)}%`;
+  },
+).join(", ")}) center / calc(100% - 56px) 8px no-repeat`;
 
 /* ----------------------------------------------------------- шейдер */
 
@@ -66,7 +76,7 @@ void main() {
   vec2 st = gl_FragCoord.xy;
 
   float padding = 28.0;
-  float trackHeight = 6.0;
+  float trackHeight = 8.0;
   vec2 trackCenter = u_resolution * 0.5;
   float trackWidth = u_resolution.x - padding * 2.0;
 
@@ -162,7 +172,7 @@ void main() { gl_Position = vec4(a_position, 0.0, 1.0); }
 /* --------------------------------------------- запекание трека-текстуры */
 
 /** Размер 1D-текстуры: достаточно, чтобы передать плавную кривую перехода. */
-const TRACK_TEX_W = 256;
+const TRACK_TEX_W = 512;
 
 function parseHex(hex: string): [number, number, number] {
   const h = hex.replace("#", "").trim();
@@ -174,24 +184,19 @@ function parseHex(hex: string): [number, number, number] {
           .join("")
       : h;
   const n = parseInt(full, 16);
-  return [
-    ((n >> 16) & 255) / 255,
-    ((n >> 8) & 255) / 255,
-    (n & 255) / 255,
-  ];
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
 
 /**
- * Запекает шкалу рабочих тем WORKING_THEMES в 1D-текстуру.
- * Каждый пиксель по X — это реальный base_background, вычисленный через
- * `interpolateWorkingScale(t)` (чистая HSL-интерполяция по чекпоинтам).
+ * Запекает тот же theme ramp, который виден в CSS-фоне. Линза и статичная
+ * полоска используют один источник цвета, поэтому ошибки распределения видны
+ * сразу и без расхождений между CSS/WebGL.
  */
 function buildTrackTextureData(): Uint8Array {
   const data = new Uint8Array(TRACK_TEX_W * 1 * 4);
   for (let i = 0; i < TRACK_TEX_W; i++) {
     const t = i / (TRACK_TEX_W - 1);
-    const pal = interpolateWorkingScale(t);
-    const [r, g, b] = parseHex(pal.base_background);
+    const [r, g, b] = parseHex(themeColorAt(t));
     data[i * 4 + 0] = Math.round(r * 255);
     data[i * 4 + 1] = Math.round(g * 255);
     data[i * 4 + 2] = Math.round(b * 255);
@@ -226,11 +231,17 @@ class LiquidGlassSlider {
   private dragging = false;
 
   private readonly canvas: HTMLCanvasElement;
+  private onChange: (v: number) => void;
 
-  constructor(canvas: HTMLCanvasElement, initial: number) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    initial: number,
+    onChange: (v: number) => void,
+  ) {
     this.canvas = canvas;
     this.val = initial;
     this.targetVal = initial;
+    this.onChange = onChange;
     this.initWebGL();
     this.setupEvents();
     this.resize();
@@ -320,7 +331,11 @@ class LiquidGlassSlider {
     this.targetVal = Math.max(0, Math.min(1, v));
   }
 
-  private updateFromEvent(clientX: number, onChange: (v: number) => void) {
+  setOnChange(onChange: (v: number) => void) {
+    this.onChange = onChange;
+  }
+
+  private updateFromEvent(clientX: number) {
     const rect = this.canvas.getBoundingClientRect();
     const x = clientX - rect.left;
     const padding = 28;
@@ -333,7 +348,7 @@ class LiquidGlassSlider {
     this.lastX = x;
     this.targetVal = raw;
     this.val = raw;
-    onChange(raw);
+    this.onChange(raw);
   }
 
   private setupEvents() {
@@ -343,11 +358,11 @@ class LiquidGlassSlider {
       this.canvas.setPointerCapture(e.pointerId);
       const rect = this.canvas.getBoundingClientRect();
       this.lastX = e.clientX - rect.left;
-      this.updateFromEvent(e.clientX, this.onChangeRef);
+      this.updateFromEvent(e.clientX);
     };
     const onMove = (e: PointerEvent) => {
       if (!this.dragging) return;
-      this.updateFromEvent(e.clientX, this.onChangeRef);
+      this.updateFromEvent(e.clientX);
     };
     const onUp = (e: PointerEvent) => {
       if (!this.dragging) return;
@@ -371,9 +386,6 @@ class LiquidGlassSlider {
       this.canvas.removeEventListener("pointercancel", onUp);
     };
   }
-
-  /** Колбэк изменения — переопределяется снаружи. */
-  onChangeRef: (_v: number) => void = () => {};
 
   private _cleanup: () => void = () => {};
 
@@ -423,11 +435,19 @@ export function ThemeSlider({
 }: ThemeSliderProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sliderRef = useRef<LiquidGlassSlider | null>(null);
+  const changeRef = useRef<(v: number) => void>(() => {});
+
+  changeRef.current = (v) => {
+    if (auto) onAutoChange(false);
+    onLevelChange(v);
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const slider = new LiquidGlassSlider(canvas, level);
+    const slider = new LiquidGlassSlider(canvas, level, (v) =>
+      changeRef.current(v),
+    );
     sliderRef.current = slider;
 
     const loop = () => {
@@ -453,12 +473,7 @@ export function ThemeSlider({
   }, [level]);
 
   useEffect(() => {
-    const slider = sliderRef.current;
-    if (!slider) return;
-    slider.onChangeRef = (v) => {
-      if (auto) onAutoChange(false);
-      onLevelChange(v);
-    };
+    sliderRef.current?.setOnChange((v) => changeRef.current(v));
   }, [auto, onLevelChange, onAutoChange]);
 
   return (
@@ -480,7 +495,10 @@ export function ThemeSlider({
       <canvas
         ref={canvasRef}
         className="theme-slider__canvas"
-        style={{ opacity: auto ? 0.55 : 1 }}
+        style={{
+          opacity: auto ? 0.88 : 1,
+          background: TRACK_BACKGROUND,
+        }}
       />
       <Sun
         className="theme-slider__icon theme-slider__icon--sun"

@@ -4,8 +4,9 @@
  * ============================================================================
  *
  * Источник истины для цветов интерфейса.
- * Ползунок плавно скользит по шкале профессиональных рабочих тем WORKING_THEMES
- * (Black -> Pro RGB Hues -> Light Gray -> Pure White) без хроматических скачков.
+ * Ползунок плавно скользит по шкале профессиональных рабочих тем WORKING_THEMES.
+ * Порядок оптимизирован под долгую работу: привычные тёмные IDE → приглушённый
+ * Monokai/olive → нейтральные mid-gray workbench → спокойные светлые IDE.
  * ============================================================================
  */
 
@@ -21,88 +22,159 @@ export interface ThemePalette {
 
 /** Крайнее тёмное положение (ручной выбор / OLED Pro Black). */
 export const PURE_DARK: ThemePalette = {
-  base_background: "#0B0D0E",
-  dropzone_normal: "#151719",
-  dropzone_active: "#212B36",
-  border: "#1E2124",
-  text_primary: "#E4E6E7",
-  text_secondary: "#A1A6AA",
-  accent_feedback: "#D6995C",
+  base_background: "#07090B",
+  dropzone_normal: "#101215",
+  dropzone_active: "#1A1D22",
+  border: "#20242A",
+  text_primary: "#E7EAED",
+  text_secondary: "#9AA2AB",
+  accent_feedback: "#58A6FF",
 };
 
-/** Профессиональный Сланцево-синий (Pro Slate). */
-export const PRO_SLATE: ThemePalette = {
-  base_background: "#141420",
-  dropzone_normal: "#1E222E",
-  dropzone_active: "#2B3245",
-  border: "#282E3D",
-  text_primary: "#E2E5EE",
-  text_secondary: "#979EB2",
-  accent_feedback: "#6085DE",
+/** VS Code modern dark: почти чёрный рабочий chrome с холодным cyan-акцентом. */
+export const VSCODE_DARK_MODERN: ThemePalette = {
+  base_background: "#121314",
+  dropzone_normal: "#191A1B",
+  dropzone_active: "#242526",
+  border: "#2A2B2C",
+  text_primary: "#BBBEBF",
+  text_secondary: "#8C8C8C",
+  accent_feedback: "#3994BC",
 };
 
-/** Профессиональный Шалфеевый (Pro Sage). */
-export const PRO_SAGE: ThemePalette = {
-  base_background: "#161C18",
-  dropzone_normal: "#212923",
-  dropzone_active: "#2E3B32",
-  border: "#2C362F",
-  text_primary: "#E3ECE5",
-  text_secondary: "#98A69B",
-  accent_feedback: "#5CA86B",
+/** VS Code Dark+ / Visual Studio: классический графит и синий selection. */
+export const VSCODE_DARK_PLUS: ThemePalette = {
+  base_background: "#1E1E1E",
+  dropzone_normal: "#252526",
+  dropzone_active: "#2D2D30",
+  border: "#3C3C3C",
+  text_primary: "#D4D4D4",
+  text_secondary: "#A6A6A6",
+  accent_feedback: "#007ACC",
 };
 
-/** Профессиональный Теплый Мокко (Pro Warm Mocha). */
-export const PRO_MOCHA: ThemePalette = {
-  base_background: "#1E1915",
-  dropzone_normal: "#2B241E",
-  dropzone_active: "#3D332B",
-  border: "#382F28",
-  text_primary: "#EAE3DE",
-  text_secondary: "#A69C94",
-  accent_feedback: "#D6855C",
+/** GitHub Dark Dimmed: мягкий сине-серый тёмный workbench. */
+export const GITHUB_DARK_DIMMED: ThemePalette = {
+  base_background: "#24292F",
+  dropzone_normal: "#2C333A",
+  dropzone_active: "#37404A",
+  border: "#444C56",
+  text_primary: "#D7DEE6",
+  text_secondary: "#A9B4C0",
+  accent_feedback: "#6EA6F8",
 };
 
-/** Авто-светлая / Мягкая бумага (Auto Light). */
-export const AUTO_LIGHT: ThemePalette = {
-  base_background: "#E9EBED",
-  dropzone_normal: "#DBDEE1",
-  dropzone_active: "#B9C4D0",
-  border: "#C7CCD1",
-  text_primary: "#242628",
-  text_secondary: "#6D7378",
-  accent_feedback: "#AD661F",
+/** JetBrains Darcula: классический нейтральный dark для долгой работы. */
+export const JETBRAINS_DARCULA: ThemePalette = {
+  base_background: "#2B2B2B",
+  dropzone_normal: "#333333",
+  dropzone_active: "#3D3D3D",
+  border: "#4A4A4A",
+  text_primary: "#DADADA",
+  text_secondary: "#A9A9A9",
+  accent_feedback: "#6897BB",
+};
+
+/** One Dark Pro: популярный slate-blue участок без неона. */
+export const ONE_DARK_PRO: ThemePalette = {
+  base_background: "#30343F",
+  dropzone_normal: "#383D49",
+  dropzone_active: "#444A58",
+  border: "#515969",
+  text_primary: "#E4E7ED",
+  text_secondary: "#ABB2BF",
+  accent_feedback: "#61AFEF",
+};
+
+/** Monokai / terminal graphite: единственный olive/green checkpoint шкалы. */
+export const MONOKAI_GRAPHITE: ThemePalette = {
+  base_background: "#3A3A32",
+  dropzone_normal: "#44443A",
+  dropzone_active: "#515145",
+  border: "#5F5F50",
+  text_primary: "#F4F1E4",
+  text_secondary: "#C3BFA4",
+  accent_feedback: "#A6E22E",
+};
+
+/** Dimmed Workbench Gray: мост из dark IDE в light без резкого скачка. */
+export const DIMMED_WORKBENCH_GRAY: ThemePalette = {
+  base_background: "#555A62",
+  dropzone_normal: "#60666F",
+  dropzone_active: "#6C737D",
+  border: "#78818C",
+  text_primary: "#F0F2F4",
+  text_secondary: "#C7CDD4",
+  accent_feedback: "#8FA1B3",
+};
+
+/** Classic Workbench Gray: средне-светлый, спокойный рабочий checkpoint. */
+export const CLASSIC_WORKBENCH_GRAY: ThemePalette = {
+  base_background: "#7C838C",
+  dropzone_normal: "#8B929B",
+  dropzone_active: "#9AA1AA",
+  border: "#A7ADB5",
+  text_primary: "#151A20",
+  text_secondary: "#323A43",
+  accent_feedback: "#6F7F8F",
+};
+
+/** Soft Light Workbench: промежуточная light IDE до почти белого режима. */
+export const SOFT_LIGHT_WORKBENCH: ThemePalette = {
+  base_background: "#B8BEC7",
+  dropzone_normal: "#AEB5BF",
+  dropzone_active: "#9FA8B4",
+  border: "#9BA3AE",
+  text_primary: "#202326",
+  text_secondary: "#4B5563",
+  accent_feedback: "#4C6F93",
+};
+
+/** VS Code Light / JetBrains Light family: спокойная светлая IDE. */
+export const VSCODE_LIGHT: ThemePalette = {
+  base_background: "#E6E8EC",
+  dropzone_normal: "#D9DDE3",
+  dropzone_active: "#C7CED8",
+  border: "#C6CCD4",
+  text_primary: "#202326",
+  text_secondary: "#5A626D",
+  accent_feedback: "#3B6EA8",
 };
 
 /** Крайнее светлое положение (ручной выбор / Pure White). */
 export const PURE_LIGHT: ThemePalette = {
-  base_background: "#F1F2F4",
-  dropzone_normal: "#E3E6E8",
-  dropzone_active: "#C2CCD6",
-  border: "#CFD4D8",
-  text_primary: "#242628",
-  text_secondary: "#6D7378",
-  accent_feedback: "#AD661F",
+  base_background: "#F4F6F8",
+  dropzone_normal: "#E6EAEE",
+  dropzone_active: "#CBD6E0",
+  border: "#D3D9DF",
+  text_primary: "#202326",
+  text_secondary: "#5F666E",
+  accent_feedback: "#2F5F8F",
 };
 
 /** Авто-тёмная (следует за браузером). */
-export const AUTO_DARK: ThemePalette = {
-  base_background: "#1C1F26",
-  dropzone_normal: "#252932",
-  dropzone_active: "#2D3953",
-  border: "#2E333E",
-  text_primary: "#E4E5E7",
-  text_secondary: "#9FA4AC",
-  accent_feedback: "#D6AD5C",
-};
+export const AUTO_DARK: ThemePalette = { ...VSCODE_DARK_MODERN };
+/** Авто-светлая (следует за браузером). */
+export const AUTO_LIGHT: ThemePalette = { ...VSCODE_LIGHT };
 
-/** ПОЛНАЯ ШКАЛА РАБОЧИХ ТЕМ (для интерполяции ползунком). */
+/**
+ * ПОЛНАЯ ШКАЛА РАБОЧИХ ТЕМ (для интерполяции ползунком).
+ *
+ * Чекпоинты распределены по светлоте без резкого прыжка из dark в light.
+ * Цветная часть остаётся приглушённой: это рабочая IDE-шкала, а не rainbow.
+ */
 export const WORKING_THEMES: ThemePalette[] = [
   PURE_DARK,
-  PRO_SLATE,
-  PRO_SAGE,
-  PRO_MOCHA,
-  AUTO_LIGHT,
+  VSCODE_DARK_MODERN,
+  VSCODE_DARK_PLUS,
+  GITHUB_DARK_DIMMED,
+  JETBRAINS_DARCULA,
+  ONE_DARK_PRO,
+  MONOKAI_GRAPHITE,
+  DIMMED_WORKBENCH_GRAY,
+  CLASSIC_WORKBENCH_GRAY,
+  SOFT_LIGHT_WORKBENCH,
+  VSCODE_LIGHT,
   PURE_LIGHT,
 ];
 
@@ -112,7 +184,13 @@ type RGB = [number, number, number];
 
 function parseHex(hex: string): RGB {
   const h = hex.replace("#", "");
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const full =
+    h.length === 3
+      ? h
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      : h;
   const n = parseInt(full, 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
@@ -207,18 +285,18 @@ function smoothstep(t: number): number {
 const clampL = (v: number) => Math.max(0, Math.min(100, v));
 const clampS = (v: number) => Math.max(0, Math.min(100, v));
 
-function lerpAngle(a: number, b: number, t: number): number {
-  const diff = (((b - a + 540) % 360) - 180) * t;
-  return (a + diff + 360) % 360;
-}
-
 function textLightness(bgLit: number, isPrimary: boolean): number {
   if (bgLit < 50) return isPrimary ? 92 : 68;
   return isPrimary ? 14 : 40;
 }
 
 /**
- * Чистая HSL интерполяция между двумя любыми палитрами без лишних изгибов.
+ * Интерполяция между checkpoint-палитрами.
+ *
+ * Основной фон смешивается напрямую в RGB: для рабочих IDE-тем это спокойнее,
+ * чем HSL-дуга, которая между приглушёнными серыми может внезапно проходить
+ * через заметный красный/зелёный оттенок. Остальные surface/text токены
+ * выводятся из уже смешанного фона.
  */
 export function interpolatePalette(
   a: ThemePalette,
@@ -231,13 +309,8 @@ export function interpolatePalette(
 
   const sk = smoothstep(k);
 
-  const [aH, aS, aL] = hexToHsl(a.base_background);
-  const [bH, bS, bL] = hexToHsl(b.base_background);
-
-  const hue = lerpAngle(aH, bH, sk);
-  const sat = clampS(aS + (bS - aS) * sk);
-  const lit = clampL(aL + (bL - aL) * sk);
-  const base = hslToHex(hue, sat, lit);
+  const base = mix(a.base_background, b.base_background, sk);
+  const [hue, sat, lit] = hexToHsl(base);
 
   const isDark = lit < 50;
 
@@ -406,8 +479,25 @@ export function applyThemeVars(tokens: Record<string, string>): void {
   }
 }
 
+function syncBrowserThemeColor(p: ThemePalette): void {
+  const root = document.documentElement;
+  const dark = isPaletteDark(p);
+  root.style.colorScheme = dark ? "dark" : "light";
+
+  let themeMeta = document.querySelector<HTMLMetaElement>(
+    'meta[name="theme-color"]',
+  );
+  if (!themeMeta) {
+    themeMeta = document.createElement("meta");
+    themeMeta.name = "theme-color";
+    document.head.appendChild(themeMeta);
+  }
+  themeMeta.content = p.base_background;
+}
+
 export function applyPalette(p: ThemePalette): void {
   if (typeof document === "undefined") return;
   applyThemeVars(deriveTokens(p));
   document.documentElement.classList.toggle("dark", isPaletteDark(p));
+  syncBrowserThemeColor(p);
 }

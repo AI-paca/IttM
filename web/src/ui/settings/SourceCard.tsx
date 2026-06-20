@@ -86,6 +86,7 @@ export function SourceCard({
         animMode="peel"
         initialSize={{ w: 320, h: isMobile ? 72 : 76 }}
         oversizePct={0.02}
+        oversizeYPx={4}
       >
         <div
           onClick={selectSource}

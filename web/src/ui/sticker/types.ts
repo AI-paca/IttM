@@ -37,6 +37,7 @@ export interface StickerBgProps {
   children?: React.ReactNode;
   initialSize?: { w: number; h: number };
   oversizePct?: number;
+  oversizeYPx?: number;
   corner?: Corner;
   baseDx?: number;
   baseDy?: number;

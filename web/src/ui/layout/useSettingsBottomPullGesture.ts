@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-interface UseSettingsPullDownGestureArgs {
+interface UseSettingsBottomPullGestureArgs {
   enabled: boolean;
   onOpen: () => void;
 }
@@ -14,28 +14,32 @@ interface PullStart {
 type InputKind = "pointer" | "touch";
 
 const MOBILE_QUERY = "(max-width: 639px), (pointer: coarse)";
-const TOP_ZONE_PX = 112;
+const BOTTOM_ZONE_PX = 180;
+const SYSTEM_BOTTOM_GUARD_PX = 16;
 const OPEN_DISTANCE_PX = 72;
-const MAX_HORIZONTAL_DRIFT_PX = 72;
+const MAX_HORIZONTAL_DRIFT_PX = 84;
 const MAX_DURATION_MS = 1000;
 
-function isInteractiveTarget(target: EventTarget | null): boolean {
+function isBlockingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   return Boolean(
-    target.closest(
-      'button, a, input, textarea, select, [role="button"], [contenteditable="true"]',
-    ),
+    target.closest('a, input, textarea, select, [contenteditable="true"]'),
   );
+}
+
+function isBottomStart(y: number): boolean {
+  const height = window.innerHeight;
+  return y >= height - BOTTOM_ZONE_PX && y <= height - SYSTEM_BOTTOM_GUARD_PX;
 }
 
 function isAtPageTop(): boolean {
   return window.scrollY <= 2 && document.documentElement.scrollTop <= 2;
 }
 
-export function useSettingsPullDownGesture({
+export function useSettingsBottomPullGesture({
   enabled,
   onOpen,
-}: UseSettingsPullDownGestureArgs) {
+}: UseSettingsBottomPullGestureArgs) {
   const onOpenRef = useRef(onOpen);
 
   useEffect(() => {
@@ -67,8 +71,8 @@ export function useSettingsPullDownGesture({
     ) => {
       if (!canListen()) return;
       if (!isAtPageTop()) return;
-      if (y > TOP_ZONE_PX) return;
-      if (isInteractiveTarget(target)) return;
+      if (!isBottomStart(y)) return;
+      if (isBlockingTarget(target)) return;
 
       start = {
         x,
@@ -84,7 +88,7 @@ export function useSettingsPullDownGesture({
       if (activeInput !== kind) return;
 
       const deltaX = Math.abs(x - start.x);
-      const deltaY = y - start.y;
+      const deltaY = start.y - y;
       const elapsed = performance.now() - start.time;
 
       if (

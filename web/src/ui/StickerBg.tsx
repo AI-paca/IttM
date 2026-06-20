@@ -27,6 +27,7 @@ export function StickerBg({
   children,
   initialSize,
   oversizePct = 0,
+  oversizeYPx = 0,
   corner = "tr",
   baseDx = 54,
   baseDy = 22,
@@ -46,6 +47,8 @@ export function StickerBg({
   const measured = rawW > 0 && rawH > 0;
   const w = measured ? rawW : 1;
   const h = measured ? rawH : 1;
+  const xScale = 1 + oversizePct;
+  const yScale = 1 + oversizePct + (measured ? oversizeYPx / h : 0);
 
   const diag = Math.hypot(w, h);
   const maxPeel = diag * 1.6;
@@ -78,7 +81,10 @@ export function StickerBg({
       className={`absolute inset-0 z-0 overflow-visible ${className || ""}`}
       style={{
         borderRadius: r,
-        transform: oversizePct ? `scale(${1 + oversizePct})` : undefined,
+        transform:
+          oversizePct || oversizeYPx
+            ? `scale(${xScale}, ${yScale})`
+            : undefined,
         transformOrigin: "center",
       }}
     >

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useEngineControls, useNavigationArea } from "../../ocr/ocr-context";
 import { AppHeader } from "../AppHeader";
 import { SettingsSidebar } from "../SettingsSidebar";
-import { useSettingsPullDownGesture } from "./useSettingsPullDownGesture";
+import { useSettingsBottomPullGesture } from "./useSettingsBottomPullGesture";
 
 export function NavigationArea() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -17,7 +17,7 @@ export function NavigationArea() {
   } = useNavigationArea();
   const engineControls = useEngineControls();
 
-  useSettingsPullDownGesture({
+  useSettingsBottomPullGesture({
     enabled:
       !sidebarOpen && (appState === "upload" || appState === "configure"),
     onOpen: () => setSidebarOpen(true),

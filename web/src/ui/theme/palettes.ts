@@ -451,12 +451,24 @@ function deriveSourceTone(
   isDark: boolean,
 ): DerivedTone {
   const bg = p.base_background;
-  const base = isDark ? lighten(seedColor, 0.12) : darken(seedColor, 0.05);
+  const [seedHue, seedSat] = hexToHsl(seedColor);
+  const [, bgSat, bgLit] = hexToHsl(bg);
+  const themedSat = clampS(
+    seedSat * (isDark ? 0.78 : 0.84) + bgSat * (isDark ? 0.14 : 0.1),
+  );
+  const themedLit = isDark
+    ? clampL(46 + bgLit * 0.34)
+    : clampL(40 + (bgLit - 70) * 0.18);
+  const base = hslToHex(seedHue, themedSat, themedLit);
   return {
     base,
-    soft: mix(bg, seedColor, isDark ? 0.22 : 0.14),
-    border: mix(seedColor, p.border, isDark ? 0.46 : 0.56),
-    text: isDark ? lighten(seedColor, 0.26) : darken(seedColor, 0.26),
+    soft: mix(bg, base, isDark ? 0.24 : 0.16),
+    border: mix(base, p.border, isDark ? 0.42 : 0.52),
+    text: hslToHex(
+      seedHue,
+      clampS(themedSat * (isDark ? 0.82 : 0.92)),
+      clampL(themedLit + (isDark ? 18 : -15)),
+    ),
     on: contrastOn(base),
   };
 }

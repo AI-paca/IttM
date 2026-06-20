@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   deriveTokens,
   interpolateWorkingScale,
+  PURE_LIGHT,
   SOURCE_STICKER_SEEDS,
   VSCODE_LIGHT,
 } from "./palettes";
@@ -103,4 +104,22 @@ test("source sticker colors follow security tiers", () => {
   );
   assert.equal(tokens["source-local-tess"], tokens["source-gateway"]);
   assert.notEqual(tokens["source-browser"], tokens["source-llm"]);
+});
+
+test("source sticker colors are fixed by safety hue but adapt to theme", () => {
+  const workbenchTokens = deriveTokens(VSCODE_LIGHT);
+  const pureLightTokens = deriveTokens(PURE_LIGHT);
+
+  assert.notEqual(
+    workbenchTokens["source-browser"],
+    pureLightTokens["source-browser"],
+  );
+  assert.equal(
+    pureLightTokens["source-local-tess"],
+    pureLightTokens["source-local-easy"],
+  );
+  assert.equal(
+    pureLightTokens["source-local-tess"],
+    pureLightTokens["source-gateway"],
+  );
 });

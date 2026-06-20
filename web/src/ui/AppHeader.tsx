@@ -31,23 +31,12 @@ export function AppHeader({
   onDrop,
   onNewFile,
   onOpenSidebar,
-  onSourceSelect,
 }: AppHeaderProps) {
   const selectedSourceLabel =
     SOURCES.find((s) => s.id === selectedSource)?.label ?? selectedSource;
-  const sourceShortcuts: { id: SourceType; label: string }[] = [
-    { id: "auto", label: "Auto" },
-    { id: "browser", label: "Browser" },
-  ];
 
   const ghostButton =
     "inline-flex h-7 items-center justify-center rounded-md text-[var(--color-text-muted)] opacity-75 transition-all hover:bg-[var(--color-bg-elevated)]/70 hover:text-[var(--color-text-primary)] hover:opacity-100 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ring)]";
-  const sourceButton = (id: SourceType) =>
-    `inline-flex h-7 items-center justify-center rounded-md px-2.5 text-[11px] font-semibold transition-all active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ring)] ${
-      selectedSource === id
-        ? "border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)]/70 text-[var(--color-text-primary)] opacity-95"
-        : "text-[var(--color-text-muted)] opacity-58 hover:bg-[var(--color-bg-elevated)]/55 hover:text-[var(--color-text-primary)] hover:opacity-90"
-    }`;
 
   return (
     <AnimatePresence>
@@ -93,10 +82,6 @@ export function AppHeader({
                     transition={{ duration: 0.2 }}
                     className="flex min-w-0 items-center gap-2"
                   >
-                    <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
-                      <span className="h-2.5 w-2.5 rounded-full bg-[var(--color-accent)] shadow-[0_0_12px_var(--color-accent)]" />
-                      <span className="absolute h-1 w-1 -translate-x-2 rounded-full bg-[var(--color-accent-strong)]/80" />
-                    </span>
                     <span className="truncate text-[13px] font-semibold text-[var(--color-text-primary)] md:text-sm">
                       Text Extractor
                     </span>
@@ -126,31 +111,13 @@ export function AppHeader({
 
             <div className="flex min-w-0 items-center justify-end gap-1.5">
               {appState !== "upload" && (
-                <>
-                  <div className="hidden items-center gap-1 sm:flex">
-                    {sourceShortcuts.map((source) => (
-                      <button
-                        key={source.id}
-                        type="button"
-                        onClick={() => onSourceSelect(source.id)}
-                        className={sourceButton(source.id)}
-                      >
-                        {source.label}
-                      </button>
-                    ))}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={onOpenSidebar}
-                    className={`${ghostButton} hidden max-w-[170px] px-2 sm:inline-flex`}
-                    title={selectedSourceLabel}
-                  >
-                    <span className="mr-1 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]" />
-                    <span className="truncate text-[11px] font-medium">
-                      {selectedSourceLabel}
-                    </span>
-                  </button>
-                </>
+                <div
+                  className="hidden max-w-[180px] items-center gap-1.5 truncate px-1.5 text-[11px] font-medium text-[var(--color-text-muted)] opacity-65 sm:flex"
+                  title={selectedSourceLabel}
+                >
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)] opacity-80" />
+                  <span className="truncate">{selectedSourceLabel}</span>
+                </div>
               )}
               <button
                 type="button"

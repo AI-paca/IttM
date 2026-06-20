@@ -26,36 +26,38 @@
  */
 
 @layer base {
-  /* ----------  LIGHT THEME (default)  ---------- */
+  /* ----------  LIGHT THEME (default = AUTO_LIGHT)  ----------
+   * Статический fallback; реально применятся токены из palettes.ts
+   * через applyPalette() при загрузке. Здесь — светлый авто-вариант. */
   :root {
-    /* Брендовый акцент (бывший blue-600) */
-    --color-accent: #2563eb;
-    --color-accent-hover: #1d4ed8;
-    --color-accent-soft: #eff6ff; /* bg-blue-50  */
-    --color-accent-soft-border: #93c5fd; /* border-blue-300 */
-    --color-accent-strong: #1e40af; /* text-blue-700/800 */
-    --color-accent-ring: rgba(37, 99, 235, 0.5);
+    /* Акцент (тёплый янтарный из AUTO_LIGHT) */
+    --color-accent: #ad661f;
+    --color-accent-hover: #985a1a;
+    --color-accent-soft: #f4ece1;
+    --color-accent-soft-border: #d4b48c;
+    --color-accent-strong: #875216;
+    --color-accent-ring: rgba(173, 102, 31, 0.5);
 
-    /* Фоны поверхностей */
-    --color-bg-app: #f9fafb; /* gray-50  */
-    --color-bg-surface: #ffffff; /* card / panel */
-    --color-bg-elevated: #f3f4f6; /* gray-100 (скелетон/ховеры) */
-    --color-bg-inset: #f9fafb; /* инпуты gray-50 */
-    --color-bg-overlay: rgba(17, 24, 39, 0.4); /* backdrop */
+    /* Фоны поверхностей (AUTO_LIGHT) */
+    --color-bg-app: #e9ebed;
+    --color-bg-surface: #dbdee1;
+    --color-bg-elevated: #b9c4d0;
+    --color-bg-inset: #e0e2e5;
+    --color-bg-overlay: rgba(17, 24, 39, 0.4);
 
-    /* Текст */
-    --color-text-primary: #111827; /* gray-900 */
-    --color-text-secondary: #4b5563; /* gray-600 */
-    --color-text-muted: #6b7280; /* gray-500 */
-    --color-text-faint: #9ca3af; /* gray-400 */
+    /* Текст (AUTO_LIGHT) */
+    --color-text-primary: #242628;
+    --color-text-secondary: #6d7378;
+    --color-text-muted: #8a8f94;
+    --color-text-faint: #aab0b5;
     --color-text-on-accent: #ffffff;
     --color-text-link: var(--color-accent);
 
-    /* Границы */
-    --color-border-default: #e5e7ec; /* gray-200 */
-    --color-border-strong: #d1d5db; /* gray-300 */
-    --color-border-subtle: #f3f4f6; /* gray-100 */
-    --color-border-accent: #bfdbfe; /* blue-200 */
+    /* Границы (AUTO_LIGHT) */
+    --color-border-default: #c7ccd1;
+    --color-border-strong: #aeb4ba;
+    --color-border-subtle: #d6d9dd;
+    --color-border-accent: #d4b48c;
 
     /* Статусы */
     --color-success: #16a34a;
@@ -90,33 +92,33 @@
     --color-sticker-edge: #ffffff;
   }
 
-  /* ----------  DARK THEME  ----------
+  /* ----------  DARK THEME (= AUTO_DARK)  ----------
    * -soft цвета НЕПРОЗРАЧНЫ, чтобы не было просвечивания слоёв. */
   .dark {
-    --color-accent: #60a5fa;
-    --color-accent-hover: #3b82f6;
-    --color-accent-soft: #172554; /* blue-950, непрозрачный */
-    --color-accent-soft-border: #1d4ed8; /* blue-700 */
-    --color-accent-strong: #93c5fd; /* blue-300 */
-    --color-accent-ring: rgba(96, 165, 250, 0.5);
+    --color-accent: #d6ad5c;
+    --color-accent-hover: #c79e4a;
+    --color-accent-soft: #2a2418; /* непрозрачный */
+    --color-accent-soft-border: #6b5527;
+    --color-accent-strong: #e6c478;
+    --color-accent-ring: rgba(214, 173, 92, 0.5);
 
-    --color-bg-app: #030712; /* gray-950 */
-    --color-bg-surface: #111827; /* gray-900 */
-    --color-bg-elevated: #1f2937; /* gray-800 */
-    --color-bg-inset: #030712; /* gray-950 (инпуты) */
+    --color-bg-app: #1c1f26;
+    --color-bg-surface: #252932;
+    --color-bg-elevated: #2d3953;
+    --color-bg-inset: #1f2229;
     --color-bg-overlay: rgba(0, 0, 0, 0.5);
 
-    --color-text-primary: #f3f4f6; /* gray-100 */
-    --color-text-secondary: #d1d5db; /* gray-300 */
-    --color-text-muted: #9ca3af; /* gray-400 */
-    --color-text-faint: #6b7280; /* gray-500 */
-    --color-text-on-accent: #ffffff;
+    --color-text-primary: #e4e5e7;
+    --color-text-secondary: #9fa4ac;
+    --color-text-muted: #82878f;
+    --color-text-faint: #5e636b;
+    --color-text-on-accent: #1a1206;
     --color-text-link: var(--color-accent);
 
-    --color-border-default: #1f2937; /* gray-800 */
-    --color-border-strong: #374151; /* gray-700 */
-    --color-border-subtle: #1f2937;
-    --color-border-accent: #1d4ed8;
+    --color-border-default: #2e333e;
+    --color-border-strong: #3d4452;
+    --color-border-subtle: #272c34;
+    --color-border-accent: #6b5527;
 
     --color-success: #4ade80;
     --color-success-soft: #052e16; /* green-950, непрозрачный */

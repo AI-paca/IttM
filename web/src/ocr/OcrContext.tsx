@@ -8,8 +8,16 @@ import type {
   AppState,
   Notice,
   NoticeTone,
-  ThemeMode,
+  ThemeLevel,
 } from "../types/app.types";
+import {
+  AUTO_DARK,
+  AUTO_LIGHT,
+  PURE_LIGHT,
+  applyPalette,
+  interpolatePalette,
+  interpolateWorkingScale,
+} from "../ui/theme/palettes";
 import type {
   AppDiagnostics,
   BackendDiagnostics,
@@ -121,14 +129,18 @@ export function OcrProvider({ children }: { children: ReactNode }) {
   const [llmModel, setLlmModel] = useState("gemini-2.5-flash-lite");
   const [llmKey, setLlmKey] = useState("");
   const [externalLlmConsent, setExternalLlmConsent] = useState(false);
-  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
+  const [themeLevel, setThemeLevel] = useState<ThemeLevel>(() => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("theme-mode");
-      return saved === "light" || saved === "dark" || saved === "auto"
-        ? saved
-        : "auto";
+      const saved = Number(localStorage.getItem("theme-level"));
+      return Number.isFinite(saved) && saved >= 0 && saved <= 1 ? saved : 0.5;
     }
-    return "auto";
+    return 0.5;
+  });
+  const [themeAuto, setThemeAuto] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("theme-auto") !== "false";
+    }
+    return true;
   });
   const [easyOcrInstalling, setEasyOcrInstalling] = useState(false);
   const [easyOcrInstallMessage, setEasyOcrInstallMessage] = useState("");
@@ -169,28 +181,42 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       });
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem("theme-mode", themeMode);
-    const applyDark = () => document.documentElement.classList.add("dark");
-    const applyLight = () => document.documentElement.classList.remove("dark");
+  // Текущее положение ползунка с учётом авто-режима:
+  //  • Ручной режим: вся шкала WORKING_THEMES (Black -> Slate -> Sage -> Mocha -> Paper -> White)
+  //    через interpolateWorkingScale — путь проходит только по валидным рабочим темам.
+  //  • Авто-режим: системная тема задаёт край пары {AUTO_DARK, AUTO_LIGHT}, уровень уточняет
+  //    положение внутри неё, а при level > 0.5 мягко уходит к PURE_LIGHT.
+  const computePalette = useCallback(
+    (auto: boolean, level: number, _prefersDark: boolean) => {
+      if (auto) {
+        if (level <= 0.5) {
+          return interpolatePalette(AUTO_DARK, AUTO_LIGHT, level * 2);
+        }
+        return interpolatePalette(AUTO_LIGHT, PURE_LIGHT, (level - 0.5) * 2);
+      }
+      return interpolateWorkingScale(level);
+    },
+    [],
+  );
 
-    if (themeMode === "dark") applyDark();
-    else if (themeMode === "light") applyLight();
-    else if (window.matchMedia("(prefers-color-scheme: dark)").matches)
-      applyDark();
-    else applyLight();
-  }, [themeMode]);
+  useEffect(() => {
+    localStorage.setItem("theme-level", String(themeLevel));
+    localStorage.setItem("theme-auto", String(themeAuto));
+  }, [themeLevel, themeAuto]);
 
   useEffect(() => {
-    if (themeMode !== "auto") return;
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    const handleChange = (e: MediaQueryListEvent) => {
-      if (e.matches) document.documentElement.classList.add("dark");
-      else document.documentElement.classList.remove("dark");
+    const apply = () => {
+      const palette = computePalette(themeAuto, themeLevel, mediaQuery.matches);
+      applyPalette(palette);
     };
+    apply();
+
+    if (!themeAuto) return;
+    const handleChange = () => apply();
     mediaQuery.addEventListener("change", handleChange);
     return () => mediaQuery.removeEventListener("change", handleChange);
-  }, [themeMode]);
+  }, [themeAuto, themeLevel, computePalette]);
 
   useMotionValueEvent(scrollY, "change", () => {
     setShowHeader(true);
@@ -426,7 +452,8 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       pingUrl,
       rememberChoice,
       selectedSource,
-      themeMode,
+      themeLevel,
+      themeAuto,
       onInstallEasyOcr: handleInstallEasyOcr,
       onLlmProviderChange: handleLlmProviderChange,
       onRememberChange: handleRememberChange,
@@ -435,7 +462,8 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       setLlmModel,
       setExternalLlmConsent,
       setPingUrl,
-      setThemeMode,
+      setThemeLevel,
+      setThemeAuto,
     }),
     [
       easyOcrInstalling,
@@ -452,7 +480,8 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       pingUrl,
       rememberChoice,
       selectedSource,
-      themeMode,
+      themeLevel,
+      themeAuto,
     ],
   );
 

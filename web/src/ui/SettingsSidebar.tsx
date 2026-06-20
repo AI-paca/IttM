@@ -9,7 +9,7 @@ import { LlmPanel } from "./settings/LlmPanel";
 import { OverscrollReveal } from "./settings/OverscrollReveal";
 import { RememberToggle } from "./settings/RememberToggle";
 import { SourceCard } from "./settings/SourceCard";
-import { ThemeToggle } from "./settings/ThemeToggle";
+import { ThemeSlider } from "./settings/ThemeSlider";
 import { useIsMobile } from "./settings/useIsMobile";
 import { useOverscrollReveal } from "./settings/useOverscrollReveal";
 
@@ -45,12 +45,14 @@ export function SettingsSidebar({
     pingUrl,
     rememberChoice,
     selectedSource,
-    themeMode,
+    themeLevel,
+    themeAuto,
     onInstallEasyOcr,
     onRememberChange,
     onSourceSelect,
     setPingUrl,
-    setThemeMode,
+    setThemeLevel,
+    setThemeAuto,
   } = controls;
 
   const isMobile = useIsMobile();
@@ -198,9 +200,11 @@ export function SettingsSidebar({
                       checked={rememberChoice}
                       onChange={onRememberChange}
                     />
-                    <ThemeToggle
-                      themeMode={themeMode}
-                      onChange={setThemeMode}
+                    <ThemeSlider
+                      level={themeLevel}
+                      auto={themeAuto}
+                      onLevelChange={setThemeLevel}
+                      onAutoChange={setThemeAuto}
                     />
                   </div>
                 </div>

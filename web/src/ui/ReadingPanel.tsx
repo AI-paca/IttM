@@ -31,31 +31,31 @@ export function ReadingPanel({
 }: ReadingPanelProps) {
   return (
     <div className="w-full animate-in fade-in duration-700 pb-20 px-0 sm:px-6 md:px-0">
-      <article className="w-full text-gray-900 dark:text-gray-100">
+      <article className="w-full text-[var(--color-text-primary)]">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-          <h1 className="text-2xl sm:text-3xl font-bold leading-tight tracking-tight text-gray-950 dark:text-gray-50">
+          <h1 className="text-2xl sm:text-3xl font-bold leading-tight tracking-tight text-[var(--color-text-primary)]">
             Извлеченный текст
           </h1>
           <div className="hidden md:flex items-center gap-3">
             <button
               onClick={onStartExtraction}
-              className="flex-shrink-0 flex items-center justify-center p-2.5 rounded-xl font-bold transition-all active:scale-95 border bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 shadow-sm"
+              className="btn-outline flex-shrink-0 p-2.5"
               title="Переделать"
             >
-              <RefreshCw className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+              <RefreshCw className="w-4 h-4 text-[var(--color-text-secondary)]" />
             </button>
             <button
               onClick={onCopy}
               className={`flex-shrink-0 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all active:scale-95 border ${
                 copied
-                  ? "bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 shadow-sm"
-                  : "bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-750 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 shadow-sm"
+                  ? "bg-[var(--color-success-soft)] border-[var(--color-success-border)] text-[var(--color-success-text)] shadow-sm"
+                  : "btn-outline"
               }`}
             >
               {copied ? (
                 <Check className="w-4 h-4" />
               ) : (
-                <Copy className="w-4 h-4 text-gray-400 dark:text-gray-500" />
+                <Copy className="w-4 h-4 text-[var(--color-text-muted)]" />
               )}
               {copied ? "Скопировано!" : "Копировать всё"}
             </button>
@@ -63,16 +63,16 @@ export function ReadingPanel({
         </div>
 
         {isExtracting && (
-          <div className="flex flex-col sm:flex-row items-center gap-4 py-6 mb-6 justify-center border-b border-gray-100 dark:border-gray-800">
-            <div className="flex items-center gap-3 text-blue-600 dark:text-blue-400">
-              <div className="w-5 h-5 border-2 border-blue-200 dark:border-blue-900 border-t-blue-600 dark:border-t-blue-400 rounded-full animate-spin" />
+          <div className="flex flex-col sm:flex-row items-center gap-4 py-6 mb-6 justify-center border-b border-[var(--color-border-subtle)]">
+            <div className="flex items-center gap-3 text-[var(--color-info)]">
+              <div className="spinner w-5 h-5" />
               <span className="font-medium text-sm animate-pulse">
                 {extractionProgress}
               </span>
             </div>
             <button
               onClick={onCancelExtraction}
-              className="px-3 py-1.5 bg-gray-100 hover:bg-red-50 text-gray-600 hover:text-red-600 dark:bg-gray-800 dark:hover:bg-red-900/40 dark:text-gray-400 dark:hover:text-red-400 rounded-lg text-xs font-bold transition-colors flex items-center gap-1"
+              className="btn-danger px-3 py-1.5 rounded-lg text-xs"
             >
               <X className="w-3.5 h-3.5" />
               Остановить
@@ -80,7 +80,9 @@ export function ReadingPanel({
           </div>
         )}
 
-        <div className="max-w-prose mx-auto text-[17px] sm:text-[18px] leading-[1.8] sm:leading-[2.0] space-y-[24px] sm:space-y-[28px] text-gray-800 dark:text-gray-300 selection:bg-blue-100 dark:selection:bg-blue-900 pb-12 whitespace-pre-wrap font-sans w-full bg-[#fdfcf8] dark:bg-gray-900 p-6 sm:p-10 rounded-2xl shadow-[inset_0_0_20px_rgba(0,0,0,0.02)] border border-gray-100 dark:border-gray-800/60">
+        <div
+          className="max-w-prose mx-auto text-[17px] sm:text-[18px] leading-[1.8] sm:leading-[2.0] space-y-[24px] sm:space-y-[28px] text-[var(--color-text-secondary)] selection:bg-[var(--color-info-soft)] pb-12 whitespace-pre-wrap font-sans w-full bg-[var(--color-bg-surface)] p-6 sm:p-10 rounded-2xl border border-[var(--color-border-subtle)]"
+        >
           {extractedText}
         </div>
 
@@ -91,7 +93,7 @@ export function ReadingPanel({
           <div className="mt-8 flex justify-center pb-32 md:pb-12">
             <button
               onClick={onResumeExtraction}
-              className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition-all shadow-md active:scale-95"
+              className="btn-primary px-6 py-3 text-base shadow-md"
             >
               <RefreshCw className="w-5 h-5" />
               Продолжить со страницы {lastExtractedPage} из {totalPdfPages}
@@ -101,27 +103,27 @@ export function ReadingPanel({
           <div className="pb-32 md:pb-12" />
         )}
 
-        <div className="fixed bottom-0 left-0 right-0 p-4 pb-6 bg-gradient-to-t from-gray-50 dark:from-gray-950 via-gray-50/95 dark:via-gray-950/95 to-transparent md:static md:bg-none md:p-0 md:mt-4 md:flex md:flex-row items-center md:border-t md:border-gray-100 dark:md:border-gray-800 md:pt-8 z-30">
+        <div className="fixed bottom-0 left-0 right-0 p-4 pb-6 bg-gradient-to-t from-[var(--color-bg-app)] via-[var(--color-bg-app)]/95 to-transparent md:static md:bg-none md:p-0 md:mt-4 md:flex md:flex-row items-center md:border-t md:border-[var(--color-border-subtle)] md:pt-8 z-30">
           <div className="flex gap-3 w-full mx-auto px-0 md:px-0">
             <button
               onClick={onNewFile}
-              className="hidden md:flex w-auto flex-none py-2.5 px-6 text-center text-gray-700 dark:text-gray-300 font-bold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors shadow-sm text-sm items-center justify-center gap-2 active:scale-95"
+              className="btn-outline hidden md:flex w-auto flex-none py-2.5 px-6 text-sm"
             >
               Новый скриншот
             </button>
             <button
               onClick={onStartExtraction}
-              className="flex md:hidden w-[52px] h-[52px] flex-shrink-0 text-center text-gray-700 dark:text-gray-300 font-bold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors shadow-sm items-center justify-center active:scale-95"
+              className="btn-outline flex md:hidden w-[52px] h-[52px] flex-shrink-0 items-center justify-center"
               title="Переделать"
             >
-              <RefreshCw className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+              <RefreshCw className="w-5 h-5 text-[var(--color-text-secondary)]" />
             </button>
             <button
               onClick={onCopy}
               className={`flex-1 flex md:hidden h-[52px] items-center justify-center gap-2 whitespace-nowrap text-center font-bold rounded-xl transition-all shadow-lg text-[15px] active:scale-95 ${
                 copied
-                  ? "bg-green-500 text-white shadow-green-500/20"
-                  : "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/30"
+                  ? "bg-[var(--color-success)] text-white"
+                  : "btn-primary"
               }`}
             >
               {copied ? (

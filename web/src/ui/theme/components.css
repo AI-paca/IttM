@@ -204,4 +204,27 @@
            border-[var(--color-accent-soft-border)]
            border-t-[var(--color-accent)];
   }
+
+  /* ----------------------------------------------- Ползунок темы (liquid glass) */
+  .theme-slider {
+    @apply flex items-center gap-2 rounded-full select-none;
+    /* тонкая полоска между иконками, без рамки/фона — компактно */
+  }
+
+  .theme-slider__icon {
+    @apply w-4 h-4 shrink-0 cursor-pointer transition-colors;
+    color: var(--color-text-muted);
+  }
+  .theme-slider__icon:hover {
+    color: var(--color-text-secondary);
+  }
+  .theme-slider__icon--moon {
+    /* луна чуть заметнее, когда тема тёмная (handled via JS opacity при желании) */
+  }
+
+  .theme-slider__canvas {
+    @apply flex-1 h-[24px] min-w-[40px] cursor-grab active:cursor-grabbing block rounded-full;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: none;
+  }
 }

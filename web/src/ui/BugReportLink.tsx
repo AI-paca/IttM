@@ -15,7 +15,7 @@ export function BugReportLink({ className }: BugReportLinkProps) {
       rel="noreferrer"
       onClick={(e) => e.stopPropagation()}
       title="Сообщить о баге"
-      className={`text-[#0a1128] dark:text-[#4facfe] hover:text-blue-500 transition-colors animate-[ping_3s_infinite] sm:animate-none hover:animate-[spin_0.2s_infinite] ${className ?? ""}`}
+      className={`text-[var(--color-info)] hover:text-[var(--color-info-text)] transition-colors animate-[ping_3s_infinite] sm:animate-none hover:animate-[spin_0.2s_infinite] ${className ?? ""}`}
     >
       <svg
         xmlns="http://www.w3.org/2000/svg"

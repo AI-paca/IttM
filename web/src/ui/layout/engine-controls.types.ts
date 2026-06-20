@@ -1,5 +1,5 @@
 import type { Dispatch, SetStateAction } from "react";
-import type { ThemeMode } from "../../types/app.types";
+import type { ThemeLevel } from "../../types/app.types";
 import type { LlmProvider, SourceType } from "../../ocr/types";
 
 export interface EngineControlsState {
@@ -13,7 +13,8 @@ export interface EngineControlsState {
   pingUrl: string;
   rememberChoice: boolean;
   selectedSource: SourceType;
-  themeMode: ThemeMode;
+  themeLevel: ThemeLevel; // 0 = PURE_DARK, 1 = PURE_LIGHT
+  themeAuto: boolean; // следовать за системной темой браузера
 }
 
 export interface EngineControlsActions {
@@ -25,7 +26,8 @@ export interface EngineControlsActions {
   setLlmModel: Dispatch<SetStateAction<string>>;
   setExternalLlmConsent: Dispatch<SetStateAction<boolean>>;
   setPingUrl: Dispatch<SetStateAction<string>>;
-  setThemeMode: Dispatch<SetStateAction<ThemeMode>>;
+  setThemeLevel: Dispatch<SetStateAction<ThemeLevel>>;
+  setThemeAuto: Dispatch<SetStateAction<boolean>>;
 }
 
 export type EngineControls = EngineControlsState & EngineControlsActions;

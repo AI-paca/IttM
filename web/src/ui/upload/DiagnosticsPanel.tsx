@@ -10,14 +10,17 @@ interface DiagnosticsPanelProps {
  */
 export function DiagnosticsPanel({ diagnostics }: DiagnosticsPanelProps) {
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm flex flex-col gap-3 transition-colors delay-100">
+    <div className="bg-[var(--color-bg-surface)] rounded-2xl border border-[var(--color-border-default)] p-4 shadow-sm flex flex-col gap-3 transition-colors delay-100">
       <div className="flex justify-between items-center">
-        <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 flex items-center gap-2">
-          <Activity className="w-4 h-4 text-blue-500" /> Diagnostics & System
+        <h3 className="text-sm font-bold text-[var(--color-text-primary)] flex items-center gap-2">
+          <Activity className="w-4 h-4 text-[var(--color-info)]" /> Diagnostics
+          & System
         </h3>
 
         {/* Placeholder: Continuity Camera (Phase 5) */}
-        <button className="hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-gray-100/50 hover:bg-gray-100 dark:bg-gray-700/30 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-[11px] font-bold rounded-lg border border-transparent hover:border-gray-200 dark:hover:border-gray-600 transition-all cursor-not-allowed">
+        <button
+          className="hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-[var(--color-bg-inset)] text-[var(--color-text-muted)] text-[11px] font-bold rounded-lg border border-transparent hover:border-[var(--color-border-default)] transition-all cursor-not-allowed"
+        >
           <svg
             viewBox="0 0 24 24"
             fill="none"
@@ -33,11 +36,8 @@ export function DiagnosticsPanel({ diagnostics }: DiagnosticsPanelProps) {
           Отсканировать с iPhone
         </button>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-gray-600 dark:text-gray-400">
-        <Metric
-          label="Local Memory"
-          value={`${diagnostics.browser.memory} GB`}
-        />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-[var(--color-text-secondary)]">
+        <Metric label="Local Memory" value={`${diagnostics.browser.memory} GB`} />
         <Metric
           label="Local CPU"
           value={`${diagnostics.browser.cores} Cores`}
@@ -45,7 +45,7 @@ export function DiagnosticsPanel({ diagnostics }: DiagnosticsPanelProps) {
         {diagnostics.backend ? (
           <BackendMetrics diagnostics={diagnostics} />
         ) : (
-          <div className="col-span-2 flex items-center bg-red-50 dark:bg-red-900/10 text-red-500 p-2.5 rounded-lg border border-red-100 dark:border-red-900/50 font-medium">
+          <div className="col-span-2 flex items-center bg-[var(--color-danger-soft)] text-[var(--color-danger-text)] p-2.5 rounded-lg border border-[var(--color-danger-border)] font-medium">
             Backend offline
           </div>
         )}
@@ -65,12 +65,12 @@ function Metric({
 }) {
   const tone =
     variant === "backend"
-      ? "bg-blue-50 dark:bg-blue-900/20 border-blue-100 dark:border-blue-900/50"
-      : "bg-gray-50 dark:bg-gray-900 border-gray-100 dark:border-gray-700/50";
+      ? "bg-[var(--color-info-soft)] border-[var(--color-info-border)]"
+      : "bg-[var(--color-bg-inset)] border-[var(--color-border-subtle)]";
   const labelTone =
     variant === "backend"
-      ? "text-blue-800 dark:text-blue-200"
-      : "text-gray-800 dark:text-gray-200";
+      ? "text-[var(--color-info-text)]"
+      : "text-[var(--color-text-primary)]";
   return (
     <div className={`flex flex-col p-2.5 rounded-lg border ${tone}`}>
       <span className={`font-semibold mb-0.5 ${labelTone}`}>{label}</span>
@@ -98,7 +98,7 @@ function BackendMetrics({ diagnostics }: { diagnostics: AppDiagnostics }) {
           {backend.gpus.map((g: BackendGpuInfo, i: number) => (
             <div
               key={i}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-100 dark:border-indigo-900/50 font-medium text-xs text-indigo-700 dark:text-indigo-300"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--color-info-soft)] rounded-lg border border-[var(--color-info-border)] font-medium text-xs text-[var(--color-info-text)]"
             >
               <Cpu className="w-3.5 h-3.5" />
               {g.name} {g.version && `(v${g.version})`}
@@ -110,8 +110,8 @@ function BackendMetrics({ diagnostics }: { diagnostics: AppDiagnostics }) {
           <div
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border font-medium text-xs ${
               backend.gpu_error
-                ? "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-400"
-                : "bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-800 text-gray-500 dark:text-gray-400"
+                ? "bg-[var(--color-warning-soft)] border-[var(--color-warning-border)] text-[var(--color-warning-text)]"
+                : "bg-[var(--color-bg-inset)] border-[var(--color-border-default)] text-[var(--color-text-muted)]"
             }`}
           >
             <Cpu className="w-3.5 h-3.5" />

@@ -36,8 +36,8 @@ export function AppHeader({
   const btnClass = (id: string) =>
     `px-3 py-1.5 text-xs sm:text-sm font-bold rounded-xl transition-all shadow-sm border ${
       selectedSource === id
-        ? "bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700"
-        : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-gray-600"
+        ? "bg-[var(--color-info-soft)] text-[var(--color-info-text)] border-[var(--color-info-border)]"
+        : "bg-[var(--color-bg-surface)] text-[var(--color-text-secondary)] border-[var(--color-border-default)] hover:border-[var(--color-info-border)]"
     }`;
 
   return (
@@ -53,9 +53,9 @@ export function AppHeader({
           onDrop={(e) => onDrop(e as DragEvent<HTMLDivElement>, true)}
           className={`sticky top-0 z-40 flex justify-center w-full transition-all duration-500 ease-out shadow-sm ${
             appState === "upload"
-              ? "bg-transparent shadow-none dark:bg-transparent"
-              : "bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-b border-gray-200/80 dark:border-gray-800 shadow-sm"
-          } ${isDragging && appState !== "upload" ? "bg-blue-50/50 dark:bg-blue-900/20" : ""}`}
+              ? "bg-transparent shadow-none"
+              : "bg-[var(--color-bg-app)]/90 backdrop-blur-xl border-b border-[var(--color-border-subtle)] shadow-sm"
+          } ${isDragging && appState !== "upload" ? "bg-[var(--color-info-soft)]/50" : ""}`}
         >
           <div
             className={`flex items-center justify-between w-[95%] xl:w-[90%] mx-auto px-6 ${appState === "upload" ? "py-4 md:py-6" : "py-3 md:py-4"} transition-all duration-300`}
@@ -77,17 +77,17 @@ export function AppHeader({
                     transition={{ duration: 0.3 }}
                     className="flex items-center gap-3"
                   >
-                    <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold shadow-md text-lg">
+                    <div className="w-10 h-10 md:w-12 md:h-12 bg-accent rounded-xl flex items-center justify-center text-on-accent font-bold shadow-md text-lg">
                       TE
                     </div>
                     <div className="flex flex-col min-w-0 justify-center">
                       <div className="flex items-center gap-2">
-                        <h1 className="font-bold tracking-tight text-gray-900 dark:text-gray-100 leading-none truncate text-xl md:text-2xl">
+                        <h1 className="font-bold tracking-tight text-[var(--color-text-primary)] leading-none truncate text-xl md:text-2xl">
                           Text Extractor
                         </h1>
                         <BugReportLink />
                       </div>
-                      <span className="text-xs text-gray-500 font-medium tracking-wide mt-1 hidden sm:block">
+                      <span className="text-xs text-[var(--color-text-secondary)] font-medium tracking-wide mt-1 hidden sm:block">
                         Intelligent Text Migration
                       </span>
                     </div>
@@ -96,22 +96,22 @@ export function AppHeader({
                   <motion.div
                     key="file-view"
                     layoutId="file-upload-zone"
-                    className="flex items-center gap-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700/50 rounded-xl md:rounded-2xl p-1.5 shadow-sm pr-3 md:pr-4 group"
+                    className="flex items-center gap-2.5 bg-[var(--color-bg-surface)] border border-[var(--color-border-default)] rounded-xl md:rounded-2xl p-1.5 shadow-sm pr-3 md:pr-4 group"
                     transition={{
                       type: "spring",
                       bounce: 0.2,
                       duration: 0.6,
                     }}
                   >
-                    <div className="w-8 h-8 md:w-9 md:h-9 bg-blue-50 dark:bg-blue-900/30 rounded-lg md:rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400 relative overflow-hidden shrink-0">
+                    <div className="w-8 h-8 md:w-9 md:h-9 bg-[var(--color-info-soft)] rounded-lg md:rounded-xl flex items-center justify-center text-[var(--color-info-text)] relative overflow-hidden shrink-0">
                       <FileText className="w-4 h-4 md:w-4 md:h-4 group-hover:opacity-0 transition-opacity duration-300" />
                       <RefreshCw className="w-4 h-4 absolute inset-0 m-auto opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                     </div>
                     <div className="flex flex-col min-w-0 justify-center mt-0.5 md:mt-0">
-                      <span className="text-[12px] md:text-[13px] font-bold text-gray-900 dark:text-gray-100 truncate max-w-[120px] md:max-w-[200px] leading-tight group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+                      <span className="text-[12px] md:text-[13px] font-bold text-[var(--color-text-primary)] truncate max-w-[120px] md:max-w-[200px] leading-tight group-hover:text-[var(--color-info-text)] transition-colors">
                         {file?.name}
                       </span>
-                      <span className="text-[10px] text-gray-500 dark:text-gray-400 font-medium truncate leading-none mt-0.5">
+                      <span className="text-[10px] text-[var(--color-text-secondary)] font-medium truncate leading-none mt-0.5">
                         Заменить файл
                       </span>
                     </div>
@@ -141,8 +141,8 @@ export function AppHeader({
                 onClick={onOpenSidebar}
                 className={
                   appState === "upload"
-                    ? "w-9 h-9 flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition-all shrink-0"
-                    : "py-1.5 px-3 sm:px-4 ml-1 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl transition-colors shadow-sm border border-gray-200 dark:border-gray-700 shrink-0 flex items-center justify-center gap-2 font-bold text-[13px] sm:text-sm"
+                    ? "w-9 h-9 flex items-center justify-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-elevated)] rounded-xl transition-all shrink-0"
+                    : "py-1.5 px-3 sm:px-4 ml-1 bg-[var(--color-bg-surface)] hover:bg-[var(--color-bg-elevated)] text-[var(--color-text-secondary)] rounded-xl transition-colors shadow-sm border border-[var(--color-border-default)] shrink-0 flex items-center justify-center gap-2 font-bold text-[13px] sm:text-sm"
                 }
                 title="Настройки"
               >

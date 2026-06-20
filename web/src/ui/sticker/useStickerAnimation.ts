@@ -52,16 +52,16 @@ export function useStickerAnimation(
   containerRef: React.RefObject<HTMLDivElement | null>,
   initialSize?: StickerSize,
 ) {
-  const initialValidSizeRef = useRef(normalizeSize(initialSize ?? EMPTY_SIZE));
+  const [initialValidSize] = useState(() =>
+    normalizeSize(initialSize ?? EMPTY_SIZE),
+  );
   const [size, setSize] = useState<StickerSize>(
-    initialValidSizeRef.current ?? EMPTY_SIZE,
+    () => initialValidSize ?? EMPTY_SIZE,
   );
   const [anim, setAnim] = useState(0);
   const animRef = useRef(0);
   const rafRef = useRef(0);
-  const lastValidSizeRef = useRef<StickerSize | null>(
-    initialValidSizeRef.current,
-  );
+  const lastValidSizeRef = useRef<StickerSize | null>(initialValidSize);
 
   // Отслеживание размеров контейнера через ResizeObserver. Не интерполируем
   // размер: SVG и HTML clip-path должны жить в одной системе координат.

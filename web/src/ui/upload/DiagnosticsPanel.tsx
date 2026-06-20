@@ -18,9 +18,7 @@ export function DiagnosticsPanel({ diagnostics }: DiagnosticsPanelProps) {
         </h3>
 
         {/* Placeholder: Continuity Camera (Phase 5) */}
-        <button
-          className="hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-[var(--color-bg-inset)] text-[var(--color-text-muted)] text-[11px] font-bold rounded-lg border border-transparent hover:border-[var(--color-border-default)] transition-all cursor-not-allowed"
-        >
+        <button className="hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-[var(--color-bg-inset)] text-[var(--color-text-muted)] text-[11px] font-bold rounded-lg border border-transparent hover:border-[var(--color-border-default)] transition-all cursor-not-allowed">
           <svg
             viewBox="0 0 24 24"
             fill="none"
@@ -37,7 +35,10 @@ export function DiagnosticsPanel({ diagnostics }: DiagnosticsPanelProps) {
         </button>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-[var(--color-text-secondary)]">
-        <Metric label="Local Memory" value={`${diagnostics.browser.memory} GB`} />
+        <Metric
+          label="Local Memory"
+          value={`${diagnostics.browser.memory} GB`}
+        />
         <Metric
           label="Local CPU"
           value={`${diagnostics.browser.cores} Cores`}

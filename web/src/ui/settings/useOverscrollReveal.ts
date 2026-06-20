@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TouchEvent, UIEvent, WheelEvent } from "react";
 import { flushSync } from "react-dom";
-import { REVEAL_HEIGHT } from "./OverscrollReveal";
 
 const REVEAL_THRESHOLD = 60;
 const MAX_OVERSCROLL = 120;
@@ -23,9 +22,7 @@ interface OverscrollRevealHandlers {
  * min-h-full, поэтому гибкое пространство над темой не сжимается, а при
  * переполнении вся нижняя секция продолжает уезжать вниз естественным скроллом.
  */
-export function useOverscrollReveal(
-  scrollNode: HTMLDivElement | null,
-): {
+export function useOverscrollReveal(scrollNode: HTMLDivElement | null): {
   overscroll: number;
   isRevealed: boolean;
   touchActive: boolean;
@@ -36,10 +33,15 @@ export function useOverscrollReveal(
   const [isRevealed, setIsRevealed] = useState(false);
   const [touchStart, setTouchStart] = useState(0);
 
+  const scrollNodeRef = useRef<HTMLDivElement | null>(scrollNode);
   const isRevealedRef = useRef(isRevealed);
   const overscrollRef = useRef(overscroll);
   const revealSettlingRef = useRef(false);
   const wheelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    scrollNodeRef.current = scrollNode;
+  }, [scrollNode]);
 
   useEffect(() => {
     isRevealedRef.current = isRevealed;
@@ -51,10 +53,10 @@ export function useOverscrollReveal(
   }, []);
 
   const scrollToBottom = useCallback(() => {
-    const el = scrollNode;
+    const el = scrollNodeRef.current;
     if (!el) return;
     el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
-  }, [scrollNode]);
+  }, []);
 
   useEffect(() => {
     if (!isRevealed) return;
@@ -87,13 +89,13 @@ export function useOverscrollReveal(
   }, []);
 
   const closeIfAwayFromBottom = useCallback(() => {
-    const el = scrollNode;
+    const el = scrollNodeRef.current;
     if (!el) return;
     const bottomOffset = el.scrollHeight - el.clientHeight - el.scrollTop;
     if (bottomOffset > 4) {
       setIsRevealed(false);
     }
-  }, [scrollNode]);
+  }, []);
 
   const closeAfterNativeScroll = useCallback(() => {
     requestAnimationFrame(() => {
@@ -119,7 +121,7 @@ export function useOverscrollReveal(
 
   const handleWheelDelta = useCallback(
     (deltaY: number) => {
-      const el = scrollNode;
+      const el = scrollNodeRef.current;
       if (!el) return;
 
       if (isRevealedRef.current) {
@@ -141,9 +143,7 @@ export function useOverscrollReveal(
         }
         setOverscrollValue(next);
       } else if (deltaY < 0) {
-        setOverscrollValue(
-          Math.max(0, overscrollRef.current + deltaY * 0.5),
-        );
+        setOverscrollValue(Math.max(0, overscrollRef.current + deltaY * 0.5));
       }
 
       if (wheelTimeoutRef.current) clearTimeout(wheelTimeoutRef.current);
@@ -151,7 +151,7 @@ export function useOverscrollReveal(
         if (!isRevealedRef.current) setOverscrollValue(0);
       }, 150);
     },
-    [closeAfterNativeScroll, reveal, scrollNode, setOverscrollValue],
+    [closeAfterNativeScroll, reveal, setOverscrollValue],
   );
 
   const onWheel = useCallback(
@@ -177,7 +177,7 @@ export function useOverscrollReveal(
 
   const onTouchMove = useCallback(
     (e: TouchEvent<HTMLDivElement>) => {
-      const el = scrollNode;
+      const el = scrollNodeRef.current;
       if (!el) return;
 
       const maxScroll = el.scrollHeight - el.clientHeight;
@@ -196,7 +196,7 @@ export function useOverscrollReveal(
         return current > 0 ? Math.max(0, current + deltaY * 0.8) : 0;
       });
     },
-    [scrollNode, touchStart],
+    [touchStart],
   );
 
   const onTouchEnd = useCallback(() => {

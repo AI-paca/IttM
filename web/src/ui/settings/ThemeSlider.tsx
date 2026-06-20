@@ -437,10 +437,14 @@ export function ThemeSlider({
   const sliderRef = useRef<LiquidGlassSlider | null>(null);
   const changeRef = useRef<(v: number) => void>(() => {});
 
-  changeRef.current = (v) => {
-    if (auto) onAutoChange(false);
-    onLevelChange(v);
-  };
+  useEffect(() => {
+    const handleChange = (v: number) => {
+      if (auto) onAutoChange(false);
+      onLevelChange(v);
+    };
+    changeRef.current = handleChange;
+    sliderRef.current?.setOnChange(handleChange);
+  }, [auto, onAutoChange, onLevelChange]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -471,10 +475,6 @@ export function ThemeSlider({
   useEffect(() => {
     sliderRef.current?.setTarget(level);
   }, [level]);
-
-  useEffect(() => {
-    sliderRef.current?.setOnChange((v) => changeRef.current(v));
-  }, [auto, onLevelChange, onAutoChange]);
 
   return (
     <div

@@ -80,9 +80,7 @@ export function ReadingPanel({
           </div>
         )}
 
-        <div
-          className="max-w-prose mx-auto text-[17px] sm:text-[18px] leading-[1.8] sm:leading-[2.0] space-y-[24px] sm:space-y-[28px] text-[var(--color-text-secondary)] selection:bg-[var(--color-info-soft)] pb-12 whitespace-pre-wrap font-sans w-full bg-[var(--color-bg-surface)] p-6 sm:p-10 rounded-2xl border border-[var(--color-border-subtle)]"
-        >
+        <div className="max-w-prose mx-auto text-[17px] sm:text-[18px] leading-[1.8] sm:leading-[2.0] space-y-[24px] sm:space-y-[28px] text-[var(--color-text-secondary)] selection:bg-[var(--color-info-soft)] pb-12 whitespace-pre-wrap font-sans w-full bg-[var(--color-bg-surface)] p-6 sm:p-10 rounded-2xl border border-[var(--color-border-subtle)]">
           {extractedText}
         </div>
 
@@ -121,9 +119,7 @@ export function ReadingPanel({
             <button
               onClick={onCopy}
               className={`flex-1 flex md:hidden h-[52px] items-center justify-center gap-2 whitespace-nowrap text-center font-bold rounded-xl transition-all shadow-lg text-[15px] active:scale-95 ${
-                copied
-                  ? "bg-[var(--color-success)] text-white"
-                  : "btn-primary"
+                copied ? "bg-[var(--color-success)] text-white" : "btn-primary"
               }`}
             >
               {copied ? (

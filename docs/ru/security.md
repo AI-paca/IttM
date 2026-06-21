@@ -27,6 +27,9 @@
   `OCR_MAX_DECODED_IMAGE_PIXELS` (`80MP`).
 - Обычные изображения обрабатываются из памяти. PDF спулируется для Poppler;
   каталог удаляется после запроса.
+- Python OCR не отдает CORS headers по умолчанию. Для отдельного
+  cross-origin frontend разрешенные origins задаются явно через
+  `OCR_CORS_ORIGINS`; wildcard запрещен.
 
 ## Browser OCR
 
@@ -53,3 +56,5 @@
 - Decoded guard `80MP` не заменяет tile decoder для decompression bomb.
 - Ошибка после начала NDJSON отдаётся как `error` event в HTTP 200, а не
   отдельным HTTP status.
+
+Статический анализ, CI-артефакты и границы проверки: [SAST](./sast.md).

@@ -81,7 +81,7 @@ export function ReadingPanel({
           </div>
         )}
 
-        <div className="mx-auto w-full max-w-[88ch] min-h-[58svh] md:min-h-[60svh] text-[16.5px] sm:text-[17px] lg:text-[18px] leading-[1.75] sm:leading-[1.9] text-[var(--color-text-secondary)] selection:bg-[var(--color-info-soft)] pb-12 font-sans bg-[var(--color-bg-surface)] p-5 sm:p-9 lg:p-10 rounded-2xl border border-[var(--color-border-subtle)]">
+        <div className="mx-auto w-full max-w-[1120px] min-h-[58svh] md:min-h-[60svh] text-[16.5px] sm:text-[17px] lg:text-[18px] leading-[1.75] sm:leading-[1.9] text-[var(--color-text-secondary)] selection:bg-[var(--color-info-soft)] pb-12 font-sans bg-[var(--color-bg-surface)] p-5 sm:p-9 lg:p-10 rounded-2xl border border-[var(--color-border-subtle)]">
           <MarkdownContent>{extractedText}</MarkdownContent>
         </div>
 

@@ -294,16 +294,25 @@
   }
 
   .markdown-content table {
-    @apply w-full min-w-[520px] border-collapse text-left text-[0.92em];
+    @apply w-full min-w-[920px] border-collapse text-left text-[0.88em] leading-snug;
   }
 
   .markdown-content th,
   .markdown-content td {
-    @apply border-b border-[var(--color-border-subtle)] px-3 py-2 align-top;
+    @apply border-b border-r border-[var(--color-border-subtle)] px-3 py-2 align-middle;
   }
 
   .markdown-content th {
     @apply bg-[var(--color-bg-elevated)] font-bold text-[var(--color-text-primary)];
+  }
+
+  .markdown-content th:last-child,
+  .markdown-content td:last-child {
+    @apply border-r-0;
+  }
+
+  .markdown-content__merge-cell {
+    @apply bg-[var(--color-bg-elevated)] font-semibold text-[var(--color-text-primary)];
   }
 
   /* ----------------------------------------------- Ползунок темы (liquid glass) */

@@ -1,0 +1,496 @@
+rules:
+  - id: python-fastapi-wildcard-cors
+    languages: [python]
+    severity: ERROR
+    message: FastAPI CORS must use an explicit origin allowlist.
+    metadata:
+      category: security
+      cwe: CWE-942
+    patterns:
+      - pattern-inside: |
+          $APP.add_middleware(CORSMiddleware, ...)
+      - pattern: allow_origins=[..., "*", ...]
+
+  - id: python-fastapi-wildcard-cors-regex
+    languages: [python]
+    severity: ERROR
+    message: FastAPI CORS regex must not allow every origin.
+    metadata:
+      category: security
+      cwe: CWE-942
+    patterns:
+      - pattern-inside: |
+          $APP.add_middleware(CORSMiddleware, ...)
+      - pattern-either:
+          - pattern: allow_origin_regex=".*"
+          - pattern: allow_origin_regex=r".*"
+          - pattern: allow_origin_regex="^.*$"
+          - pattern: allow_origin_regex=r"^.*$"
+
+  - id: python-dynamic-code-execution
+    languages: [python]
+    severity: ERROR
+    message: Dynamic Python code execution is forbidden on request-processing paths.
+    metadata:
+      category: security
+      cwe: CWE-95
+    pattern-either:
+      - pattern: eval($VALUE)
+      - pattern: exec($VALUE)
+
+  - id: python-shell-command-execution
+    languages: [python]
+    severity: ERROR
+    message: Avoid shell command execution; pass a fixed argv list without shell=True.
+    metadata:
+      category: security
+      cwe: CWE-78
+    pattern-either:
+      - pattern: os.system($COMMAND)
+      - pattern: subprocess.$FUNC(..., shell=True, ...)
+
+  - id: python-subprocess-with-string-argv
+    languages: [python]
+    severity: ERROR
+    message: subprocess must receive a fixed argv list, not a shell-like string.
+    metadata:
+      category: security
+      cwe: CWE-78
+    pattern-either:
+      - pattern: subprocess.run("...", ...)
+      - pattern: subprocess.Popen("...", ...)
+
+  - id: python-unsafe-yaml-deserialization
+    languages: [python]
+    severity: ERROR
+    message: yaml.load can construct arbitrary Python objects; use safe_load.
+    metadata:
+      category: security
+      cwe: CWE-502
+    patterns:
+      - pattern: yaml.load(...)
+      - pattern-not: yaml.load(..., Loader=yaml.SafeLoader, ...)
+      - pattern-not: yaml.load(..., Loader=SafeLoader, ...)
+
+  - id: python-insecure-tempfile-mktemp
+    languages: [python]
+    severity: ERROR
+    message: tempfile.mktemp is race-prone; use TemporaryDirectory or NamedTemporaryFile.
+    metadata:
+      category: security
+      cwe: CWE-377
+    pattern: tempfile.mktemp(...)
+
+  - id: python-requests-without-timeout
+    languages: [python]
+    severity: ERROR
+    message: Outbound HTTP calls must set a timeout to avoid worker exhaustion.
+    metadata:
+      category: security
+      cwe: CWE-400
+    patterns:
+      - pattern-either:
+          - pattern: requests.get(...)
+          - pattern: requests.post(...)
+          - pattern: requests.put(...)
+          - pattern: requests.patch(...)
+          - pattern: requests.delete(...)
+          - pattern: requests.request(...)
+      - pattern-not: requests.get(..., timeout=..., ...)
+      - pattern-not: requests.post(..., timeout=..., ...)
+      - pattern-not: requests.put(..., timeout=..., ...)
+      - pattern-not: requests.patch(..., timeout=..., ...)
+      - pattern-not: requests.delete(..., timeout=..., ...)
+      - pattern-not: requests.request(..., timeout=..., ...)
+
+  - id: python-requests-insecure-tls
+    languages: [python]
+    severity: ERROR
+    message: HTTP clients must not disable TLS verification; fix trust roots instead of using verify=False.
+    metadata:
+      category: security
+      cwe: CWE-295
+    pattern-either:
+      - pattern: requests.$METHOD(..., verify=False, ...)
+      - pattern: httpx.$METHOD(..., verify=False, ...)
+      - pattern: requests.Session(...).$METHOD(..., verify=False, ...)
+      - pattern: httpx.Client(...).$METHOD(..., verify=False, ...)
+
+  - id: python-unsafe-subprocess-user-argv
+    languages: [python]
+    severity: ERROR
+    message: User-controlled subprocess argv must go through an explicit allowlist before execution.
+    metadata:
+      category: security
+      cwe: CWE-78
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.run([...,$ARG,...], ...)
+          - pattern: subprocess.Popen([...,$ARG,...], ...)
+          - pattern: subprocess.check_call([...,$ARG,...], ...)
+          - pattern: subprocess.check_output([...,$ARG,...], ...)
+      - metavariable-regex:
+          metavariable: $ARG
+          regex: (?i).*(request|upload|filename|filepath|user|input|query|param|argv|args|form|body).*
+
+  - id: python-unsafe-pickle-deserialization
+    languages: [python]
+    severity: ERROR
+    message: Pickle must not deserialize data that can cross a trust boundary.
+    metadata:
+      category: security
+      cwe: CWE-502
+    pattern-either:
+      - pattern: pickle.load(...)
+      - pattern: pickle.loads(...)
+
+  - id: python-weak-hash-security
+    languages: [python]
+    severity: ERROR
+    message: MD5/SHA1 are forbidden for passwords, tokens, and integrity checks; use SHA-256+ or a password hashing KDF.
+    metadata:
+      category: security
+      cwe: CWE-327
+    pattern-either:
+      - pattern: hashlib.md5(...)
+      - pattern: hashlib.sha1(...)
+
+  - id: python-insecure-random-security-token
+    languages: [python]
+    severity: ERROR
+    message: Security tokens and nonces must use secrets or os.urandom, not random.
+    metadata:
+      category: security
+      cwe: CWE-330
+    patterns:
+      - pattern-either:
+          - pattern: $NAME = random.random(...)
+          - pattern: $NAME = random.randint(...)
+          - pattern: $NAME = random.choice(...)
+          - pattern: $NAME = random.choices(...)
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(token|secret|password|key|nonce|session|idempotency).*
+
+  - id: python-hardcoded-secret
+    languages: [python]
+    severity: ERROR
+    message: Secrets must come from environment or a secret manager, not source literals.
+    metadata:
+      category: security
+      cwe: CWE-798
+    patterns:
+      - pattern-either:
+          - pattern: $NAME = "$VALUE"
+          - pattern: '$NAME: str = "$VALUE"'
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(api_?key|secret|token|password|jwt).*
+      - metavariable-regex:
+          metavariable: $VALUE
+          regex: .{16,}
+
+  - id: python-tarfile-unsafe-extract
+    languages: [python]
+    severity: ERROR
+    message: tarfile extraction must use filter='data' or an equivalent member allowlist.
+    metadata:
+      category: security
+      cwe: CWE-22
+    patterns:
+      - pattern: $TAR.extractall(...)
+      - pattern-not: $TAR.extractall(..., filter="data", ...)
+      - pattern-not: $TAR.extractall(..., filter='data', ...)
+
+  - id: typescript-dynamic-code-execution
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Dynamic JavaScript execution is forbidden.
+    metadata:
+      category: security
+      cwe: CWE-95
+    pattern-either:
+      - pattern: eval($VALUE)
+      - pattern: new Function(...)
+
+  - id: typescript-node-shell-exec
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: child_process exec APIs run through a shell; use spawn/execFile with a fixed argv list.
+    metadata:
+      category: security
+      cwe: CWE-78
+    pattern-either:
+      - pattern: child_process.exec(...)
+      - pattern: child_process.execSync(...)
+      - pattern: exec(...)
+      - pattern: execSync(...)
+
+  - id: typescript-fetch-without-abortsignal
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Server-side fetch calls must carry an AbortSignal or an explicit timeout guard.
+    metadata:
+      category: security
+      cwe: CWE-400
+    paths:
+      include:
+        - /gateway/src/**
+        - /edge/**
+        - /server.ts
+    patterns:
+      - pattern: fetch($URL, $INIT)
+      - pattern-not: "fetch($URL, { ..., signal: ..., ... })"
+
+  - id: typescript-path-traversal-fs
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Filesystem paths built from request/user input must go through safeResolve-style containment checks.
+    metadata:
+      category: security
+      cwe: CWE-22
+    paths:
+      include:
+        - /gateway/src/**
+        - /server.ts
+      exclude:
+        - /gateway/src/**/*.test.ts
+    pattern-either:
+      - pattern: fs.readFile(path.join($ROOT, $USER), ...)
+      - pattern: readFile(path.join($ROOT, $USER), ...)
+      - pattern: fs.createReadStream(path.join($ROOT, $USER), ...)
+      - pattern: createReadStream(path.join($ROOT, $USER), ...)
+
+  - id: typescript-hardcoded-secret
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Secrets must come from environment or a secret manager, not source literals.
+    metadata:
+      category: security
+      cwe: CWE-798
+    paths:
+      exclude:
+        - /gateway/src/**/*.test.ts
+        - /web/src/**/*.test.ts
+        - /web/src/**/*.ocr-test.ts
+    patterns:
+      - pattern-either:
+          - pattern: const $NAME = "$VALUE"
+          - pattern: let $NAME = "$VALUE"
+          - pattern: var $NAME = "$VALUE"
+          - pattern: '$NAME: "$VALUE"'
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(api_?key|secret|token|password|jwt).*
+      - metavariable-regex:
+          metavariable: $VALUE
+          regex: .{16,}
+
+  - id: typescript-open-redirect
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Redirect targets must be selected from an allowlist, not assigned from request or provider data.
+    metadata:
+      category: security
+      cwe: CWE-601
+    patterns:
+      - pattern-either:
+          - pattern: location.href = $URL
+          - pattern: window.location = $URL
+          - pattern: $RESPONSE.redirect($URL)
+      - pattern-not: location.href = "..."
+      - pattern-not: window.location = "..."
+      - pattern-not: $RESPONSE.redirect("...")
+
+  - id: typescript-wildcard-cors-header
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: CORS must echo an explicit allowlisted origin instead of '*'.
+    metadata:
+      category: security
+      cwe: CWE-942
+    pattern-either:
+      - pattern: $HEADERS.set("Access-Control-Allow-Origin", "*")
+      - pattern: $HEADERS.append("Access-Control-Allow-Origin", "*")
+      - pattern: '"Access-Control-Allow-Origin": "*"'
+
+  - id: typescript-shell-spawn
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Child processes must not execute through a shell.
+    metadata:
+      category: security
+      cwe: CWE-78
+    pattern-either:
+      - pattern: "spawn($COMMAND, $ARGS, { ..., shell: true, ... })"
+      - pattern: "spawnSync($COMMAND, $ARGS, { ..., shell: true, ... })"
+
+  - id: typescript-unsafe-html-sink
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Dynamic HTML sinks bypass framework/browser escaping.
+    metadata:
+      category: security
+      cwe: CWE-79
+    pattern-either:
+      - pattern: $ELEMENT.innerHTML = $VALUE
+      - pattern: $ELEMENT.outerHTML = $VALUE
+      - pattern: $ELEMENT.insertAdjacentHTML(...)
+      - pattern: document.write(...)
+      - pattern: $RANGE.createContextualFragment(...)
+
+  - id: typescript-react-dangerously-set-inner-html
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: React dangerouslySetInnerHTML must not be used for document/provider content.
+    metadata:
+      category: security
+      cwe: CWE-79
+    patterns:
+      - pattern: "<$TAG dangerouslySetInnerHTML={...} />"
+
+  - id: typescript-postmessage-wildcard-target
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: postMessage must use an explicit target origin instead of '*'.
+    metadata:
+      category: security
+      cwe: CWE-346
+    pattern: $TARGET.postMessage($MESSAGE, "*")
+
+  - id: typescript-sensitive-browser-storage
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: API keys, tokens, and secrets must not be persisted in browser storage.
+    metadata:
+      category: security
+      cwe: CWE-922
+    patterns:
+      - pattern-either:
+          - pattern: localStorage.setItem($KEY, $VALUE)
+          - pattern: sessionStorage.setItem($KEY, $VALUE)
+      - metavariable-regex:
+          metavariable: $KEY
+          regex: (?i).*(api.?key|token|secret|password).*
+
+  - id: github-workflow-curl-pipe-shell
+    languages: [generic]
+    severity: ERROR
+    message: GitHub Actions must not pipe network downloads directly into a shell.
+    metadata:
+      category: security
+      cwe: CWE-494
+    paths:
+      include:
+        - /.github/workflows/*.yml
+    pattern-regex: (?i)\b(curl|wget)\b[^\n|]*\|\s*(sh|bash)\b
+
+  - id: github-workflow-pull-request-target
+    languages: [generic]
+    severity: ERROR
+    message: pull_request_target can expose repository secrets to untrusted PR code; use pull_request unless explicitly reviewed.
+    metadata:
+      category: security
+      cwe: CWE-829
+    paths:
+      include:
+        - /.github/workflows/*.yml
+    pattern-regex: '(^|\n)\s*pull_request_target\s*:'
+
+  - id: nginx-proxy-pass-user-controlled-host
+    languages: [generic]
+    severity: ERROR
+    message: nginx proxy_pass must not use client-controlled host variables.
+    metadata:
+      category: security
+      cwe: CWE-918
+    paths:
+      include:
+        - /gateway/nginx.conf
+    pattern-regex: 'proxy_pass\s+https?://\$(host|http_host|arg_[A-Za-z0-9_]+|http_[A-Za-z0-9_]+)'
+
+  - id: bash-dynamic-eval
+    languages: [bash]
+    severity: ERROR
+    message: Shell eval executes dynamically constructed code.
+    metadata:
+      category: security
+      cwe: CWE-78
+    pattern: eval ...
+
+  - id: bash-curl-pipe-shell
+    languages: [bash]
+    severity: ERROR
+    message: Do not pipe network downloads directly into a shell.
+    metadata:
+      category: security
+      cwe: CWE-494
+    pattern-either:
+      - pattern: curl ... | sh
+      - pattern: curl ... | bash
+      - pattern: wget ... | sh
+      - pattern: wget ... | bash
+
+  - id: dockerfile-curl-pipe-shell
+    languages: [dockerfile]
+    severity: ERROR
+    message: Docker builds must not pipe network downloads directly into a shell.
+    metadata:
+      category: security
+      cwe: CWE-494
+    pattern-either:
+      - pattern: RUN curl ... | sh
+      - pattern: RUN curl ... | bash
+      - pattern: RUN wget ... | sh
+      - pattern: RUN wget ... | bash
+
+  - id: dockerfile-remote-add
+    languages: [dockerfile]
+    severity: ERROR
+    message: Dockerfile ADD from a remote URL is not reproducible; download with verification or COPY local files.
+    metadata:
+      category: security
+      cwe: CWE-494
+    pattern-either:
+      - pattern: ADD http://... ...
+      - pattern: ADD https://... ...
+
+  - id: docker-compose-privileged
+    languages: [yaml]
+    severity: ERROR
+    message: Compose services must not run privileged or on the host network.
+    metadata:
+      category: security
+      cwe: CWE-250
+    paths:
+      include:
+        - /docker-compose.yml
+    pattern-either:
+      - pattern: |
+          privileged: true
+      - pattern: |
+          network_mode: host
+
+  - id: docker-compose-docker-socket-mount
+    languages: [generic]
+    severity: ERROR
+    message: Compose services must not mount the Docker socket.
+    metadata:
+      category: security
+      cwe: CWE-250
+    paths:
+      include:
+        - /docker-compose.yml
+    pattern-regex: /var/run/docker\.sock
+
+  - id: docker-compose-public-bind
+    languages: [generic]
+    severity: ERROR
+    message: Compose ports must not bind directly to 0.0.0.0; use GATEWAY_HOST_BIND with a loopback default.
+    metadata:
+      category: security
+      cwe: CWE-605
+    paths:
+      include:
+        - /docker-compose.yml
+    pattern-regex: '0\.0\.0\.0:'

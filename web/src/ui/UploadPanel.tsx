@@ -65,7 +65,8 @@ export function UploadPanel({
       {diagnostics && (
         <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm flex flex-col gap-3 transition-colors delay-100">
           <h3 className="text-sm font-bold text-gray-700 dark:text-gray-300 flex items-center gap-2">
-            <Activity className="w-4 h-4 text-blue-500" /> Diagnostics & Limits
+            <Activity className="w-4 h-4 text-blue-500" />{" "}
+            {"Diagnostics & Limits"}
           </h3>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-gray-600 dark:text-gray-400">
             <div className="flex flex-col bg-gray-50 dark:bg-gray-900 p-2.5 rounded-lg border border-gray-100 dark:border-gray-700/50">

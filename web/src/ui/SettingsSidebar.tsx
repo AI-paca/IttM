@@ -86,7 +86,7 @@ export function SettingsSidebar({
               <div className="flex flex-col gap-4">
                 <div className="flex flex-col gap-2">
                   <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-1">
-                    Local & Browser
+                    {"Local & Browser"}
                   </h3>
                   {SOURCES.filter((s) =>
                     ["auto", "browser", "local_tess", "local_easy"].includes(
@@ -172,7 +172,7 @@ export function SettingsSidebar({
 
                 <div className="flex flex-col gap-2 mt-2">
                   <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-1">
-                    API & Cloud
+                    {"API & Cloud"}
                   </h3>
                   {SOURCES.filter((s) => ["gateway", "llm"].includes(s.id)).map(
                     (src) => (

@@ -10,6 +10,24 @@ permissions:
   contents: read
 
 jobs:
+  sast:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Semgrep SAST
+        run: npm run test:sast
+
+      - name: Upload Semgrep SAST artifacts
+        if: ${{ always() && env.ACT != 'true' }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: semgrep-sast
+          path: |
+            .sast/semgrep.json
+            .sast/semgrep.sarif
+          if-no-files-found: warn
+
   linters:
     runs-on: ubuntu-24.04
     steps:

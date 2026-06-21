@@ -19,6 +19,7 @@
     "test": "node --import tsx --test web/src/**/*.test.ts gateway/src/**/*.test.ts edge/**/*.test.ts",
     "test:contract": "bash scripts/ci/run-contract-tests.sh",
     "test:smoke": "bash scripts/ci/run-smoke-tests.sh",
+    "test:sast": "bash scripts/ci/run-sast.sh",
     "test:pages": "node scripts/ci/verify-pages-build.mjs dist /IttM/",
     "test:engine-docs": "python3 scripts/ci/verify_engine_profile_docs.py && python3 scripts/ci/verify_pipeline_flag_docs.py",
     "test:pages:live": "node scripts/ci/smoke-pages.mjs",

@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { processPdfIntelligently } from "../lib/pdf-parser";
+import { effectivePdfCropMode, readCropMode } from "../lib/crop-preference";
+import { debugMarkdownForFile } from "./debug-sample-markdown";
 import {
   buildApiUrl,
   buildBackendGatewayCandidates,
@@ -44,6 +46,7 @@ interface UseOcrExtractionArgs {
   setAppState: Dispatch<SetStateAction<AppState>>;
   setExtractedText: Dispatch<SetStateAction<string>>;
   setExtractionProgress: Dispatch<SetStateAction<string>>;
+  setActiveSource: Dispatch<SetStateAction<SourceType | null>>;
   setIsExtracting: Dispatch<SetStateAction<boolean>>;
   setLastExtractedPage: Dispatch<SetStateAction<number>>;
   setTotalPdfPages: Dispatch<SetStateAction<number | null>>;
@@ -65,6 +68,7 @@ export function useOcrExtraction({
   setAppState,
   setExtractedText,
   setExtractionProgress,
+  setActiveSource,
   setIsExtracting,
   setLastExtractedPage,
   setTotalPdfPages,
@@ -112,6 +116,10 @@ export function useOcrExtraction({
           diagnostics,
           browserPipelineProfileForSource("browser"),
         );
+        const pdfCropMode = effectivePdfCropMode(readCropMode());
+        const activateSource = (source: SourceType) => {
+          if (active.current) setActiveSource(source);
+        };
 
         const handleChunk = (chunk: string, pageIndex?: number) => {
           console.log(
@@ -133,6 +141,7 @@ export function useOcrExtraction({
         };
 
         const runBrowserFallback = async () => {
+          activateSource("browser");
           if (file.type === "application/pdf") {
             const md = await processPdfIntelligently(
               file,
@@ -160,6 +169,7 @@ export function useOcrExtraction({
                 renderScale: browserProfile.pdfRenderScale,
                 maxPagePixels: browserProfile.maxImagePixels,
                 maxDimension: browserProfile.maxDimension,
+                cropMode: pdfCropMode,
                 shouldContinue: () => active.current,
               },
             );
@@ -177,65 +187,67 @@ export function useOcrExtraction({
           );
         };
 
-        let effectiveSource = selectedSource;
-        const localBackendAvailable = hasAvailableLocalBackend(diagnostics);
-        const autoBackendCandidates = buildBackendGatewayCandidates({
-          customBaseUrl: pingUrl,
-          includeLocal: localBackendAvailable,
-        });
-
-        if (effectiveSource === "auto" && autoBackendCandidates.length === 0) {
-          console.log(
-            "[OCR] No backend candidates are available, auto-switching to browser source",
-          );
-          effectiveSource = "browser";
+        const debugMarkdown = debugMarkdownForFile(file);
+        if (debugMarkdown) {
+          activateSource("browser");
+          setExtractionProgress("Показываем debug Markdown sample...");
+          result = {
+            markdown: debugMarkdown,
+            meta: { debugFixture: true },
+          };
         }
 
-        if (effectiveSource === "browser") {
-          result = await runBrowserFallback();
-        } else if (
-          effectiveSource === "local_tess" ||
-          effectiveSource === "local_easy"
-        ) {
-          const engineType =
-            effectiveSource === "local_tess" ? "tesseract" : "easyocr";
-          const url = buildApiUrl("", "/api/convert/stream", {
-            engine_type: engineType,
-            ...(backendPipelineParams(effectiveSource) || {}),
+        if (!result) {
+          let effectiveSource = selectedSource;
+          const localBackendAvailable = hasAvailableLocalBackend(diagnostics);
+          const autoBackendCandidates = buildBackendGatewayCandidates({
+            customBaseUrl: pingUrl,
+            includeLocal: localBackendAvailable,
           });
 
-          result = await executeBackendOcrStreaming(
-            file,
-            url,
-            active,
-            (text) => {
-              if (active.current) setExtractionProgress(text);
-            },
-            handleChunk,
-          );
-        } else if (effectiveSource === "llm") {
-          result = await executeLlmOcr(
-            file,
-            {
-              provider: llmProvider,
-              model: llmModel,
-              key: llmKey,
-              externalConsent: externalLlmConsent,
-            },
-            active,
-            (text) => {
-              if (active.current) setExtractionProgress(text);
-            },
-            handleChunk,
-            lastExtractedPage,
-            setTotalPdfPages,
-            browserProfile.pdfRenderScale,
-          );
-        } else if (effectiveSource === "gateway") {
-          if (isOllamaBaseUrl(pingUrl)) {
-            result = await executeOllamaOcr(
+          if (
+            effectiveSource === "auto" &&
+            autoBackendCandidates.length === 0
+          ) {
+            console.log(
+              "[OCR] No backend candidates are available, auto-switching to browser source",
+            );
+            effectiveSource = "browser";
+          }
+
+          if (effectiveSource === "browser") {
+            result = await runBrowserFallback();
+          } else if (
+            effectiveSource === "local_tess" ||
+            effectiveSource === "local_easy"
+          ) {
+            activateSource(effectiveSource);
+            const engineType =
+              effectiveSource === "local_tess" ? "tesseract" : "easyocr";
+            const url = buildApiUrl("", "/api/convert/stream", {
+              engine_type: engineType,
+              ...(backendPipelineParams(effectiveSource) || {}),
+            });
+
+            result = await executeBackendOcrStreaming(
               file,
-              { baseUrl: pingUrl, model: llmModel },
+              url,
+              active,
+              (text) => {
+                if (active.current) setExtractionProgress(text);
+              },
+              handleChunk,
+            );
+          } else if (effectiveSource === "llm") {
+            activateSource("llm");
+            result = await executeLlmOcr(
+              file,
+              {
+                provider: llmProvider,
+                model: llmModel,
+                key: llmKey,
+                externalConsent: externalLlmConsent,
+              },
               active,
               (text) => {
                 if (active.current) setExtractionProgress(text);
@@ -245,73 +257,104 @@ export function useOcrExtraction({
               setTotalPdfPages,
               browserProfile.pdfRenderScale,
             );
-            if (file.type !== "application/pdf")
-              handleChunk(result.markdown || "");
-          } else {
-            const gatewayUrl = buildApiUrl(
-              pingUrl,
-              "/api/convert/stream",
-              backendPipelineParams("gateway"),
-            );
-            result = await executeBackendOcrStreaming(
-              file,
-              gatewayUrl,
-              active,
-              (text) => {
-                if (active.current) setExtractionProgress(text);
-              },
-              handleChunk,
-            );
-          }
-        } else if (effectiveSource === "auto") {
-          try {
-            result = await executeBackendOcrWithFallback(
-              file,
-              autoBackendCandidates,
-              active,
-              (text) => {
-                if (active.current) setExtractionProgress(text);
-              },
-              backendPipelineParams("auto"),
-              handleChunk,
-            );
-          } catch (backendError) {
-            if (normalizePlatformError(backendError).partialResult) {
-              throw backendError;
-            }
-            if (llmKey.trim() && externalLlmConsent) {
-              setExtractionProgress(
-                "Cloud/локальный gateway недоступен, пробуем LLM OCR...",
+          } else if (effectiveSource === "gateway") {
+            activateSource("gateway");
+            if (isOllamaBaseUrl(pingUrl)) {
+              result = await executeOllamaOcr(
+                file,
+                { baseUrl: pingUrl, model: llmModel },
+                active,
+                (text) => {
+                  if (active.current) setExtractionProgress(text);
+                },
+                handleChunk,
+                lastExtractedPage,
+                setTotalPdfPages,
+                browserProfile.pdfRenderScale,
               );
-              try {
-                result = await executeLlmOcr(
-                  file,
-                  {
-                    provider: llmProvider,
-                    model: llmModel,
-                    key: llmKey,
-                    externalConsent: externalLlmConsent,
-                  },
-                  active,
-                  (text) => {
-                    if (active.current) setExtractionProgress(text);
-                  },
-                  handleChunk,
-                  lastExtractedPage,
-                  setTotalPdfPages,
-                  browserProfile.pdfRenderScale,
-                );
-              } catch (llmError) {
-                console.warn("[OCR] LLM fallback failed:", llmError);
-              }
+              if (file.type !== "application/pdf")
+                handleChunk(result.markdown || "");
+            } else {
+              const gatewayUrl = buildApiUrl(
+                pingUrl,
+                "/api/convert/stream",
+                backendPipelineParams("gateway"),
+              );
+              result = await executeBackendOcrStreaming(
+                file,
+                gatewayUrl,
+                active,
+                (text) => {
+                  if (active.current) setExtractionProgress(text);
+                },
+                handleChunk,
+              );
             }
-
-            if (!result) {
-              if (active.current)
+          } else if (effectiveSource === "auto") {
+            try {
+              activateSource("gateway");
+              result = await executeBackendOcrWithFallback(
+                file,
+                autoBackendCandidates,
+                active,
+                (text) => {
+                  if (active.current) setExtractionProgress(text);
+                },
+                backendPipelineParams("auto"),
+                handleChunk,
+                { stallTimeoutMs: 35_000 },
+              );
+            } catch (backendError) {
+              const normalizedBackendError =
+                normalizePlatformError(backendError);
+              if (normalizedBackendError.code === "OCR_STREAM_STALLED") {
+                progressiveText = "";
+                setExtractedText("");
+                setLastExtractedPage(1);
+                if (active.current) {
+                  setExtractionProgress(
+                    "Gateway завис, выполняем в браузере (WASM)...",
+                  );
+                }
+                result = await runBrowserFallback();
+              } else if (normalizedBackendError.partialResult) {
+                throw backendError;
+              }
+              if (!result && llmKey.trim() && externalLlmConsent) {
+                activateSource("llm");
                 setExtractionProgress(
-                  "Cloud/локальный gateway недоступен, выполняем в браузере (WASM)...",
+                  "Cloud/локальный gateway недоступен, пробуем LLM OCR...",
                 );
-              result = await runBrowserFallback();
+                try {
+                  result = await executeLlmOcr(
+                    file,
+                    {
+                      provider: llmProvider,
+                      model: llmModel,
+                      key: llmKey,
+                      externalConsent: externalLlmConsent,
+                    },
+                    active,
+                    (text) => {
+                      if (active.current) setExtractionProgress(text);
+                    },
+                    handleChunk,
+                    lastExtractedPage,
+                    setTotalPdfPages,
+                    browserProfile.pdfRenderScale,
+                  );
+                } catch (llmError) {
+                  console.warn("[OCR] LLM fallback failed:", llmError);
+                }
+              }
+
+              if (!result) {
+                if (active.current)
+                  setExtractionProgress(
+                    "Cloud/локальный gateway недоступен, выполняем в браузере (WASM)...",
+                  );
+                result = await runBrowserFallback();
+              }
             }
           }
         }

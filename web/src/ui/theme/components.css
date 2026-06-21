@@ -1,0 +1,340 @@
+/**
+ * ============================================================================
+ *  УНИВЕРСАЛЬНЫЕ КОМПОНЕНТНЫЕ КЛАССЫ
+ * ============================================================================
+ *
+ * Готовые стили для повторяющихся UI-паттернов. Используются напрямую как
+ * className. Все цвета берутся из tokens.css, поэтому смена темы/палитры
+ * происходит автоматически.
+ *
+ * Важно (Tailwind v4): внутри @apply нельзя ссылаться на другие кастомные
+ * классы (например .btn, .focus-ring). Поэтому общие Tailwind-утилиты
+ * раскрываются в каждом классе напрямую.
+ *
+ * Соглашение об именовании:
+ *   .btn-*              — кнопки (primary/ghost/outline/danger/secondary)
+ *   .surface-*          — поверхности (card/elevated/inset)
+ *   .input / .input-field — текстовые поля / select
+ *   .label / .form-label  — подписи к полям
+ *   .badge-*            — цветные бейджи (по статусу)
+ *   .divider            — разделитель
+ *   .skeleton           — анимированный плейсхолдер
+ *   .spinner            — индикатор загрузки
+ *   .segmented-*        — segmented control
+ *   .checkbox-*         — кастомный чекбокс
+ *   .warning-notice     — блок-предупреждение
+ *   .settings-panel     — контейнер панели настроек
+ * ============================================================================
+ */
+
+@layer utilities {
+  /* Скрывает полосу прокрутки, не занимая место (предотвращает скачки ширины
+     контейнера при появлении/исчезновении скроллбара). Важно для контейнеров
+     с абсолютными дочерними элементами, рассчитанными на полную ширину
+     (например, 3D-стикеры в SourceCard внутри SettingsSidebar). */
+  .no-scrollbar {
+    scrollbar-gutter: stable;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE/Edge legacy */
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none; /* Chrome/Safari/Edge */
+  }
+}
+
+@layer components {
+  /* ---------------------------------------------------------- Поверхности */
+  .surface-card {
+    @apply bg-[var(--color-bg-surface)] text-[var(--color-text-primary)]
+           border border-[var(--color-border-default)] rounded-2xl shadow-sm;
+  }
+
+  .surface-elevated {
+    @apply bg-[var(--color-bg-elevated)] text-[var(--color-text-primary)];
+  }
+
+  .surface-inset {
+    @apply bg-[var(--color-bg-inset)] text-[var(--color-text-primary)]
+           border border-[var(--color-border-default)];
+  }
+
+  /* ------------------------------------------------------------ Разделитель */
+  .divider {
+    @apply h-px w-full bg-[var(--color-border-subtle)] my-2 sm:my-4;
+  }
+
+  /* ----------------------------------------------------------------- Кнопки */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 font-bold
+           rounded-xl transition-all active:scale-95 select-none
+           outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ring)]
+           bg-[var(--color-accent)] hover:bg-[var(--color-accent-hover)]
+           text-[var(--color-text-on-accent)] shadow-lg;
+  }
+
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 font-bold
+           rounded-xl transition-all active:scale-95 select-none
+           outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ring)]
+           bg-[var(--color-bg-surface)] hover:bg-[var(--color-bg-elevated)]
+           text-[var(--color-text-secondary)]
+           border border-[var(--color-border-default)] shadow-sm;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 font-bold
+           rounded-xl transition-all active:scale-95 select-none
+           outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ring)]
+           bg-transparent hover:bg-[var(--color-bg-elevated)]
+           text-[var(--color-text-muted)];
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 font-bold
+           rounded-xl transition-all active:scale-95 select-none
+           outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ring)]
+           bg-[var(--color-bg-elevated)] hover:bg-[var(--color-danger-soft)]
+           text-[var(--color-text-muted)] hover:text-[var(--color-danger-text)]
+           border border-[var(--color-border-default)];
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 font-bold
+           rounded-xl transition-all active:scale-95 select-none
+           outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ring)]
+           bg-[var(--color-bg-elevated)] hover:bg-[var(--color-bg-inset)]
+           text-[var(--color-text-muted)]
+           border border-[var(--color-border-default)] shadow-sm;
+  }
+
+  /* ------------------------------------------------------- Поля ввода/формы */
+  .input {
+    @apply w-full p-2 rounded-lg text-sm font-mono transition-all
+           outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ring)]
+           bg-[var(--color-bg-inset)] text-[var(--color-text-primary)]
+           border border-[var(--color-border-default)];
+  }
+
+  /* Синоним .input — без monofont, подходит для select/url-полей. */
+  .input-field {
+    @apply w-full p-2 border rounded-lg text-sm transition-all
+           outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ring)]
+           bg-[var(--color-bg-inset)] text-[var(--color-text-primary)]
+           border-[var(--color-border-default)];
+  }
+
+  .label,
+  .form-label {
+    @apply text-[11px] font-bold text-[var(--color-text-muted)];
+  }
+
+  .settings-panel {
+    @apply mt-1 flex flex-col gap-3 px-1 border rounded-xl p-3 mx-1 shadow-sm
+           bg-[var(--color-bg-surface)] border-[var(--color-border-default)];
+  }
+
+  /* ---------------------------------------------------------------- Бейджи */
+  .badge-success {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg
+           border font-medium text-xs transition-colors
+           bg-[var(--color-success-soft)] border-[var(--color-success-border)]
+           text-[var(--color-success-text)];
+  }
+
+  .badge-danger {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg
+           border font-medium text-xs transition-colors
+           bg-[var(--color-danger-soft)] border-[var(--color-danger-border)]
+           text-[var(--color-danger-text)];
+  }
+
+  .badge-warning {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg
+           border font-medium text-xs transition-colors
+           bg-[var(--color-warning-soft)] border-[var(--color-warning-border)]
+           text-[var(--color-warning-text)];
+  }
+
+  .badge-info {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg
+           border font-medium text-xs transition-colors
+           bg-[var(--color-info-soft)] border-[var(--color-info-border)]
+           text-[var(--color-info-text)];
+  }
+
+  .badge-muted {
+    @apply inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg
+           border font-medium text-xs transition-colors
+           bg-[var(--color-bg-elevated)] border-[var(--color-border-default)]
+           text-[var(--color-text-muted)];
+  }
+
+  /* --------------------------------------- Segmented control (тоггл-сегмент) */
+  .segmented-control {
+    @apply flex p-1 rounded-xl bg-[var(--color-bg-inset)]
+           border border-[var(--color-border-subtle)];
+  }
+
+  .segmented-btn {
+    @apply flex-1 flex justify-center items-center py-1.5 text-xs font-bold
+           rounded-lg transition-all cursor-pointer select-none
+           text-[var(--color-text-muted)]
+           hover:text-[var(--color-text-secondary)];
+  }
+
+  .segmented-btn-active {
+    @apply bg-[var(--color-bg-surface)] shadow-sm
+           text-[var(--color-text-primary)];
+  }
+
+  /* --------------------------------------------------------- Чекбокс-карточка */
+  .checkbox-indicator {
+    @apply w-5 h-5 border rounded flex items-center justify-center shrink-0
+           bg-[var(--color-bg-surface)] border-[var(--color-border-strong)]
+           peer-checked:bg-[var(--color-accent)]
+           peer-checked:border-[var(--color-accent)]
+           transition-colors;
+  }
+
+  .checkbox-label {
+    @apply text-[14px] font-semibold text-[var(--color-text-secondary)] select-none
+           group-hover:text-[var(--color-text-primary)] transition-colors;
+  }
+
+  /* ----------------------------------------------------- Предупреждение */
+  .warning-notice {
+    @apply flex items-start gap-2.5 rounded-lg border p-2.5 transition-colors
+           bg-[var(--color-warning-soft)] border-[var(--color-warning-border)]
+           text-[var(--color-warning-text)];
+  }
+
+  /* ----------------------------------------------- Скелетон (загрузка) */
+  .skeleton {
+    @apply bg-[var(--color-bg-elevated)] rounded-md animate-pulse;
+  }
+
+  /* ------------------------------------------------- Спиннер (loading) */
+  .spinner {
+    @apply inline-block border-2 rounded-full animate-spin
+           border-[var(--color-accent-soft-border)]
+           border-t-[var(--color-accent)];
+  }
+
+  /* ----------------------------------------------------------- Markdown output */
+  .markdown-content {
+    @apply max-w-none break-words text-[var(--color-text-secondary)];
+  }
+
+  .markdown-content > * + * {
+    margin-top: 1.15em;
+  }
+
+  .markdown-content h1,
+  .markdown-content h2,
+  .markdown-content h3,
+  .markdown-content h4 {
+    @apply font-bold leading-tight text-[var(--color-text-primary)];
+  }
+
+  .markdown-content h1 {
+    @apply text-[1.55em];
+  }
+
+  .markdown-content h2 {
+    @apply text-[1.28em];
+  }
+
+  .markdown-content h3 {
+    @apply text-[1.12em];
+  }
+
+  .markdown-content a {
+    @apply font-semibold text-[var(--color-info)] underline decoration-[var(--color-info-border)] underline-offset-4 transition-colors hover:text-[var(--color-info-text)];
+  }
+
+  .markdown-content ul,
+  .markdown-content ol {
+    @apply ps-6;
+  }
+
+  .markdown-content ul {
+    @apply list-disc;
+  }
+
+  .markdown-content ol {
+    @apply list-decimal;
+  }
+
+  .markdown-content li + li {
+    margin-top: 0.35em;
+  }
+
+  .markdown-content blockquote {
+    @apply border-s-4 border-[var(--color-border-strong)] ps-4 italic text-[var(--color-text-muted)];
+  }
+
+  .markdown-content hr {
+    @apply my-8 border-0 border-t border-[var(--color-border-subtle)];
+  }
+
+  .markdown-content code {
+    @apply rounded-md bg-[var(--color-bg-inset)] px-1.5 py-0.5 font-mono text-[0.9em] text-[var(--color-text-primary)];
+  }
+
+  .markdown-content pre {
+    @apply overflow-x-auto rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-inset)] p-4 text-[0.88em] leading-relaxed;
+  }
+
+  .markdown-content pre code {
+    @apply rounded-none bg-transparent p-0 text-inherit;
+  }
+
+  .markdown-content__table-wrap {
+    @apply w-full overflow-x-auto rounded-xl border border-[var(--color-border-subtle)];
+  }
+
+  .markdown-content table {
+    @apply w-full min-w-[920px] border-collapse text-left text-[0.88em] leading-snug;
+  }
+
+  .markdown-content th,
+  .markdown-content td {
+    @apply border-b border-r border-[var(--color-border-subtle)] px-3 py-2 align-middle;
+  }
+
+  .markdown-content th {
+    @apply bg-[var(--color-bg-elevated)] font-bold text-[var(--color-text-primary)];
+  }
+
+  .markdown-content th:last-child,
+  .markdown-content td:last-child {
+    @apply border-r-0;
+  }
+
+  .markdown-content__merge-cell {
+    @apply bg-[var(--color-bg-elevated)] font-semibold text-[var(--color-text-primary)];
+  }
+
+  /* ----------------------------------------------- Ползунок темы (liquid glass) */
+  .theme-slider {
+    @apply flex min-h-12 items-center gap-2 rounded-full select-none sm:min-h-0;
+    /* тонкая полоска между иконками, без рамки/фона — компактно */
+  }
+
+  .theme-slider__icon {
+    @apply w-5 h-5 shrink-0 cursor-pointer transition-colors sm:w-4 sm:h-4;
+    color: var(--color-text-muted);
+  }
+  .theme-slider__icon:hover {
+    color: var(--color-text-secondary);
+  }
+  .theme-slider__icon--moon {
+    /* луна чуть заметнее, когда тема тёмная (handled via JS opacity при желании) */
+  }
+
+  .theme-slider__canvas {
+    @apply flex-1 h-[38px] min-w-[120px] cursor-grab active:cursor-grabbing block rounded-full sm:h-[24px] sm:min-w-[40px];
+    -webkit-tap-highlight-color: transparent;
+    touch-action: none;
+  }
+}

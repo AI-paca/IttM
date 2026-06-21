@@ -45,6 +45,7 @@ export interface AppDiagnostics {
 }
 
 export interface PlatformErrorShape {
+  code?: string;
   message: string;
   status?: number;
   source: string;
@@ -53,6 +54,7 @@ export interface PlatformErrorShape {
 }
 
 export class PlatformError extends Error {
+  code?: string;
   status?: number;
   source: string;
   raw?: string;
@@ -61,6 +63,7 @@ export class PlatformError extends Error {
   constructor(error: PlatformErrorShape) {
     super(error.message);
     this.name = "PlatformError";
+    this.code = error.code;
     this.status = error.status;
     this.source = error.source;
     this.raw = error.raw;

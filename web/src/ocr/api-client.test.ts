@@ -229,6 +229,45 @@ test("readBackendOcrStream emits pages as NDJSON chunks arrive", async () => {
   ]);
 });
 
+test("readBackendOcrStream tolerates backend progress and warning events", async () => {
+  const response = new Response(
+    [
+      '{"type":"progress","stage":"ocr"}',
+      '{"type":"progress","stage":"ocr","message":"Processing page 2","percent":50}',
+      '{"type":"warning","code":"EMPTY_PAGE","message":"No text was recognized on page 2.","page":2}',
+      '{"type":"page","page":1,"markdown":"first"}',
+      '{"type":"complete","meta":{"pages":1}}',
+    ].join("\n") + "\n",
+    {
+      headers: { "content-type": "application/x-ndjson" },
+    },
+  );
+  const progress: string[] = [];
+
+  const result = await readBackendOcrStream(
+    response,
+    { current: true },
+    (message) => progress.push(message),
+  );
+
+  assert.equal(result.markdown, "first");
+  assert.deepEqual(progress, [
+    "Processing page 2",
+    "No text was recognized on page 2.",
+    "Получена страница 1...",
+  ]);
+  assert.deepEqual(result.meta, {
+    pages: 1,
+    warnings: [
+      {
+        code: "EMPTY_PAGE",
+        message: "No text was recognized on page 2.",
+        page: 2,
+      },
+    ],
+  });
+});
+
 test("readBackendOcrStream reports backend error events", async () => {
   const response = new Response('{"type":"error","detail":"page 3 failed"}\n', {
     headers: { "content-type": "application/x-ndjson" },
@@ -339,6 +378,42 @@ test("readBackendOcrStream cancels the reader after client cancellation", async 
 
   assert.equal(cancelled, true);
   assert.equal(result.markdown, "first");
+});
+
+test("readBackendOcrStream rejects and cancels stalled partial streams", async () => {
+  let cancelled = false;
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode('{"type":"page","page":1,"markdown":"first"}\n'),
+      );
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      readBackendOcrStream(
+        new Response(body, {
+          headers: { "content-type": "application/x-ndjson" },
+        }),
+        { current: true },
+        undefined,
+        undefined,
+        { stallTimeoutMs: 5 },
+      ),
+    (error: unknown) => {
+      const normalized = normalizePlatformError(error);
+      assert.equal(normalized.code, "OCR_STREAM_STALLED");
+      assert.equal(normalized.partialResult, true);
+      return true;
+    },
+  );
+
+  assert.equal(cancelled, true);
 });
 
 test("readBackendOcrStream rejects unknown protocol events", async () => {

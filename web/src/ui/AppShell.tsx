@@ -10,7 +10,7 @@ export function AppShell() {
 
   return (
     <div
-      className="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col font-sans transition-colors duration-300 relative"
+      className="min-h-screen bg-app text-primary flex flex-col font-sans transition-colors duration-300 relative"
       onDragOver={(event) => {
         if (appState !== "upload") dragHandlers.onDragOver(event);
       }}

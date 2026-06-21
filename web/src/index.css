@@ -1,2 +1,67 @@
 @import "tailwindcss";
+@import "./ui/theme/tokens.css";
+@import "./ui/theme/components.css";
+
 @custom-variant dark (&:is(.dark *));
+
+/**
+ * Регистрируем семантические токены как Tailwind-цвета.
+ * После этого становятся доступны классы:
+ *   bg-app / bg-surface / bg-elevated / bg-inset / bg-overlay
+ *   text-primary / text-secondary / text-muted / text-faint / text-on-accent / text-link
+ *   border-default / border-strong / border-subtle / border-accent
+ *   accent / accent-hover / accent-soft / accent-soft-border / accent-strong
+ *   success / danger / warning / info  (+ -soft / -border / -text)
+ *
+ * `inline` означает: значения берутся прямо из CSS-переменных (var(...)),
+ * поэтому переключение .dark на <html> мгновенно меняет все цвета.
+ */
+@theme inline {
+  /* Брендовый акцент */
+  --color-accent: var(--color-accent);
+  --color-accent-hover: var(--color-accent-hover);
+  --color-accent-soft: var(--color-accent-soft);
+  --color-accent-soft-border: var(--color-accent-soft-border);
+  --color-accent-strong: var(--color-accent-strong);
+
+  /* Фоны */
+  --color-app: var(--color-bg-app);
+  --color-surface: var(--color-bg-surface);
+  --color-elevated: var(--color-bg-elevated);
+  --color-inset: var(--color-bg-inset);
+  --color-overlay: var(--color-bg-overlay);
+
+  /* Текст */
+  --color-primary: var(--color-text-primary);
+  --color-secondary: var(--color-text-secondary);
+  --color-muted: var(--color-text-muted);
+  --color-faint: var(--color-text-faint);
+  --color-on-accent: var(--color-text-on-accent);
+  --color-link: var(--color-text-link);
+
+  /* Границы */
+  --color-default: var(--color-border-default);
+  --color-strong: var(--color-border-strong);
+  --color-subtle: var(--color-border-subtle);
+
+  /* Статусы */
+  --color-success: var(--color-success);
+  --color-success-soft: var(--color-success-soft);
+  --color-success-border: var(--color-success-border);
+  --color-success-text: var(--color-success-text);
+
+  --color-danger: var(--color-danger);
+  --color-danger-soft: var(--color-danger-soft);
+  --color-danger-border: var(--color-danger-border);
+  --color-danger-text: var(--color-danger-text);
+
+  --color-warning: var(--color-warning);
+  --color-warning-soft: var(--color-warning-soft);
+  --color-warning-border: var(--color-warning-border);
+  --color-warning-text: var(--color-warning-text);
+
+  --color-info: var(--color-info);
+  --color-info-soft: var(--color-info-soft);
+  --color-info-border: var(--color-info-border);
+  --color-info-text: var(--color-info-text);
+}

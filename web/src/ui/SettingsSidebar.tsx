@@ -1,15 +1,17 @@
-import {
-  Check,
-  ClipboardPaste,
-  DownloadCloud,
-  Moon,
-  Sun,
-  X,
-} from "lucide-react";
+import { useCallback, useState } from "react";
+import { X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import type { Variants } from "motion/react";
 import type { EngineControls } from "./layout/engine-controls.types";
-import type { LlmProvider, SourceType } from "../ocr/types";
 import { SOURCES } from "./sources";
+import { GatewayPanel } from "./settings/GatewayPanel";
+import { LlmPanel } from "./settings/LlmPanel";
+import { OverscrollReveal } from "./settings/OverscrollReveal";
+import { RememberToggle } from "./settings/RememberToggle";
+import { SourceCard } from "./settings/SourceCard";
+import { ThemeSlider } from "./settings/ThemeSlider";
+import { useIsMobile } from "./settings/useIsMobile";
+import { useOverscrollReveal } from "./settings/useOverscrollReveal";
 
 interface SettingsSidebarProps {
   controls: EngineControls;
@@ -17,45 +19,94 @@ interface SettingsSidebarProps {
   onClose: () => void;
 }
 
+const LOCAL_SOURCE_IDS = ["auto", "browser", "local_tess", "local_easy"];
+const CLOUD_SOURCE_IDS = ["gateway", "llm"];
+
+/**
+ * Сайдбар настроек: выбор источника OCR, конфигурация Gateway/LLM,
+ * переключатель темы и опция запоминания выбора.
+ *
+ * Раньше был "божественным" компонентом (~615 строк) — теперь разбит на
+ * одноотвественные модули в `./settings/`. Здесь только оркестрация:
+ * мобильный bottom-sheet, overscroll reveal и композиция секций.
+ *
+ * Рефакторинг: хардкодные gray-* классы заменены на семантические токены
+ * (bg-surface, bg-overlay, text-faint, bg-strong, border-default).
+ */
 export function SettingsSidebar({
   controls,
   isOpen,
   onClose,
 }: SettingsSidebarProps) {
   const {
-    easyOcrInstalling,
     easyOcrInstallMessage,
     easyOcrInstallProgress,
-    externalLlmConsent,
-    llmKey,
-    llmModel,
-    llmProvider,
+    easyOcrInstalling,
     pingUrl,
     rememberChoice,
     selectedSource,
-    themeMode,
+    themeLevel,
+    themeAuto,
     onInstallEasyOcr,
-    onLlmProviderChange,
     onRememberChange,
     onSourceSelect,
-    setLlmKey,
-    setLlmModel,
-    setExternalLlmConsent,
     setPingUrl,
-    setThemeMode,
+    setThemeLevel,
+    setThemeAuto,
   } = controls;
 
-  const localGatewayEndpoints = [""];
-  const gatewayEndpointOptions = [
-    ...localGatewayEndpoints,
-    "http://localhost:11434",
-    "http://127.0.0.1:11434",
-  ];
-  const gatewayEndpointValue = localGatewayEndpoints.includes(pingUrl)
-    ? ""
-    : gatewayEndpointOptions.includes(pingUrl)
-      ? pingUrl
-      : "custom";
+  const isMobile = useIsMobile();
+  const [peeledId, setPeeledId] = useState<string | null>(null);
+  const [scrollNode, setScrollNode] = useState<HTMLDivElement | null>(null);
+  const bindScrollNode = useCallback((node: HTMLDivElement | null) => {
+    setScrollNode(node);
+  }, []);
+
+  const { overscroll, isRevealed, touchActive, handlers, close } =
+    useOverscrollReveal(scrollNode);
+
+  const togglePeel = (id: string) => setPeeledId(id || null);
+
+  const renderSource = (id: string) => {
+    const src = SOURCES.find((s) => s.id === id);
+    if (!src) return null;
+    return (
+      <SourceCard
+        key={src.id}
+        src={src}
+        isMobile={isMobile}
+        isActive={selectedSource === src.id}
+        isPeeled={peeledId === src.id}
+        easyOcrInstalling={easyOcrInstalling}
+        easyOcrInstallMessage={easyOcrInstallMessage}
+        easyOcrInstallProgress={easyOcrInstallProgress}
+        onSelect={onSourceSelect}
+        onInstallEasyOcr={onInstallEasyOcr}
+        onTogglePeel={togglePeel}
+      />
+    );
+  };
+
+  const sidebarVariants: Variants = {
+    initial: {
+      y: isMobile ? "100%" : 0,
+      x: isMobile ? 0 : "100%",
+    },
+    animate: {
+      y: 0,
+      x: 0,
+      transition: { type: "spring", damping: 28, stiffness: 220 },
+    },
+    exit: {
+      y: isMobile ? "100%" : 0,
+      x: isMobile ? 0 : "100%",
+      transition: {
+        type: "tween",
+        duration: 0.24,
+        ease: [0.32, 0, 0.67, 0],
+      },
+    },
+  };
 
   return (
     <AnimatePresence>
@@ -65,321 +116,109 @@ export function SettingsSidebar({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-gray-900/40 z-[90] backdrop-blur-sm"
+            transition={{ duration: 0.24, ease: "easeInOut" }}
+            className="fixed inset-0 bg-overlay z-[90] backdrop-blur-sm"
             onClick={onClose}
           />
           <motion.div
-            initial={{ x: "100%" }}
-            animate={{ x: 0 }}
-            exit={{ x: "100%" }}
-            transition={{ type: "tween", ease: "easeOut", duration: 0.15 }}
-            className="fixed top-0 right-0 bottom-0 w-[85%] max-w-[340px] bg-white dark:bg-gray-900 shadow-2xl z-[100] border-l border-gray-200 dark:border-gray-800 flex flex-col font-sans"
+            variants={sidebarVariants}
+            initial="initial"
+            animate="animate"
+            exit="exit"
+            className={`fixed ${
+              isMobile
+                ? "bottom-0 left-0 right-0 h-auto max-h-[88dvh] rounded-t-[1.65rem] border-t"
+                : "top-0 right-0 bottom-0 w-[90%] max-w-[360px] border-l"
+            } bg-surface shadow-2xl z-[100] border-default flex flex-col font-sans`}
           >
+            {isMobile && (
+              <div
+                className="w-full flex justify-center pt-4 pb-2"
+                onClick={onClose}
+              >
+                <div className="w-12 h-1.5 bg-strong rounded-full opacity-70" />
+              </div>
+            )}
             <button
               onClick={onClose}
-              className="absolute top-4 right-4 p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 bg-gray-100/50 dark:bg-gray-800/50 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full transition-colors z-10"
+              className="absolute top-4 right-4 flex h-11 w-11 items-center justify-center text-faint hover:text-primary bg-elevated hover:bg-inset rounded-full transition-colors z-[110] sm:h-auto sm:w-auto sm:p-1.5"
+              aria-label="Закрыть настройки"
             >
               <X className="w-6 h-6" />
             </button>
 
-            <div className="p-4 sm:p-5 pt-14 flex flex-col gap-6 overflow-y-auto">
-              <div className="flex flex-col gap-4">
-                <div className="flex flex-col gap-2">
-                  <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-1">
-                    Local & Browser
-                  </h3>
-                  {SOURCES.filter((s) =>
-                    ["auto", "browser", "local_tess", "local_easy"].includes(
-                      s.id,
-                    ),
-                  ).map((src) => (
-                    <button
-                      key={src.id}
-                      onClick={() => onSourceSelect(src.id as SourceType)}
-                      className={`w-full flex items-center justify-between px-3 py-3 text-left transition-colors rounded-xl border ${
-                        selectedSource === src.id
-                          ? "bg-blue-50/50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
-                          : "bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 hover:border-blue-300 dark:hover:border-gray-600"
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={
-                            selectedSource === src.id
-                              ? "text-blue-600 dark:text-blue-400"
-                              : "text-gray-400 dark:text-gray-500"
-                          }
-                        >
-                          {src.icon}
-                        </div>
-                        <div className="flex flex-col">
-                          <span
-                            className={`text-[13px] font-semibold ${selectedSource === src.id ? "text-blue-700 dark:text-blue-300" : "text-gray-700 dark:text-gray-200"}`}
-                          >
-                            {src.label}
-                          </span>
-                          <span className="text-[11px] text-gray-500 dark:text-gray-400 leading-tight mt-0.5">
-                            {src.desc}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex flex-row items-center gap-2">
-                        {src.id === "local_easy" &&
-                          !easyOcrInstalling &&
-                          selectedSource === src.id && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onInstallEasyOcr();
-                              }}
-                              className="p-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-gray-400 hover:text-blue-500 hover:border-blue-300 dark:hover:border-blue-700 shadow-sm mr-2 active:scale-95 transition-all text-center"
-                              title="Скачать EasyOCR (~5ГБ)"
-                            >
-                              <DownloadCloud className="w-4 h-4" />
-                            </button>
-                          )}
-                        {src.id === "local_easy" && easyOcrInstalling && (
-                          <div
-                            className="w-[104px] px-2 py-1 bg-blue-50 dark:bg-blue-900 border border-blue-200 dark:border-blue-700 rounded text-[10px] text-blue-700 dark:text-blue-200 mr-2"
-                            title={easyOcrInstallMessage}
-                          >
-                            <div className="flex items-center justify-between gap-1">
-                              <span className="truncate">
-                                {Math.round(easyOcrInstallProgress)}%
-                              </span>
-                              <div className="w-2 h-2 border-2 border-blue-500 border-t-transparent rounded-full animate-spin shrink-0"></div>
-                            </div>
-                            <div className="mt-1 h-1 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-950">
-                              <div
-                                className="h-full rounded-full bg-blue-500 transition-all duration-500"
-                                style={{
-                                  width: `${Math.max(
-                                    3,
-                                    Math.min(100, easyOcrInstallProgress),
-                                  )}%`,
-                                }}
-                              />
-                            </div>
-                          </div>
-                        )}
-                        {selectedSource === src.id && (
-                          <Check className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                        )}
-                      </div>
-                    </button>
-                  ))}
-                </div>
+            <div
+              ref={bindScrollNode}
+              className="flex-1 overflow-y-auto no-scrollbar relative z-10 bg-surface"
+              onScroll={handlers.onScroll}
+              onWheel={handlers.onWheel}
+              onTouchStart={handlers.onTouchStart}
+              onTouchMove={handlers.onTouchMove}
+              onTouchEnd={handlers.onTouchEnd}
+            >
+              <div
+                className="flex flex-col min-h-full"
+                style={{
+                  transform: `translateY(-${overscroll}px)`,
+                  transition: touchActive
+                    ? "none"
+                    : "transform 0.3s cubic-bezier(0.25, 1, 0.5, 1)",
+                }}
+              >
+                <div className="p-5 sm:p-6 pt-14 flex flex-col gap-5 sm:gap-6 pb-7 flex-1 min-h-full">
+                  {/* Верхняя секция: источники + конфигурация. flex-1 растягивает,
+                      чтобы нижние контролы (тема/запоминание) прижимались к низу
+                      сайдбара, когда контента мало. */}
+                  <div className="flex flex-col gap-4 flex-1 min-h-0">
+                    <section className="flex flex-col gap-2.5 sm:gap-2">
+                      <h3 className="text-[10.5px] font-bold text-faint uppercase tracking-widest pl-1 sm:text-[10px]">
+                        Local & Browser
+                      </h3>
+                      {LOCAL_SOURCE_IDS.map(renderSource)}
+                    </section>
 
-                <div className="flex flex-col gap-2 mt-2">
-                  <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-1">
-                    API & Cloud
-                  </h3>
-                  {SOURCES.filter((s) => ["gateway", "llm"].includes(s.id)).map(
-                    (src) => (
-                      <button
-                        key={src.id}
-                        onClick={() => onSourceSelect(src.id as SourceType)}
-                        className={`w-full flex items-center justify-between px-3 py-3 text-left transition-colors rounded-xl border ${
-                          selectedSource === src.id
-                            ? "bg-blue-50/50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800"
-                            : "bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 hover:border-blue-300 dark:hover:border-gray-600"
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={
-                              selectedSource === src.id
-                                ? "text-blue-600 dark:text-blue-400"
-                                : "text-gray-400 dark:text-gray-500"
-                            }
-                          >
-                            {src.icon}
-                          </div>
-                          <div className="flex flex-col">
-                            <span
-                              className={`text-[13px] font-semibold ${selectedSource === src.id ? "text-blue-700 dark:text-blue-300" : "text-gray-700 dark:text-gray-200"}`}
-                            >
-                              {src.label}
-                            </span>
-                            <span className="text-[11px] text-gray-500 dark:text-gray-400 leading-tight mt-0.5">
-                              {src.desc}
-                            </span>
-                          </div>
-                        </div>
-                        {selectedSource === src.id && (
-                          <Check className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                        )}
-                      </button>
-                    ),
-                  )}
+                    <section className="flex flex-col gap-2.5 sm:gap-2 mt-2">
+                      <h3 className="text-[10.5px] font-bold text-faint uppercase tracking-widest pl-1 sm:text-[10px]">
+                        API & Cloud
+                      </h3>
+                      {CLOUD_SOURCE_IDS.map(renderSource)}
 
-                  {selectedSource === "gateway" && (
-                    <div className="mt-1 flex flex-col gap-2 px-1">
-                      <select
-                        onChange={(e) => {
-                          const value = e.target.value;
-                          setPingUrl(value === "custom" ? "" : value);
-                        }}
-                        className="p-2 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-lg text-sm text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-blue-500 transition-all font-sans"
-                        value={gatewayEndpointValue}
-                      >
-                        <option value="">Текущий Gateway</option>
-                        <option value="http://localhost:11434">
-                          Напрямую в Ollama (:11434)
-                        </option>
-                        <option value="custom">Cloudflare Edge / Custom</option>
-                      </select>
-                      {gatewayEndpointValue === "custom" && (
-                        <input
-                          type="url"
-                          placeholder="Edge / Custom URL: https://..."
-                          value={pingUrl}
-                          onChange={(e) => setPingUrl(e.target.value)}
-                          className="w-full p-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-blue-500 outline-none text-gray-800 dark:text-gray-200 transition-all font-mono shadow-sm"
+                      {selectedSource === "gateway" && (
+                        <GatewayPanel
+                          pingUrl={pingUrl}
+                          setPingUrl={setPingUrl}
                         />
                       )}
-                    </div>
-                  )}
 
-                  {selectedSource === "llm" && (
-                    <div className="mt-1 flex flex-col gap-3 px-1 border border-gray-200 dark:border-gray-700 rounded-xl p-3 bg-white dark:bg-gray-800 shadow-sm mx-1">
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-[11px] font-bold text-gray-500 dark:text-gray-400">
-                          Провайдер
-                        </label>
-                        <select
-                          value={llmProvider}
-                          onChange={(e) => {
-                            const prov = e.target.value as LlmProvider;
-                            onLlmProviderChange(prov);
-                            if (prov === "gemini")
-                              setLlmModel("gemini-2.5-flash-lite");
-                            else setLlmModel("baidu/qianfan-ocr-fast:free");
-                          }}
-                          className="p-2 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-lg text-sm text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                        >
-                          <option value="gemini">Google Gemini</option>
-                          <option value="openrouter">OpenRouter</option>
-                        </select>
-                      </div>
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-[11px] font-bold text-gray-500 dark:text-gray-400">
-                          Модель
-                        </label>
-                        <input
-                          type="text"
-                          value={llmModel}
-                          onChange={(e) => setLlmModel(e.target.value)}
-                          className="p-2 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-lg text-sm text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono"
-                        />
-                      </div>
-                      <div className="flex flex-col gap-1.5">
-                        <label className="text-[11px] font-bold text-gray-500 dark:text-gray-400">
-                          API Ключ
-                        </label>
-                        <div className="flex gap-2">
-                          <input
-                            type="password"
-                            value={llmKey}
-                            onChange={(e) => setLlmKey(e.target.value)}
-                            placeholder="Введите ключ..."
-                            className="flex-1 min-w-0 p-2 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-lg text-sm text-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-blue-500 transition-all font-mono"
-                          />
-                          <button
-                            onClick={async () => {
-                              try {
-                                const text =
-                                  await navigator.clipboard.readText();
-                                setLlmKey(text);
-                              } catch (e) {
-                                console.debug("Clipboard read failed", e);
-                              }
-                            }}
-                            className="p-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg transition-colors border border-gray-200 dark:border-gray-700"
-                            title="Вставить"
-                          >
-                            <ClipboardPaste className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                      <label className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
-                        <input
-                          type="checkbox"
-                          checked={externalLlmConsent}
-                          onChange={(event) =>
-                            setExternalLlmConsent(event.target.checked)
-                          }
-                          className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
-                        />
-                        <span className="text-[11px] leading-4">
-                          Я согласен отправить содержимое документа во внешний
-                          сервис{" "}
-                          {llmProvider === "gemini"
-                            ? "Google Gemini"
-                            : "OpenRouter"}
-                          . Согласие действует только до перезагрузки вкладки.
-                        </span>
-                      </label>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex-1" />
-
-              <div className="h-px bg-gray-100 dark:bg-gray-800 mt-2" />
-
-              <div className="flex flex-col gap-3 px-1 mt-2">
-                <label className="relative flex items-center gap-3 cursor-pointer group">
-                  <input
-                    type="checkbox"
-                    className="peer sr-only"
-                    checked={rememberChoice}
-                    onChange={(e) => onRememberChange(e.target.checked)}
-                  />
-                  <div className="w-5 h-5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 peer-checked:bg-blue-600 peer-checked:border-blue-600 dark:peer-checked:bg-blue-600 dark:peer-checked:border-blue-600 transition-colors flex items-center justify-center shrink-0">
-                    <svg
-                      className="w-3.5 h-3.5 text-white opacity-0 peer-checked:opacity-100 transition-opacity"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={3}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M5 13l4 4L19 7"
-                      />
-                    </svg>
+                      {selectedSource === "llm" && (
+                        <LlmPanel controls={controls} />
+                      )}
+                    </section>
                   </div>
-                  <span className="text-[14px] font-semibold text-gray-700 dark:text-gray-300 select-none group-hover:text-gray-900 dark:group-hover:text-gray-100 transition-colors">
-                    Запомнить выбор (Cookies)
-                  </span>
-                </label>
-              </div>
 
-              <div className="flex flex-col gap-3 pb-4">
-                <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-xl w-full">
-                  <button
-                    onClick={() => setThemeMode("auto")}
-                    className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${themeMode === "auto" ? "bg-white dark:bg-gray-700 shadow-sm text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"}`}
-                  >
-                    Default
-                  </button>
-                  <button
-                    onClick={() => setThemeMode("light")}
-                    className={`flex-1 flex justify-center items-center py-1.5 text-xs font-bold rounded-lg transition-all ${themeMode === "light" ? "bg-white dark:bg-gray-700 shadow-sm text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"}`}
-                  >
-                    <Sun className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => setThemeMode("dark")}
-                    className={`flex-1 flex justify-center items-center py-1.5 text-xs font-bold rounded-lg transition-all ${themeMode === "dark" ? "bg-white dark:bg-gray-700 shadow-sm text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"}`}
-                  >
-                    <Moon className="w-4 h-4" />
-                  </button>
+                  <div className="divider" />
+
+                  {/* Нижняя секция: reveal ниже не влияет на позицию темы. */}
+                  <div className="mt-auto flex flex-col gap-3 shrink-0">
+                    <RememberToggle
+                      checked={rememberChoice}
+                      onChange={onRememberChange}
+                    />
+                    <ThemeSlider
+                      level={themeLevel}
+                      auto={themeAuto}
+                      onLevelChange={setThemeLevel}
+                      onAutoChange={setThemeAuto}
+                    />
+                  </div>
                 </div>
               </div>
+              <OverscrollReveal
+                isRevealed={isRevealed}
+                overscroll={overscroll}
+                touchActive={touchActive}
+                onClose={close}
+              />
             </div>
           </motion.div>
         </>

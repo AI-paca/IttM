@@ -1,10 +1,10 @@
-# Local LLM OCR runners
+# Local Ollama deployment scripts
 
-This directory is an experimental staging area for local OCR/VLM engines. It is intentionally outside the main application Docker/compose flow so model downloads do not inflate normal development images.
+This directory keeps local Ollama and compatible OCR/VLM deployment scripts in one device-local workdir. It is intentionally outside the main application Docker/compose flow so model downloads do not inflate normal development images.
 
 Tracked files here are only scripts, manifests, and examples. Real tokens and model caches stay outside git:
 
-- `LLM-OCR/.env` and `LLM-OCR/.evn` are ignored local token files.
+- `scripts/ollama-deploy/.env` and `.evn` are ignored local token files.
 - `HF_HOME` defaults to `${HOME}/.cache/huggingface`, so Hugging Face weights are reused from the user cache instead of copied into the repository.
 - `NEMOTRON_OCR_REPO_DIR` defaults to `${HOME}/.cache/huggingface/nemotron-ocr-v2-src`, because Nemotron needs its source package installed as well as the weights.
 - Ollama keeps its own model cache.
@@ -12,18 +12,18 @@ Tracked files here are only scripts, manifests, and examples. Real tokens and mo
 Quick start:
 
 ```bash
-scripts/llm-ocr/create-workdir.sh
-scripts/llm-ocr/run-local-api.sh --list
-scripts/llm-ocr/run-local-api.sh
+scripts/ollama-deploy/create-workdir.sh
+scripts/ollama-deploy/run-local-api.sh --list
+scripts/ollama-deploy/run-local-api.sh
 ```
 
 Non-interactive examples:
 
 ```bash
-scripts/llm-ocr/run-local-api.sh --model glm-ocr --backend ollama
-scripts/llm-ocr/run-local-api.sh --model qianfan-ocr --backend vllm --docker --port 18081
-scripts/llm-ocr/run-local-api.sh --model paddle-ocrv6-medium --backend paddleocr
-scripts/llm-ocr/run-local-api.sh --model nemotron-ocr-v2 --backend nemotron --docker
+scripts/ollama-deploy/run-local-api.sh --model glm-ocr --backend ollama
+scripts/ollama-deploy/run-local-api.sh --model qianfan-ocr --backend vllm --docker --port 18081
+scripts/ollama-deploy/run-local-api.sh --model paddle-ocrv6-medium --backend paddleocr
+scripts/ollama-deploy/run-local-api.sh --model nemotron-ocr-v2 --backend nemotron --docker
 ```
 
 Use `--dry-run` first if you only want to inspect the download and server commands.

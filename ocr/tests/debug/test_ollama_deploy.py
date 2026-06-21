@@ -3,9 +3,17 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
-RUNNER = ROOT / "LLM-OCR" / "llm_ocr_runner.py"
-CATALOG = ROOT / "LLM-OCR" / "models.json"
+RUNNER_DIR = ROOT / "scripts" / "ollama-deploy"
+RUNNER = RUNNER_DIR / "ollama_deploy.py"
+CATALOG = RUNNER_DIR / "models.json"
+
+pytestmark = pytest.mark.skipif(
+    not RUNNER.exists() or not CATALOG.exists(),
+    reason="local Ollama deployment scripts are not part of the repository",
+)
 
 
 def run_runner(*args):
@@ -87,4 +95,4 @@ def test_runner_dry_run_nemotron_uses_external_source_cache_for_docker():
 
     assert "nvcr.io/nvidia/pytorch:25.09-py3" in result.stdout
     assert "/nemotron-ocr-src" in result.stdout
-    assert "LLM-OCR/local_ocr_api.py --backend nemotron" in result.stdout
+    assert "local_ocr_api.py --backend nemotron" in result.stdout

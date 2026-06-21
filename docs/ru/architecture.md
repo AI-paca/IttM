@@ -1,106 +1,80 @@
 # Архитектура проекта
 
 [Документация](./README.md) |
-[Границы ответственности](./course/boundaries.md)
+[Границы ответственности](./course/boundaries.md) |
+[Целевой единый пайплайн](./architecture-unified-pipeline.md) |
+[Текущая реализация флагов](./architecture-current-flags.md) |
+[Ограничения](./architecture-limitations.md)
 
-IttM — **gateway-first** инструмент: ядром является Extraction contract (gateway API), а браузерный интерфейс, CLI-обёртка и `curl` — равноправные клиенты над одним backend-ом. Архитектурно проект делится на браузерный клиент, браузерные стратегии распознавания, TypeScript gateway и Python OCR-сервис. Способ запуска (Docker / bare-metal / статическая сборка) и способ обращения к сервису (Web UI / `curl` / CLI) режимами обработки не являются — обработкой управляют четыре движка (Local Tesseract, Local EasyOCR, Browser OCR, External LLM).
+IttM — **gateway-first** инструмент. Ядро — Extraction contract (gateway API).
+Web UI, CLI-обёртка и `curl` — равноправные клиенты над одним backend-ом.
 
-При локальном запуске `server.ts` одновременно обслуживает API и frontend. В Docker-режиме наружу опубликован только nginx: он раздает собранный frontend и проксирует `/api/*` во внутренний gateway. Python OCR-сервис остается закрытым внутри runtime-сети и доступен gateway по `OCR_URL`.
+Подробности о флагах/профилях вынесены в отдельные документы:
 
-```mermaid
-flowchart TB
-    User["User"]
+- [`architecture-unified-pipeline.md`](./architecture-unified-pipeline.md) — целевая модель единого пайплайна.
+- [`architecture-current-flags.md`](./architecture-current-flags.md) — текущая реализация профилей/флагов.
 
-    subgraph Browser["Browser: React + Vite"]
-        direction TB
-        App["App.tsx<br/>OcrProvider + AppShell"]
-        State["OcrContext.tsx<br/>state + actions"]
-        Workspace["OcrWorkspace<br/>upload / settings / reading"]
-        Strategy["use-extraction.ts<br/>source selection + fallback"]
-        Pdf["pdf-parser.ts + worker<br/>PDF text + page canvas"]
-        BrowserOcr["browser-engine.ts<br/>Tesseract.js WASM"]
-        Llm["llm-client.ts<br/>Gemini / OpenRouter / Ollama"]
+## Запуск (launch) ≠ обработка (engines)
 
-        App --> State
-        State --> Workspace
-        State --> Strategy
-        Strategy --> Pdf
-        Strategy --> BrowserOcr
-        Strategy --> Llm
-    end
+| Ось             | Значения                                                                                                                   |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Запуск (launch) | Docker Compose, bare-metal (`bash scripts/runtime/run-local.sh`), статическая Lite (`bash scripts/runtime/build-lite.sh`). |
+| Доступ (access) | Web UI, `curl`, CLI (`npm run extract -- --help`).                                                                         |
 
-    subgraph LocalRuntime["Local runtime"]
-        direction TB
-        LocalServer["server.ts<br/>Express API + Vite dev/prod static"]
-    end
+Это разные оси, не режимы OCR. Обработкой управляют **четыре движка**: Local Tesseract, Local EasyOCR, Browser OCR, External LLM. Запуск и доступ — лишь способ доставить им документ.
 
-    subgraph DockerRuntime["Docker runtime"]
-        direction TB
-        Nginx["nginx container<br/>published on host<br/>static dist + /api proxy"]
-        GatewayContainer["gateway container<br/>server.ts + gateway/src<br/>internal: 3000"]
-        OcrContainer["ocr container<br/>FastAPI + Tesseract<br/>internal: 8000"]
+## Runtime-топология
 
-        Nginx -->|/api/*| GatewayContainer
-        GatewayContainer -->|OCR_URL| OcrContainer
-    end
+Диаграмма показывает поток документа и границы ответственности: способы доступа
+и запуска не являются OCR-режимами, browser orchestrator выбирает источник
+обработки, gateway держит единый Extraction contract, а OCR/LLM-движки только
+исполняют выбранную обработку.
 
-    subgraph Gateway["gateway/src"]
-        direction TB
-        Handle["core/handle.ts<br/>API-only dispatch"]
-        Routes["core/routes.ts<br/>convert / health / capabilities / diagnostics / probe / install"]
-        Client["clients/ocrClient.ts<br/>OCR_URL proxy"]
-        Http["core/http.ts<br/>JSON/error helpers"]
+<img src="../assets/project-architecture.svg" alt="Архитектура проекта IttM">
 
-        Handle --> Routes
-        Routes --> Client
-        Routes --> Http
-    end
+В Docker наружу опубликован только nginx: он раздаёт собранный frontend и
+проксирует `/api/*` во внутренний gateway. Python OCR-сервис остаётся закрытым
+внутри runtime-сети и доступен gateway по `OCR_URL`.
 
-    subgraph Python["ocr/app: FastAPI OCR"]
-        direction TB
-        Api["routers/*<br/>convert / health / probe / install"]
-        Upload["routers/convert.py<br/>upload + JSON/NDJSON"]
-        Convert["services/convert_service.py<br/>page iterator + orchestration"]
-        Chunking["chunking/*<br/>split + dedupe"]
-        Engines["engines/*<br/>Auto / Tesseract / EasyOCR / Stub"]
-        Markdown["formatting/markdown_formatter.py<br/>Markdown result"]
+В bare-metal-режиме `server.ts` одновременно обслуживает API и frontend на
+одном gateway-порту.
 
-        Api --> Upload
-        Upload --> Convert
-        Convert --> Chunking
-        Convert --> Engines
-        Engines --> Markdown
-    end
+## Shared contract (что уже работает)
 
-    External["External APIs<br/>Gemini / OpenRouter / Ollama"]
-    CustomGateway["Custom gateway<br/>user-configured endpoint"]
-    Edge["Cloudflare Worker<br/>optional edge ingress / API proxy"]
+Подмножество маршрутов, которые уже едины для Web UI, CLI и `curl`:
 
-    User --> App
-    Strategy -->|Docker /api| Nginx
-    Strategy -. local /api .-> LocalServer
-    Strategy -. custom gateway .-> CustomGateway
-    Llm -. Gemini via edge .-> Edge
-    Edge -. optional origin proxy .-> Nginx
-    Edge -. Gemini proxy .-> External
-    LocalServer --> Handle
-    GatewayContainer --> Handle
-    OcrContainer --> Api
-    Client -->|HTTP OCR_URL| Api
-    Llm --> External
+| Маршрут                                  | Метод    | Назначение                                                                                                                                  |
+| ---------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/extract/text`                 | POST     | Синхронное извлечение; формат по `Accept` (`text/plain`, `text/markdown`, `application/json`, `text/event-stream`, `application/x-ndjson`). |
+| `POST /api/tasks`                        | POST     | Async-задача (`queued → running → ... → cancelled/partial/complete`).                                                                       |
+| `GET  /api/tasks`                        | GET      | Список задач (`?state=&limit=&engine=&profile=`).                                                                                           |
+| `GET  /api/tasks/:id`                    | GET      | Статус и результат задачи.                                                                                                                  |
+| `GET  /api/tasks/:id/events`             | GET      | SSE-стрим прогресса; resume по `Last-Event-ID`.                                                                                             |
+| `POST /api/tasks/:id/cancel`             | POST     | Отмена.                                                                                                                                     |
+| `POST /convert`, `/convert/stream`       | POST     | Совместимые OCR-маршруты.                                                                                                                   |
+| `GET  /api/health`                       | GET      | Проверка сервиса.                                                                                                                           |
+| `GET  /api/capabilities`                 | GET      | Доступные движки, профили и лимиты.                                                                                                         |
+| `GET  /api/diagnostics`                  | GET      | Диагностика окружения.                                                                                                                      |
+| `POST /api/probe`                        | POST     | Тестовый прогон без сохранения.                                                                                                             |
+| `GET  /v1/pipeline/flags`                | GET      | Каталог effective flag keys (общий для backend, browser, LLM).                                                                              |
+| `POST /api/install-easyocr` (+`/status`) | POST/GET | Установка EasyOCR и её статус.                                                                                                              |
 
-    Markdown -->|JSON or page NDJSON| Client
-    Client -->|passes result back| Strategy
-    Strategy --> State
-```
+`pdf_mode=auto|raster` принимается в query (`?pdf_mode=...`), HTTP-header
+(`X-PDF-Mode`), JSON-поле (`pdfMode`) и CLI-флаг (`--pdf-mode`). Неизвестные
+значения → HTTP 400. Фактически использованный режим возвращается в
+`meta.pdf_mode`.
 
-Проверенное состояние runtime:
+In-memory task queue: `maxWorkers: 1`, `maxQueued: 32`. Задачи живут в памяти
+процесса gateway и не переживают рестарт; durable queue, retry и retention
+отсутствуют.
 
-- в Docker наружу публикуется только nginx; host-порт выбирается автоматически из диапазона `3000-3099`, а фактический порт показывает `docker compose port nginx 80`;
-- gateway и OCR остаются внутри Docker-сети;
-- `GET /api/health` через nginx возвращает ответ Python OCR-сервиса;
-- локальный запуск использует те же gateway-маршруты, что и контейнерный запуск;
-- статическая Lite-сборка может работать без серверного OCR и использовать browser OCR или внешние LLM API.
+## Что где смотреть
 
-Границы файлов и точки входа вынесены в отдельный документ:
-[границы ответственности и точки входа](./course/boundaries.md).
+| Тема                                          | Документ                                                                 |
+| --------------------------------------------- | ------------------------------------------------------------------------ |
+| Целевая модель единого пайплайна              | [`architecture-unified-pipeline.md`](./architecture-unified-pipeline.md) |
+| Текущая реализация профилей/флагов            | [`architecture-current-flags.md`](./architecture-current-flags.md)       |
+| Каталог профилей, табличные/OCR-флаги         | [`engine/README.md`](./engine/README.md)                                 |
+| Жёсткие лимиты, причины и следствия           | [`architecture-limitations.md`](./architecture-limitations.md)           |
+| Границы файлов и точки входа                  | [`course/boundaries.md`](./course/boundaries.md)                         |
+| Направления развития (расширение, Linux, LLM) | [`roadmap/vision.md`](./roadmap/vision.md)                               |

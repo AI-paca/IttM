@@ -103,6 +103,7 @@ logs/
 *.bak
 *.cache
 .cache/
+/.sast/
 
 # Test artifacts
 .coverage
@@ -122,8 +123,8 @@ debug/fixtures/*
 !debug/reference/
 debug/reference/*
 !debug/reference/.gitkeep
-!debug/reference/*.md
-!debug/private-report.md
+!debug/reference/SAMPLE_4k.png.md
+!debug/reference/SAMPLE_mixed_ru_en_zh_table_image.pdf.md
 
 # LLM review drafts
 docs/ревью от LLM/
@@ -137,7 +138,17 @@ docs/ревью от LLM/
 *.pth
 *.weights
 
-# Local LLM OCR experiments
+# Local Ollama deployment workdir
+scripts/ollama-deploy/.env
+scripts/ollama-deploy/.evn
+scripts/ollama-deploy/.hf-cache/
+scripts/ollama-deploy/cache/
+scripts/ollama-deploy/models/
+scripts/ollama-deploy/output/
+scripts/ollama-deploy/tmp/
+
+# Legacy local LLM OCR experiments
+LLM-OCR/
 LLM-OCR/.env
 LLM-OCR/.evn
 LLM-OCR/.hf-cache/
@@ -145,3 +156,7 @@ LLM-OCR/cache/
 LLM-OCR/models/
 LLM-OCR/output/
 LLM-OCR/tmp/
+
+# Local agent and planning workspaces
+.zoo/
+draft-to-do.md

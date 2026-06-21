@@ -1,73 +1,38 @@
 # Документация IttM
 
-[English](../en/README.md) | [Корневой README](../../README.md)
+<p align="right">
+  <a href="../../README.md"><img alt="Русский" src="https://img.shields.io/badge/%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-%F0%9F%87%B7%F0%9F%87%BA-blue"></a>
+  <a href="../en/README.md"><img alt="English" src="https://img.shields.io/badge/English-%F0%9F%87%AC%F0%9F%87%A7-lightgrey"></a>
+</p>
 
-Пользовательская вводная (что это, как запустить, безопасно ли) — в
-[корневом `README.md`](../../README.md). Здесь — техническая документация для
-разработчиков и контрибьюторов: архитектура, контракты, ограничения, тесты и
-границы ответственности.
+[Корневой README](../../README.md) | [English](../en/README.md)
+
+Пользовательская вводная — в [корневом `README.md`](../../README.md). Этот
+индекс собирает техническую документацию для разработчиков и контрибьюторов:
+архитектура, контракты, ограничения, тесты, направления развития.
 
 ## Карта документации
 
-| Документ                                                             | О чём                                                                   |
-| -------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| [Архитектура](./architecture.md)                                     | Компоненты, runtime-ы (локальный/Docker), mermaid-схема потоков данных. |
-| [Ограничения OCR-архитектуры](./architecture-limitations.md)         | Лимиты памяти, PDF, таблиц; что и почему не масштабируется.             |
-| [Extraction contract](#extraction-contract) (ниже)                   | Единый набор маршрутов gateway над всеми движками.                      |
-| [Тестирование](./testing.md)                                         | Tiers тестов, oracle выбора профиля, PR gate.                           |
-| [Debug](./debug.md)                                                  | Локальные воспроизводимые OCR-входы и артефакты.                        |
-| [Движок и профили](./engine/README.md)                               | Backend profiles, pipeline flags, CI-контракт документации.             |
-| [Политика безопасности](./security.md)                               | Границы доверия, незакрытые риски, модель угроз.                        |
-| [Ручной запуск Docker](./docker-manual-launch.md)                    | Команды `docker build`/`docker run` без Compose.                        |
-| [Границы ответственности](./course/boundaries.md)                    | Точки входа и владельцы файлов по компонентам.                          |
-| [История усиления движка](./engine-hardening-progress.md)            | Что уже стабилизировано в OCR-пайплайне.                                |
-| [Эксперимент качества Tesseract](./experiments/tesseract-quality.md) | Почему нужен oracle и какие артефакты собраны.                          |
-| [SBOM / зависимости](./sbom-report.md)                               | Состав зависимостей.                                                    |
-| [История roadmap](./roadmap/history.md)                              | Как архитектура пришла к текущему виду.                                 |
-| [Ветки развития](./roadmap/development-branches.md)                  | Фактические ветки-заглушки, активные линии и архивы.                    |
-| [Критерии заданий курса](./course/course_tasks.md)                   | Таблица соответствия заданий курса и реализации.                        |
-
-## Extraction contract
-
-IttM — **gateway-first** инструмент: ядром является Extraction contract (gateway
-API), а Web UI, CLI-обёртка (`scripts/cli/ittm-extract.ts`) и `curl` — равноправные
-клиенты над одним и тем же backend-ом. Контракт не зависит ни от движка, ни от
-клиента.
-
-| Маршрут                             | Метод    | Назначение                                                                                                                                  |
-| ----------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/api/extract/text`                 | POST     | Синхронное извлечение; формат по `Accept` (`text/plain`, `text/markdown`, `application/json`, `text/event-stream`, `application/x-ndjson`). |
-| `/api/tasks`                        | POST     | Создать async-задачу (`queued → running → ... → cancelled`).                                                                                |
-| `/api/tasks`                        | GET      | Список задач (`?state=&limit=`).                                                                                                            |
-| `/api/tasks/:id`                    | GET      | Статус и результат задачи.                                                                                                                  |
-| `/api/tasks/:id/events`             | GET      | SSE-стрим прогресса; resume по `Last-Event-ID`.                                                                                             |
-| `/api/tasks/:id/cancel`             | POST     | Отмена задачи.                                                                                                                              |
-| `/convert`, `/convert/stream`       | POST     | Совместимые OCR-маршруты.                                                                                                                   |
-| `/api/health`                       | GET      | Проверка сервиса.                                                                                                                           |
-| `/api/capabilities`                 | GET      | Доступные движки и лимиты.                                                                                                                  |
-| `/api/diagnostics`                  | GET      | Диагностика окружения.                                                                                                                      |
-| `/api/probe`                        | POST     | Тестовый прогон без сохранения.                                                                                                             |
-| `/api/install-easyocr` (+`/status`) | POST/GET | Установка EasyOCR и её статус.                                                                                                              |
-
-In-memory task lifecycle: `maxWorkers: 1`, `maxQueued: 32`. Задачи хранятся в
-памяти процесса gateway и **не переживают рестарт**: durable queue, retry и
-retention отсутствуют (см. [draft-to-do](../../draft-to-do.md)).
-
-Для PDF контракт принимает `pdf_mode=auto|raster`:
-
-- `auto` — default; backend использует пригодный текстовый слой, а
-  image-only/поврежденный PDF рендерит постранично и передает в OCR;
-- `raster` — явно пропускает проверку текстового слоя и принудительно
-  распознает отрендеренные страницы.
-
-Флаг доступен одинаково в query `pdf_mode`, заголовке `X-PDF-Mode`, JSON-поле
-`pdfMode` и CLI-аргументе `--pdf-mode`. Неизвестное значение отклоняется с
-HTTP 400.
+| Документ                                                                | О чём                                                                         |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| [Архитектура проекта](./architecture.md)                                | Runtime-топология (локальный/Docker), shared contract, Mermaid-схема потоков. |
+| [Целевой единый пайплайн](./architecture-unified-pipeline.md)           | Целевая модель: один контракт, один resolver флагов, один PDF-контракт.       |
+| [Текущая реализация флагов и профилей](./architecture-current-flags.md) | Что есть в коде: `OcrPipelineProfile`, `pipeline_flags`, `pdf_mode`, engines. |
+| [Ограничения OCR-архитектуры](./architecture-limitations.md)            | Жёсткие лимиты памяти, PDF, таблиц.                                           |
+| [Видение развития проекта](./roadmap/vision.md)                         | Расширение, Linux-pipeline длинных скриншотов, marketplace-cart с whitelist.  |
+| [Движок и профили](./engine/README.md)                                  | Backend profiles, pipeline flags, CI-контракт документации.                   |
+| [Тестирование](./testing.md)                                            | Tiers тестов, oracle выбора профиля, PR gate.                                 |
+| [Debug](./debug.md)                                                     | Локальные воспроизводимые OCR-входы и артефакты.                              |
+| [Политика безопасности](./security.md)                                  | Границы доверия, незакрытые риски, модель угроз.                              |
+| [SAST](./sast.md)                                                       | Запуск Semgrep, разбор findings, добавление правил и CI-артефакты.            |
+| [Ручной запуск Docker](./docker-manual-launch.md)                       | `docker build` / `docker run` без Compose.                                    |
+| [Границы ответственности](./course/boundaries.md)                       | Точки входа и владельцы файлов по компонентам.                                |
+| [Эксперимент качества Tesseract](./experiments/tesseract-quality.md)    | Почему нужен oracle и какие артефакты собраны.                                |
+| [История roadmap](./roadmap/history.md)                                 | Как архитектура пришла к текущему виду.                                       |
+| [Ветки развития](./roadmap/development-branches.md)                     | Фактические ветки, активные линии и архивы.                                   |
+| [Критерии заданий курса](./course/course_tasks.md)                      | Таблица соответствия заданий курса и реализации.                              |
 
 ## Движки
-
-Обработку выполняют четыре движка. Способ запуска (Docker / bare-metal / статика)
-и способ доступа (Web UI / `curl` / CLI) — это не «режимы обработки».
 
 | Движок          | Где выполняется                | Передача исходного файла                          |
 | --------------- | ------------------------------ | ------------------------------------------------- |
@@ -75,6 +40,48 @@ HTTP 400.
 | Local EasyOCR   | Python FastAPI (backend)       | multipart без browser-side `arrayBuffer()`/Base64 |
 | Browser OCR     | Tesseract.js worker в браузере | файл не покидает вкладку                          |
 | External LLM    | API выбранного провайдера      | только после явного согласия пользователя         |
+
+## Extraction contract
+
+Один набор маршрутов для Web UI, CLI и `curl`. Формат ответа — по заголовку
+`Accept`: `text/plain`, `text/markdown`, `application/json`, `text/event-stream`,
+`application/x-ndjson`.
+
+| Маршрут                                                              | Метод    | Назначение                                                           |
+| -------------------------------------------------------------------- | -------- | -------------------------------------------------------------------- |
+| `/api/extract/text`                                                  | POST     | Синхронное извлечение.                                               |
+| `/api/tasks`                                                         | POST/GET | Async-задачи: `queued → running → ... → cancelled/partial/complete`. |
+| `/api/tasks/:id`                                                     | GET      | Статус и результат задачи.                                           |
+| `/api/tasks/:id/events`                                              | GET      | SSE-стрим прогресса; resume по `Last-Event-ID`.                      |
+| `/api/tasks/:id/cancel`                                              | POST     | Отмена задачи.                                                       |
+| `/convert`, `/convert/stream`                                        | POST     | Совместимые OCR-маршруты.                                            |
+| `/api/health`, `/api/capabilities`, `/api/diagnostics`, `/api/probe` | GET/POST | Состояние runtime, лимиты, тестовый прогон.                          |
+| `/v1/pipeline/flags`                                                 | GET      | Каталог effective flag keys (общий для backend, browser, LLM).       |
+| `/api/install-easyocr` (+`/status`)                                  | POST/GET | Установка EasyOCR и её статус.                                       |
+
+`pdf_mode=auto|raster` принимается в query (`?pdf_mode=...`), HTTP-header
+(`X-PDF-Mode`), JSON-поле (`pdfMode`) и CLI-флаг (`--pdf-mode`). Неизвестные
+значения → HTTP 400. Фактически использованный режим возвращается в
+`meta.pdf_mode`.
+
+In-memory task queue: `maxWorkers: 1`, `maxQueued: 32`. Задачи живут в памяти
+процесса gateway и не переживают рестарт; durable queue, retry и retention
+отсутствуют.
+
+## Запуск
+
+```bash
+# Полная версия (Web UI + backend)
+bash scripts/runtime/run-local.sh
+
+# Статический Web UI без backend OCR
+bash scripts/runtime/build-lite.sh
+
+# Docker Compose (Web UI + backend)
+docker compose up -d && docker compose port nginx 80
+```
+
+Подробные требования и команды без Compose — в [docker-manual-launch.md](./docker-manual-launch.md).
 
 ## Проверки
 
@@ -89,12 +96,5 @@ npm run build:pages && npm run test:pages
 docker compose config --quiet
 ```
 
-Python-проверки (flake8/Black/Ruff/pytest) и OCR tiers описаны в
+Python-проверки (flake8 / Black / Ruff / pytest) и OCR tiers описаны в
 [тестировании](./testing.md).
-
-## Статус реализации
-
-Текущий код является целевой (релизной) реализацией. Известные пробелы
-относительно идеальной архитектуры собраны в
-[`draft-to-do.md`](../../draft-to-do.md): что не сделано (to-do) и что требует
-проверки, но не исправления (not-to-do).

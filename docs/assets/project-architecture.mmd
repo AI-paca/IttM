@@ -1,0 +1,119 @@
+%%{init: {"themeVariables": {"fontFamily": "Inter, system-ui, sans-serif"}}}%%
+flowchart LR
+    classDef entry fill:#1f2937,stroke:#9ca3af,color:#f9fafb,stroke-width:1px;
+    classDef browser fill:#2563eb,stroke:#60a5fa,color:#eff6ff,stroke-width:1px;
+    classDef gateway fill:#7c3aed,stroke:#a78bfa,color:#f5f3ff,stroke-width:1px;
+    classDef ocr fill:#0f766e,stroke:#5eead4,color:#ecfeff,stroke-width:1px;
+    classDef external fill:#be123c,stroke:#fb7185,color:#fff1f2,stroke-width:1px;
+    classDef artifact fill:#0f172a,stroke:#64748b,color:#f8fafc,stroke-width:1px;
+    classDef contract fill:#b45309,stroke:#f59e0b,color:#fffbeb,stroke-width:1px;
+
+    subgraph ACCESS["Access and launch are not OCR modes"]
+        direction TB
+        User["User"]
+        Web["Web UI<br/>React + Vite"]
+        Cli["CLI<br/>npm run extract"]
+        Curl["curl / API client"]
+        Docker["Docker Compose<br/>nginx published only"]
+        Bare["Bare metal<br/>server.ts"]
+        Static["Static Lite<br/>browser-only"]
+
+        User --> Web
+        User --> Cli
+        User --> Curl
+        Docker --> Nginx
+        Bare --> Server
+        Static --> Web
+    end
+    class User,Web,Cli,Curl,Docker,Bare,Static entry
+
+    subgraph BROWSER["Browser orchestrator"]
+        direction TB
+        App["AppShell + OcrProvider"]
+        State["OcrContext<br/>state + actions"]
+        Strategy["use-extraction<br/>source selection + fallback"]
+        Pdf["PDF parser + page worker"]
+        BrowserOcr["Browser OCR<br/>Tesseract.js WASM"]
+        BrowserWorkers["Workers<br/>PDF render / resize / encoding"]
+
+        App --> State
+        State --> Strategy
+        Strategy --> Pdf
+        Strategy --> BrowserWorkers
+        Strategy --> BrowserOcr
+    end
+    class App,State,Strategy,Pdf,BrowserOcr,BrowserWorkers browser
+
+    subgraph GATEWAY["Gateway contract"]
+        direction TB
+        Nginx["nginx<br/>static dist + /api proxy"]
+        Server["server.ts<br/>API + static frontend"]
+        Handle["gateway/core/handle.ts"]
+        Routes["routes<br/>extract / tasks / health / probe"]
+        Tasks["task API<br/>queue + SSE events"]
+        OcrClient["ocrClient<br/>OCR_URL proxy"]
+        Contract["Extraction contract<br/>JSON / text / Markdown / NDJSON"]
+
+        Nginx --> Server
+        Server --> Handle
+        Handle --> Routes
+        Routes --> Tasks
+        Routes --> OcrClient
+        Routes --> Contract
+    end
+    class Nginx,Server,Handle,Routes,Tasks,OcrClient gateway
+    class Contract contract
+
+    subgraph OCR["Local OCR runtime"]
+        direction TB
+        FastApi["FastAPI routers<br/>convert / health / install"]
+        Convert["convert_service<br/>PDF text-layer / raster pages"]
+        Limits["resource guards<br/>upload / pages / pixels"]
+        Pipeline["pipeline profiles<br/>effective flags"]
+        Engines["OCR engines<br/>Auto / Tesseract / EasyOCR / Stub"]
+        Markdown["Markdown formatter"]
+
+        FastApi --> Limits
+        FastApi --> Convert
+        Convert --> Pipeline
+        Convert --> Engines
+        Engines --> Markdown
+    end
+    class FastApi,Convert,Limits,Pipeline,Engines,Markdown ocr
+
+    subgraph EXT["External trust boundary"]
+        direction TB
+        Edge["Cloudflare Worker<br/>optional ingress / Gemini proxy"]
+        Llm["External LLM<br/>Gemini / OpenRouter / Ollama"]
+        Custom["Custom gateway<br/>user endpoint"]
+    end
+    class Edge,Llm,Custom external
+
+    subgraph OUT["Result surfaces"]
+        direction TB
+        Json["JSON result"]
+        Text["plain text / Markdown"]
+        Stream["page NDJSON / SSE progress"]
+    end
+    class Json,Text,Stream artifact
+
+    Web --> App
+    Cli --> Server
+    Curl --> Server
+    Strategy -->|local Browser OCR| BrowserOcr
+    Strategy -->|Docker /api| Nginx
+    Strategy -->|bare-metal /api| Server
+    Strategy -. custom gateway .-> Custom
+    Strategy -. external LLM .-> Llm
+    Edge -. optional origin proxy .-> Nginx
+    Edge -. Gemini proxy .-> Llm
+    Custom -. contract-compatible .-> Contract
+
+    OcrClient -->|multipart upload| FastApi
+    Markdown -->|page output| Contract
+    Contract --> Json
+    Contract --> Text
+    Contract --> Stream
+    Json --> State
+    Text --> State
+    Stream --> State

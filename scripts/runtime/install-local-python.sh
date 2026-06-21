@@ -28,10 +28,7 @@ if ! command -v "$HOST_PYTHON" >/dev/null 2>&1; then
     exit 1
 fi
 
-if ! "$HOST_PYTHON" - <<'PY'
-import sys
-raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
-PY
+if ! "$HOST_PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'
 then
     echo "Python 3.10+ is required. Selected interpreter is too old: $HOST_PYTHON"
     exit 1

@@ -1,0 +1,167 @@
+%%{init: {"themeVariables": {"fontFamily": "Inter, system-ui, sans-serif"}}}%%
+flowchart TB
+    classDef trustBoundary fill:#e2e8f0,stroke:#475569,color:#0f172a,stroke-width:1px;
+    classDef scope fill:#dbeafe,stroke:#1d4ed8,color:#0c1f4a,stroke-width:1px;
+    classDef rule fill:#fef3c7,stroke:#b45309,color:#451a03,stroke-width:1px;
+    classDef runner fill:#ede9fe,stroke:#6d28d9,color:#1e1147,stroke-width:1px;
+    classDef exclusion fill:#f1f5f9,stroke:#475569,color:#0f172a,stroke-width:1px;
+    classDef artifact fill:#f8fafc,stroke:#0f172a,color:#0f172a,stroke-width:1px;
+    classDef gate fill:#fee2e2,stroke:#b91c1c,color:#450a0a,stroke-width:1px;
+    classDef triage fill:#f5f3ff,stroke:#6d28d9,color:#1e1147,stroke-width:1px;
+    classDef sastGuard fill:#dcfce7,stroke:#15803d,color:#052e16,stroke-width:1px;
+    classDef runtimeGuard fill:#cffafe,stroke:#0e7490,color:#082f49,stroke-width:1px;
+    classDef companion fill:#f5f5f4,stroke:#57534e,color:#1c1917,stroke-width:1px;
+
+    subgraph TRUST["Trust boundary"]
+        direction TB
+        PR["Pull request<br/>push to feature/*<br/>manual workflow_dispatch"]
+        Scheduled["Scheduled resilience<br/>cron: 23 2 * * 1"]
+    end
+    class PR,Scheduled trustBoundary
+
+    subgraph SCOPE["Scope — SAST_TARGETS"]
+        direction TB
+        Targets["SAST_TARGETS<br/>in scripts/ci/run-sast.sh"]
+        Targets --> S1["gateway/src"]
+        Targets --> S2["web/src"]
+        Targets --> S3["edge/cloudflare-worker.ts"]
+        Targets --> S4["ocr/app"]
+        Targets --> S5["server.ts"]
+        Targets --> S6["scripts/ci<br/>scripts/runtime<br/>scripts/cli"]
+        Targets --> S7["docker/*Dockerfile<br/>docker-compose.yml"]
+        Targets --> S8[".github/workflows/*"]
+        Targets --> S9["gateway/nginx.conf"]
+    end
+    class Targets,S1,S2,S3,S4,S5,S6,S7,S8,S9 scope
+
+    subgraph RULES["Rules — .semgrep/sast.yml (Semgrep 1.166.0 pinned)"]
+        direction TB
+        R1["CORS allowlist<br/>python-fastapi-wildcard-cors<br/>typescript-wildcard-cors-header"]
+        R2["Dynamic execution<br/>eval / exec / new Function<br/>yaml.load / pickle"]
+        R3["Shell exec<br/>subprocess shell=True<br/>child_process.exec / spawn(shell:true)<br/>bash-eval / curl-pipe-shell"]
+        R4["Server fetch timeout<br/>typescript-fetch-without-abortsignal<br/>python-requests-without-timeout"]
+        R5["TLS verification<br/>python-requests-insecure-tls"]
+        R6["Weak crypto / random<br/>python-weak-hash-security<br/>python-insecure-random-security-token"]
+        R7["Hardcoded secrets<br/>python-hardcoded-secret<br/>typescript-hardcoded-secret"]
+        R8["Browser sinks<br/>innerHTML / outerHTML<br/>insertAdjacentHTML / document.write<br/>dangerouslySetInnerHTML"]
+        R9["postMessage / storage<br/>postMessage('*')<br/>localStorage secrets"]
+        R10["Path traversal / open redirect<br/>typescript-path-traversal-fs<br/>typescript-open-redirect"]
+        R11["Filesystem safety<br/>python-unsafe-subprocess-user-argv<br/>python-tarfile-unsafe-extract"]
+        R12["Container supply chain<br/>dockerfile-curl-pipe-shell<br/>dockerfile-remote-add"]
+        R13["Compose / workflow<br/>docker-compose-privileged<br/>docker-compose-public-bind<br/>github-workflow-pull-request-target<br/>nginx-proxy-pass-user-controlled-host"]
+    end
+    class R1,R2,R3,R4,R5,R6,R7,R8,R9,R10,R11,R12,R13 rule
+
+    subgraph RUNNER["Runner — scripts/ci/run-sast.sh"]
+        direction TB
+        Run["docker run --rm<br/>--network none<br/>--user $(id -u):$(id -g)<br/>pinned @sha256"]
+    end
+    class Run runner
+
+    subgraph EXCL["Exclusions"]
+        direction TB
+        E1["paths.exclude per rule<br/>*.test.ts / *.test.py<br/>fixtures only"]
+        E2["inline nosemgrep<br/>+ short reason"]
+    end
+    class E1,E2 exclusion
+
+    subgraph ART["Artifacts — runtime, ignored"]
+        direction TB
+        A1[".sast/semgrep.json"]
+        A2[".sast/semgrep.sarif"]
+        A3["summarize-sast.mjs<br/>→ Markdown table"]
+        A4["GitHub Step Summary<br/>stdout (local)"]
+    end
+    class A1,A2,A3,A4 artifact
+
+    subgraph GATE["Gate"]
+        direction TB
+        G1["semgrep --error<br/>exit != 0 → block PR"]
+    end
+    class G1 gate
+
+    subgraph TRIAGE["Finding triage"]
+        direction TB
+        T1["Fix code"]
+        T2["Narrow rule"]
+        T3["nosemgrep + reason"]
+        T1 --> T2
+        T2 --> T3
+    end
+    class T1,T2,T3 triage
+
+    subgraph SASTGUARD["SAST guards in code"]
+        direction TB
+        SG1["Forbidden patterns absent<br/>(see RULES)"]
+    end
+    class SG1 sastGuard
+
+    subgraph RTGUARD["Runtime guards (out of SAST scope)"]
+        direction TB
+        RT1["edge CORS allowlist<br/>ALLOWED_ORIGINS reject *"]
+        RT2["OCR CORS allowlist<br/>OCR_CORS_ORIGINS reject *"]
+        RT3["gateway fetchWithTimeout<br/>AbortController"]
+        RT4["static safeResolve<br/>path traversal guard"]
+        RT5["pip pinned digest<br/>base image pinned digest"]
+    end
+    class RT1,RT2,RT3,RT4,RT5 runtimeGuard
+
+    subgraph COMP["Companion gates"]
+        direction TB
+        C1["SCA / SBOM (Hw7)"]
+        C2["Secret scanning<br/>history (out of scope)"]
+        C3["Runtime contract tests<br/>edge CORS / OCR CORS / staticFiles"]
+    end
+    class C1,C2,C3 companion
+
+    %% Flow
+    PR --> Targets
+    Scheduled --> Targets
+    Targets --> R1
+    Targets --> R2
+    Targets --> R3
+    Targets --> R4
+    Targets --> R5
+    Targets --> R6
+    Targets --> R7
+    Targets --> R8
+    Targets --> R9
+    Targets --> R10
+    Targets --> R11
+    Targets --> R12
+    Targets --> R13
+    R1 --> Run
+    R2 --> Run
+    R3 --> Run
+    R4 --> Run
+    R5 --> Run
+    R6 --> Run
+    R7 --> Run
+    R8 --> Run
+    R9 --> Run
+    R10 --> Run
+    R11 --> Run
+    R12 --> Run
+    R13 --> Run
+    E1 -.->|filters| Run
+    E2 -.->|inline| Run
+    Run --> A1
+    Run --> A2
+    A1 --> A3
+    A2 --> A3
+    A3 --> A4
+    A3 --> G1
+    G1 -->|fail| PR
+    A4 --> Triage
+    G1 -->|findings| Triage
+
+    %% SAST guards feed runtime guards as defense in depth
+    R1 -.->|forbids wildcard| SG1
+    R4 -.->|forces timeout| SG1
+    R10 -.->|forbids traversal| SG1
+    SG1 -.->|release contract| RTGUARD
+
+    %% Companion gates (independent layers)
+    RTGUARD --> C1
+    RTGUARD --> C3
+    RTGUARD -.-> C2

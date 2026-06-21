@@ -172,14 +172,14 @@ export function SettingsSidebar({
                   <div className="flex flex-col gap-4 flex-1 min-h-0">
                     <section className="flex flex-col gap-2.5 sm:gap-2">
                       <h3 className="text-[10.5px] font-bold text-faint uppercase tracking-widest pl-1 sm:text-[10px]">
-                        Local & Browser
+                        {"Local & Browser"}
                       </h3>
                       {LOCAL_SOURCE_IDS.map(renderSource)}
                     </section>
 
                     <section className="flex flex-col gap-2.5 sm:gap-2 mt-2">
                       <h3 className="text-[10.5px] font-bold text-faint uppercase tracking-widest pl-1 sm:text-[10px]">
-                        API & Cloud
+                        {"API & Cloud"}
                       </h3>
                       {CLOUD_SOURCE_IDS.map(renderSource)}
 

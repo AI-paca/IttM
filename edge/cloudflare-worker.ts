@@ -2,6 +2,7 @@ interface Env {
   ORIGIN_URL: string;
   GEMINI_API_KEY?: string;
   ALLOWED_ORIGINS?: string;
+  ALLOW_EXTENSION_ORIGINS?: string;
   MAX_UPLOAD_BYTES?: string;
 }
 
@@ -13,29 +14,46 @@ const DEFAULT_CORS_HEADERS = {
   Vary: "Origin",
 };
 
+function enabled(value: string | undefined): boolean {
+  return value === "1" || value?.toLowerCase() === "true";
+}
+
+function allowedOrigins(env: Env): string[] {
+  const origins = (env.ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((item) => item.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+
+  if (origins.includes("*")) {
+    throw new Error(
+      "ALLOWED_ORIGINS must contain explicit origins; wildcard CORS is disabled.",
+    );
+  }
+
+  return Array.from(new Set(origins));
+}
+
 function getCorsHeaders(request: Request, env: Env): Record<string, string> {
   const origin = request.headers.get("Origin");
-  const allowed = env.ALLOWED_ORIGINS
-    ? env.ALLOWED_ORIGINS.split(",").map((item) => item.trim())
-    : [];
+  const headers = { ...DEFAULT_CORS_HEADERS };
 
   if (!origin) {
-    return { ...DEFAULT_CORS_HEADERS, "Access-Control-Allow-Origin": "*" };
+    return headers;
   }
 
+  const normalizedOrigin = origin.replace(/\/+$/, "");
+  const allowed = allowedOrigins(env);
+  const extensionOriginsEnabled = enabled(env.ALLOW_EXTENSION_ORIGINS);
   if (
-    allowed.includes("*") ||
-    allowed.includes(origin) ||
-    origin.startsWith("moz-extension://") ||
-    origin.startsWith("chrome-extension://")
+    allowed.includes(normalizedOrigin) ||
+    (extensionOriginsEnabled &&
+      (origin.startsWith("moz-extension://") ||
+        origin.startsWith("chrome-extension://")))
   ) {
-    return {
-      ...DEFAULT_CORS_HEADERS,
-      "Access-Control-Allow-Origin": origin,
-    };
+    headers["Access-Control-Allow-Origin"] = origin;
   }
 
-  return { ...DEFAULT_CORS_HEADERS, "Access-Control-Allow-Origin": "null" };
+  return headers;
 }
 
 function json(
@@ -69,7 +87,21 @@ function contentLength(request: Request): number | null {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const corsHeaders = getCorsHeaders(request, env);
+    let corsHeaders: Record<string, string>;
+    try {
+      corsHeaders = getCorsHeaders(request, env);
+    } catch (error) {
+      return json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Invalid CORS configuration",
+        },
+        500,
+        DEFAULT_CORS_HEADERS,
+      );
+    }
 
     if (request.method === "OPTIONS") {
       return new Response(null, {

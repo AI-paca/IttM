@@ -177,10 +177,7 @@ ensure_host_python() {
         exit 1
     fi
 
-    if ! "$HOST_PYTHON" - <<'PY'
-import sys
-raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
-PY
+    if ! "$HOST_PYTHON" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'
     then
         echo "[RUNNER] Python 3.10+ is required; the current $HOST_PYTHON is too old."
         exit 1

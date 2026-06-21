@@ -1,5 +1,5 @@
 # FastAPI smoke/glue suite. Contract confidence lives in focused service tests.
-# See .zoo/.review-from-llm/TEST_PLATFORM_RFC.md, Tier 2.
+# Tier 2 smoke coverage keeps API routing separate from focused service contracts.
 import asyncio
 import io
 import json
@@ -12,11 +12,51 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from app import upload_limits
-from app.main import app
+from app.main import app, create_app
 from app.routers import convert, install
 from app.services import convert_service
 
 client = TestClient(app)
+
+
+def test_cors_is_disabled_by_default(monkeypatch):
+    monkeypatch.delenv("OCR_CORS_ORIGINS", raising=False)
+    local_client = TestClient(create_app())
+
+    response = local_client.get(
+        "/health",
+        headers={"Origin": "https://attacker.example"},
+    )
+
+    assert response.status_code == 200
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_cors_allows_only_explicit_origins(monkeypatch):
+    monkeypatch.setenv(
+        "OCR_CORS_ORIGINS",
+        "http://localhost:3000, https://app.example/,http://localhost:3000",
+    )
+    local_client = TestClient(create_app())
+
+    allowed = local_client.get(
+        "/health",
+        headers={"Origin": "https://app.example"},
+    )
+    blocked = local_client.get(
+        "/health",
+        headers={"Origin": "https://attacker.example"},
+    )
+
+    assert allowed.headers["access-control-allow-origin"] == "https://app.example"
+    assert "access-control-allow-origin" not in blocked.headers
+
+
+def test_cors_rejects_wildcard_configuration(monkeypatch):
+    monkeypatch.setenv("OCR_CORS_ORIGINS", "*")
+
+    with pytest.raises(ValueError, match="explicit origins"):
+        create_app()
 
 
 def test_probe():

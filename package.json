@@ -16,7 +16,7 @@
     "extract": "tsx scripts/cli/ittm-extract.ts",
     "lint": "eslint . && npm run typecheck",
     "typecheck": "tsc --project web/tsconfig.json --noEmit && tsc --project gateway/tsconfig.json --noEmit && tsc --project edge/tsconfig.json --noEmit",
-    "test": "node --import tsx --test web/src/**/*.test.ts gateway/src/**/*.test.ts",
+    "test": "node --import tsx --test web/src/**/*.test.ts gateway/src/**/*.test.ts edge/**/*.test.ts",
     "test:contract": "bash scripts/ci/run-contract-tests.sh",
     "test:smoke": "bash scripts/ci/run-smoke-tests.sh",
     "test:pages": "node scripts/ci/verify-pages-build.mjs dist /IttM/",

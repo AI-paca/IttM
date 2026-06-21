@@ -21,6 +21,33 @@ function backendFetchError(targetUrl: string, error: any): Response {
   );
 }
 
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs = 30_000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const upstreamSignal = init.signal;
+
+  if (upstreamSignal) {
+    if (upstreamSignal.aborted) controller.abort(upstreamSignal.reason);
+    else {
+      upstreamSignal.addEventListener(
+        "abort",
+        () => controller.abort(upstreamSignal.reason),
+        { once: true },
+      );
+    }
+  }
+
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export class OcrClient {
   static async convert(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
@@ -71,7 +98,7 @@ export class OcrClient {
   static async health(env: Env): Promise<Response> {
     const targetUrl = `${env.OCR_URL}/health`;
     try {
-      return await fetch(targetUrl, { method: "GET" });
+      return await fetchWithTimeout(targetUrl, { method: "GET" });
     } catch (e: any) {
       return backendFetchError(targetUrl, e);
     }
@@ -79,7 +106,9 @@ export class OcrClient {
 
   static async capabilities(env: Env): Promise<Response> {
     try {
-      return await fetch(`${env.OCR_URL}/v1/capabilities`, { method: "GET" });
+      return await fetchWithTimeout(`${env.OCR_URL}/v1/capabilities`, {
+        method: "GET",
+      });
     } catch (e: any) {
       return new Response(JSON.stringify({ error: e.message }), {
         status: 502,
@@ -91,10 +120,11 @@ export class OcrClient {
   static async probe(req: Request, env: Env): Promise<Response> {
     try {
       const data = await req.json();
-      return await fetch(`${env.OCR_URL}/v1/probe`, {
+      return await fetchWithTimeout(`${env.OCR_URL}/v1/probe`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
+        signal: req.signal,
       });
     } catch (e: any) {
       return new Response(JSON.stringify({ error: e.message }), {
@@ -106,7 +136,9 @@ export class OcrClient {
 
   static async diagnostics(env: Env): Promise<Response> {
     try {
-      return await fetch(`${env.OCR_URL}/diagnostics`, { method: "GET" });
+      return await fetchWithTimeout(`${env.OCR_URL}/diagnostics`, {
+        method: "GET",
+      });
     } catch (e: any) {
       return new Response(JSON.stringify({ error: e.message }), {
         status: 502,
@@ -117,7 +149,7 @@ export class OcrClient {
 
   static async installEasy(env: Env): Promise<Response> {
     try {
-      return await fetch(`${env.OCR_URL}/v1/install-easyocr`, {
+      return await fetchWithTimeout(`${env.OCR_URL}/v1/install-easyocr`, {
         method: "POST",
       });
     } catch (e: any) {
@@ -130,9 +162,12 @@ export class OcrClient {
 
   static async installEasyStatus(env: Env): Promise<Response> {
     try {
-      return await fetch(`${env.OCR_URL}/v1/install-easyocr/status`, {
-        method: "GET",
-      });
+      return await fetchWithTimeout(
+        `${env.OCR_URL}/v1/install-easyocr/status`,
+        {
+          method: "GET",
+        },
+      );
     } catch (e: any) {
       return new Response(JSON.stringify({ error: e.message }), {
         status: 502,
@@ -143,7 +178,9 @@ export class OcrClient {
 
   static async installLight(env: Env): Promise<Response> {
     try {
-      return await fetch(`${env.OCR_URL}/v1/install-light`, { method: "POST" });
+      return await fetchWithTimeout(`${env.OCR_URL}/v1/install-light`, {
+        method: "POST",
+      });
     } catch (e: any) {
       return new Response(JSON.stringify({ error: e.message }), {
         status: 502,

@@ -1,5 +1,5 @@
 // @smoke Integration glue only; contract confidence lives in gateway/src/tasks/*.
-// See .zoo/.review-from-llm/TEST_PLATFORM_RFC.md, Tier 2.
+// Tier 2 smoke coverage keeps API routing separate from focused task contracts.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { route } from "./routes";

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent
-REPO_ROOT = ROOT.parent
+LOCAL_API_CONTAINER_PATH = Path("local_ocr_api.py")
 CATALOG_PATH = ROOT / "models.json"
 ENV_PATHS = (ROOT / ".env", ROOT / ".evn")
 
@@ -48,8 +48,8 @@ def merged_env() -> dict[str, str]:
         str(Path.home() / ".cache" / "huggingface" / "nemotron-ocr-v2-src"),
     )
     env.setdefault("OLLAMA_HOST", "http://127.0.0.1:11434")
-    env.setdefault("LLM_OCR_API_HOST", "127.0.0.1")
-    env.setdefault("LLM_OCR_API_PORT", "18080")
+    env.setdefault("OLLAMA_DEPLOY_API_HOST", "127.0.0.1")
+    env.setdefault("OLLAMA_DEPLOY_API_PORT", "18080")
     return env
 
 
@@ -270,7 +270,7 @@ def local_fastapi_command(
             volumes = ["-v", f"{source_dir}:/nemotron-ocr-src"]
             prefix = ""
         run = (
-            f"{prefix}{install}&& python3 LLM-OCR/local_ocr_api.py "
+            f"{prefix}{install}&& python3 {shlex.quote(str(LOCAL_API_CONTAINER_PATH))} "
             f"--backend {shlex.quote(server_backend)} --host 0.0.0.0 --port {port}"
         )
         return [
@@ -282,7 +282,7 @@ def local_fastapi_command(
             "-p",
             f"{port}:{port}",
             "-v",
-            f"{REPO_ROOT}:/workspace",
+            f"{ROOT}:/workspace",
             "-v",
             f"{env['HF_HOME']}:/root/.cache/huggingface",
             *volumes,
@@ -338,7 +338,10 @@ def api_url(
 def main() -> int:
     parser = argparse.ArgumentParser(description="Select and run a local OCR/VLM API.")
     parser.add_argument("--list", action="store_true", help="List known models.")
-    parser.add_argument("--model", help="Model id from LLM-OCR/models.json.")
+    parser.add_argument(
+        "--model",
+        help="Model id from scripts/ollama-deploy/models.json.",
+    )
     parser.add_argument("--backend", help="Backend name for the selected model.")
     parser.add_argument(
         "--docker",
@@ -366,13 +369,15 @@ def main() -> int:
         help="Show functional flag contract for the selected model.",
     )
     parser.add_argument(
-        "--host", default=None, help="API host. Defaults to LLM_OCR_API_HOST."
+        "--host",
+        default=None,
+        help="API host. Defaults to OLLAMA_DEPLOY_API_HOST.",
     )
     parser.add_argument(
         "--port",
         type=int,
         default=None,
-        help="API port. Defaults to backend/model or LLM_OCR_API_PORT.",
+        help="API port. Defaults to backend/model or OLLAMA_DEPLOY_API_PORT.",
     )
     args = parser.parse_args()
 
@@ -384,8 +389,8 @@ def main() -> int:
     env = merged_env()
     model = select_model(catalog, args.model)
     backend_name, backend = select_backend(model, args.backend)
-    host = args.host or env["LLM_OCR_API_HOST"]
-    port = args.port or int(backend.get("port") or env["LLM_OCR_API_PORT"])
+    host = args.host or env["OLLAMA_DEPLOY_API_HOST"]
+    port = args.port or int(backend.get("port") or env["OLLAMA_DEPLOY_API_PORT"])
 
     print(f"Selected model: {model['id']} ({model['label']})")
     print(f"Selected backend: {backend_name} ({backend['kind']})")

@@ -5,6 +5,6 @@
 - `cli/` — command-line entry points.
 - `debug/` — manual OCR corpus runners, reports, and diagnostic utilities.
 - `runtime/` — local application setup, startup, and static builds.
-- `llm-ocr/` — LLM OCR helper scripts.
+- `ollama-deploy/` — local Ollama deployment scripts.
 
 Run scripts from the repository root unless their help text says otherwise.

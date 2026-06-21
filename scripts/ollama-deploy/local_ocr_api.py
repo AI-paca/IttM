@@ -99,7 +99,7 @@ class NemotronBackend:
 def create_app(server_backend: str):
     from fastapi import FastAPI, File, Form, UploadFile
 
-    app = FastAPI(title="Local LLM OCR API", version="0.1.0")
+    app = FastAPI(title="Local Ollama OCR API", version="0.1.0")
     backend_holder: dict[str, Any] = {}
 
     def backend():
@@ -138,10 +138,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Small local OCR HTTP wrapper.")
     parser.add_argument("--backend", choices=["paddle", "nemotron"], required=True)
     parser.add_argument(
-        "--host", default=os.environ.get("LLM_OCR_API_HOST", "127.0.0.1")
+        "--host",
+        default=os.environ.get("OLLAMA_DEPLOY_API_HOST", "127.0.0.1"),
     )
     parser.add_argument(
-        "--port", type=int, default=int(os.environ.get("LLM_OCR_API_PORT", "18080"))
+        "--port",
+        type=int,
+        default=int(os.environ.get("OLLAMA_DEPLOY_API_PORT", "18080")),
     )
     args = parser.parse_args()
 

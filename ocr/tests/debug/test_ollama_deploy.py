@@ -3,9 +3,17 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
-RUNNER = ROOT / "LLM-OCR" / "llm_ocr_runner.py"
-CATALOG = ROOT / "LLM-OCR" / "models.json"
+RUNNER_DIR = ROOT / "scripts" / "ollama-deploy"
+RUNNER = RUNNER_DIR / "ollama_deploy.py"
+CATALOG = RUNNER_DIR / "models.json"
+
+pytestmark = pytest.mark.skipif(
+    not RUNNER.exists() or not CATALOG.exists(),
+    reason="local Ollama deployment scripts are not part of the repository",
+)
 
 
 def run_runner(*args):
@@ -21,8 +29,16 @@ def run_runner(*args):
 def test_manifest_groups_flags_by_pipeline_responsibility():
     catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
 
-    groups = {flag["group"] for model in catalog["models"] for flag in model["flag_contract"]}
-    requirements = {flag["requirement"] for model in catalog["models"] for flag in model["flag_contract"]}
+    groups = {
+        flag["group"]
+        for model in catalog["models"]
+        for flag in model["flag_contract"]
+    }
+    requirements = {
+        flag["requirement"]
+        for model in catalog["models"]
+        for flag in model["flag_contract"]
+    }
 
     assert {"alignment", "positioning", "composition"} <= groups
     assert {"required", "quality"} <= requirements
@@ -87,4 +103,4 @@ def test_runner_dry_run_nemotron_uses_external_source_cache_for_docker():
 
     assert "nvcr.io/nvidia/pytorch:25.09-py3" in result.stdout
     assert "/nemotron-ocr-src" in result.stdout
-    assert "LLM-OCR/local_ocr_api.py --backend nemotron" in result.stdout
+    assert "local_ocr_api.py --backend nemotron" in result.stdout

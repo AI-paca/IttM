@@ -1,0 +1,213 @@
+/**
+ * ============================================================================
+ *  ЕДИНАЯ РЕДАКТИРУЕМАЯ ТАБЛИЦА ЦВЕТОВ (Design Tokens)
+ * ============================================================================
+ *
+ * Меняйте цвета ТОЛЬКО здесь. Все компоненты ссылаются на эти переменные
+ * через Tailwind-классы (bg-surface, text-primary, border-default ...) или
+ * через CSS var(--color-...).
+ *
+ * Тёмная тема: значение переопределяется в блоке .dark (класс вешается на
+ * <html> в OcrContext.tsx).
+ *
+ * Именование семантическое (по роли), а не по оттенку:
+ *   --color-bg-*      — фоны
+ *   --color-text-*    — текст
+ *   --color-border-*  — границы
+ *   --color-accent-*  — акцентный/брендовый цвет
+ *   --color-status-*  — семантика (success/danger/warning/info)
+ *   --color-sticker-* — служебные для 3D-стикера (StickerBg)
+ *
+ * ВАЖНО для тёмной темы: все `-soft` цвета должны быть НЕПРОЗРАЧНЫМИ.
+ * Раньше они задавались через rgba() с alpha 0.3–0.4 — это приводило к тому,
+ * что при наложении слоёв (бейдж под стикером, активный стикер) нижний слой
+ * просвечивал, а тексты накладывались друг на друга.
+ * ============================================================================
+ */
+
+@layer base {
+  /* ----------  LIGHT THEME (default = AUTO_LIGHT)  ----------
+   * Статический fallback; реально применятся токены из palettes.ts
+   * через applyPalette() при загрузке. Здесь — светлый авто-вариант. */
+  :root {
+    /* Акцент (тёплый янтарный из AUTO_LIGHT) */
+    --color-accent: #ad661f;
+    --color-accent-hover: #985a1a;
+    --color-accent-soft: #f4ece1;
+    --color-accent-soft-border: #d4b48c;
+    --color-accent-strong: #875216;
+    --color-accent-ring: rgba(173, 102, 31, 0.5);
+
+    /* Фоны поверхностей (AUTO_LIGHT) */
+    --color-bg-app: #e9ebed;
+    --color-bg-surface: #dbdee1;
+    --color-bg-elevated: #b9c4d0;
+    --color-bg-inset: #e0e2e5;
+    --color-bg-overlay: rgba(17, 24, 39, 0.4);
+
+    /* Текст (AUTO_LIGHT) */
+    --color-text-primary: #242628;
+    --color-text-secondary: #6d7378;
+    --color-text-muted: #8a8f94;
+    --color-text-faint: #aab0b5;
+    --color-text-on-accent: #ffffff;
+    --color-text-link: var(--color-accent);
+
+    /* Границы (AUTO_LIGHT) */
+    --color-border-default: #c7ccd1;
+    --color-border-strong: #aeb4ba;
+    --color-border-subtle: #d6d9dd;
+    --color-border-accent: #d4b48c;
+
+    /* Статусы */
+    --color-success: #16a34a;
+    --color-success-soft: #f0fdf4;
+    --color-success-border: #bbf7d0;
+    --color-success-text: #15803d;
+
+    --color-danger: #dc2626;
+    --color-danger-soft: #fef2f2;
+    --color-danger-border: #fecaca;
+    --color-danger-text: #b91c1c;
+
+    --color-warning: #d97706;
+    --color-warning-soft: #fffbeb;
+    --color-warning-border: #fde68a;
+    --color-warning-text: #78350f;
+
+    --color-info: #6366f1;
+    --color-info-soft: #eef2ff;
+    --color-info-border: #e0e7ff;
+    --color-info-text: #4338ca;
+
+    /* Спец. тени/свечения */
+    --shadow-accent: 0 20px 60px -15px rgba(37, 99, 235, 0.3);
+    --shadow-accent-glow: 0 0 30px rgba(37, 99, 235, 0.6);
+
+    /* 3D-стикер: складки (используется в StickerBg) */
+    --color-sticker-fold-dark: #a0adbe;
+    --color-sticker-fold-mid: #bbc4d1;
+    --color-sticker-fold-light: #dadfe5;
+    --color-sticker-fold-white: #f3f4f5;
+    --color-sticker-edge: #ffffff;
+
+    /* Стикеры источников: fallback, runtime пересчитывает из palettes.ts */
+    --color-source-auto: #5f6d81;
+    --color-source-auto-soft: #d0d4db;
+    --color-source-auto-border: #959eac;
+    --color-source-auto-text: #3f4854;
+    --color-source-auto-on: #ffffff;
+    --color-source-browser: #31ae7a;
+    --color-source-browser-soft: #c9dfda;
+    --color-source-browser-border: #7ebea9;
+    --color-source-browser-text: #246f50;
+    --color-source-browser-on: #ffffff;
+    --color-source-local-tess: #b88127;
+    --color-source-local-tess-soft: #dfd8cc;
+    --color-source-local-tess-border: #bfa881;
+    --color-source-local-tess-text: #76541e;
+    --color-source-local-tess-on: #ffffff;
+    --color-source-local-easy: #b88127;
+    --color-source-local-easy-soft: #dfd8cc;
+    --color-source-local-easy-border: #bfa881;
+    --color-source-local-easy-text: #76541e;
+    --color-source-local-easy-on: #ffffff;
+    --color-source-gateway: #b88127;
+    --color-source-gateway-soft: #dfd8cc;
+    --color-source-gateway-border: #bfa881;
+    --color-source-gateway-text: #76541e;
+    --color-source-gateway-on: #ffffff;
+    --color-source-llm: #af3530;
+    --color-source-llm-soft: #ddcbce;
+    --color-source-llm-border: #bb8485;
+    --color-source-llm-text: #702623;
+    --color-source-llm-on: #ffffff;
+  }
+
+  /* ----------  DARK THEME (= AUTO_DARK)  ----------
+   * -soft цвета НЕПРОЗРАЧНЫ, чтобы не было просвечивания слоёв. */
+  .dark {
+    --color-accent: #d6ad5c;
+    --color-accent-hover: #c79e4a;
+    --color-accent-soft: #2a2418; /* непрозрачный */
+    --color-accent-soft-border: #6b5527;
+    --color-accent-strong: #e6c478;
+    --color-accent-ring: rgba(214, 173, 92, 0.5);
+
+    --color-bg-app: #1c1f26;
+    --color-bg-surface: #252932;
+    --color-bg-elevated: #2d3953;
+    --color-bg-inset: #1f2229;
+    --color-bg-overlay: rgba(0, 0, 0, 0.5);
+
+    --color-text-primary: #e4e5e7;
+    --color-text-secondary: #9fa4ac;
+    --color-text-muted: #82878f;
+    --color-text-faint: #5e636b;
+    --color-text-on-accent: #1a1206;
+    --color-text-link: var(--color-accent);
+
+    --color-border-default: #2e333e;
+    --color-border-strong: #3d4452;
+    --color-border-subtle: #272c34;
+    --color-border-accent: #6b5527;
+
+    --color-success: #4ade80;
+    --color-success-soft: #052e16; /* green-950, непрозрачный */
+    --color-success-border: #166534;
+    --color-success-text: #4ade80;
+
+    --color-danger: #f87171;
+    --color-danger-soft: #450a0a; /* red-950, непрозрачный */
+    --color-danger-border: #7f1d1d;
+    --color-danger-text: #fca5a5;
+
+    --color-warning: #fbbf24;
+    --color-warning-soft: #451a03; /* amber-950, непрозрачный */
+    --color-warning-border: #92400e;
+    --color-warning-text: #fde68a;
+
+    --color-info: #818cf8;
+    --color-info-soft: #1e1b4b; /* indigo-950, непрозрачный */
+    --color-info-border: #3730a3;
+    --color-info-text: #c7d2fe;
+
+    /* 3D-стикер: тёмные складки */
+    --color-sticker-fold-dark: #25363e;
+    --color-sticker-fold-mid: #304752;
+    --color-sticker-fold-light: #3e5a68;
+    --color-sticker-fold-white: #537180;
+    --color-sticker-edge: #6c8896;
+
+    --color-source-auto: #6b798c;
+    --color-source-auto-soft: #272b31;
+    --color-source-auto-border: #505864;
+    --color-source-auto-text: #a0a8b3;
+    --color-source-auto-on: #ffffff;
+    --color-source-browser: #3cbb86;
+    --color-source-browser-soft: #1c3b2f;
+    --color-source-browser-border: #347f60;
+    --color-source-browser-text: #86ceaf;
+    --color-source-browser-on: #ffffff;
+    --color-source-local-tess: #c68e32;
+    --color-source-local-tess-soft: #3d311b;
+    --color-source-local-tess-border: #84642f;
+    --color-source-local-tess-text: #d3b480;
+    --color-source-local-tess-on: #ffffff;
+    --color-source-local-easy: #c68e32;
+    --color-source-local-easy-soft: #3d311b;
+    --color-source-local-easy-border: #84642f;
+    --color-source-local-easy-text: #d3b480;
+    --color-source-local-easy-on: #ffffff;
+    --color-source-gateway: #c68e32;
+    --color-source-gateway-soft: #3d311b;
+    --color-source-gateway-border: #84642f;
+    --color-source-gateway-text: #d3b480;
+    --color-source-gateway-on: #ffffff;
+    --color-source-llm: #bc3f3b;
+    --color-source-llm-soft: #3b1e1d;
+    --color-source-llm-border: #7f3735;
+    --color-source-llm-text: #ce8885;
+    --color-source-llm-on: #ffffff;
+  }
+}

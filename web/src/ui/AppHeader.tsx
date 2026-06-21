@@ -3,6 +3,7 @@ import { FileText, RefreshCw, Settings } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { AppState } from "../types/app.types";
 import type { SourceType } from "../ocr/types";
+import { BugReportLink } from "./BugReportLink";
 import { SOURCES } from "./sources";
 
 interface AppHeaderProps {
@@ -16,7 +17,6 @@ interface AppHeaderProps {
   onDrop: (event: DragEvent<HTMLDivElement>, autoStart?: boolean) => void;
   onNewFile: () => void;
   onOpenSidebar: () => void;
-  onSourceSelect: (source: SourceType) => void;
 }
 
 export function AppHeader({
@@ -30,14 +30,13 @@ export function AppHeader({
   onDrop,
   onNewFile,
   onOpenSidebar,
-  onSourceSelect,
 }: AppHeaderProps) {
-  const btnClass = (id: string) =>
-    `px-3 py-1.5 text-xs sm:text-sm font-bold rounded-xl transition-all shadow-sm border ${
-      selectedSource === id
-        ? "bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700"
-        : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-gray-600"
-    }`;
+  const selectedSourceLabel =
+    SOURCES.find((s) => s.id === selectedSource)?.label ?? selectedSource;
+
+  const ghostButton =
+    "inline-flex items-center justify-center rounded-md text-[var(--color-text-muted)] opacity-75 transition-all hover:bg-[var(--color-bg-elevated)]/70 hover:text-[var(--color-text-primary)] hover:opacity-100 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ring)]";
+  const settingsButton = `${ghostButton} absolute inset-y-0 right-0 z-10 w-1/4 min-w-[104px] justify-end rounded-none pr-4 sm:static sm:min-w-0 sm:w-7 sm:h-7 sm:rounded-md sm:p-0`;
 
   return (
     <AnimatePresence>
@@ -45,107 +44,91 @@ export function AppHeader({
         <motion.header
           initial={{ y: 0 }}
           animate={{ y: 0 }}
-          exit={{ y: -100 }}
-          transition={{ duration: 0.3, ease: "easeInOut" }}
+          exit={{ y: -56 }}
+          transition={{ duration: 0.24, ease: "easeInOut" }}
           onDragOver={onDragOver}
           onDragLeave={onDragLeave}
-          onDrop={(e) => onDrop(e, true)}
-          className={`sticky top-0 z-40 flex justify-center w-full transition-all duration-500 ease-out shadow-sm ${
-            appState === "upload"
-              ? "bg-transparent shadow-none dark:bg-transparent"
-              : "bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-b border-gray-200/80 dark:border-gray-800 shadow-sm"
-          } ${isDragging && appState !== "upload" ? "bg-blue-50/50 dark:bg-blue-900/20" : ""}`}
+          onDrop={(event) => onDrop(event as DragEvent<HTMLDivElement>, true)}
+          className={`sticky top-0 z-40 w-full border-b transition-colors duration-300 ${
+            isDragging && appState !== "upload"
+              ? "border-[var(--color-info-border)] bg-[var(--color-info-soft)]/55"
+              : "border-[var(--color-border-subtle)]/55 bg-[var(--color-bg-app)]/58"
+          } backdrop-blur-md`}
         >
           <div
-            className={`flex items-center justify-between w-full max-w-7xl mx-auto px-4 ${appState === "upload" ? "py-4" : "py-3"} transition-colors duration-200`}
+            className={`relative mx-auto grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 pl-3 pr-2 sm:px-5 md:px-7 ${
+              appState === "upload"
+                ? "h-[52px] sm:h-10 md:h-11"
+                : "h-[52px] sm:h-9 md:h-10"
+            }`}
           >
-            <div
-              className={`flex items-center gap-3 flex-shrink-0 ${appState !== "upload" ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
+            <button
+              type="button"
               onClick={() => {
                 if (appState !== "upload") onNewFile();
               }}
-              title={appState !== "upload" ? "Новый скриншот" : ""}
+              className={`-ml-1.5 flex h-11 min-w-[128px] max-w-[72vw] items-center justify-self-start rounded-md px-1.5 text-left sm:ml-0 sm:h-auto sm:min-w-0 sm:max-w-none sm:px-0 ${
+                appState !== "upload"
+                  ? "cursor-pointer hover:opacity-100"
+                  : "cursor-default"
+              } opacity-85 transition-opacity`}
+              title={appState !== "upload" ? "Новый скриншот" : undefined}
             >
               <AnimatePresence mode="popLayout" initial={false}>
                 {appState === "upload" ? (
                   <motion.div
                     key="logo-view"
-                    initial={{ opacity: 0, x: -20 }}
+                    initial={{ opacity: 0, x: -10 }}
                     animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, scale: 0.8 }}
-                    transition={{ duration: 0.3 }}
-                    className="flex items-center gap-3"
+                    exit={{ opacity: 0, x: -8 }}
+                    transition={{ duration: 0.2 }}
+                    className="flex min-w-0 items-center gap-2"
                   >
-                    <div className="w-9 h-9 md:w-10 md:h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold shadow-sm">
-                      TE
-                    </div>
-                    <div className="flex flex-col min-w-0 justify-center">
-                      <h1 className="font-bold tracking-tight text-gray-900 dark:text-gray-100 leading-none truncate text-xl">
-                        Text Extractor
-                      </h1>
-                    </div>
+                    <span className="truncate text-[13px] font-semibold text-[var(--color-text-primary)] md:text-sm">
+                      Text Extractor
+                    </span>
+                    <BugReportLink className="hidden sm:inline-flex" />
                   </motion.div>
                 ) : (
                   <motion.div
                     key="file-view"
                     layoutId="file-upload-zone"
-                    className="flex items-center gap-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700/50 rounded-xl md:rounded-2xl p-1.5 shadow-sm pr-3 md:pr-4 group"
-                    transition={{
-                      type: "spring",
-                      bounce: 0.2,
-                      duration: 0.6,
-                    }}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -8 }}
+                    transition={{ duration: 0.2 }}
+                    className="group flex min-w-0 items-center gap-2"
                   >
-                    <div className="w-8 h-8 md:w-9 md:h-9 bg-blue-50 dark:bg-blue-900/30 rounded-lg md:rounded-xl flex items-center justify-center text-blue-600 dark:text-blue-400 relative overflow-hidden shrink-0">
-                      <FileText className="w-4 h-4 md:w-4 md:h-4 group-hover:opacity-0 transition-opacity duration-300" />
-                      <RefreshCw className="w-4 h-4 absolute inset-0 m-auto opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
-                    </div>
-                    <div className="flex flex-col min-w-0 justify-center mt-0.5 md:mt-0">
-                      <span className="text-[12px] md:text-[13px] font-bold text-gray-900 dark:text-gray-100 truncate max-w-[120px] md:max-w-[200px] leading-tight group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-                        {file?.name}
-                      </span>
-                      <span className="text-[10px] text-gray-500 dark:text-gray-400 font-medium truncate leading-none mt-0.5">
-                        Заменить файл
-                      </span>
-                    </div>
+                    <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--color-text-muted)]">
+                      <FileText className="h-3.5 w-3.5 transition-opacity duration-200 group-hover:opacity-0" />
+                      <RefreshCw className="absolute h-3.5 w-3.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+                    </span>
+                    <span className="max-w-[150px] truncate text-[12px] font-medium text-[var(--color-text-secondary)] group-hover:text-[var(--color-text-primary)] md:max-w-[260px] md:text-[13px]">
+                      {file?.name}
+                    </span>
                   </motion.div>
                 )}
               </AnimatePresence>
-            </div>
+            </button>
 
-            <div className="flex items-center gap-2 ml-auto overflow-hidden">
+            <div className="flex min-w-0 items-center justify-end gap-1.5">
               {appState !== "upload" && (
-                <div className="hidden sm:flex items-center gap-1.5 overflow-x-auto no-scrollbar scroll-smooth">
-                  <button
-                    onClick={() => onSourceSelect("auto")}
-                    className={btnClass("auto")}
-                  >
-                    Auto
-                  </button>
-                  <button
-                    onClick={() => onSourceSelect("browser")}
-                    className={`whitespace-nowrap ${btnClass("browser")}`}
-                  >
-                    Browser
-                  </button>
+                <div
+                  className="hidden max-w-[180px] items-center gap-1.5 truncate px-1.5 text-[11px] font-medium text-[var(--color-text-muted)] opacity-65 sm:flex"
+                  title={selectedSourceLabel}
+                >
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)] opacity-80" />
+                  <span className="truncate">{selectedSourceLabel}</span>
                 </div>
               )}
               <button
+                type="button"
                 onClick={onOpenSidebar}
-                className={
-                  appState === "upload"
-                    ? "w-9 h-9 flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl transition-all shrink-0"
-                    : "py-1.5 px-3 sm:px-4 ml-1 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl transition-colors shadow-sm border border-gray-200 dark:border-gray-700 shrink-0 flex items-center justify-center gap-2 font-bold text-[13px] sm:text-sm"
-                }
+                className={settingsButton}
                 title="Настройки"
+                aria-label="Настройки"
               >
-                {appState === "upload" ? (
-                  <Settings className="w-5 h-5" />
-                ) : (
-                  <span className="truncate max-w-[100px] sm:max-w-[140px]">
-                    {SOURCES.find((s) => s.id === selectedSource)?.label}
-                  </span>
-                )}
+                <Settings className="h-5 w-5 sm:h-4 sm:w-4" />
               </button>
             </div>
           </div>

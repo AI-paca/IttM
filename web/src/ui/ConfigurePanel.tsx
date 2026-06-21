@@ -10,9 +10,9 @@ export function ConfigurePanel({ onStartExtraction }: ConfigurePanelProps) {
       <div className="w-full">
         <button
           onClick={onStartExtraction}
-          className="w-full py-4 sm:py-5 bg-blue-600 hover:bg-blue-700 text-white text-lg sm:text-xl font-bold rounded-2xl md:rounded-3xl shadow-xl shadow-blue-500/20 transition-all active:scale-[0.98] focus:outline-none focus:ring-4 focus:ring-blue-500/50 flex items-center justify-center gap-3 group"
+          className="btn-primary w-full py-4 sm:py-5 text-lg sm:text-xl rounded-2xl md:rounded-3xl shadow-xl shadow-[var(--color-accent-ring)] active:scale-[0.98] flex items-center justify-center gap-3 group"
         >
-          <FileText className="w-7 h-7 sm:w-8 sm:h-8 outline-none bg-blue-500/50 p-1.5 rounded-lg group-hover:scale-110 transition-transform hidden sm:block backdrop-blur-sm" />
+          <FileText className="w-7 h-7 sm:w-8 sm:h-8 outline-none bg-[var(--color-accent-hover)] p-1.5 rounded-lg group-hover:scale-110 transition-transform hidden sm:block backdrop-blur-sm" />
           Получить текст
         </button>
       </div>

@@ -16,6 +16,7 @@ interface InitRequest {
   renderScale: number;
   maxPagePixels: number;
   maxDimension: number;
+  cropMode?: "auto" | "none";
 }
 
 interface PageRequest {
@@ -44,6 +45,7 @@ let settings = {
   renderScale: 1.5,
   maxPagePixels: 12_000_000,
   maxDimension: 4096,
+  cropMode: "auto" as "auto" | "none",
 };
 
 function normalizedText(items: PdfTextItem[]): string {
@@ -94,12 +96,19 @@ async function renderPage(pageNumber: number) {
       viewport,
     }).promise;
 
-    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-    const bounds = findContentBounds(
-      imageData.data,
-      canvas.width,
-      canvas.height,
-    );
+    const bounds =
+      settings.cropMode === "none"
+        ? {
+            left: 0,
+            top: 0,
+            right: canvas.width,
+            bottom: canvas.height,
+          }
+        : findContentBounds(
+            context.getImageData(0, 0, canvas.width, canvas.height).data,
+            canvas.width,
+            canvas.height,
+          );
     const cropWidth = Math.max(1, bounds.right - bounds.left);
     const cropHeight = Math.max(1, bounds.bottom - bounds.top);
     const output = new OffscreenCanvas(cropWidth, cropHeight);
@@ -144,6 +153,7 @@ self.onmessage = async (event: MessageEvent<PdfWorkerRequest>) => {
         renderScale: request.renderScale,
         maxPagePixels: request.maxPagePixels,
         maxDimension: request.maxDimension,
+        cropMode: request.cropMode ?? "auto",
       };
       documentTask = pdfjsLib.getDocument({
         ...pdfJsDocumentOptions(await request.file.arrayBuffer()),

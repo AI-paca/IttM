@@ -19,8 +19,8 @@ export function NoticeToast({ notice, onClose }: NoticeToastProps) {
           exit={{ opacity: 0, y: -12 }}
           className={`fixed top-4 left-1/2 z-[120] w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 rounded-2xl border px-4 py-3 shadow-xl backdrop-blur-xl ${
             notice.tone === "success"
-              ? "border-green-200 bg-green-50/95 text-green-800 dark:border-green-800 dark:bg-green-900/90 dark:text-green-100"
-              : "border-red-200 bg-red-50/95 text-red-800 dark:border-red-800 dark:bg-red-950/90 dark:text-red-100"
+              ? "border-[var(--color-success-border)] bg-[var(--color-success-soft)] text-[var(--color-success-text)]"
+              : "border-[var(--color-danger-border)] bg-[var(--color-danger-soft)] text-[var(--color-danger-text)]"
           }`}
         >
           <div className="flex items-start gap-3">

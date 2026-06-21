@@ -150,6 +150,7 @@ async function processPdfInWorker(
         renderScale: options.renderScale ?? 1.5,
         maxPagePixels: options.maxPagePixels ?? 12_000_000,
         maxDimension: options.maxDimension ?? 4096,
+        cropMode: options.cropMode ?? "auto",
       },
       options.shouldContinue,
     );
@@ -217,7 +218,8 @@ async function processPdfOnMainThread(
           if (!context) throw new Error("Could not create PDF canvas.");
           await page.render({ canvasContext: context, viewport } as never)
             .promise;
-          const cropped = cropWhiteBorders(canvas);
+          const cropped =
+            options.cropMode === "none" ? canvas : cropWhiteBorders(canvas);
           const image = await new Promise<Blob>((resolve, reject) => {
             cropped.toBlob(
               (blob) =>

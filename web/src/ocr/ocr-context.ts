@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 import type { ChangeEvent, Context, DragEvent, RefObject } from "react";
-import type { AppDiagnostics } from "./types";
+import type { AppDiagnostics, SourceType } from "./types";
 import type { AppState, Notice } from "../types/app.types";
 import type { EngineControls } from "../ui/layout/engine-controls.types";
 
@@ -19,6 +19,7 @@ export interface OcrShellContextValue {
 }
 
 export interface NavigationAreaContextValue {
+  activeSource: SourceType | null;
   appState: AppState;
   dragHandlers: DragHandlers;
   file: File | null;

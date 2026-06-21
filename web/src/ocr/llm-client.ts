@@ -1,4 +1,5 @@
 import { processPdfIntelligently } from "../lib/pdf-parser";
+import { effectivePdfCropMode, readCropMode } from "../lib/crop-preference";
 import {
   buildOllamaGenerateUrl,
   parsePlatformError,
@@ -231,6 +232,7 @@ export async function executeOllamaOcr(
       onTotalPages,
       {
         renderScale: pdfRenderScale,
+        cropMode: effectivePdfCropMode(readCropMode()),
         shouldContinue: () => activeContent.current,
       },
     );
@@ -282,6 +284,7 @@ export async function executeLlmOcr(
       onTotalPages,
       {
         renderScale: pdfRenderScale,
+        cropMode: effectivePdfCropMode(readCropMode()),
         shouldContinue: () => activeContent.current,
       },
     );

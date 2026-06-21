@@ -7,6 +7,9 @@
 `ocr/app/pipeline_config.py`, если новый профиль, флаг или параметр не упомянут
 здесь.
 
+Формат Markdown-таблиц с объединёнными ячейками описан отдельно:
+[Markdown-контракт таблиц](table-markdown-contract.md).
+
 ## Модель профиля
 
 `OcrPipelineProfile` объединяет:

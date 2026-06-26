@@ -9,5 +9,5 @@ pillow
 pytest==9.1.0
 python-multipart
 pytesseract
-ruff==0.15.18
+ruff==0.15.20
 uvicorn

@@ -40,11 +40,11 @@ npm run test:sca
 6. отклоняет npm advisory, source `HIGH`/`CRITICAL` и исправимые image
    `MEDIUM`/`HIGH`/`CRITICAL`.
 
-JSON-отчеты и SBOM сохраняются в игнорируемой `.sca/`. В Git отслеживается
-только `.sca/accepted-risk.json`. Workflow `SCA and SBOM` запускается
-еженедельно и вручную, затем публикует `.sca/*.json` как artifact на 30 дней.
-Обычный PR gate не зависит от внешней vulnerability database, чтобы не ловить
-случайный шум из feeds.
+JSON-отчеты, SBOM и accepted-risk diff сохраняются в игнорируемой `.sca/`. В
+Git отслеживается только `.sca/accepted-risk.json`. Workflow `SCA and SBOM`
+запускается еженедельно и вручную, затем публикует `.sca/*.json` и
+`.sca/*.txt` как artifact на 30 дней. Обычный PR gate не зависит от внешней
+vulnerability database, чтобы не ловить случайный шум из feeds.
 
 ## Что gate-ится
 

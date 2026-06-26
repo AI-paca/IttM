@@ -31,7 +31,9 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: sca-sbom-${{ github.run_id }}
-          path: .sca/*.json
+          path: |
+            .sca/*.json
+            .sca/*.txt
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30

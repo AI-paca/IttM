@@ -21,8 +21,8 @@ npm run test:sca
 The command runs `npm audit`, scans the source tree with Trivy, builds the
 gateway, nginx, OCR runtime, and OCR CI images, then emits vulnerability reports
 and CycloneDX SBOM files under `.sca/`. The GitHub workflow
-`SCA and SBOM` runs weekly and on manual dispatch, uploading `.sca/*.json` as a
-30-day artifact.
+`SCA and SBOM` runs weekly and on manual dispatch, uploading `.sca/*.json` and
+`.sca/*.txt` as a 30-day artifact.
 
 The current SCA gate has no fixable source or image findings. Fixable OS
 findings discovered during the run were closed with build-time package upgrades:

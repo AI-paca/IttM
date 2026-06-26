@@ -129,8 +129,8 @@ def test_pdf_raster_mode_skips_usable_text_layer(monkeypatch):
     )
     monkeypatch.setattr(
         convert_service,
-        "_iter_document_images",
-        lambda _content, _filename, _pipeline: iter([Image.new("RGB", (40, 30), "white")]),
+        "_iter_document_pages",
+        lambda _content, _filename, _pipeline: iter([(Image.new("RGB", (40, 30), "white"), 1, 1)]),
     )
     monkeypatch.setattr(
         convert_service,

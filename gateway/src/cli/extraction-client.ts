@@ -1,7 +1,13 @@
 export type HeadlessEvent =
   | { type: "accepted"; taskId: string }
-  | { type: "progress"; stage: string; page?: number; percent?: number }
-  | { type: "page"; page: number; markdown: string }
+  | {
+      type: "progress";
+      stage: string;
+      page?: number;
+      percent?: number;
+      totalPages?: number;
+    }
+  | { type: "page"; page: number; markdown: string; totalPages?: number }
   | { type: "warning"; code: string; message: string }
   | {
       type: "error";

@@ -967,6 +967,16 @@ async function readBackendEvents(
   });
 }
 
+function eventTotalPages(event: any): number | undefined {
+  const totalPages =
+    typeof event.total_pages === "number"
+      ? event.total_pages
+      : event.totalPages;
+  return typeof totalPages === "number" && Number.isFinite(totalPages)
+    ? Math.max(1, Math.floor(totalPages))
+    : undefined;
+}
+
 function toWorkerEvent(event: any): WorkerEventInput {
   if (event.type === "progress") {
     return {
@@ -974,6 +984,7 @@ function toWorkerEvent(event: any): WorkerEventInput {
       stage: String(event.stage ?? "ocr"),
       page: typeof event.page === "number" ? event.page : undefined,
       percent: typeof event.percent === "number" ? event.percent : undefined,
+      totalPages: eventTotalPages(event),
     };
   }
   if (event.type === "page") {
@@ -981,6 +992,7 @@ function toWorkerEvent(event: any): WorkerEventInput {
       type: "page",
       page: typeof event.page === "number" ? event.page : 1,
       markdown: String(event.markdown ?? ""),
+      totalPages: eventTotalPages(event),
     };
   }
   return {

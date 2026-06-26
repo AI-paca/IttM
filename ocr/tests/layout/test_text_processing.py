@@ -46,8 +46,8 @@ def test_iter_convert_bytes_reports_empty_pages(monkeypatch):
     )
     monkeypatch.setattr(
         convert_service,
-        "_iter_document_images",
-        lambda _content, _filename, _pipeline: iter([image]),
+        "_iter_document_pages",
+        lambda _content, _filename, _pipeline: iter([(image, 1, 1)]),
     )
     monkeypatch.setattr(
         convert_service,
@@ -72,14 +72,22 @@ def test_iter_convert_bytes_reports_empty_pages(monkeypatch):
     )
 
     assert events[0] == {
+        "type": "progress",
+        "stage": "ocr",
+        "message": "Обработка страницы 1 из 1...",
+        "page": 1,
+        "total_pages": 1,
+        "percent": 0,
+    }
+    assert events[1] == {
         "type": "warning",
         "code": "EMPTY_PAGE",
         "message": "No text was recognized on page 1.",
         "page": 1,
     }
-    assert events[1] == {"type": "page", "page": 1, "markdown": ""}
-    assert events[2]["type"] == "complete"
-    assert events[2]["meta"]["empty_pages"] == [1]
+    assert events[2] == {"type": "page", "page": 1, "total_pages": 1, "markdown": ""}
+    assert events[3]["type"] == "complete"
+    assert events[3]["meta"]["empty_pages"] == [1]
 
 
 def test_dedupe_chunks_removes_exact_normalized_duplicates():

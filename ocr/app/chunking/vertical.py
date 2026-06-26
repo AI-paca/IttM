@@ -105,7 +105,7 @@ def _line_positions(mask: np.ndarray, *, axis: int, min_coverage: int) -> list[i
     return [int(round((start + end) / 2)) for start, end in _group_indexes(indexes)]
 
 
-def _with_edges(positions: list[int], size: int, tolerance: int = 12) -> tuple[int, ...]:
+def _with_edges(positions: list[int], size: int, tolerance: int = 8) -> tuple[int, ...]:
     if size <= 1:
         return tuple(sorted(set(positions)))
 
@@ -194,7 +194,11 @@ def _grid_line_masks(binary: np.ndarray):
 
 
 def _cell_line_hints_from_contours(
-    table_grid: np.ndarray, local_width: int, local_height: int
+    table_grid: np.ndarray,
+    local_width: int,
+    local_height: int,
+    *,
+    include_unconfirmed: bool = False,
 ) -> tuple[list[int], list[int], int]:
     """
     Use contour holes inside the connected grid as additional cell-boundary hints.
@@ -224,18 +228,22 @@ def _cell_line_hints_from_contours(
         if area >= max_cell_area:
             continue
 
-        if hierarchy[0][index][3] < 0:
-            continue
+        has_parent = hierarchy[0][index][3] >= 0
         contour_area = cv2.contourArea(contour)
         rectangularity = contour_area / area if area else 0.0
-        if rectangularity < 0.82:
+        is_confirmed_cell = has_parent and rectangularity >= 0.82
+
+        if not is_confirmed_cell and not include_unconfirmed:
             continue
 
-        # Only confirmed rectangular holes are cell interiors. Using every
-        # contour here lets surviving text strokes become fake row/column lines.
+        # Tall phone screenshots often contain broken or faint grid lines. In
+        # that case, contour edges are useful near-line hints after clustering;
+        # regular page/table fixtures stay on confirmed rectangular holes only.
         x_positions.extend([x, x + width])
         y_positions.extend([y, y + height])
-        confirmed_cells += 1
+
+        if is_confirmed_cell:
+            confirmed_cells += 1
 
     return x_positions, y_positions, confirmed_cells
 
@@ -306,34 +314,79 @@ def detect_table_layouts(
         table_grid = grid[y:y2, x:x2]
         local_width = x2 - x
         local_height = y2 - y
-        contour_x_lines, contour_y_lines, confirmed_cells = _cell_line_hints_from_contours(
-            table_grid,
-            local_width,
-            local_height,
-        )
 
-        projected_y_lines = _line_positions(
-            table_horizontal,
-            axis=1,
-            min_coverage=max(18, int(local_width * 0.35)),
-        )
-        projected_x_lines = _line_positions(
-            table_vertical,
-            axis=0,
-            min_coverage=max(18, int(local_height * 0.35)),
-        )
-        y_lines_local = _with_edges(
-            projected_y_lines if len(projected_y_lines) >= 3 else [*projected_y_lines, *contour_y_lines],
-            local_height,
-        )
-        x_lines_local = _with_edges(
-            projected_x_lines if len(projected_x_lines) >= 3 else [*projected_x_lines, *contour_x_lines],
-            local_width,
-        )
+        def build_candidate(
+            *,
+            projection_ratio: float,
+            include_unconfirmed: bool,
+            always_mix_contours: bool,
+        ):
+            contour_x_lines, contour_y_lines, confirmed_cells = _cell_line_hints_from_contours(
+                table_grid,
+                local_width,
+                local_height,
+                include_unconfirmed=include_unconfirmed,
+            )
+            projected_y_lines = _line_positions(
+                table_horizontal,
+                axis=1,
+                min_coverage=max(18, int(local_width * projection_ratio)),
+            )
+            projected_x_lines = _line_positions(
+                table_vertical,
+                axis=0,
+                min_coverage=max(18, int(local_height * projection_ratio)),
+            )
+            y_source = (
+                [*projected_y_lines, *contour_y_lines]
+                if always_mix_contours
+                else projected_y_lines if len(projected_y_lines) >= 3 else [*projected_y_lines, *contour_y_lines]
+            )
+            x_source = (
+                [*projected_x_lines, *contour_x_lines]
+                if always_mix_contours
+                else projected_x_lines if len(projected_x_lines) >= 3 else [*projected_x_lines, *contour_x_lines]
+            )
+            return (
+                _with_edges(x_source, local_width),
+                _with_edges(y_source, local_height),
+                confirmed_cells,
+            )
 
-        if len(x_lines_local) < 3 or len(y_lines_local) < 3:
-            continue
-        if local_width / max(1, len(x_lines_local) - 1) < 6 or local_height / max(1, len(y_lines_local) - 1) < 6:
+        def candidate_is_valid(
+            x_lines_local: tuple[int, ...],
+            y_lines_local: tuple[int, ...],
+            confirmed_cells: int,
+        ) -> bool:
+            if len(x_lines_local) < 3 or len(y_lines_local) < 3:
+                return False
+            if local_width / max(1, len(x_lines_local) - 1) < 6 or local_height / max(1, len(y_lines_local) - 1) < 6:
+                return False
+            rows = len(y_lines_local) - 1
+            cols = len(x_lines_local) - 1
+            if rows * cols < min_cells:
+                return False
+            if min_confirmed_cell_ratio > 0:
+                min_confirmed_cells = max(
+                    min_cells,
+                    int(np.ceil(rows * cols * min_confirmed_cell_ratio)),
+                )
+                return confirmed_cells >= min_confirmed_cells
+            return True
+
+        x_lines_local, y_lines_local, confirmed_cells = build_candidate(
+            projection_ratio=0.22,
+            include_unconfirmed=True,
+            always_mix_contours=True,
+        )
+        if not candidate_is_valid(x_lines_local, y_lines_local, confirmed_cells) and local_height < 1000:
+            x_lines_local, y_lines_local, confirmed_cells = build_candidate(
+                projection_ratio=0.35,
+                include_unconfirmed=False,
+                always_mix_contours=False,
+            )
+
+        if not candidate_is_valid(x_lines_local, y_lines_local, confirmed_cells):
             continue
 
         x_lines = tuple(x + pos for pos in x_lines_local)
@@ -341,15 +394,8 @@ def detect_table_layouts(
         cells = _cells_from_lines(x_lines, y_lines)
         rows = len(y_lines) - 1
         cols = len(x_lines) - 1
-        if rows * cols < min_cells or len(cells) < min_cells:
+        if len(cells) < min_cells:
             continue
-        if min_confirmed_cell_ratio > 0:
-            min_confirmed_cells = max(
-                min_cells,
-                int(np.ceil(rows * cols * min_confirmed_cell_ratio)),
-            )
-            if confirmed_cells < min_confirmed_cells:
-                continue
 
         tables.append(
             TableLayout(
@@ -535,7 +581,7 @@ def erase_table_lines_for_ocr(image: Image.Image) -> Image.Image:
     _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     height, width = gray.shape[:2]
     horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (max(40, width // 12), 1))
-    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(40, height // 4)))
+    vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(18, height // 16)))
     horizontal = cv2.morphologyEx(binary, cv2.MORPH_OPEN, horizontal_kernel, iterations=1)
     vertical = cv2.morphologyEx(binary, cv2.MORPH_OPEN, vertical_kernel, iterations=1)
     line_mask = cv2.add(horizontal, vertical)

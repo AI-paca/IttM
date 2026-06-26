@@ -96,11 +96,13 @@ export type ExtractionEvent =
       stage: string;
       page?: number;
       percent?: number;
+      totalPages?: number;
     })
   | (SequencedEvent & {
       type: "page";
       page: number;
       markdown: string;
+      totalPages?: number;
     })
   | (SequencedEvent & { type: "warning"; code: string; message: string })
   | (SequencedEvent & {

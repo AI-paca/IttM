@@ -2,16 +2,33 @@
 
 [Русский](../ru/sbom-report.md) | [Documentation](./README.md)
 
-An automatically published SBOM is not available yet.
+Analysis date: June 26, 2026.
 
-Current dependency sources:
+Local SCA builds Docker images and runs `apt-get update`, `apt-get upgrade`,
+and `apk upgrade` during image builds. If a corporate network, VPN, or proxy
+breaks Docker DNS and you see `Temporary failure resolving deb.debian.org`,
+restart the Docker daemon, wait for it to become ready, and rerun
+`npm run test:sca`; in WSL this usually means restarting the service, for example
+`sudo systemctl restart docker` inside a systemd-enabled distribution. That is a
+build-network issue, not a code finding.
 
-- `package-lock.json` for web/gateway/edge;
-- `ocr/requirements-light.txt` for OCR runtime;
-- `ocr/requirements-ci.txt` for Python CI;
-- system packages in `docker/ocr.Dockerfile`;
-- base images in `docker/*.Dockerfile`.
+The project now has a reproducible SCA/SBOM flow:
 
-A release-grade setup should generate CycloneDX or SPDX in CI, retain the
-artifact, and scan known vulnerabilities. The missing artifact is a documented
-limitation, not evidence that the dependency tree is vulnerability-free.
+```bash
+npm run test:sca
+```
+
+The command runs `npm audit`, scans the source tree with Trivy, builds the
+gateway, nginx, OCR runtime, and OCR CI images, then emits vulnerability reports
+and CycloneDX SBOM files under `.sca/`. The GitHub workflow
+`SCA and SBOM` runs weekly and on manual dispatch, uploading `.sca/*.json` and
+`.sca/*.txt` as a 30-day artifact.
+
+The current SCA gate has no fixable source or image findings. Fixable OS
+findings discovered during the run were closed with build-time package upgrades:
+Alpine `libexpat` in the nginx image and Debian `libssh2-1t64` in the OCR
+images.
+
+Tracked policy lives in `.sca/accepted-risk.json`; generated reports are ignored
+locally. See the Russian report for the full course-facing analysis, accepted
+risk rationale, and runtime EasyOCR limitation.

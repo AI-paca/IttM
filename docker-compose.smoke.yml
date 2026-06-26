@@ -1,0 +1,14 @@
+services:
+  gateway:
+    image: ittm-gateway-smoke
+    build:
+      context: .
+      dockerfile: docker/gateway.smoke.Dockerfile
+      network: ${DOCKER_BUILD_NETWORK:-default}
+
+  nginx:
+    image: ittm-nginx-smoke
+    build:
+      context: .
+      dockerfile: docker/nginx.smoke.Dockerfile
+      network: ${DOCKER_BUILD_NETWORK:-default}

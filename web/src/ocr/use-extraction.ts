@@ -25,17 +25,61 @@ import {
 import { hasAvailableLocalBackend } from "./source-availability";
 import type {
   AppDiagnostics,
+  ExtractionDocumentProgress,
   LlmProvider,
   OcrResult,
+  ProgressDetail,
+  ProgressSink,
   SourceType,
 } from "./types";
 import type { AppState } from "../types/app.types";
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+function normalizeProgressPercent(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+  return clamp01(value > 1 ? value / 100 : value);
+}
+
+function normalizePageNumber(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+  return Math.max(1, Math.floor(value));
+}
+
+function normalizeCompletedPages(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+  return Math.max(0, Math.floor(value));
+}
+
+function hasProgressField(detail: ProgressDetail, key: keyof ProgressDetail) {
+  return Object.prototype.hasOwnProperty.call(detail, key);
+}
+
+function calculateDocumentPercent(
+  totalPages: number | null,
+  completedPages: number,
+  currentPagePercent: number | null,
+) {
+  if (!totalPages) return null;
+  const completed = Math.min(Math.max(0, completedPages), totalPages);
+  const current = currentPagePercent === null ? 0 : currentPagePercent;
+  return clamp01((completed + current) / totalPages);
+}
 
 interface UseOcrExtractionArgs {
   diagnostics: AppDiagnostics | null;
   extractedText: string;
   file: File | null;
   lastExtractedPage: number;
+  totalPdfPages: number | null;
   externalLlmConsent: boolean;
   llmKey: string;
   llmModel: string;
@@ -46,6 +90,9 @@ interface UseOcrExtractionArgs {
   setAppState: Dispatch<SetStateAction<AppState>>;
   setExtractedText: Dispatch<SetStateAction<string>>;
   setExtractionProgress: Dispatch<SetStateAction<string>>;
+  setDocumentProgress: Dispatch<
+    SetStateAction<ExtractionDocumentProgress | null>
+  >;
   setActiveSource: Dispatch<SetStateAction<SourceType | null>>;
   setIsExtracting: Dispatch<SetStateAction<boolean>>;
   setLastExtractedPage: Dispatch<SetStateAction<number>>;
@@ -58,6 +105,7 @@ export function useOcrExtraction({
   extractedText,
   file,
   lastExtractedPage,
+  totalPdfPages,
   externalLlmConsent,
   llmKey,
   llmModel,
@@ -68,6 +116,7 @@ export function useOcrExtraction({
   setAppState,
   setExtractedText,
   setExtractionProgress,
+  setDocumentProgress,
   setActiveSource,
   setIsExtracting,
   setLastExtractedPage,
@@ -109,6 +158,98 @@ export function useOcrExtraction({
         file.name,
       );
       setIsExtracting(true);
+      let knownTotalPages = file.type === "application/pdf" ? totalPdfPages : 1;
+      const initialCurrentPage =
+        file.type === "application/pdf" ? Math.max(1, lastExtractedPage) : 1;
+      const initialCompletedPages =
+        file.type === "application/pdf"
+          ? Math.max(0, lastExtractedPage - 1)
+          : 0;
+      setDocumentProgress({
+        currentPage: initialCurrentPage,
+        totalPages: knownTotalPages,
+        completedPages: initialCompletedPages,
+        currentPagePercent: null,
+        documentPercent: calculateDocumentPercent(
+          knownTotalPages,
+          initialCompletedPages,
+          null,
+        ),
+      });
+      const updateDocumentProgress = (detail: ProgressDetail) => {
+        if (!active.current) return;
+        setDocumentProgress((previous) => {
+          const fallback: ExtractionDocumentProgress = previous ?? {
+            currentPage: initialCurrentPage,
+            totalPages: knownTotalPages,
+            completedPages: initialCompletedPages,
+            currentPagePercent: null,
+            documentPercent: calculateDocumentPercent(
+              knownTotalPages,
+              initialCompletedPages,
+              null,
+            ),
+          };
+          const currentPage = hasProgressField(detail, "currentPage")
+            ? normalizePageNumber(detail.currentPage)
+            : fallback.currentPage;
+          const totalPages = hasProgressField(detail, "totalPages")
+            ? normalizePageNumber(detail.totalPages)
+            : fallback.totalPages;
+          const completedPages =
+            hasProgressField(detail, "completedPages") &&
+            detail.completedPages !== undefined
+              ? (normalizeCompletedPages(detail.completedPages) ??
+                fallback.completedPages)
+              : fallback.completedPages;
+          const currentPagePercent = hasProgressField(
+            detail,
+            "currentPagePercent",
+          )
+            ? normalizeProgressPercent(detail.currentPagePercent)
+            : fallback.currentPagePercent;
+          const documentPercent = hasProgressField(detail, "documentPercent")
+            ? normalizeProgressPercent(detail.documentPercent)
+            : calculateDocumentPercent(
+                totalPages,
+                completedPages,
+                currentPagePercent,
+              );
+
+          return {
+            currentPage,
+            totalPages,
+            completedPages,
+            currentPagePercent,
+            documentPercent,
+          };
+        });
+      };
+      const setProgress: ProgressSink = (message, percent, detail) => {
+        if (!active.current) return;
+        setExtractionProgress(message);
+        if (typeof percent === "number" || detail) {
+          const incomingTotalPages = normalizePageNumber(detail?.totalPages);
+          if (incomingTotalPages) {
+            knownTotalPages = incomingTotalPages;
+            if (file.type === "application/pdf") {
+              setTotalPdfPages(incomingTotalPages);
+            }
+          }
+          updateDocumentProgress({
+            ...(typeof percent === "number"
+              ? { currentPagePercent: percent }
+              : {}),
+            ...detail,
+          });
+        }
+      };
+      const rememberTotalPdfPages = (total: number) => {
+        knownTotalPages = normalizePageNumber(total);
+        if (!knownTotalPages) return;
+        setTotalPdfPages(knownTotalPages);
+        updateDocumentProgress({ totalPages: knownTotalPages });
+      };
       let progressiveText = lastExtractedPage > 1 ? extractedText || "" : "";
       try {
         let result: OcrResult | null = null;
@@ -136,6 +277,19 @@ export function useOcrExtraction({
           setExtractedText(progressiveText);
           if (pageIndex !== undefined) {
             setLastExtractedPage(pageIndex + 1);
+            updateDocumentProgress({
+              currentPage: pageIndex,
+              ...(knownTotalPages ? { totalPages: knownTotalPages } : {}),
+              completedPages: pageIndex,
+              currentPagePercent: null,
+            });
+          } else if (file.type !== "application/pdf") {
+            updateDocumentProgress({
+              currentPage: 1,
+              totalPages: 1,
+              completedPages: 1,
+              currentPagePercent: null,
+            });
           }
           setAppState((prev) => (prev !== "reading" ? "reading" : prev));
         };
@@ -145,18 +299,27 @@ export function useOcrExtraction({
           if (file.type === "application/pdf") {
             const md = await processPdfIntelligently(
               file,
-              (msg) => {
-                if (active.current) setExtractionProgress(msg);
+              (msg, detail) => {
+                setProgress(msg, undefined, detail);
               },
-              async (image) => {
+              async (image, pageNumber, totalPages) => {
                 const tempFile = new File([image], "page.jpg", {
                   type: image.type || "image/jpeg",
                 });
+                const pageProgress: ProgressSink = (text, percent, detail) => {
+                  setProgress(text, percent, {
+                    currentPage: pageNumber,
+                    totalPages,
+                    completedPages: pageNumber - 1,
+                    ...(typeof percent === "number"
+                      ? { currentPagePercent: percent }
+                      : {}),
+                    ...detail,
+                  });
+                };
                 const ocrRes = await runBrowserOcrLowMemory(
                   tempFile,
-                  (text) => {
-                    if (active.current) setExtractionProgress(text);
-                  },
+                  pageProgress,
                   undefined,
                   browserProfile,
                 );
@@ -164,7 +327,7 @@ export function useOcrExtraction({
               },
               handleChunk,
               lastExtractedPage,
-              setTotalPdfPages,
+              rememberTotalPdfPages,
               {
                 renderScale: browserProfile.pdfRenderScale,
                 maxPagePixels: browserProfile.maxImagePixels,
@@ -177,9 +340,7 @@ export function useOcrExtraction({
           }
           return await runBrowserOcrLowMemory(
             file,
-            (text) => {
-              if (active.current) setExtractionProgress(text);
-            },
+            setProgress,
             (chunk) => {
               handleChunk(chunk);
             },
@@ -190,7 +351,7 @@ export function useOcrExtraction({
         const debugMarkdown = debugMarkdownForFile(file);
         if (debugMarkdown) {
           activateSource("browser");
-          setExtractionProgress("Показываем debug Markdown sample...");
+          setProgress("Показываем debug Markdown sample...");
           result = {
             markdown: debugMarkdown,
             meta: { debugFixture: true },
@@ -233,9 +394,7 @@ export function useOcrExtraction({
               file,
               url,
               active,
-              (text) => {
-                if (active.current) setExtractionProgress(text);
-              },
+              setProgress,
               handleChunk,
             );
           } else if (effectiveSource === "llm") {
@@ -249,12 +408,10 @@ export function useOcrExtraction({
                 externalConsent: externalLlmConsent,
               },
               active,
-              (text) => {
-                if (active.current) setExtractionProgress(text);
-              },
+              setProgress,
               handleChunk,
               lastExtractedPage,
-              setTotalPdfPages,
+              rememberTotalPdfPages,
               browserProfile.pdfRenderScale,
             );
           } else if (effectiveSource === "gateway") {
@@ -264,12 +421,10 @@ export function useOcrExtraction({
                 file,
                 { baseUrl: pingUrl, model: llmModel },
                 active,
-                (text) => {
-                  if (active.current) setExtractionProgress(text);
-                },
+                setProgress,
                 handleChunk,
                 lastExtractedPage,
-                setTotalPdfPages,
+                rememberTotalPdfPages,
                 browserProfile.pdfRenderScale,
               );
               if (file.type !== "application/pdf")
@@ -284,9 +439,7 @@ export function useOcrExtraction({
                 file,
                 gatewayUrl,
                 active,
-                (text) => {
-                  if (active.current) setExtractionProgress(text);
-                },
+                setProgress,
                 handleChunk,
               );
             }
@@ -297,9 +450,7 @@ export function useOcrExtraction({
                 file,
                 autoBackendCandidates,
                 active,
-                (text) => {
-                  if (active.current) setExtractionProgress(text);
-                },
+                setProgress,
                 backendPipelineParams("auto"),
                 handleChunk,
                 { stallTimeoutMs: 35_000 },
@@ -312,9 +463,7 @@ export function useOcrExtraction({
                 setExtractedText("");
                 setLastExtractedPage(1);
                 if (active.current) {
-                  setExtractionProgress(
-                    "Gateway завис, выполняем в браузере (WASM)...",
-                  );
+                  setProgress("Gateway завис, выполняем в браузере (WASM)...");
                 }
                 result = await runBrowserFallback();
               } else if (normalizedBackendError.partialResult) {
@@ -322,7 +471,7 @@ export function useOcrExtraction({
               }
               if (!result && llmKey.trim() && externalLlmConsent) {
                 activateSource("llm");
-                setExtractionProgress(
+                setProgress(
                   "Cloud/локальный gateway недоступен, пробуем LLM OCR...",
                 );
                 try {
@@ -335,12 +484,10 @@ export function useOcrExtraction({
                       externalConsent: externalLlmConsent,
                     },
                     active,
-                    (text) => {
-                      if (active.current) setExtractionProgress(text);
-                    },
+                    setProgress,
                     handleChunk,
                     lastExtractedPage,
-                    setTotalPdfPages,
+                    rememberTotalPdfPages,
                     browserProfile.pdfRenderScale,
                   );
                 } catch (llmError) {
@@ -350,7 +497,7 @@ export function useOcrExtraction({
 
               if (!result) {
                 if (active.current)
-                  setExtractionProgress(
+                  setProgress(
                     "Cloud/локальный gateway недоступен, выполняем в браузере (WASM)...",
                   );
                 result = await runBrowserFallback();
@@ -361,6 +508,20 @@ export function useOcrExtraction({
 
         if (active.current) {
           setAppState("reading");
+          const resultPages =
+            typeof result?.meta?.pages === "number" &&
+            Number.isFinite(result.meta.pages)
+              ? Math.max(1, Math.floor(result.meta.pages))
+              : knownTotalPages;
+          if (resultPages) {
+            updateDocumentProgress({
+              currentPage: resultPages,
+              totalPages: resultPages,
+              completedPages: resultPages,
+              currentPagePercent: null,
+              documentPercent: 1,
+            });
+          }
           if (!progressiveText) {
             console.log(
               "[OCR] No chunks detected, using final result markdown",

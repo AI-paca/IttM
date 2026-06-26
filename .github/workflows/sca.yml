@@ -1,0 +1,39 @@
+name: SCA and SBOM
+
+on:
+  schedule:
+    - cron: "41 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sca:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Scan source and production images
+        run: npm run test:sca
+
+      - name: Upload vulnerability reports and SBOMs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: sca-sbom-${{ github.run_id }}
+          path: |
+            .sca/*.json
+            .sca/*.txt
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30

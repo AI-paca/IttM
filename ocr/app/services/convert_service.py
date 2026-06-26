@@ -192,15 +192,15 @@ def _prepared_image(image: Image.Image, image_pipeline: OcrPreprocessingPipeline
     return processed
 
 
-def _iter_document_images(
+def _iter_document_pages(
     content: bytes,
     filename: str,
     image_pipeline: OcrPreprocessingPipeline,
-) -> Iterator[Image.Image]:
+) -> Iterator[Tuple[Image.Image, int, int]]:
     if Path(filename).suffix.lower() != ".pdf":
         try:
             with Image.open(BytesIO(content)) as image:
-                yield _prepared_image(image, image_pipeline)
+                yield _prepared_image(image, image_pipeline), 1, 1
         except Exception as exc:
             raise ValueError(f"Could not load image: {str(exc)}") from exc
         return
@@ -241,7 +241,7 @@ def _iter_document_images(
                 page = pages[0]
                 try:
                     _validate_decoded_image_size(page)
-                    yield page.convert("RGB")
+                    yield page.convert("RGB"), page_number, page_count
                 finally:
                     for rendered_page in pages:
                         rendered_page.close()
@@ -249,6 +249,15 @@ def _iter_document_images(
         raise
     except Exception as exc:
         raise ValueError(f"Failed to process PDF: {str(exc)}") from exc
+
+
+def _iter_document_images(
+    content: bytes,
+    filename: str,
+    image_pipeline: OcrPreprocessingPipeline,
+) -> Iterator[Image.Image]:
+    for image, _, _ in _iter_document_pages(content, filename, image_pipeline):
+        yield image
 
 
 MAX_DIRECT_TABLE_HEIGHT = 3600
@@ -1509,10 +1518,12 @@ def iter_convert_bytes(
     normalized_pdf_mode = normalize_pdf_mode(pdf_mode)
     text_layer_pages = _extract_pdf_text_layer_pages(content, filename) if normalized_pdf_mode == "auto" else []
     if text_layer_pages:
+        total_pages = len(text_layer_pages)
         for page_number, page_text in enumerate(text_layer_pages, start=1):
             yield {
                 "type": "page",
                 "page": page_number,
+                "total_pages": total_pages,
                 "markdown": page_text,
             }
         yield {
@@ -1545,26 +1556,39 @@ def iter_convert_bytes(
     page_count = 0
     empty_pages = []
 
-    for main_image in _iter_document_images(content, filename, image_pipeline):
+    for main_image, page_number, total_pages in _iter_document_pages(
+        content,
+        filename,
+        image_pipeline,
+    ):
         try:
-            page_count += 1
-            print(f"[OCR] Processing page {page_count}", flush=True)
+            page_count = page_number
+            yield {
+                "type": "progress",
+                "stage": "ocr",
+                "message": f"Обработка страницы {page_number} из {total_pages}...",
+                "page": page_number,
+                "total_pages": total_pages,
+                "percent": 0,
+            }
+            print(f"[OCR] Processing page {page_number}", flush=True)
             page_markdown, page_meta = _convert_page(main_image, engine, profile)
             total_chunks += page_meta["chunks"]
             cards_found += page_meta["cards_found"]
             tables_found += page_meta["tables_found"]
             table_cells += page_meta["table_cells"]
             if not page_markdown.strip():
-                empty_pages.append(page_count)
+                empty_pages.append(page_number)
                 yield {
                     "type": "warning",
                     "code": "EMPTY_PAGE",
-                    "message": f"No text was recognized on page {page_count}.",
-                    "page": page_count,
+                    "message": f"No text was recognized on page {page_number}.",
+                    "page": page_number,
                 }
             yield {
                 "type": "page",
-                "page": page_count,
+                "page": page_number,
+                "total_pages": total_pages,
                 "markdown": page_markdown,
             }
         finally:

@@ -18,12 +18,17 @@ node_modules
 web/node_modules
 gateway/node_modules
 dist
+!dist/
+!dist/**
 build
 logs
 docs/
 edge
 ocr
 scripts
+!scripts/
+!scripts/ci/
+!scripts/ci/ocr-smoke-stub.mjs
 testtables/
 debug/
 .env

@@ -20,7 +20,7 @@ jobs:
 
       - name: Upload Semgrep SAST artifacts
         if: ${{ always() && env.ACT != 'true' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: semgrep-sast
           path: |
@@ -28,23 +28,23 @@ jobs:
             .sast/semgrep.sarif
           if-no-files-found: warn
 
-  linters:
+  node-fast:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - name: Install npm dependencies
         run: npm ci
 
-      - name: JS/TS Prettier check
-        run: npx prettier --check .
+      - name: Prettier check
+        run: npm run format:check
 
-      - name: JS/TS ESLint
+      - name: ESLint
         run: npx eslint .
 
       - name: TypeScript typecheck
@@ -53,185 +53,84 @@ jobs:
       - name: Engine profile documentation contract
         run: npm run test:engine-docs
 
-      - name: Build OCR Docker image
-        run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci ./ocr
-
-      - name: Python flake8
-        run: docker run --rm ittm-ocr-ci python -m flake8 .
-
-      - name: Python Black check
-        run: docker run --rm ittm-ocr-ci python -m black --check .
-
-      - name: Python Ruff check
-        run: docker run --rm ittm-ocr-ci python -m ruff check .
-
-  frontend-gateway:
-    runs-on: ubuntu-24.04
-    needs: [linters]
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install npm dependencies
-        run: npm ci
-
       - name: Unit tests
         run: npm test
 
-      - name: Build
+      - name: Build application
         run: npm run build
 
       - name: GitHub Pages OCR asset regression
         run: npm run build:pages && npm run test:pages
 
-      - name: Build Gateway Docker image
-        run: docker build -f docker/gateway.Dockerfile -t ittm-gateway-ci .
-
-      - name: Build Nginx gateway Docker image
-        run: docker build -f docker/nginx.Dockerfile -t ittm-nginx-ci .
-
-      - name: Validate Docker Compose config
-        run: docker compose config --quiet
-
-  python:
+  contract:
     runs-on: ubuntu-24.04
-    needs: [linters]
     steps:
       - uses: actions/checkout@v6
 
-      - name: Build OCR Docker image
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build OCR test image
         run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci ./ocr
 
-      - name: Python tests
+      - name: Contract tests
+        env:
+          OCR_TEST_IMAGE: ittm-ocr-ci
+        run: npm run test:contract
+
+  smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build OCR test image
+        run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci ./ocr
+
+      - name: Smoke tests
+        env:
+          OCR_TEST_IMAGE: ittm-ocr-ci
+        run: npm run test:smoke
+
+  python-fast:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build OCR test image
+        run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci ./ocr
+
+      - name: Python style checks
+        run: |
+          docker run --rm ittm-ocr-ci python -m flake8 .
+          docker run --rm ittm-ocr-ci python -m black --check .
+          docker run --rm ittm-ocr-ci python -m ruff check .
+
+      - name: Python API, engine, and layout tests
         run: |
           docker run --rm \
             -v "${PWD}/scripts:/scripts:ro" \
             -v "${PWD}/debug:/debug:ro" \
             -v "${PWD}/LLM-OCR:/LLM-OCR:ro" \
             ittm-ocr-ci \
-            python -m pytest tests -q
+            python -m pytest tests/api tests/engines tests/layout tests/debug -q
 
-  ocr-quality:
+  compose-config:
     runs-on: ubuntu-24.04
-    needs: [linters, frontend-gateway, python]
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Prepare Tesseract.js cache directory
-        run: mkdir -p .cache/tesseract-js
-
-      - name: Cache Tesseract.js data
-        uses: actions/cache@v5
-        with:
-          path: .cache/tesseract-js
-          key: tesseract-js-${{ runner.os }}-eng-rus-chi-sim-v2
-
-      - name: Install npm dependencies
-        run: npm ci
-
-      - name: Build OCR Docker image
-        run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci ./ocr
-
-      - name: Prepare OCR fixtures and tessdata from Docker image
-        run: |
-          set -euo pipefail
-
-          mkdir -p .cache/tessdata ocr/tests/fixtures
-
-          container_id="$(docker create ittm-ocr-ci python tests/support/quality_fixtures.py)"
-          cleanup() {
-            docker rm -f "$container_id" >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-
-          if docker start -a "$container_id" && docker cp "$container_id:/app/tests/fixtures/." ocr/tests/fixtures/; then
-            echo "Generated OCR fixtures inside Docker image and copied them out."
-          else
-            echo "Docker cp fixture path failed; retrying with a mounted fixture directory."
-            docker run --rm \
-              -v "${PWD}/ocr/tests/fixtures:/app/tests/fixtures" \
-              ittm-ocr-ci \
-              python tests/support/quality_fixtures.py
-          fi
-
-          for lang in eng rus chi_sim; do
-            if docker cp "$container_id:/usr/share/tesseract-ocr/5/tessdata/${lang}.traineddata" ".cache/tessdata/"; then
-              echo "Copied ${lang}.traineddata from Docker image."
-            else
-              echo "Default tessdata path failed for ${lang}; searching inside Docker image."
-              docker run --rm \
-                -v "${PWD}/.cache/tessdata:/out" \
-                ittm-ocr-ci \
-                sh -c 'set -eu
-                  lang="$1"
-                  for dir in /usr/share/tesseract-ocr/5/tessdata /usr/share/tesseract-ocr/4.00/tessdata; do
-                    if [ -s "$dir/$lang.traineddata" ]; then
-                      cp "$dir/$lang.traineddata" "/out/$lang.traineddata"
-                      exit 0
-                    fi
-                  done
-                  echo "Missing $lang.traineddata in known tessdata paths" >&2
-                  exit 1' sh "$lang"
-            fi
-            test -s ".cache/tessdata/${lang}.traineddata"
-          done
-
-          for fixture in multilingual.png multilingual.jpg multilingual.webp multilingual.pdf multilingual.txt; do
-            test -s "ocr/tests/fixtures/${fixture}"
-          done
-
-      - name: Verify OCR quality files
-        run: |
-          set -euo pipefail
-          files=(
-            .cache/tessdata/eng.traineddata
-            .cache/tessdata/rus.traineddata
-            .cache/tessdata/chi_sim.traineddata
-            ocr/tests/fixtures/multilingual.png
-            ocr/tests/fixtures/multilingual.jpg
-            ocr/tests/fixtures/multilingual.webp
-            ocr/tests/fixtures/multilingual.pdf
-            ocr/tests/fixtures/multilingual.txt
-          )
-
-          for file in "${files[@]}"; do
-            test -s "$file"
-          done
-
-          if sha256sum "${files[@]}"; then
-            echo "Recorded SHA256 snapshot for OCR quality inputs."
-          else
-            echo "sha256sum failed; falling back to byte-size snapshot."
-            wc -c "${files[@]}"
-          fi
-
-      - name: Browser OCR strict multilingual test
-        env:
-          BROWSER_OCR_LANG_PATH: ${{ github.workspace }}/.cache/tessdata
-        run: |
-          set -euo pipefail
-          npm run test:ocr:browser || {
-            echo "Browser OCR failed once; clearing Tesseract.js cache and retrying."
-            rm -rf .cache/tesseract-js
-            mkdir -p .cache/tesseract-js
-            npm run test:ocr:browser
-          }
-
-      - name: Backend OCR strict multilingual test
-        env:
-          RUN_OCR_QUALITY: "1"
-        run: |
-          docker run --rm \
-            -e RUN_OCR_QUALITY="${RUN_OCR_QUALITY}" \
-            -v "${PWD}/ocr/tests/fixtures:/app/tests/fixtures" \
-            ittm-ocr-ci \
-            python -m pytest tests/quality/test_ocr_quality.py -q
+      - name: Validate Docker Compose config
+        run: docker compose config --quiet

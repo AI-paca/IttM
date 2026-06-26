@@ -3,7 +3,11 @@ import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { findContentBounds } from "./image-content-bounds";
 import { assertBrowserPdfSize } from "./pdf-limits";
 import { boundedViewportScale, processPreparedPages } from "./pdf-processing";
-import type { PdfProcessingOptions, PreparedPdfPage } from "./pdf-processing";
+import type {
+  PdfProcessingOptions,
+  PdfProgressDetail,
+  PreparedPdfPage,
+} from "./pdf-processing";
 import { pdfJsDocumentOptions } from "./pdfjs-options";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -134,8 +138,12 @@ function normalizedPdfText(items: PdfTextItem[]): string {
 
 async function processPdfInWorker(
   file: File,
-  onProgress: (msg: string) => void,
-  processImageCallback: (image: Blob) => Promise<string>,
+  onProgress: (msg: string, detail?: PdfProgressDetail) => void,
+  processImageCallback: (
+    image: Blob,
+    pageNumber: number,
+    totalPages: number,
+  ) => Promise<string>,
   onChunkExtracted: ((text: string, pageIdx?: number) => void) | undefined,
   startPage: number,
   onTotalPages: ((total: number) => void) | undefined,
@@ -175,8 +183,12 @@ async function processPdfInWorker(
 
 async function processPdfOnMainThread(
   file: File,
-  onProgress: (msg: string) => void,
-  processImageCallback: (image: Blob) => Promise<string>,
+  onProgress: (msg: string, detail?: PdfProgressDetail) => void,
+  processImageCallback: (
+    image: Blob,
+    pageNumber: number,
+    totalPages: number,
+  ) => Promise<string>,
   onChunkExtracted: ((text: string, pageIdx?: number) => void) | undefined,
   startPage: number,
   onTotalPages: ((total: number) => void) | undefined,
@@ -251,8 +263,12 @@ async function processPdfOnMainThread(
 
 export async function processPdfIntelligently(
   file: File,
-  onProgress: (msg: string) => void,
-  processImageCallback: (image: Blob) => Promise<string>,
+  onProgress: (msg: string, detail?: PdfProgressDetail) => void,
+  processImageCallback: (
+    image: Blob,
+    pageNumber: number,
+    totalPages: number,
+  ) => Promise<string>,
   onChunkExtracted?: (text: string, pageIdx?: number) => void,
   startPage = 1,
   onTotalPages?: (total: number) => void,

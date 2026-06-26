@@ -1,19 +1,18 @@
-import { useState } from "react";
 import { X } from "lucide-react";
+import type { ExtractionDocumentProgress } from "../ocr/types";
+import { DocumentProgressBar } from "./DocumentProgressBar";
 
 interface LoadingPanelProps {
+  documentProgress: ExtractionDocumentProgress | null;
   extractionProgress: string;
   onCancelExtraction: () => void;
 }
 
 export function LoadingPanel({
+  documentProgress,
   extractionProgress,
   onCancelExtraction,
 }: LoadingPanelProps) {
-  // Оценка генерируется один раз при монтировании (3–7 сек),
-  // чтобы не нарушать чистоту рендера и не дёргать Math.random при каждом рендере.
-  const [estimatedSeconds] = useState(() => Math.floor(Math.random() * 5) + 3);
-
   return (
     <div className="flex flex-col w-full animate-in fade-in duration-500">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 sm:mb-10 w-full gap-4">
@@ -33,11 +32,12 @@ export function LoadingPanel({
       </div>
 
       <div className="surface-card w-full max-w-4xl mx-auto space-y-6 p-5 sm:p-8 mt-2 sm:mt-4">
+        <DocumentProgressBar progress={documentProgress} />
         <div className="flex items-center gap-3 mb-4 sm:mb-6 border-b border-[var(--color-border-subtle)] pb-4">
           <div className="text-sm font-medium text-[var(--color-text-secondary)]">
             Оценка времени завершения:{" "}
             <span className="text-[var(--color-info)]">
-              ~{estimatedSeconds} сек
+              обычно 2-7 мин, тяжелые PDF до 14 мин
             </span>
           </div>
         </div>

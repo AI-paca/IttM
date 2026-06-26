@@ -233,9 +233,9 @@ test("readBackendOcrStream tolerates backend progress and warning events", async
   const response = new Response(
     [
       '{"type":"progress","stage":"ocr"}',
-      '{"type":"progress","stage":"ocr","message":"Processing page 2","percent":50}',
+      '{"type":"progress","stage":"ocr","message":"Processing page 2","page":2,"total_pages":3,"percent":50}',
       '{"type":"warning","code":"EMPTY_PAGE","message":"No text was recognized on page 2.","page":2}',
-      '{"type":"page","page":1,"markdown":"first"}',
+      '{"type":"page","page":1,"total_pages":3,"markdown":"first"}',
       '{"type":"complete","meta":{"pages":1}}',
     ].join("\n") + "\n",
     {
@@ -243,11 +243,15 @@ test("readBackendOcrStream tolerates backend progress and warning events", async
     },
   );
   const progress: string[] = [];
+  const progressDetails: Array<unknown> = [];
 
   const result = await readBackendOcrStream(
     response,
     { current: true },
-    (message) => progress.push(message),
+    (message, _percent, detail) => {
+      progress.push(message);
+      progressDetails.push(detail);
+    },
   );
 
   assert.equal(result.markdown, "first");
@@ -255,6 +259,21 @@ test("readBackendOcrStream tolerates backend progress and warning events", async
     "Processing page 2",
     "No text was recognized on page 2.",
     "Получена страница 1...",
+  ]);
+  assert.deepEqual(progressDetails, [
+    {
+      currentPage: 2,
+      completedPages: 1,
+      totalPages: 3,
+      currentPagePercent: 0.5,
+    },
+    undefined,
+    {
+      currentPage: 1,
+      totalPages: 3,
+      completedPages: 1,
+      currentPagePercent: null,
+    },
   ]);
   assert.deepEqual(result.meta, {
     pages: 1,

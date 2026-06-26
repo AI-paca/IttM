@@ -1,8 +1,11 @@
 import { Check, Copy, RefreshCw, X } from "lucide-react";
+import type { ExtractionDocumentProgress } from "../ocr/types";
+import { DocumentProgressBar } from "./DocumentProgressBar";
 import { MarkdownContent } from "./MarkdownContent";
 
 interface ReadingPanelProps {
   copied: boolean;
+  documentProgress: ExtractionDocumentProgress | null;
   extractedText: string;
   extractionProgress: string;
   file: File | null;
@@ -18,6 +21,7 @@ interface ReadingPanelProps {
 
 export function ReadingPanel({
   copied,
+  documentProgress,
   extractedText,
   extractionProgress,
   file,
@@ -64,20 +68,23 @@ export function ReadingPanel({
         </div>
 
         {isExtracting && (
-          <div className="flex flex-col sm:flex-row items-center gap-4 py-6 mb-6 justify-center border-b border-[var(--color-border-subtle)]">
-            <div className="flex items-center gap-3 text-[var(--color-info)]">
-              <div className="spinner w-5 h-5" />
-              <span className="font-medium text-sm animate-pulse">
-                {extractionProgress}
-              </span>
+          <div className="mb-6 border-b border-[var(--color-border-subtle)] py-6">
+            <div className="mb-4 flex flex-col sm:flex-row items-center gap-4 justify-center">
+              <div className="flex items-center gap-3 text-[var(--color-info)]">
+                <div className="spinner w-5 h-5" />
+                <span className="font-medium text-sm animate-pulse">
+                  {extractionProgress}
+                </span>
+              </div>
+              <button
+                onClick={onCancelExtraction}
+                className="btn-danger px-3 py-1.5 rounded-lg text-xs"
+              >
+                <X className="w-3.5 h-3.5" />
+                Остановить
+              </button>
             </div>
-            <button
-              onClick={onCancelExtraction}
-              className="btn-danger px-3 py-1.5 rounded-lg text-xs"
-            >
-              <X className="w-3.5 h-3.5" />
-              Остановить
-            </button>
+            <DocumentProgressBar progress={documentProgress} />
           </div>
         )}
 

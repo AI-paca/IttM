@@ -1,0 +1,75 @@
+name: OCR quality tests
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-ocr:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Prepare Tesseract.js cache directory
+        run: mkdir -p .cache/tesseract-js
+
+      - name: Cache Tesseract.js data
+        uses: actions/cache@v5
+        with:
+          path: .cache/tesseract-js
+          key: tesseract-js-${{ runner.os }}-eng-rus-chi-sim-v2
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Browser OCR strict multilingual test
+        run: |
+          set -euo pipefail
+          npm run test:ocr:browser || {
+            echo "Browser OCR failed once; clearing Tesseract.js cache and retrying."
+            rm -rf .cache/tesseract-js
+            mkdir -p .cache/tesseract-js
+            npm run test:ocr:browser
+          }
+
+  backend-ocr:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build OCR test image
+        run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci ./ocr
+
+      - name: Prepare OCR fixtures
+        run: |
+          set -euo pipefail
+          mkdir -p ocr/tests/fixtures
+          docker run --rm \
+            -v "${PWD}/ocr/tests/fixtures:/app/tests/fixtures" \
+            ittm-ocr-ci \
+            python tests/support/quality_fixtures.py
+
+          for fixture in multilingual.png multilingual.jpg multilingual.webp multilingual.pdf multilingual.txt; do
+            test -s "ocr/tests/fixtures/${fixture}"
+          done
+
+      - name: Backend OCR strict multilingual test
+        env:
+          RUN_OCR_QUALITY: "1"
+        run: |
+          docker run --rm \
+            -e RUN_OCR_QUALITY="${RUN_OCR_QUALITY}" \
+            -v "${PWD}/ocr/tests/fixtures:/app/tests/fixtures" \
+            ittm-ocr-ci \
+            python -m pytest tests/quality/test_ocr_quality.py -q

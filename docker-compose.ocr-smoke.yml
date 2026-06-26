@@ -1,0 +1,16 @@
+services:
+  ocr:
+    image: ittm-ocr-smoke
+    build:
+      context: .
+      dockerfile: docker/ocr.smoke.Dockerfile
+      network: ${DOCKER_BUILD_NETWORK:-default}
+    command: ["node", "ocr-smoke-stub.mjs"]
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e "fetch('http://127.0.0.1:' + (process.env.PORT || '8000') + '/readiness').then((r) => r.json()).then((data) => process.exit(data.ready ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 5s
+      timeout: 3s
+      retries: 12

@@ -29,12 +29,13 @@ test("boundedViewportScale enforces dimension and pixel limits", () => {
 test("processPreparedPages handles one page at a time in order", async () => {
   const events: string[] = [];
   const chunks: number[] = [];
+  const progressDetails: Array<unknown> = [];
 
   const result = await processPreparedPages(
     3,
     1,
     {},
-    () => {},
+    (_message, detail) => progressDetails.push(detail),
     async (pageNumber) => {
       events.push(`prepare:${pageNumber}`);
       return {
@@ -59,6 +60,62 @@ test("processPreparedPages handles one page at a time in order", async () => {
     "ocr:3",
   ]);
   assert.deepEqual(chunks, [1, 2, 3]);
+  assert.deepEqual(progressDetails, [
+    {
+      currentPage: 1,
+      totalPages: 3,
+      completedPages: 0,
+      currentPagePercent: 0.05,
+    },
+    {
+      currentPage: 1,
+      totalPages: 3,
+      completedPages: 0,
+      currentPagePercent: 0.25,
+    },
+    {
+      currentPage: 1,
+      totalPages: 3,
+      completedPages: 1,
+      currentPagePercent: null,
+    },
+    {
+      currentPage: 2,
+      totalPages: 3,
+      completedPages: 1,
+      currentPagePercent: 0.05,
+    },
+    {
+      currentPage: 2,
+      totalPages: 3,
+      completedPages: 1,
+      currentPagePercent: 0.25,
+    },
+    {
+      currentPage: 2,
+      totalPages: 3,
+      completedPages: 2,
+      currentPagePercent: null,
+    },
+    {
+      currentPage: 3,
+      totalPages: 3,
+      completedPages: 2,
+      currentPagePercent: 0.05,
+    },
+    {
+      currentPage: 3,
+      totalPages: 3,
+      completedPages: 2,
+      currentPagePercent: 0.25,
+    },
+    {
+      currentPage: 3,
+      totalPages: 3,
+      completedPages: 3,
+      currentPagePercent: null,
+    },
+  ]);
   assert.equal(result, "page 1\n\n---\n\npage 2\n\n---\n\npage 3");
 });
 

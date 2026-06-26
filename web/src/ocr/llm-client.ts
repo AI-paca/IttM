@@ -10,7 +10,12 @@ import {
   prepareImageForLlm,
 } from "./document-encoding";
 import { assertExternalLlmConsent, runExternalLlmRequest } from "./llm-consent";
-import type { LlmProvider, OcrResult, ProgressSink } from "./types";
+import type {
+  LlmProvider,
+  OcrResult,
+  ProgressDetail,
+  ProgressSink,
+} from "./types";
 
 const OCR_PROMPT =
   "Extract all text from this image/document. Preserve tables as Markdown tables. Output only the extracted content, no markdown fences.";
@@ -214,16 +219,29 @@ export async function executeOllamaOcr(
   if (targetFile.type === "application/pdf") {
     const md = await processPdfIntelligently(
       targetFile,
-      (msg) => {
-        if (activeContent.current) onProgress(msg);
+      (msg, detail) => {
+        if (activeContent.current) onProgress(msg, undefined, detail);
       },
-      async (image) => {
+      async (image, pageNumber, totalPages) => {
+        const pageProgress: ProgressSink = (message, percent, detail) => {
+          if (!activeContent.current) return;
+          const progressDetail: ProgressDetail = {
+            currentPage: pageNumber,
+            totalPages,
+            completedPages: pageNumber - 1,
+            ...(typeof percent === "number"
+              ? { currentPagePercent: percent }
+              : {}),
+            ...detail,
+          };
+          onProgress(message, percent, progressDetail);
+        };
         const b64 = await blobToBase64OffMainThread(image);
         const res = await executeOllamaOcrForImage(
           b64,
           settings,
           activeContent,
-          onProgress,
+          pageProgress,
         );
         return res.markdown;
       },
@@ -265,17 +283,30 @@ export async function executeLlmOcr(
   if (targetFile.type === "application/pdf") {
     const md = await processPdfIntelligently(
       targetFile,
-      (msg) => {
-        if (activeContent.current) onProgress(msg);
+      (msg, detail) => {
+        if (activeContent.current) onProgress(msg, undefined, detail);
       },
-      async (image) => {
+      async (image, pageNumber, totalPages) => {
+        const pageProgress: ProgressSink = (message, percent, detail) => {
+          if (!activeContent.current) return;
+          const progressDetail: ProgressDetail = {
+            currentPage: pageNumber,
+            totalPages,
+            completedPages: pageNumber - 1,
+            ...(typeof percent === "number"
+              ? { currentPagePercent: percent }
+              : {}),
+            ...detail,
+          };
+          onProgress(message, percent, progressDetail);
+        };
         const b64 = await blobToBase64OffMainThread(image);
         const res = await executeLlmOcrForImage(
           b64,
           "image/jpeg",
           settings,
           activeContent,
-          onProgress,
+          pageProgress,
         );
         return res.markdown;
       },

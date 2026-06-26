@@ -25,6 +25,7 @@
 | [Debug](./debug.md)                                                     | Локальные воспроизводимые OCR-входы и артефакты.                              |
 | [Политика безопасности](./security.md)                                  | Границы доверия, незакрытые риски, модель угроз.                              |
 | [SAST](./sast.md)                                                       | Запуск Semgrep, разбор findings, добавление правил и CI-артефакты.            |
+| [SBOM и зависимости](./sbom-report.md)                                  | SCA/SBOM workflow, accepted risk и границы анализа зависимостей.              |
 | [Ручной запуск Docker](./docker-manual-launch.md)                       | `docker build` / `docker run` без Compose.                                    |
 | [Границы ответственности](./course/boundaries.md)                       | Точки входа и владельцы файлов по компонентам.                                |
 | [Эксперимент качества Tesseract](./experiments/tesseract-quality.md)    | Почему нужен oracle и какие артефакты собраны.                                |

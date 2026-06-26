@@ -2,6 +2,13 @@
 
 [Русский](../ru/testing.md) | [Documentation](./README.md)
 
+## Before Docker-heavy Checks
+
+Docker builds need working DNS inside the daemon. Compose smoke, the Python OCR
+image, and SCA run `apt-get update`, `apt-get upgrade`, or `apk upgrade`; if a
+corporate network, VPN, or proxy causes `Temporary failure resolving
+deb.debian.org`, restart Docker and rerun the command.
+
 ## JavaScript / TypeScript
 
 ```bash
@@ -56,9 +63,7 @@ docker compose ps
 curl -fsS "http://$(docker compose port nginx 80)/api/health"
 ```
 
-Image builds require working Docker DNS. A
-`Temporary failure resolving deb.debian.org` error belongs to the build
-environment and must be rechecked in GitHub CI.
+Image builds require working Docker DNS; see the note at the top of this page.
 
 ## Manual Debug
 

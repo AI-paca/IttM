@@ -1,0 +1,25 @@
+name: Container image checks
+
+on:
+  schedule:
+    - cron: "59 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  production-images:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build Gateway production image
+        run: docker build -f docker/gateway.Dockerfile -t ittm-gateway-ci .
+
+      - name: Build Nginx production image
+        run: docker build -f docker/nginx.Dockerfile -t ittm-nginx-ci .
+
+      - name: Build OCR production image
+        run: docker build -f docker/ocr.Dockerfile -t ittm-ocr-ci ./ocr

@@ -40,7 +40,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
-    "@napi-rs/canvas": "^0.1.100",
+    "@napi-rs/canvas": "^1.0.1",
     "@tailwindcss/vite": "^4.1.14",
     "@types/express": "^5.0.6",
     "@types/mime-types": "^3.0.1",

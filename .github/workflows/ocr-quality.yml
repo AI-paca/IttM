@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
@@ -46,7 +46,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Build OCR test image
         run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci ./ocr

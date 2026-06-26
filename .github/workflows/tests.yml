@@ -13,7 +13,7 @@ jobs:
   sast:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Semgrep SAST
         run: npm run test:sast
@@ -31,7 +31,7 @@ jobs:
   node-fast:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
@@ -65,7 +65,7 @@ jobs:
   contract:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
@@ -86,7 +86,7 @@ jobs:
   smoke:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
@@ -107,7 +107,7 @@ jobs:
   python-fast:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Build OCR test image
         run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci ./ocr
@@ -130,7 +130,7 @@ jobs:
   compose-config:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Validate Docker Compose config
         run: docker compose config --quiet

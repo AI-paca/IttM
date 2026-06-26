@@ -35,7 +35,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - name: Install npm dependencies
@@ -61,6 +61,48 @@ jobs:
 
       - name: GitHub Pages OCR asset regression
         run: npm run build:pages && npm run test:pages
+
+  contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build OCR test image
+        run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci ./ocr
+
+      - name: Contract tests
+        env:
+          OCR_TEST_IMAGE: ittm-ocr-ci
+        run: npm run test:contract
+
+  smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build OCR test image
+        run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci ./ocr
+
+      - name: Smoke tests
+        env:
+          OCR_TEST_IMAGE: ittm-ocr-ci
+        run: npm run test:smoke
 
   python-fast:
     runs-on: ubuntu-24.04

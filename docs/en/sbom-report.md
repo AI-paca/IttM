@@ -8,7 +8,9 @@ Local SCA builds Docker images and runs `apt-get update`, `apt-get upgrade`,
 and `apk upgrade` during image builds. If a corporate network, VPN, or proxy
 breaks Docker DNS and you see `Temporary failure resolving deb.debian.org`,
 restart the Docker daemon, wait for it to become ready, and rerun
-`npm run test:sca`; that is a build-network issue, not a code finding.
+`npm run test:sca`; in WSL this usually means restarting the service, for example
+`sudo systemctl restart docker` inside a systemd-enabled distribution. That is a
+build-network issue, not a code finding.
 
 The project now has a reproducible SCA/SBOM flow:
 

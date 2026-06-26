@@ -7,7 +7,9 @@
 Docker builds need working DNS inside the daemon. Compose smoke, the Python OCR
 image, and SCA run `apt-get update`, `apt-get upgrade`, or `apk upgrade`; if a
 corporate network, VPN, or proxy causes `Temporary failure resolving
-deb.debian.org`, restart Docker and rerun the command.
+deb.debian.org`, restart the Docker daemon and rerun the command. In WSL that
+usually means restarting the service, for example `sudo systemctl restart docker`
+inside a systemd-enabled distribution, not just restarting the Docker client.
 
 ## JavaScript / TypeScript
 

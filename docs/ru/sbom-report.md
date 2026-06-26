@@ -12,7 +12,9 @@ SCA собирает Docker images и во время build запускает `
 `apt-get upgrade` и `apk upgrade`. Если корпоративная сеть, VPN или proxy
 ломают Docker DNS, ошибка вроде `Temporary failure resolving deb.debian.org`
 относится к build network, а не к коду или finding. Сначала перезапустите
-Docker daemon, дождитесь его готовности и повторите `npm run test:sca`.
+Docker daemon: в WSL это обычно restart сервиса, например
+`sudo systemctl restart docker` в дистрибутиве с systemd, а не только перезапуск
+клиента. Дождитесь готовности daemon и повторите `npm run test:sca`.
 
 ## Инструмент и воспроизводимый запуск
 

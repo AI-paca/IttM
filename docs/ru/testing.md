@@ -11,9 +11,11 @@
 Docker build должен иметь рабочий DNS внутри daemon: compose smoke, Python OCR
 image и SCA запускают `apt-get update`, `apt-get upgrade` или `apk upgrade`.
 Если локально появляется `Temporary failure resolving deb.debian.org`, сначала
-перезапустите Docker daemon после настройки корпоративной сети/VPN/proxy и
-повторите команду. Это инфраструктурная проблема build network; после рестарта
-надо перепроверить локально или в GitHub CI.
+перезапустите Docker daemon после настройки корпоративной сети/VPN/proxy. В WSL
+это обычно restart сервиса, например `sudo systemctl restart docker` в дистрибутиве
+с systemd, а не только перезапуск клиента. После готовности daemon повторите
+команду. Это инфраструктурная проблема build network; после рестарта надо
+перепроверить локально или в GitHub CI.
 
 ## Tiers
 

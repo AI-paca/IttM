@@ -104,6 +104,9 @@ logs/
 *.cache
 .cache/
 /.sast/
+/.sca/*
+!/.sca/
+!/.sca/accepted-risk.json
 
 # Test artifacts
 .coverage

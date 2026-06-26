@@ -20,6 +20,7 @@
     "test:contract": "bash scripts/ci/run-contract-tests.sh",
     "test:smoke": "bash scripts/ci/run-smoke-tests.sh",
     "test:sast": "bash scripts/ci/run-sast.sh",
+    "test:sca": "bash scripts/ci/run-sca.sh",
     "test:pages": "node scripts/ci/verify-pages-build.mjs dist /IttM/",
     "test:engine-docs": "python3 scripts/ci/verify_engine_profile_docs.py && python3 scripts/ci/verify_pipeline_flag_docs.py",
     "test:pages:live": "node scripts/ci/smoke-pages.mjs",
@@ -67,7 +68,7 @@
     "react-dom": "^19.0.1",
     "tailwindcss": "^4.1.14",
     "tesseract.js": "^7.0.0",
-    "tsx": "^4.21.0",
+    "tsx": "^4.22.4",
     "typescript": "~5.8.2",
     "typescript-eslint": "^8.59.2",
     "vite": "^6.2.3"

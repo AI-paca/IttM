@@ -61,12 +61,12 @@
       <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Интеграция в CI + осмысленный разбор найденных issues</td>
     </tr>
     <tr>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">ДЗ 7. Композиционный анализ (SCA)</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">12.06.2026</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Инструмент запущен, но без понимания</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Получен SBOM или отчет</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Найдены и объяснены уязвимости</td>
-      <td style="padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Предложены или применены способы устранения</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">ДЗ 7. Композиционный анализ (SCA)</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">12.06.2026</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Trivy + npm audit запускаются через `npm run test:sca`</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">CycloneDX SBOM и JSON-отчеты публикуются artifact</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">CVE/advisory разобраны в `docs/ru/sbom-report.md`</td>
+      <td style="background-color: #238636; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">Обновлены зависимости, Docker hardening и accepted risk</td>
     </tr>
     <tr>
       <td style="background-color: #d4a017; color: white; padding: 12px; border: 1px solid rgba(0,0,0,0.2);">ДЗ 8. Отчетность и документация</td>

@@ -1,6 +1,10 @@
 import { createContext, useContext } from "react";
 import type { ChangeEvent, Context, DragEvent, RefObject } from "react";
-import type { AppDiagnostics, SourceType } from "./types";
+import type {
+  AppDiagnostics,
+  ExtractionDocumentProgress,
+  SourceType,
+} from "./types";
 import type { AppState, Notice } from "../types/app.types";
 import type { EngineControls } from "../ui/layout/engine-controls.types";
 
@@ -34,6 +38,7 @@ export interface OcrWorkspaceContextValue {
   diagnostics: AppDiagnostics | null;
   dragHandlers: DragHandlers;
   extractedText: string;
+  documentProgress: ExtractionDocumentProgress | null;
   extractionProgress: string;
   file: File | null;
   fileInputRef: RefObject<HTMLInputElement | null>;

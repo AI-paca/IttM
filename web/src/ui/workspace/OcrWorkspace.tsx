@@ -10,6 +10,7 @@ export function OcrWorkspace() {
     appState,
     copied,
     diagnostics,
+    documentProgress,
     dragHandlers,
     extractedText,
     extractionProgress,
@@ -54,6 +55,7 @@ export function OcrWorkspace() {
 
         {appState === "loading" && (
           <LoadingPanel
+            documentProgress={documentProgress}
             extractionProgress={extractionProgress}
             onCancelExtraction={onCancelExtraction}
           />
@@ -62,6 +64,7 @@ export function OcrWorkspace() {
         {appState === "reading" && (
           <ReadingPanel
             copied={copied}
+            documentProgress={documentProgress}
             extractedText={extractedText}
             extractionProgress={extractionProgress}
             file={file}

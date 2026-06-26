@@ -71,6 +71,22 @@ export class PlatformError extends Error {
   }
 }
 
+export interface ExtractionDocumentProgress {
+  currentPage: number | null;
+  totalPages: number | null;
+  completedPages: number;
+  currentPagePercent: number | null;
+  documentPercent: number | null;
+}
+
+export interface ProgressDetail {
+  currentPage?: number | null;
+  totalPages?: number | null;
+  completedPages?: number;
+  currentPagePercent?: number | null;
+  documentPercent?: number | null;
+}
+
 export interface ProgressSink {
-  (msg: string, percent?: number): void;
+  (msg: string, percent?: number, detail?: ProgressDetail): void;
 }

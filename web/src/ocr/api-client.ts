@@ -2,6 +2,7 @@ import {
   PlatformError,
   type OcrResult,
   type PlatformErrorShape,
+  type ProgressDetail,
   type ProgressSink,
 } from "./types";
 
@@ -391,6 +392,8 @@ interface BackendStreamPageEvent {
   type: "page";
   page: number;
   markdown: string;
+  total_pages?: number;
+  totalPages?: number;
 }
 
 interface BackendStreamCompleteEvent {
@@ -413,6 +416,8 @@ interface BackendStreamProgressEvent {
   message?: string;
   page?: number;
   percent?: number;
+  total_pages?: number;
+  totalPages?: number;
 }
 
 interface BackendStreamWarningEvent {
@@ -425,6 +430,24 @@ interface BackendStreamWarningEvent {
 
 function backendJsonUrl(streamUrl: string): string {
   return streamUrl.replace(/\/convert\/stream(?=[?#]|$)/, "/convert");
+}
+
+function eventTotalPages(
+  event: BackendStreamPageEvent | BackendStreamProgressEvent,
+) {
+  const totalPages =
+    typeof event.total_pages === "number"
+      ? event.total_pages
+      : event.totalPages;
+  return typeof totalPages === "number" && Number.isFinite(totalPages)
+    ? Math.max(1, Math.floor(totalPages))
+    : undefined;
+}
+
+function normalizeStreamPercent(value: number | undefined) {
+  if (value === undefined || !Number.isFinite(value)) return undefined;
+  const normalized = value > 1 ? value / 100 : value;
+  return Math.max(0, Math.min(1, normalized));
 }
 
 interface BackendStreamOptions {
@@ -538,11 +561,21 @@ export async function readBackendOcrStream(
         progressEvent.message.trim()
       ) {
         markMeaningfulEvent();
+        const detail: ProgressDetail = {};
+        const totalPages = eventTotalPages(progressEvent);
+        if (typeof progressEvent.page === "number") {
+          detail.currentPage = progressEvent.page;
+          detail.completedPages = Math.max(0, progressEvent.page - 1);
+        }
+        if (totalPages !== undefined) detail.totalPages = totalPages;
+        const pagePercent = normalizeStreamPercent(progressEvent.percent);
+        if (pagePercent !== undefined) detail.currentPagePercent = pagePercent;
         onProgress?.(
           progressEvent.message.trim(),
           typeof progressEvent.percent === "number"
             ? progressEvent.percent
             : undefined,
+          Object.keys(detail).length ? detail : undefined,
         );
       }
       return;
@@ -573,7 +606,13 @@ export async function readBackendOcrStream(
     const pageEvent = event as unknown as BackendStreamPageEvent;
     markMeaningfulEvent();
     markdownParts.push(pageEvent.markdown);
-    onProgress?.(`Получена страница ${pageEvent.page}...`);
+    const totalPages = eventTotalPages(pageEvent);
+    onProgress?.(`Получена страница ${pageEvent.page}...`, undefined, {
+      currentPage: pageEvent.page,
+      ...(totalPages !== undefined ? { totalPages } : {}),
+      completedPages: pageEvent.page,
+      currentPagePercent: null,
+    });
     onChunk?.(`${pageEvent.markdown}\n\n---\n\n`, pageEvent.page);
   };
 

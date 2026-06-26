@@ -19,6 +19,7 @@ import {
 import type {
   AppDiagnostics,
   BackendDiagnostics,
+  ExtractionDocumentProgress,
   LlmProvider,
   SourceType,
 } from "./types";
@@ -124,6 +125,8 @@ export function OcrProvider({ children }: { children: ReactNode }) {
   const [extractionProgress, setExtractionProgress] = useState(
     "Достаём текст из скриншота...",
   );
+  const [documentProgress, setDocumentProgress] =
+    useState<ExtractionDocumentProgress | null>(null);
   const [llmProvider, setLlmProvider] = useState<LlmProvider>("gemini");
   const [llmModel, setLlmModel] = useState("gemini-2.5-flash-lite");
   const [llmKey, setLlmKey] = useState("");
@@ -277,6 +280,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
 
       setFile(selected);
       setActiveSource(null);
+      setDocumentProgress(null);
       if (autoStart) {
         setLastExtractedPage(1);
         setTotalPdfPages(null);
@@ -328,6 +332,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
     setAppState("upload");
     setFile(null);
     setActiveSource(null);
+    setDocumentProgress(null);
   }, []);
 
   const handleStartExtraction = useCallback(() => {
@@ -337,6 +342,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
     }
     setLastExtractedPage(1);
     setTotalPdfPages(null);
+    setDocumentProgress(null);
     setExtractedText("");
     setActiveSource(null);
     setAppState("loading");
@@ -423,10 +429,12 @@ export function OcrProvider({ children }: { children: ReactNode }) {
     setAppState,
     setExtractedText,
     setExtractionProgress,
+    setDocumentProgress,
     setActiveSource,
     setIsExtracting,
     setLastExtractedPage,
     setTotalPdfPages,
+    totalPdfPages,
     showNotice,
   });
 
@@ -525,6 +533,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       diagnostics,
       dragHandlers,
       extractedText,
+      documentProgress,
       extractionProgress,
       file,
       fileInputRef,
@@ -544,6 +553,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       cancelExtraction,
       copied,
       diagnostics,
+      documentProgress,
       dragHandlers,
       extractedText,
       extractionProgress,

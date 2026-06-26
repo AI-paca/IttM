@@ -13,6 +13,13 @@ export interface PreparedPdfPage {
   image: Blob;
 }
 
+export interface PdfProgressDetail {
+  currentPage: number;
+  totalPages: number;
+  completedPages?: number;
+  currentPagePercent?: number | null;
+}
+
 function assertActive(options: PdfProcessingOptions) {
   if (options.shouldContinue && !options.shouldContinue()) {
     throw new DOMException("PDF processing was cancelled.", "AbortError");
@@ -38,24 +45,39 @@ export async function processPreparedPages(
   totalPages: number,
   startPage: number,
   options: PdfProcessingOptions,
-  onProgress: (message: string) => void,
+  onProgress: (message: string, detail?: PdfProgressDetail) => void,
   preparePage: (pageNumber: number) => Promise<PreparedPdfPage>,
-  processImage: (image: Blob) => Promise<string>,
+  processImage: (
+    image: Blob,
+    pageNumber: number,
+    totalPages: number,
+  ) => Promise<string>,
   onChunkExtracted?: (text: string, pageIndex?: number) => void,
 ): Promise<string> {
   const markdownParts: string[] = [];
 
   for (let pageNumber = startPage; pageNumber <= totalPages; pageNumber += 1) {
     assertActive(options);
-    onProgress(`Обработка страницы ${pageNumber} из ${totalPages}...`);
+    onProgress(`Обработка страницы ${pageNumber} из ${totalPages}...`, {
+      currentPage: pageNumber,
+      totalPages,
+      completedPages: pageNumber - 1,
+      currentPagePercent: 0.05,
+    });
     const prepared = await preparePage(pageNumber);
     assertActive(options);
     onProgress(
       prepared.nativeText
         ? `Проверка изображения на странице ${pageNumber}...`
         : `Распознавание скана страницы ${pageNumber}...`,
+      {
+        currentPage: pageNumber,
+        totalPages,
+        completedPages: pageNumber - 1,
+        currentPagePercent: 0.25,
+      },
     );
-    const ocrText = await processImage(prepared.image);
+    const ocrText = await processImage(prepared.image, pageNumber, totalPages);
     assertActive(options);
     const pageText = mergeNativeAndOcrText(prepared.nativeText, ocrText);
 
@@ -63,6 +85,12 @@ export async function processPreparedPages(
       markdownParts.push(pageText);
       onChunkExtracted?.(`${pageText}\n\n---\n\n`, pageNumber);
     }
+    onProgress(`Страница ${pageNumber} обработана.`, {
+      currentPage: pageNumber,
+      totalPages,
+      completedPages: pageNumber,
+      currentPagePercent: null,
+    });
   }
 
   return markdownParts.join("\n\n---\n\n");

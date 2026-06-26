@@ -24,7 +24,7 @@ jobs:
         run: mkdir -p .cache/tesseract-js
 
       - name: Cache Tesseract.js data
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .cache/tesseract-js
           key: tesseract-js-${{ runner.os }}-eng-rus-chi-sim-v2

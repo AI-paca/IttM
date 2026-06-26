@@ -6,7 +6,7 @@ numpy
 opencv-python-headless
 pdf2image
 pillow
-pytest==9.1.0
+pytest==9.1.1
 python-multipart
 pytesseract
 ruff==0.15.18

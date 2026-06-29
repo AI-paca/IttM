@@ -221,67 +221,93 @@
   }
 
   /* ------------------------------------------ Steam-style progress edge */
-  .progress-edge-track {
+  .document-progress-chrome {
     background: linear-gradient(
       180deg,
-      color-mix(
-          in srgb,
-          var(--color-accent-soft-border) 34%,
-          var(--color-bg-elevated) 66%
-        )
+      color-mix(in srgb, var(--color-bg-elevated) 22%, var(--color-bg-surface))
         0%,
+      var(--color-bg-surface) 100%
+    );
+  }
+
+  .progress-edge-track {
+    background: color-mix(
+      in srgb,
+      var(--color-bg-inset) 78%,
+      var(--color-accent-soft-border) 22%
+    );
+    box-shadow: inset 0 -1px 0
+      color-mix(in srgb, var(--color-border-subtle) 72%, transparent);
+  }
+
+  .progress-edge-track-path {
+    fill: none;
+    stroke: color-mix(
+      in srgb,
+      var(--color-bg-inset) 78%,
+      var(--color-accent-soft-border) 22%
+    );
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 5px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .progress-edge-fill {
+    overflow: hidden;
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-accent) 92%, var(--color-accent-strong))
+        0%,
+      color-mix(in srgb, var(--color-accent) 82%, var(--color-accent-strong))
+        24%,
       color-mix(
           in srgb,
-          var(--color-accent-soft-border) 18%,
-          var(--color-bg-muted) 82%
+          var(--color-accent) 68%,
+          var(--color-bg-elevated) 32%
         )
         100%
     );
     box-shadow:
       inset 0 1px 0
-        color-mix(in srgb, var(--color-accent-soft-border) 24%, transparent),
-      inset 0 -1px 0 color-mix(in srgb, var(--color-bg-muted) 72%, transparent);
+        color-mix(in srgb, var(--color-accent-soft-border) 44%, transparent),
+      0 0 7px color-mix(in srgb, var(--color-accent) 42%, transparent);
   }
 
-  .progress-edge-fill {
-    overflow: hidden;
-    background-image:
-      linear-gradient(
-        180deg,
-        color-mix(
-            in srgb,
-            var(--color-accent) 82%,
-            var(--color-accent-strong) 18%
-          )
-          0%,
-        var(--color-accent) 58%,
-        color-mix(
-            in srgb,
-            var(--color-accent) 76%,
-            var(--color-accent-strong) 24%
-          )
-          100%
-      ),
-      linear-gradient(
-        100deg,
-        transparent 0%,
-        transparent 28%,
-        color-mix(in srgb, var(--color-accent-soft-border) 72%, transparent) 50%,
-        transparent 72%,
-        transparent 100%
-      );
-    background-position:
-      0 0,
-      135% 0;
-    background-size:
-      100% 100%,
-      190% 100%;
-    background-blend-mode: normal, screen;
+  .progress-edge-fill-path {
+    fill: none;
+    stroke: color-mix(
+      in srgb,
+      var(--color-accent) 88%,
+      var(--color-accent-strong)
+    );
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 5px;
+    filter: drop-shadow(
+      0 0 4px color-mix(in srgb, var(--color-accent) 40%, transparent)
+    );
+    vector-effect: non-scaling-stroke;
+  }
+
+  .cancel-wrap-button {
+    isolation: isolate;
+    outline: none;
+    transform-origin: center;
+    box-shadow: inset 0 1px 0
+      color-mix(in srgb, white 8%, transparent);
+  }
+
+  .cancel-wrap-button:hover {
+    background: var(--color-bg-elevated);
+    border-bottom-color: var(--color-bg-elevated);
+    color: var(--color-danger-text);
+  }
+
+  .cancel-wrap-button:focus-visible {
     box-shadow:
-      inset 0 1px 0
-        color-mix(in srgb, var(--color-accent-strong) 36%, transparent),
-      0 0 7px color-mix(in srgb, var(--color-accent) 58%, transparent);
-    animation: progress-edge-flow 1.35s linear infinite;
+      0 0 0 2px var(--color-accent-ring),
+      0 4px 14px color-mix(in srgb, var(--color-accent) 18%, transparent);
   }
 
   .progress-edge-fill::after {
@@ -289,24 +315,13 @@
     position: absolute;
     inset-block: 0;
     right: -1px;
-    width: 16px;
+    width: 12px;
     background: linear-gradient(
       90deg,
       transparent 0%,
-      color-mix(in srgb, var(--color-accent) 72%, transparent) 42%,
-      color-mix(
-          in srgb,
-          var(--color-accent-soft-border) 70%,
-          var(--color-accent) 30%
-        )
-        100%
+      color-mix(in srgb, var(--color-accent) 80%, transparent) 100%
     );
-    box-shadow:
-      0 0 9px color-mix(in srgb, var(--color-accent) 76%, transparent),
-      0 0 3px
-        color-mix(in srgb, var(--color-accent-soft-border) 70%, transparent);
-    opacity: 0.82;
-    animation: progress-edge-leading-pulse 1s ease-in-out infinite;
+    opacity: 0.85;
   }
 
   @media (prefers-reduced-motion: reduce) {

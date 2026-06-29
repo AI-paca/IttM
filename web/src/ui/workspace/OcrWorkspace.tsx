@@ -1,7 +1,6 @@
 import { AnimatePresence } from "motion/react";
 import { useOcrWorkspace } from "../../ocr/ocr-context";
 import { ConfigurePanel } from "../ConfigurePanel";
-import { LoadingPanel } from "../LoadingPanel";
 import { ReadingPanel } from "../ReadingPanel";
 import { UploadPanel } from "../UploadPanel";
 
@@ -13,7 +12,6 @@ export function OcrWorkspace() {
     documentProgress,
     dragHandlers,
     extractedText,
-    extractionProgress,
     file,
     fileInputRef,
     isDragging,
@@ -32,7 +30,9 @@ export function OcrWorkspace() {
     <main className="flex-1 flex flex-col items-center px-4 md:px-8 py-6 md:py-8 w-full max-w-7xl mx-auto relative z-10 overflow-x-hidden">
       <div
         className={`w-full flex flex-col transition-all duration-500 flex-1 ${
-          appState === "reading" ? "max-w-5xl" : "max-w-[900px]"
+          appState === "reading" || appState === "loading"
+            ? "max-w-[1120px]"
+            : "max-w-[900px]"
         }`}
       >
         <AnimatePresence mode="popLayout">
@@ -53,20 +53,13 @@ export function OcrWorkspace() {
           <ConfigurePanel onStartExtraction={onStartExtraction} />
         )}
 
-        {appState === "loading" && (
-          <LoadingPanel
-            documentProgress={documentProgress}
-            extractionProgress={extractionProgress}
-            onCancelExtraction={onCancelExtraction}
-          />
-        )}
-
-        {appState === "reading" && (
+        {/* Один компонент обслуживает «loading» (текста ещё нет) и «reading»
+            (текст появился), но размеры карточки адаптируются под состояние. */}
+        {(appState === "loading" || appState === "reading") && (
           <ReadingPanel
             copied={copied}
             documentProgress={documentProgress}
             extractedText={extractedText}
-            extractionProgress={extractionProgress}
             file={file}
             isExtracting={isExtracting}
             lastExtractedPage={lastExtractedPage}

@@ -27,11 +27,11 @@ export function OcrWorkspace() {
   } = useOcrWorkspace();
 
   return (
-    <main className="flex-1 flex flex-col items-center px-4 md:px-8 py-6 md:py-8 w-full max-w-7xl mx-auto relative z-10 overflow-x-hidden">
+    <main className="flex-1 flex flex-col items-center px-4 md:px-8 py-6 md:py-8 w-full max-w-[1440px] mx-auto relative z-10 overflow-x-hidden">
       <div
         className={`w-full flex flex-col transition-all duration-500 flex-1 ${
           appState === "reading" || appState === "loading"
-            ? "max-w-[1120px]"
+            ? "max-w-[1280px]"
             : "max-w-[900px]"
         }`}
       >

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Check, Copy, RefreshCw } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, Copy, Maximize2, Minimize2, RefreshCw } from "lucide-react";
 import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import type { ExtractionDocumentProgress } from "../ocr/types";
 import { DocumentProgressBar } from "./DocumentProgressBar";
@@ -66,6 +66,8 @@ export function ReadingPanel({
   onStartExtraction,
 }: ReadingPanelProps) {
   const showContent = extractedText.length > 0;
+  const documentSurfaceRef = useRef<HTMLDivElement | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const isDesktopViewport = useIsDesktopViewport();
   const desktopCopyLayoutId =
     showContent && !isExtracting && isDesktopViewport
@@ -82,11 +84,40 @@ export function ReadingPanel({
     mass: 0.8,
   };
   const cardLayoutClass = showContent
-    ? "max-w-[1120px] min-h-[58svh] md:min-h-[60svh] pb-12"
-    : "max-w-[1120px] min-h-[400px] sm:min-h-[430px] md:min-h-[460px] pb-0";
+    ? "max-w-[1280px] min-h-[62svh] md:min-h-[66svh] pb-12"
+    : "max-w-[1280px] min-h-[430px] sm:min-h-[500px] lg:min-h-[560px] xl:min-h-[600px] pb-0";
   const contentPaddingClass = showContent
-    ? "p-5 sm:p-9 lg:p-10"
+    ? "p-5 pr-16 sm:p-9 sm:pr-20 lg:p-10 lg:pr-24"
     : "px-5 py-5 sm:px-8 sm:py-6 lg:px-10 lg:py-7";
+  const fullscreenTitle = isFullscreen
+    ? "Выйти из полноэкранного режима"
+    : "Во весь экран";
+
+  useEffect(() => {
+    const syncFullscreenState = () => {
+      setIsFullscreen(document.fullscreenElement === documentSurfaceRef.current);
+    };
+
+    syncFullscreenState();
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    return () =>
+      document.removeEventListener("fullscreenchange", syncFullscreenState);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    const surface = documentSurfaceRef.current;
+    if (!surface) return;
+
+    try {
+      if (document.fullscreenElement === surface) {
+        await document.exitFullscreen();
+      } else {
+        await surface.requestFullscreen();
+      }
+    } catch {
+      // Fullscreen can be denied by the browser; the UI should simply stay put.
+    }
+  };
 
   return (
     <LayoutGroup id="ocr-primary-action-group">
@@ -133,7 +164,8 @@ export function ReadingPanel({
         )}
 
         <div
-          className={`surface-card relative overflow-hidden mx-auto w-full ${cardLayoutClass} text-[16.5px] sm:text-[17px] lg:text-[18px] leading-[1.75] sm:leading-[1.9] text-[var(--color-text-secondary)] selection:bg-[var(--color-info-soft)] font-sans transition-[max-width,min-height,padding] duration-500 ease-out`}
+          ref={documentSurfaceRef}
+          className={`document-fullscreen-surface surface-card relative overflow-hidden mx-auto w-full ${cardLayoutClass} text-[16.5px] sm:text-[17px] lg:text-[18px] leading-[1.75] sm:leading-[1.9] text-[var(--color-text-secondary)] selection:bg-[var(--color-info-soft)] font-sans transition-[max-width,min-height,padding] duration-500 ease-out`}
         >
           <AnimatePresence mode="popLayout">
             {isExtracting && (
@@ -144,6 +176,22 @@ export function ReadingPanel({
               />
             )}
           </AnimatePresence>
+
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            title={fullscreenTitle}
+            aria-label={fullscreenTitle}
+            className={`document-fullscreen-toggle absolute z-40 flex h-9 w-9 items-center justify-center rounded-xl border border-transparent bg-transparent text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-elevated)] hover:text-[var(--color-accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ring)] active:scale-95 ${
+              isExtracting ? "right-14 top-[8px] sm:right-[148px]" : "right-4 top-4"
+            }`}
+          >
+            {isFullscreen ? (
+              <Minimize2 className="h-4 w-4" />
+            ) : (
+              <Maximize2 className="h-4 w-4" />
+            )}
+          </button>
 
           <div className={contentPaddingClass}>
             {showContent ? (

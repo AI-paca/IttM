@@ -310,6 +310,28 @@
       0 4px 14px color-mix(in srgb, var(--color-accent) 18%, transparent);
   }
 
+  .document-fullscreen-surface:fullscreen {
+    width: 100vw;
+    max-width: none;
+    height: 100svh;
+    min-height: 100svh;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: auto;
+    background: var(--color-bg-surface);
+  }
+
+  .document-fullscreen-surface:fullscreen .document-progress-chrome {
+    position: sticky;
+    top: 0;
+    z-index: 35;
+  }
+
+  .document-fullscreen-surface:fullscreen .document-fullscreen-toggle {
+    position: fixed;
+  }
+
   .progress-edge-fill::after {
     content: "";
     position: absolute;

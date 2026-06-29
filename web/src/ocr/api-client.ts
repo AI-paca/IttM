@@ -107,7 +107,7 @@ export async function parsePlatformError(
   try {
     raw = await response.text();
   } catch {
-    raw = "";
+    // Keep the empty fallback when the response body cannot be read.
   }
 
   if (raw && contentType.includes("application/json")) {

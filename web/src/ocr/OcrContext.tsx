@@ -196,7 +196,8 @@ const PREVIEW_PARTIAL_TEXT = `# Извлеченный текст
 
 export function OcrProvider({ children }: { children: ReactNode }) {
   const previewMode = getPreviewMode();
-  const previewDocumentProgress = getLoadingPreviewDocumentProgress(previewMode);
+  const previewDocumentProgress =
+    getLoadingPreviewDocumentProgress(previewMode);
   const loadingPreview = previewDocumentProgress !== null;
   const [appState, setAppState] = useState<AppState>(
     loadingPreview ? "loading" : "upload",
@@ -250,15 +251,19 @@ export function OcrProvider({ children }: { children: ReactNode }) {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { scrollY } = useScroll();
-  const previewTransitionTotalPages = previewDocumentProgress?.totalPages ?? null;
+  const previewTransitionTotalPages =
+    previewDocumentProgress?.totalPages ?? null;
+  const previewTransitionInitialPercent =
+    previewDocumentProgress?.documentPercent ?? 0;
 
   useEffect(() => {
-    if (previewMode !== "transition" || !previewDocumentProgress) return;
-    const params = new URLSearchParams(window.location.search);
-    const totalPages = previewDocumentProgress.totalPages ?? previewTotalPages(params);
-    const initialPercent = previewDocumentProgress.documentPercent ?? 0;
+    if (previewMode !== "transition" || previewTransitionTotalPages === null)
+      return;
+    const totalPages = previewTransitionTotalPages;
     const firstPagePercent =
-      totalPages > 1 ? Math.max(initialPercent, (1 + 0.42) / totalPages) : 1;
+      totalPages > 1
+        ? Math.max(previewTransitionInitialPercent, (1 + 0.42) / totalPages)
+        : 1;
     const firstPageTimeout = window.setTimeout(() => {
       setDocumentProgress({
         currentPage: Math.min(2, totalPages),
@@ -293,7 +298,11 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       window.clearTimeout(firstPageTimeout);
       window.clearTimeout(doneTimeout);
     };
-  }, [previewMode, previewTransitionTotalPages]);
+  }, [
+    previewMode,
+    previewTransitionInitialPercent,
+    previewTransitionTotalPages,
+  ]);
 
   const showNotice = useCallback(
     (message: string, tone: NoticeTone = "error") => {

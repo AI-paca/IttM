@@ -72,13 +72,20 @@ function useSmoothedPercent(
 
     if (targetPercent === null) {
       displayRef.current = null;
-      setDisplayPercent(null);
-      return;
+      frameRef.current = requestAnimationFrame(() => {
+        frameRef.current = null;
+        setDisplayPercent(null);
+      });
+      return () => {
+        if (frameRef.current !== null) {
+          cancelAnimationFrame(frameRef.current);
+          frameRef.current = null;
+        }
+      };
     }
 
     if (displayRef.current === null) {
       displayRef.current = targetPercent;
-      setDisplayPercent(targetPercent);
     }
 
     let previousTime = performance.now();
@@ -101,8 +108,7 @@ function useSmoothedPercent(
       }
 
       const responseSeconds = responseSecondsForDistance(distance);
-      const smoothing =
-        1 - Math.exp(-elapsedSeconds / responseSeconds);
+      const smoothing = 1 - Math.exp(-elapsedSeconds / responseSeconds);
       const next = clampPercent(current + distance * smoothing) ?? softTarget;
       displayRef.current = next;
       setDisplayPercent(next);
@@ -119,7 +125,7 @@ function useSmoothedPercent(
     };
   }, [progress, targetPercent]);
 
-  return displayPercent;
+  return targetPercent === null ? null : (displayPercent ?? targetPercent);
 }
 
 /**
@@ -140,21 +146,26 @@ function useExtractionEta(displayPercent: number | null): number | null {
   const [eta, setEta] = useState<number | null>(null);
 
   useEffect(() => {
-    if (displayPercent === null || displayPercent < 0.02) {
-      startedAtRef.current = null;
-      setEta(null);
-      return;
-    }
-    if (startedAtRef.current === null) {
-      startedAtRef.current = performance.now();
-    }
-    const elapsedSeconds = (performance.now() - startedAtRef.current) / 1000;
-    if (displayPercent >= 0.995) {
-      setEta(0);
-      return;
-    }
-    const predicted = (elapsedSeconds * (1 - displayPercent)) / displayPercent;
-    setEta(predicted);
+    const frame = requestAnimationFrame(() => {
+      if (displayPercent === null || displayPercent < 0.02) {
+        startedAtRef.current = null;
+        setEta(null);
+        return;
+      }
+      if (startedAtRef.current === null) {
+        startedAtRef.current = performance.now();
+      }
+      const elapsedSeconds = (performance.now() - startedAtRef.current) / 1000;
+      if (displayPercent >= 0.995) {
+        setEta(0);
+        return;
+      }
+      const predicted =
+        (elapsedSeconds * (1 - displayPercent)) / displayPercent;
+      setEta(predicted);
+    });
+
+    return () => cancelAnimationFrame(frame);
   }, [displayPercent]);
 
   return eta;

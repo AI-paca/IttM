@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "reviewed_at": "2026-06-26",
+  "reviewed_at": "2026-06-29",
   "source": "Trivy image reports for OCR production and OCR CI images",
   "policy": "Only vulnerabilities without FixedVersion may be accepted here. Fixable MEDIUM/HIGH/CRITICAL image findings remain blocked by scripts/ci/run-sca.sh.",
   "reason": "The listed Debian package families currently have no FixedVersion in the vendor feed. They are tracked as accepted risk until Debian publishes a fix or the package leaves the OCR images.",
@@ -49,6 +49,7 @@
     "liblzma5",
     "libmount1",
     "libncursesw6",
+    "libnghttp2-14",
     "libnss3",
     "libopenjp2-7",
     "libpam-modules",
@@ -60,6 +61,7 @@
     "libpoppler147",
     "libsmartcols1",
     "libsqlite3-0",
+    "libssh2-1t64",
     "libsystemd0",
     "libtasn1-6",
     "libtiff6",

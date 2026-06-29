@@ -12,6 +12,7 @@ export function NavigationArea() {
     dragHandlers,
     file,
     isDragging,
+    isExtracting,
     onNewFile,
     showHeader,
   } = useNavigationArea();
@@ -29,6 +30,7 @@ export function NavigationArea() {
         appState={appState}
         file={file}
         isDragging={isDragging}
+        isExtracting={isExtracting}
         selectedSource={activeSource ?? engineControls.selectedSource}
         showHeader={showHeader}
         onDragOver={dragHandlers.onDragOver}

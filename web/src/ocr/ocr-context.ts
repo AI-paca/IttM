@@ -28,6 +28,7 @@ export interface NavigationAreaContextValue {
   dragHandlers: DragHandlers;
   file: File | null;
   isDragging: boolean;
+  isExtracting: boolean;
   showHeader: boolean;
   onNewFile: () => void;
 }

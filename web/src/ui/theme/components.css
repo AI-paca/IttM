@@ -220,6 +220,133 @@
            border-t-[var(--color-accent)];
   }
 
+  /* ------------------------------------------ Steam-style progress edge */
+  .document-progress-chrome {
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-bg-elevated) 22%, var(--color-bg-surface))
+        0%,
+      var(--color-bg-surface) 100%
+    );
+  }
+
+  .progress-edge-track {
+    background: color-mix(
+      in srgb,
+      var(--color-bg-inset) 78%,
+      var(--color-accent-soft-border) 22%
+    );
+    box-shadow: inset 0 -1px 0
+      color-mix(in srgb, var(--color-border-subtle) 72%, transparent);
+  }
+
+  .progress-edge-track-path {
+    fill: none;
+    stroke: color-mix(
+      in srgb,
+      var(--color-bg-inset) 78%,
+      var(--color-accent-soft-border) 22%
+    );
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 5px;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .progress-edge-fill {
+    overflow: hidden;
+    background-image: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-accent) 92%, var(--color-accent-strong)) 0%,
+      color-mix(in srgb, var(--color-accent) 82%, var(--color-accent-strong))
+        24%,
+      color-mix(in srgb, var(--color-accent) 68%, var(--color-bg-elevated) 32%)
+        100%
+    );
+    box-shadow:
+      inset 0 1px 0
+        color-mix(in srgb, var(--color-accent-soft-border) 44%, transparent),
+      0 0 7px color-mix(in srgb, var(--color-accent) 42%, transparent);
+  }
+
+  .progress-edge-fill-path {
+    fill: none;
+    stroke: color-mix(
+      in srgb,
+      var(--color-accent) 88%,
+      var(--color-accent-strong)
+    );
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 5px;
+    filter: drop-shadow(
+      0 0 4px color-mix(in srgb, var(--color-accent) 40%, transparent)
+    );
+    vector-effect: non-scaling-stroke;
+  }
+
+  .cancel-wrap-button {
+    isolation: isolate;
+    outline: none;
+    transform-origin: center;
+    box-shadow: inset 0 1px 0 color-mix(in srgb, white 8%, transparent);
+  }
+
+  .cancel-wrap-button:hover {
+    background: var(--color-bg-elevated);
+    border-bottom-color: var(--color-bg-elevated);
+    color: var(--color-danger-text);
+  }
+
+  .cancel-wrap-button:focus-visible {
+    box-shadow:
+      0 0 0 2px var(--color-accent-ring),
+      0 4px 14px color-mix(in srgb, var(--color-accent) 18%, transparent);
+  }
+
+  .document-fullscreen-surface:fullscreen {
+    width: 100vw;
+    max-width: none;
+    height: 100svh;
+    min-height: 100svh;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: auto;
+    background: var(--color-bg-surface);
+  }
+
+  .document-fullscreen-surface:fullscreen .document-progress-chrome {
+    position: sticky;
+    top: 0;
+    z-index: 35;
+  }
+
+  .document-fullscreen-surface:fullscreen .document-fullscreen-toggle {
+    position: fixed;
+  }
+
+  .progress-edge-fill::after {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    right: -1px;
+    width: 12px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--color-accent) 80%, transparent) 100%
+    );
+    opacity: 0.85;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .progress-edge-fill,
+    .progress-edge-fill::after {
+      animation: none;
+    }
+  }
+
   /* ----------------------------------------------------------- Markdown output */
   .markdown-content {
     @apply max-w-none break-words text-[var(--color-text-secondary)];
@@ -336,5 +463,30 @@
     @apply flex-1 h-[38px] min-w-[120px] cursor-grab active:cursor-grabbing block rounded-full sm:h-[24px] sm:min-w-[40px];
     -webkit-tap-highlight-color: transparent;
     touch-action: none;
+  }
+}
+
+@keyframes progress-edge-flow {
+  0% {
+    background-position:
+      0 0,
+      135% 0;
+  }
+  100% {
+    background-position:
+      0 0,
+      -70% 0;
+  }
+}
+
+@keyframes progress-edge-leading-pulse {
+  0%,
+  100% {
+    opacity: 0.54;
+    transform: scaleX(0.72);
+  }
+  45% {
+    opacity: 1;
+    transform: scaleX(1.12);
   }
 }

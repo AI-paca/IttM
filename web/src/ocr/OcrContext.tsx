@@ -106,8 +106,26 @@ function fileFromClipboard(event: ClipboardEvent): File | null {
   return null;
 }
 
+function isLoadingPreview() {
+  if (typeof window === "undefined") return false;
+  return (
+    new URLSearchParams(window.location.search).get("preview") === "loading"
+  );
+}
+
+const PREVIEW_DOCUMENT_PROGRESS: ExtractionDocumentProgress = {
+  currentPage: 3,
+  totalPages: 6,
+  completedPages: 2,
+  currentPagePercent: 0.65,
+  documentPercent: (2 + 0.65) / 6,
+};
+
 export function OcrProvider({ children }: { children: ReactNode }) {
-  const [appState, setAppState] = useState<AppState>("upload");
+  const loadingPreview = isLoadingPreview();
+  const [appState, setAppState] = useState<AppState>(
+    loadingPreview ? "loading" : "upload",
+  );
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [selectedSource, setSelectedSource] = useState<SourceType>(() =>
@@ -121,12 +139,14 @@ export function OcrProvider({ children }: { children: ReactNode }) {
   const [showHeader, setShowHeader] = useState(true);
   const [copied, setCopied] = useState(false);
   const [extractedText, setExtractedText] = useState("");
-  const [isExtracting, setIsExtracting] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(loadingPreview);
   const [extractionProgress, setExtractionProgress] = useState(
-    "Достаём текст из скриншота...",
+    loadingPreview ? "Отправка на сервер..." : "Достаём текст из скриншота...",
   );
   const [documentProgress, setDocumentProgress] =
-    useState<ExtractionDocumentProgress | null>(null);
+    useState<ExtractionDocumentProgress | null>(
+      loadingPreview ? PREVIEW_DOCUMENT_PROGRESS : null,
+    );
   const [llmProvider, setLlmProvider] = useState<LlmProvider>("gemini");
   const [llmModel, setLlmModel] = useState("gemini-2.5-flash-lite");
   const [llmKey, setLlmKey] = useState("");

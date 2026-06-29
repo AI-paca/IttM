@@ -68,9 +68,9 @@ export function ReadingPanel({
         </div>
 
         {isExtracting && (
-          <div className="mb-6 border-b border-[var(--color-border-subtle)] py-6">
+          <div className="relative mb-6 overflow-hidden border-b border-[var(--color-border-subtle)] py-6">
             <div className="mb-4 flex flex-col sm:flex-row items-center gap-4 justify-center">
-              <div className="flex items-center gap-3 text-[var(--color-info)]">
+              <div className="flex items-center gap-3 text-[var(--color-accent-strong)]">
                 <div className="spinner w-5 h-5" />
                 <span className="font-medium text-sm animate-pulse">
                   {extractionProgress}

@@ -220,6 +220,102 @@
            border-t-[var(--color-accent)];
   }
 
+  /* ------------------------------------------ Steam-style progress edge */
+  .progress-edge-track {
+    background: linear-gradient(
+      180deg,
+      color-mix(
+          in srgb,
+          var(--color-accent-soft-border) 34%,
+          var(--color-bg-elevated) 66%
+        )
+        0%,
+      color-mix(
+          in srgb,
+          var(--color-accent-soft-border) 18%,
+          var(--color-bg-muted) 82%
+        )
+        100%
+    );
+    box-shadow:
+      inset 0 1px 0
+        color-mix(in srgb, var(--color-accent-soft-border) 24%, transparent),
+      inset 0 -1px 0 color-mix(in srgb, var(--color-bg-muted) 72%, transparent);
+  }
+
+  .progress-edge-fill {
+    overflow: hidden;
+    background-image:
+      linear-gradient(
+        180deg,
+        color-mix(
+            in srgb,
+            var(--color-accent) 82%,
+            var(--color-accent-strong) 18%
+          )
+          0%,
+        var(--color-accent) 58%,
+        color-mix(
+            in srgb,
+            var(--color-accent) 76%,
+            var(--color-accent-strong) 24%
+          )
+          100%
+      ),
+      linear-gradient(
+        100deg,
+        transparent 0%,
+        transparent 28%,
+        color-mix(in srgb, var(--color-accent-soft-border) 72%, transparent) 50%,
+        transparent 72%,
+        transparent 100%
+      );
+    background-position:
+      0 0,
+      135% 0;
+    background-size:
+      100% 100%,
+      190% 100%;
+    background-blend-mode: normal, screen;
+    box-shadow:
+      inset 0 1px 0
+        color-mix(in srgb, var(--color-accent-strong) 36%, transparent),
+      0 0 7px color-mix(in srgb, var(--color-accent) 58%, transparent);
+    animation: progress-edge-flow 1.35s linear infinite;
+  }
+
+  .progress-edge-fill::after {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    right: -1px;
+    width: 16px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--color-accent) 72%, transparent) 42%,
+      color-mix(
+          in srgb,
+          var(--color-accent-soft-border) 70%,
+          var(--color-accent) 30%
+        )
+        100%
+    );
+    box-shadow:
+      0 0 9px color-mix(in srgb, var(--color-accent) 76%, transparent),
+      0 0 3px
+        color-mix(in srgb, var(--color-accent-soft-border) 70%, transparent);
+    opacity: 0.82;
+    animation: progress-edge-leading-pulse 1s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .progress-edge-fill,
+    .progress-edge-fill::after {
+      animation: none;
+    }
+  }
+
   /* ----------------------------------------------------------- Markdown output */
   .markdown-content {
     @apply max-w-none break-words text-[var(--color-text-secondary)];
@@ -336,5 +432,30 @@
     @apply flex-1 h-[38px] min-w-[120px] cursor-grab active:cursor-grabbing block rounded-full sm:h-[24px] sm:min-w-[40px];
     -webkit-tap-highlight-color: transparent;
     touch-action: none;
+  }
+}
+
+@keyframes progress-edge-flow {
+  0% {
+    background-position:
+      0 0,
+      135% 0;
+  }
+  100% {
+    background-position:
+      0 0,
+      -70% 0;
+  }
+}
+
+@keyframes progress-edge-leading-pulse {
+  0%,
+  100% {
+    opacity: 0.54;
+    transform: scaleX(0.72);
+  }
+  45% {
+    opacity: 1;
+    transform: scaleX(1.12);
   }
 }

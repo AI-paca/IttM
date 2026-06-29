@@ -31,12 +31,12 @@ export function LoadingPanel({
         </button>
       </div>
 
-      <div className="surface-card w-full max-w-4xl mx-auto space-y-6 p-5 sm:p-8 mt-2 sm:mt-4">
+      <div className="surface-card relative overflow-hidden w-full max-w-4xl mx-auto space-y-6 p-5 sm:p-8 mt-2 sm:mt-4">
         <DocumentProgressBar progress={documentProgress} />
         <div className="flex items-center gap-3 mb-4 sm:mb-6 border-b border-[var(--color-border-subtle)] pb-4">
           <div className="text-sm font-medium text-[var(--color-text-secondary)]">
             Оценка времени завершения:{" "}
-            <span className="text-[var(--color-info)]">
+            <span className="text-[var(--color-accent-strong)]">
               обычно 2-7 мин, тяжелые PDF до 14 мин
             </span>
           </div>

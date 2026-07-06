@@ -14,10 +14,11 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' }}
     runs-on: ubuntu-24.04
     steps:
-      - name: Find Dependabot grouped pull request
+      - name: Find eligible Dependabot pull request
         id: pr
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           pr_json="$(
@@ -31,14 +32,7 @@ jobs:
           fi
 
           number="$(jq -r '.number' <<<"$pr_json")"
-          pr="$(gh pr view "$number" --json headRefName,title,url)"
-          title="$(jq -r '.title' <<<"$pr")"
-          head_ref="$(jq -r '.headRefName' <<<"$pr")"
-
-          if [[ "$title" != *"minor-and-patch"* && "$head_ref" != *"minor-and-patch"* ]]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          pr="$(gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json url)"
 
           echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "url=$(jq -r '.url' <<<"$pr")" >> "$GITHUB_OUTPUT"
@@ -46,6 +40,7 @@ jobs:
       - name: Enable auto-merge
         if: ${{ steps.pr.outputs.skip == 'false' }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           PR_URL: ${{ steps.pr.outputs.url }}
         run: gh pr merge --auto --squash "$PR_URL"

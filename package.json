@@ -45,12 +45,12 @@
     "@tailwindcss/vite": "^4.3.2",
     "@types/express": "^5.0.6",
     "@types/mime-types": "^3.0.1",
-    "@types/node": "^22.14.0",
+    "@types/node": "^26.1.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@typescript-eslint/eslint-plugin": "^8.62.1",
     "@typescript-eslint/parser": "^8.62.1",
-    "@vitejs/plugin-react": "^5.0.4",
+    "@vitejs/plugin-react": "^6.0.3",
     "autoprefixer": "^10.5.2",
     "dotenv": "^17.2.3",
     "esbuild": "^0.28.0",
@@ -60,9 +60,9 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",
     "globals": "^17.7.0",
-    "lucide-react": "^0.546.0",
+    "lucide-react": "^1.23.0",
     "motion": "^12.42.2",
-    "pdfjs-dist": "^5.7.284",
+    "pdfjs-dist": "^6.1.200",
     "prettier": "^3.9.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -71,6 +71,6 @@
     "tsx": "^4.23.0",
     "typescript": "~5.8.2",
     "typescript-eslint": "^8.62.1",
-    "vite": "^6.2.3"
+    "vite": "^8.1.3"
   }
 }

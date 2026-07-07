@@ -102,7 +102,6 @@ export async function executeLlmOcrForImage(
         `Gemini: сеть недоступна или ключ ограничен политиками браузера (${
           normalizePlatformError(error).message
         })`,
-        { cause: error },
       );
     }
 
@@ -158,7 +157,6 @@ export async function executeLlmOcrForImage(
   } catch (error) {
     throw new Error(
       `OpenRouter: сеть недоступна или запрос заблокирован (${normalizePlatformError(error).message})`,
-      { cause: error },
     );
   }
 
@@ -195,7 +193,6 @@ export async function executeOllamaOcrForImage(
   } catch (error) {
     throw new Error(
       `Ollama: сеть недоступна или CORS заблокировал запрос (${normalizePlatformError(error).message})`,
-      { cause: error },
     );
   }
 

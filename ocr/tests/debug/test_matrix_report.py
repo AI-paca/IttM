@@ -98,7 +98,10 @@ def test_writes_per_method_csv(tmp_path):
     assert sample["easyocr gate"] == "pass"
     assert sample["browser-tesseract gate"] == "pass"
     assert sample["browser-tesseract profile"] == "browser_tesseract_dewarp"
-    assert "ocr_language_priority:rus+eng+kaz+kir+chi_sim" in sample["tesseract flags"]
+    assert (
+        "ocr_language_priority:rus+eng+kaz+kir+chi_sim"
+        in sample["tesseract flags"]
+    )
     assert "ocr_table_word_psm:6" in sample["tesseract flags"]
     assert "ocr_large_table_word_psm:11" in sample["tesseract flags"]
     assert "table_raw_text_fallback:True" in sample["tesseract flags"]
@@ -108,7 +111,7 @@ def test_writes_per_method_csv(tmp_path):
         == "ocr_runtime:tesseract.js; ocr_languages:rus+eng+chi_sim; preprocess:projector_slide_dewarp"
     )
     assert "preprocess:projected_document_dewarp" not in sample["browser-tesseract flags"]
-    assert raster["threshold"] == "70"
-    assert raster["tesseract gate"] == "pass"
+    assert raster["threshold"] == "90"
+    assert raster["tesseract gate"] == "fail"
     assert (output_root / "time.csv").exists()
     assert not (output_root / "result.xlsx").exists()

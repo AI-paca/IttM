@@ -6,8 +6,8 @@ numpy
 opencv-python-headless
 pdf2image
 pillow
-pytest==9.1.1
+pytest==9.1.0
 python-multipart
 pytesseract
-ruff==0.15.20
+ruff==0.15.18
 uvicorn

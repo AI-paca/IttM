@@ -10,6 +10,7 @@ class AutoEngine(OcrEngine):
         tesseract_language_priority: tuple[str, ...] | None = None,
         tesseract_ocr_border_pixels: int = 10,
         tesseract_edge_word_fallback_psms: tuple[int, ...] = (8, 13),
+        tesseract_language_retry: str = "off",
     ):
         from app.engines.easyocr_engine import EasyOcrEngine
         from app.engines.tesseract_engine import TesseractEngine
@@ -18,6 +19,7 @@ class AutoEngine(OcrEngine):
             language_priority=tesseract_language_priority,
             ocr_border_pixels=tesseract_ocr_border_pixels,
             edge_word_fallback_psms=tesseract_edge_word_fallback_psms,
+            language_retry=tesseract_language_retry,
         )
         self.easy = EasyOcrEngine()
 

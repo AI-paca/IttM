@@ -106,102 +106,8 @@ function fileFromClipboard(event: ClipboardEvent): File | null {
   return null;
 }
 
-function getPreviewMode(): string | null {
-  if (typeof window === "undefined") return null;
-  return new URLSearchParams(window.location.search).get("preview");
-}
-
-function isLoadingPreviewMode(previewMode: string | null) {
-  return previewMode === "loading" || previewMode === "transition";
-}
-
-const DEFAULT_PREVIEW_DOCUMENT_PROGRESS: ExtractionDocumentProgress = {
-  currentPage: 3,
-  totalPages: 6,
-  completedPages: 2,
-  currentPagePercent: 0.65,
-  documentPercent: (2 + 0.65) / 6,
-};
-
-function previewTotalPages(params: URLSearchParams) {
-  const requestedPages = Number(params.get("pages"));
-  return Number.isFinite(requestedPages) && requestedPages > 0
-    ? Math.floor(requestedPages)
-    : (DEFAULT_PREVIEW_DOCUMENT_PROGRESS.totalPages ?? 6);
-}
-
-function getLoadingPreviewDocumentProgress(
-  previewMode: string | null,
-): ExtractionDocumentProgress | null {
-  if (!isLoadingPreviewMode(previewMode)) return null;
-  if (typeof window === "undefined") return DEFAULT_PREVIEW_DOCUMENT_PROGRESS;
-
-  const params = new URLSearchParams(window.location.search);
-  const totalPages = previewTotalPages(params);
-  const progressParam = params.get("progress");
-  if (progressParam === null) {
-    if (totalPages === DEFAULT_PREVIEW_DOCUMENT_PROGRESS.totalPages) {
-      return DEFAULT_PREVIEW_DOCUMENT_PROGRESS;
-    }
-    return {
-      ...DEFAULT_PREVIEW_DOCUMENT_PROGRESS,
-      totalPages,
-      documentPercent:
-        (DEFAULT_PREVIEW_DOCUMENT_PROGRESS.completedPages +
-          DEFAULT_PREVIEW_DOCUMENT_PROGRESS.currentPagePercent) /
-        totalPages,
-    };
-  }
-
-  const requestedProgress = Number(progressParam);
-  if (!Number.isFinite(requestedProgress)) {
-    return DEFAULT_PREVIEW_DOCUMENT_PROGRESS;
-  }
-
-  const documentPercent = Math.max(0, Math.min(1, requestedProgress));
-  const rawPageProgress = documentPercent * totalPages;
-  const completedPages = Math.min(totalPages, Math.floor(rawPageProgress));
-  const currentPage = Math.min(totalPages, completedPages + 1);
-  const currentPagePercent =
-    completedPages >= totalPages ? 1 : rawPageProgress - completedPages;
-
-  return {
-    currentPage,
-    totalPages,
-    completedPages,
-    currentPagePercent,
-    documentPercent,
-  };
-}
-
-const PREVIEW_EXTRACTED_TEXT = `# Извлеченный текст
-
-Тестовый документ на две страницы завершён. Этот preview нужен только для
-визуальной проверки перехода от отмены к копированию.
-
-| Страница | Состояние |
-| --- | --- |
-| 1 | распознана |
-| 2 | распознана |`;
-
-const PREVIEW_PARTIAL_TEXT = `# Извлеченный текст
-
-Первая страница уже появилась, вторая ещё распознаётся. Это состояние проверяет
-переход между страницами без резкой смены layout.
-
-| Страница | Состояние |
-| --- | --- |
-| 1 | распознана |
-| 2 | в обработке |`;
-
 export function OcrProvider({ children }: { children: ReactNode }) {
-  const previewMode = getPreviewMode();
-  const previewDocumentProgress =
-    getLoadingPreviewDocumentProgress(previewMode);
-  const loadingPreview = previewDocumentProgress !== null;
-  const [appState, setAppState] = useState<AppState>(
-    loadingPreview ? "loading" : "upload",
-  );
+  const [appState, setAppState] = useState<AppState>("upload");
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [selectedSource, setSelectedSource] = useState<SourceType>(() =>
@@ -215,18 +121,18 @@ export function OcrProvider({ children }: { children: ReactNode }) {
   const [showHeader, setShowHeader] = useState(true);
   const [copied, setCopied] = useState(false);
   const [extractedText, setExtractedText] = useState("");
-  const [isExtracting, setIsExtracting] = useState(loadingPreview);
+  const [isExtracting, setIsExtracting] = useState(false);
   const [extractionProgress, setExtractionProgress] = useState(
-    loadingPreview ? "Отправка на сервер..." : "Достаём текст из скриншота...",
+    "Достаём текст из скриншота...",
   );
   const [documentProgress, setDocumentProgress] =
-    useState<ExtractionDocumentProgress | null>(
-      loadingPreview ? previewDocumentProgress : null,
-    );
+    useState<ExtractionDocumentProgress | null>(null);
   const [llmProvider, setLlmProvider] = useState<LlmProvider>("gemini");
   const [llmModel, setLlmModel] = useState("gemini-2.5-flash-lite");
   const [llmKey, setLlmKey] = useState("");
   const [externalLlmConsent, setExternalLlmConsent] = useState(false);
+  const [lexicalCorrectionEnabled, setLexicalCorrectionEnabled] =
+    useState(false);
   const [themeLevel, setThemeLevel] = useState<ThemeLevel>(() => {
     if (typeof window !== "undefined") {
       const saved = Number(localStorage.getItem("theme-level"));
@@ -251,58 +157,6 @@ export function OcrProvider({ children }: { children: ReactNode }) {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { scrollY } = useScroll();
-  const previewTransitionTotalPages =
-    previewDocumentProgress?.totalPages ?? null;
-  const previewTransitionInitialPercent =
-    previewDocumentProgress?.documentPercent ?? 0;
-
-  useEffect(() => {
-    if (previewMode !== "transition" || previewTransitionTotalPages === null)
-      return;
-    const totalPages = previewTransitionTotalPages;
-    const firstPagePercent =
-      totalPages > 1
-        ? Math.max(previewTransitionInitialPercent, (1 + 0.42) / totalPages)
-        : 1;
-    const firstPageTimeout = window.setTimeout(() => {
-      setDocumentProgress({
-        currentPage: Math.min(2, totalPages),
-        totalPages,
-        completedPages: Math.min(1, totalPages),
-        currentPagePercent:
-          totalPages > 1 ? Math.max(0, firstPagePercent * totalPages - 1) : 1,
-        documentPercent: firstPagePercent,
-      });
-      setTotalPdfPages(totalPages);
-      setLastExtractedPage(Math.min(2, totalPages));
-      setExtractedText(PREVIEW_PARTIAL_TEXT);
-      setAppState("reading");
-    }, 650);
-
-    const doneTimeout = window.setTimeout(() => {
-      setDocumentProgress({
-        currentPage: totalPages,
-        totalPages,
-        completedPages: totalPages,
-        currentPagePercent: 1,
-        documentPercent: 1,
-      });
-      setTotalPdfPages(totalPages);
-      setLastExtractedPage(totalPages + 1);
-      setExtractedText(PREVIEW_EXTRACTED_TEXT);
-      setIsExtracting(false);
-      setAppState("reading");
-    }, 2100);
-
-    return () => {
-      window.clearTimeout(firstPageTimeout);
-      window.clearTimeout(doneTimeout);
-    };
-  }, [
-    previewMode,
-    previewTransitionInitialPercent,
-    previewTransitionTotalPages,
-  ]);
 
   const showNotice = useCallback(
     (message: string, tone: NoticeTone = "error") => {
@@ -567,6 +421,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
     extractedText,
     externalLlmConsent,
     file,
+    lexicalCorrectionEnabled,
     lastExtractedPage,
     llmKey,
     llmModel,
@@ -603,6 +458,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       easyOcrInstallProgress,
       easyOcrInstalling,
       externalLlmConsent,
+      lexicalCorrectionEnabled,
       llmKey,
       llmModel,
       llmProvider,
@@ -612,6 +468,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       themeLevel,
       themeAuto,
       onInstallEasyOcr: handleInstallEasyOcr,
+      onLexicalCorrectionChange: setLexicalCorrectionEnabled,
       onLlmProviderChange: handleLlmProviderChange,
       onRememberChange: handleRememberChange,
       onSourceSelect: handleSourceSelect,
@@ -631,6 +488,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       handleLlmProviderChange,
       handleRememberChange,
       handleSourceSelect,
+      lexicalCorrectionEnabled,
       llmKey,
       llmModel,
       llmProvider,
@@ -660,7 +518,6 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       dragHandlers,
       file,
       isDragging,
-      isExtracting,
       showHeader,
       onNewFile: handleNewFile,
     }),
@@ -671,7 +528,6 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       file,
       handleNewFile,
       isDragging,
-      isExtracting,
       showHeader,
     ],
   );

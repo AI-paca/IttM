@@ -8,6 +8,14 @@ const distRoot = path.resolve(process.argv[2] || "dist");
 const expectedBase = normalizeBase(process.argv[3] || "/IttM/");
 const tesseractVendorRoot = path.join(distRoot, "vendor", "tesseract");
 const pdfJsWasmVendorRoot = path.join(distRoot, "vendor", "pdfjs", "wasm");
+const textReviewerModelId = "HuggingFaceTB/SmolLM2-135M-Instruct";
+const textReviewerModelRoot = path.join(
+  distRoot,
+  "vendor",
+  "models",
+  textReviewerModelId,
+);
+const textReviewerOnnxBytes = 137147981;
 const requiredTesseractAssets = [
   "worker.min.js",
   "tesseract-core-lstm.wasm.js",
@@ -50,6 +58,15 @@ async function listFiles(root) {
 async function assertNonEmpty(filePath) {
   const fileStat = await stat(filePath);
   assert.ok(fileStat.size > 0, `${filePath} is empty`);
+}
+
+async function assertFileSize(filePath, expectedBytes) {
+  const fileStat = await stat(filePath);
+  assert.equal(
+    fileStat.size,
+    expectedBytes,
+    `${filePath} has an unexpected size`,
+  );
 }
 
 async function verifyServedPagesAssets(routes) {
@@ -126,6 +143,11 @@ for (const asset of requiredTesseractAssets) {
 for (const asset of requiredPdfJsWasmAssets) {
   await assertNonEmpty(path.join(pdfJsWasmVendorRoot, asset));
 }
+await assertNonEmpty(path.join(textReviewerModelRoot, "config.json"));
+await assertFileSize(
+  path.join(textReviewerModelRoot, "onnx", "model_quantized.onnx"),
+  textReviewerOnnxBytes,
+);
 
 const javascriptFiles = (await listFiles(path.join(distRoot, "assets"))).filter(
   (filePath) => filePath.endsWith(".js"),
@@ -139,6 +161,7 @@ const expectedWorkerPath = `${expectedBase}vendor/tesseract/worker.min.js`;
 const incorrectRootWorkerPath = "/vendor/tesseract/worker.min.js";
 const expectedPdfJsWasmPath = `${expectedBase}vendor/pdfjs/wasm/`;
 const pdfJsWasmRoute = "vendor/pdfjs/wasm/";
+const modelVendorRoute = "vendor/models/";
 
 assert.ok(
   bundleText.includes(expectedWorkerPath),
@@ -154,6 +177,12 @@ assert.ok(
   bundleText.includes(expectedBase) && bundleText.includes(pdfJsWasmRoute),
   `compiled bundle does not compose ${expectedPdfJsWasmPath}`,
 );
+assert.ok(
+  bundleText.includes(expectedBase) &&
+    bundleText.includes(modelVendorRoute) &&
+    bundleText.includes(textReviewerModelId),
+  `compiled reviewer worker does not reference ${textReviewerModelId}`,
+);
 
 await verifyServedPagesAssets([
   expectedBase,
@@ -163,8 +192,9 @@ await verifyServedPagesAssets([
   ...requiredPdfJsWasmAssets.map(
     (asset) => `${expectedBase}vendor/pdfjs/wasm/${asset}`,
   ),
+  `${expectedBase}vendor/models/${textReviewerModelId}/config.json`,
 ]);
 
 console.log(
-  `Pages build verified over HTTP: ${requiredTesseractAssets.length} Tesseract assets and ${requiredPdfJsWasmAssets.length} PDF.js decoder assets`,
+  `Pages build verified over HTTP: ${requiredTesseractAssets.length} Tesseract assets, ${requiredPdfJsWasmAssets.length} PDF.js decoder assets, and ${textReviewerModelId}`,
 );

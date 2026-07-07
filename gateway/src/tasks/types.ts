@@ -1,5 +1,10 @@
 export type TaskState =
-  "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
+  | "queued"
+  | "running"
+  | "cancelling"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 export type ExtractionEngine = "auto" | "tesseract" | "easyocr" | "browser";
 

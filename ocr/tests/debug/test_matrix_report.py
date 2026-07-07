@@ -108,7 +108,7 @@ def test_writes_per_method_csv(tmp_path):
         == "ocr_runtime:tesseract.js; ocr_languages:rus+eng+chi_sim; preprocess:projector_slide_dewarp"
     )
     assert "preprocess:projected_document_dewarp" not in sample["browser-tesseract flags"]
-    assert raster["threshold"] == "70"
-    assert raster["tesseract gate"] == "pass"
+    assert raster["threshold"] == "90"
+    assert raster["tesseract gate"] == "fail"
     assert (output_root / "time.csv").exists()
     assert not (output_root / "result.xlsx").exists()

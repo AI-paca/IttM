@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import csv
+import dataclasses
 import difflib
 import pathlib
 import re
@@ -9,6 +10,10 @@ import unicodedata
 TABLE_QUALITY_MINIMUM = 87.0
 TABLE_QUALITY_GOOD = 93.0
 TABLE_QUALITY_TARGET = 97.0
+TEXT_QUALITY_TARGET = 90.0
+NOT_APPLICABLE = "not_applicable"
+NOT_CHECKED = "not_checked"
+MISSING_REFERENCE = "missing_reference"
 MAX_FUZZY_IDENTIFIER_LINE_CHARS = 200
 MAX_FUZZY_COMPACT_CHARS = 180
 MAX_FUZZY_HAYSTACK_CHARS = 400
@@ -19,6 +24,32 @@ FORBIDDEN_EXPECTED_MARKERS = (
     "[unreadable]",
     "[illegible]",
 )
+
+
+@dataclasses.dataclass(frozen=True)
+class TableFixtureSpec:
+    expected_blocks: int
+    expected_rows: int
+    expected_cols: int
+    anchors: tuple[str, ...] = ()
+
+
+@dataclasses.dataclass(frozen=True)
+class MatchScore:
+    match_percent: str
+    matched_lines: str
+    total_lines: str
+    text_match_percent: str
+    compact_quality_percent: str
+    compact_quality_gate: str
+    lexical_t9_percent: str
+    lexical_t9_gate: str
+    markdown_grammar_percent: str
+    markdown_grammar_gate: str
+    markdown_grammar_notes: str
+    success_probability_percent: str
+    success_probability_gate: str
+    failure_kind: str
 
 
 def normalize_markdown(value: str) -> str:
@@ -43,6 +74,62 @@ def similarity_percent(actual: str, expected: str) -> str:
         actual_normalized,
     ).ratio()
     return f"{ratio * 100:.2f}"
+
+
+def compact_quality_percent(actual: str, expected: str) -> str:
+    actual_compact = compact(actual)
+    expected_compact = compact(expected)
+    if not actual_compact and not expected_compact:
+        return "100.00"
+    if not actual_compact or not expected_compact:
+        return "0.00"
+
+    matcher = difflib.SequenceMatcher(None, expected_compact, actual_compact)
+    matched = sum(block.size for block in matcher.get_matching_blocks())
+    return f"{2 * matched / (len(expected_compact) + len(actual_compact)) * 100:.2f}"
+
+
+def percent_gate(value: str, threshold: float = TEXT_QUALITY_TARGET) -> str:
+    if value in {"", "n/a", NOT_APPLICABLE, NOT_CHECKED, MISSING_REFERENCE}:
+        return NOT_APPLICABLE
+    try:
+        parsed = float(value)
+    except ValueError:
+        return NOT_CHECKED
+    return "pass" if parsed >= threshold else "fail"
+
+
+def _percent_float(value: str, fallback: float = 0.0) -> float:
+    if value in {"", "n/a", NOT_APPLICABLE, NOT_CHECKED, MISSING_REFERENCE}:
+        return fallback
+    try:
+        return float(value)
+    except ValueError:
+        return fallback
+
+
+def lexical_t9_percent(text_match_percent: str, compact_percent: str) -> str:
+    compact_value = _percent_float(compact_percent)
+    text_value = _percent_float(text_match_percent)
+    if compact_value <= 0:
+        return "0.00"
+    # Conditional probability of linguistic/context recovery after raw glyphs
+    # are present. If text recall exceeds compact glyph quality, this layer is
+    # not the bottleneck.
+    return f"{min(100.0, text_value / compact_value * 100.0):.2f}"
+
+
+def weighted_success_percent(
+    quality_percent: str,
+    grammar_percent: str,
+    t9_percent: str,
+) -> str:
+    score = (
+        0.87 * _percent_float(quality_percent)
+        + 0.09 * _percent_float(grammar_percent)
+        + 0.04 * _percent_float(t9_percent)
+    )
+    return f"{score:.2f}"
 
 
 def expected_lines(expected: str) -> list[str]:
@@ -123,6 +210,10 @@ def expected_line_matches(
         token_squashed = squash_repeated_chars(token_compact)
         if (
             token in actual_tokens
+            or homework_label_token_matches(
+                token_compact,
+                actual_token_compacts | actual_token_confusables,
+            )
             or (len(token_compact) >= 2 and token_compact in actual_compact)
             or (
                 len(token_confusable) >= 2
@@ -193,26 +284,906 @@ def escape_markdown(value: str) -> str:
     return value.replace("|", "\\|").replace("\n", " ")
 
 
-def markdown_table_rows(markdown: str) -> list[list[list[str]]]:
+def split_markdown_cells(value: str, *, outer_pipes: bool) -> list[str]:
+    if outer_pipes:
+        value = value[1:-1]
+    cells = []
+    current = []
+    escaped = False
+    for character in value:
+        if escaped:
+            current.append(character)
+            escaped = False
+            continue
+        if character == "\\":
+            escaped = True
+            continue
+        if character == "|":
+            cells.append("".join(current).strip())
+            current = []
+            continue
+        current.append(character)
+    if escaped:
+        current.append("\\")
+    cells.append("".join(current).strip())
+    return cells
+
+
+def _is_table_separator_cells(cells: list[str]) -> bool:
+    return bool(cells) and all(
+        re.fullmatch(r":?-{3,}:?", cell)
+        for cell in cells
+    )
+
+
+def _strict_table_cells(stripped: str) -> list[str] | None:
+    if not stripped.startswith("|") or not stripped.endswith("|"):
+        return None
+    return split_markdown_cells(stripped, outer_pipes=True)
+
+
+def _loose_table_cells(stripped: str) -> list[str] | None:
+    if stripped.startswith("|") or stripped.endswith("|"):
+        return None
+    if not re.search(r"\s\|\s", stripped):
+        return None
+    cells = split_markdown_cells(stripped, outer_pipes=False)
+    if len(cells) < 2:
+        return None
+    if sum(1 for cell in cells if compact(cell)) < 2:
+        return None
+    return cells
+
+
+def _table_cells_for_line(
+    stripped: str,
+    *,
+    include_loose: bool,
+) -> tuple[list[str], bool] | None:
+    strict_cells = _strict_table_cells(stripped)
+    if strict_cells is not None:
+        return strict_cells, False
+    if include_loose:
+        loose_cells = _loose_table_cells(stripped)
+        if loose_cells is not None:
+            return loose_cells, True
+    return None
+
+
+def _is_fence_line(stripped: str) -> bool:
+    return stripped.startswith("```")
+
+
+def _append_table_candidate(
+    tables: list[list[list[str]]],
+    current: list[list[str]],
+    *,
+    loose: bool,
+) -> None:
+    if not current:
+        return
+    if loose and len(current) < 2:
+        return
+    tables.append(current)
+
+
+def _non_fenced_stripped_lines(markdown: str) -> list[str]:
+    lines = []
+    in_fence = False
+    for line in markdown.splitlines():
+        stripped = line.strip()
+        if _is_fence_line(stripped):
+            in_fence = not in_fence
+            continue
+        if in_fence or not stripped:
+            continue
+        lines.append(stripped)
+    return lines
+
+
+def markdown_table_rows(
+    markdown: str,
+    *,
+    include_loose: bool = False,
+) -> list[list[list[str]]]:
     tables: list[list[list[str]]] = []
     current: list[list[str]] = []
+    current_loose = False
+    in_fence = False
 
     for line in markdown.splitlines():
         stripped = line.strip()
-        if not stripped.startswith("|") or not stripped.endswith("|"):
-            if current:
-                tables.append(current)
-                current = []
+        if _is_fence_line(stripped):
+            _append_table_candidate(
+                tables,
+                current,
+                loose=current_loose,
+            )
+            current = []
+            current_loose = False
+            in_fence = not in_fence
+            continue
+        if in_fence:
             continue
 
-        cells = [cell.strip() for cell in stripped[1:-1].split("|")]
-        if cells and all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells):
+        parsed = _table_cells_for_line(
+            stripped,
+            include_loose=include_loose,
+        )
+        if parsed is None:
+            _append_table_candidate(
+                tables,
+                current,
+                loose=current_loose,
+            )
+            current = []
+            current_loose = False
+            continue
+
+        cells, loose = parsed
+        if current and loose != current_loose:
+            _append_table_candidate(
+                tables,
+                current,
+                loose=current_loose,
+            )
+            current = []
+        current_loose = loose
+        if _is_table_separator_cells(cells):
             continue
         current.append(cells)
 
-    if current:
-        tables.append(current)
+    _append_table_candidate(
+        tables,
+        current,
+        loose=current_loose,
+    )
     return tables
+
+
+def strict_reference_tables(markdown: str) -> list[list[list[str]]]:
+    return [
+        table
+        for table in markdown_table_rows(markdown, include_loose=True)
+        if len(table) >= 2 and max((len(row) for row in table), default=0) >= 2
+    ]
+
+
+def normalize_table_cell(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value)
+    normalized = normalized.casefold().replace("ё", "е")
+    normalized = normalized.replace("<br>", " ")
+    return " ".join(normalized.split())
+
+
+def strict_table_cell_match(
+    actual_markdown: str,
+    expected_markdown: str,
+) -> tuple[float | None, int, int]:
+    expected_tables = strict_reference_tables(expected_markdown)
+    if not expected_tables:
+        return None, 0, 0
+
+    actual_tables = markdown_table_rows(actual_markdown)
+    total_cells = 0
+    matched_cells = 0
+    for expected_index, expected_table in enumerate(expected_tables):
+        actual_table = actual_tables[expected_index] if expected_index < len(actual_tables) else []
+        expected_width = max((len(row) for row in expected_table), default=0)
+        for row_index, expected_row in enumerate(expected_table):
+            for col_index in range(expected_width):
+                expected_cell = (
+                    expected_row[col_index].strip()
+                    if col_index < len(expected_row)
+                    else ""
+                )
+                if not expected_cell:
+                    continue
+                total_cells += 1
+                actual_cell = ""
+                if row_index < len(actual_table) and col_index < len(actual_table[row_index]):
+                    actual_cell = actual_table[row_index][col_index]
+                if normalize_table_cell(actual_cell) == normalize_table_cell(expected_cell):
+                    matched_cells += 1
+
+    if total_cells == 0:
+        return None, 0, 0
+    return matched_cells / total_cells * 100, matched_cells, total_cells
+
+
+def table_fixture_spec(markdown: str) -> TableFixtureSpec | None:
+    strict_tables = strict_reference_tables(markdown)
+    if not strict_tables:
+        return None
+
+    anchors = tuple(
+        cell
+        for table in strict_tables
+        for row in table
+        for cell in row
+        if meaningful_table_anchor(cell)
+    )
+    rows = max((len(table) for table in strict_tables), default=0)
+    cols = max(
+        (len(row) for table in strict_tables for row in table),
+        default=0,
+    )
+    return TableFixtureSpec(
+        expected_blocks=len(strict_tables),
+        expected_rows=rows,
+        expected_cols=cols,
+        anchors=anchors,
+    )
+
+
+def meaningful_table_anchor(value: str) -> bool:
+    stripped = normalize_markdown(value)
+    if not stripped:
+        return False
+    if stripped in {"-", "::merge-left::", "::merge-up::", "::merge-up-left::"}:
+        return False
+    anchor_tokens = [token for token in tokens(stripped) if len(token) > 1]
+    # Duplicate detection is meant to catch table content leaked into prose.
+    # Short headers, ratings, prices, and field labels are too ambiguous here.
+    return len(compact(stripped)) >= 16 or len(anchor_tokens) >= 4
+
+
+def reference_requires_table_structure(markdown: str) -> bool:
+    normalized = normalize_ocr_text(markdown)
+    return (
+        "merged subsection" in normalized
+        or "placeholder cells" in normalized
+        or "учебный план" in normalized
+    ) and ("table" in normalized or "|" in markdown)
+
+
+def primary_table(markdown: str) -> list[list[str]]:
+    tables = markdown_table_rows(markdown)
+    if not tables:
+        return []
+    return max(
+        tables,
+        key=lambda table: (
+            len(table) * max((len(row) for row in table), default=0),
+            len(table),
+        ),
+    )
+
+
+def non_table_text(markdown: str) -> str:
+    lines: list[str] = []
+    in_table = False
+    for line in markdown.splitlines():
+        stripped = line.strip()
+        is_table_line = stripped.startswith("|") and stripped.endswith("|")
+        if is_table_line:
+            in_table = True
+            continue
+        if in_table and not stripped:
+            in_table = False
+            continue
+        if not is_table_line:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+def score_count(actual: int, expected: int) -> float:
+    if expected <= 0:
+        return 100.0
+    if actual <= 0:
+        return 0.0
+    ratio = min(actual, expected) / max(actual, expected)
+    return ratio * 100.0
+
+
+def table_shape(table: list[list[str]]) -> tuple[int, int]:
+    return (
+        len(table),
+        max((len(row) for row in table), default=0),
+    )
+
+
+def table_area(table: list[list[str]]) -> int:
+    rows, cols = table_shape(table)
+    return rows * cols
+
+
+def comparison_table_sequences(
+    actual_tables: list[list[list[str]]],
+    expected_tables: list[list[list[str]]],
+) -> tuple[list[list[list[str]]], list[list[list[str]]]]:
+    if not expected_tables:
+        return actual_tables, expected_tables
+    max_expected_area = max(
+        table_area(table)
+        for table in expected_tables
+    )
+    if max_expected_area < 40:
+        return actual_tables, expected_tables
+    min_area = max(6, int(max_expected_area * 0.10))
+    return (
+        [
+            table
+            for table in actual_tables
+            if table_area(table) >= min_area
+        ],
+        [
+            table
+            for table in expected_tables
+            if table_area(table) >= min_area
+        ],
+    )
+
+
+def table_pair_shape_score(
+    actual_table: list[list[str]],
+    expected_table: list[list[str]],
+) -> float:
+    actual_rows, actual_cols = table_shape(actual_table)
+    expected_rows, expected_cols = table_shape(expected_table)
+    return min(
+        score_count(actual_rows, expected_rows),
+        score_count(actual_cols, expected_cols),
+    )
+
+
+def table_shape_sequence_score(
+    actual_tables: list[list[list[str]]],
+    expected_tables: list[list[list[str]]],
+) -> float:
+    actual_tables, expected_tables = comparison_table_sequences(
+        actual_tables,
+        expected_tables,
+    )
+    if not expected_tables:
+        return 100.0
+    if not actual_tables:
+        return 0.0
+    rows = len(actual_tables)
+    cols = len(expected_tables)
+    dp = [
+        [0.0 for _ in range(cols + 1)]
+        for _ in range(rows + 1)
+    ]
+    for actual_index, actual_table in enumerate(actual_tables, start=1):
+        for expected_index, expected_table in enumerate(
+            expected_tables,
+            start=1,
+        ):
+            dp[actual_index][expected_index] = max(
+                dp[actual_index - 1][expected_index],
+                dp[actual_index][expected_index - 1],
+                dp[actual_index - 1][expected_index - 1]
+                + table_pair_shape_score(actual_table, expected_table),
+            )
+    return dp[rows][cols] / cols
+
+
+def table_shape_notes(tables: list[list[list[str]]]) -> str:
+    return ",".join(
+        f"{rows}x{cols}"
+        for rows, cols in (table_shape(table) for table in tables)
+    ) or "none"
+
+
+def score_table_structure(
+    actual_markdown: str,
+    expected_markdown: str,
+) -> tuple[float | None, str]:
+    spec = table_fixture_spec(expected_markdown)
+    if spec is None:
+        if reference_requires_table_structure(expected_markdown):
+            return 0.0, "reference_table_structure_missing"
+        return None, ""
+
+    actual_tables = markdown_table_rows(actual_markdown)
+    expected_tables = strict_reference_tables(expected_markdown)
+    comparison_actual_tables, comparison_expected_tables = comparison_table_sequences(
+        actual_tables,
+        expected_tables,
+    )
+    table = primary_table(actual_markdown)
+    actual_rows = len(table)
+    actual_cols = max((len(row) for row in table), default=0)
+
+    block_score = score_count(
+        len(comparison_actual_tables),
+        len(comparison_expected_tables),
+    )
+    shape_score = table_shape_sequence_score(
+        comparison_actual_tables,
+        comparison_expected_tables,
+    )
+
+    duplicate_score = duplicate_anchor_score(actual_markdown, spec.anchors)
+
+    scores = [block_score, shape_score, duplicate_score]
+
+    notes = (
+        f"blocks={len(actual_tables)}/{spec.expected_blocks}; "
+        f"rows={actual_rows}/{spec.expected_rows}; "
+        f"cols={actual_cols}/{spec.expected_cols}; "
+        f"shape={shape_score:.2f}; "
+        f"shapes={table_shape_notes(actual_tables)}/{table_shape_notes(expected_tables)}; "
+        f"duplicates={duplicate_score:.2f}"
+    )
+    return min(scores), notes
+
+
+def _plain_heading_level(raw_line: str, *, first_content: bool) -> int | None:
+    stripped = raw_line.strip()
+    if not stripped:
+        return None
+    if stripped.startswith(("#", "|", "-", "*", "+", ">", "`")):
+        return None
+    if re.match(r"^\d+[.)]\s+", stripped):
+        return None
+    if re.search(r"\s\|\s", stripped):
+        return None
+    if stripped.endswith((".", "!", "?", ";")):
+        return None
+    line_tokens = tokens(stripped)
+    if not line_tokens or len(line_tokens) > 8:
+        return None
+    if len(stripped) > 96:
+        return None
+    return 1 if first_content else 2
+
+
+def markdown_control_tokens(
+    markdown: str,
+    *,
+    infer_plain_headings: bool = False,
+) -> tuple[str, ...]:
+    result = []
+    in_fence = False
+    first_content = True
+    for raw_line in markdown.splitlines():
+        line = raw_line.lstrip()
+        if line.startswith("```"):
+            in_fence = not in_fence
+            result.append("FENCE")
+            continue
+        if in_fence:
+            continue
+        heading = re.match(r"^(#{1,6})\s+", line)
+        if heading:
+            result.append(f"H{len(heading.group(1))}")
+            first_content = False
+            continue
+        if re.match(r"^[-*+]\s+", line):
+            result.append("LI")
+            first_content = False
+            continue
+        if re.match(r"^\d+[.)]\s+", line):
+            result.append("OLI")
+            first_content = False
+            continue
+        if line.startswith("> "):
+            result.append("QUOTE")
+            first_content = False
+            continue
+        if infer_plain_headings:
+            level = _plain_heading_level(
+                raw_line,
+                first_content=first_content,
+            )
+            if level is not None:
+                result.append(f"H{level}")
+                first_content = False
+                continue
+        if line.strip():
+            first_content = False
+    return tuple(result)
+
+
+def markdown_symbol_tokens(markdown: str) -> tuple[str, ...]:
+    normalized = unicodedata.normalize("NFKC", markdown)
+    return tuple(
+        character
+        for character in normalized
+        if not character.isspace()
+        and unicodedata.category(character)[0] not in {"L", "M"}
+    )
+
+
+def _table_line_columns(markdown: str) -> dict[int, int]:
+    line_columns: dict[int, int] = {}
+    current: list[tuple[int, int]] = []
+    current_loose = False
+    in_fence = False
+
+    def flush() -> None:
+        nonlocal current
+        if current and (not current_loose or len(current) >= 2):
+            line_columns.update(current)
+        current = []
+
+    for index, raw_line in enumerate(markdown.splitlines()):
+        stripped = raw_line.strip()
+        if _is_fence_line(stripped):
+            flush()
+            current_loose = False
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+
+        parsed = _table_cells_for_line(
+            stripped,
+            include_loose=True,
+        )
+        if parsed is None:
+            if not _is_table_separator_cells(
+                split_markdown_cells(stripped.strip("|"), outer_pipes=False)
+            ):
+                flush()
+                current_loose = False
+            continue
+        cells, loose = parsed
+        if current and loose != current_loose:
+            flush()
+        current_loose = loose
+        if _is_table_separator_cells(cells):
+            continue
+        if len(cells) >= 2:
+            current.append((index, len(cells)))
+    flush()
+    return line_columns
+
+
+def markdown_shadow_codes(
+    markdown: str,
+    *,
+    infer_plain_headings: bool = False,
+) -> tuple[int, ...]:
+    codes = []
+    in_fence = False
+    previous_table_cols: int | None = None
+    table_line_columns = _table_line_columns(markdown)
+    first_content = True
+    for line_index, raw_line in enumerate(markdown.splitlines()):
+        line = raw_line.lstrip()
+        if line.startswith("```"):
+            in_fence = not in_fence
+            previous_table_cols = None
+            continue
+        if in_fence:
+            continue
+
+        stripped = line.strip()
+        if re.fullmatch(
+            r"\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?",
+            stripped,
+        ):
+            continue
+        cols = table_line_columns.get(line_index)
+        if cols is not None:
+            code = 8 if previous_table_cols == cols else 5
+            codes.extend([code] * (cols - 1))
+            previous_table_cols = cols
+            first_content = False
+            continue
+        previous_table_cols = None
+
+        heading = re.match(r"^(#{1,6})\s+\S", line)
+        if heading:
+            codes.append(3 * len(heading.group(1)))
+            first_content = False
+            continue
+        unordered = re.match(r"^(\s*)[-*+]\s+\S", raw_line)
+        if unordered:
+            indent = len(unordered.group(1).expandtabs(2)) // 2
+            codes.append(7 + 3 * (indent + 1))
+            first_content = False
+            continue
+        if infer_plain_headings:
+            level = _plain_heading_level(
+                raw_line,
+                first_content=first_content,
+            )
+            if level is not None:
+                codes.append(3 * level)
+                first_content = False
+                continue
+        if line.strip():
+            first_content = False
+    return tuple(codes)
+
+
+def markdown_context_shadow_codes(
+    markdown: str,
+    *,
+    infer_plain_headings: bool = False,
+) -> tuple[int, ...]:
+    del infer_plain_headings
+    codes = []
+    in_fence = False
+    in_table = False
+    table_line_columns = _table_line_columns(markdown)
+    for line_index, raw_line in enumerate(markdown.splitlines()):
+        line = raw_line.lstrip()
+        stripped = line.strip()
+        if line.startswith("```"):
+            in_fence = not in_fence
+            in_table = False
+            continue
+        if in_fence:
+            continue
+
+        if line_index in table_line_columns:
+            if not in_table:
+                codes.append(7)
+            in_table = True
+            continue
+        if re.fullmatch(
+            r"\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?",
+            stripped,
+        ):
+            continue
+        in_table = False
+
+        if re.match(r"^(#{1,6})\s+\S", line):
+            continue
+        unordered = re.match(r"^(\s*)[-*+]\s+\S", raw_line)
+        if unordered:
+            indent = len(unordered.group(1).expandtabs(2)) // 2
+            codes.append(7 + 3 * (indent + 1))
+            continue
+        ordered = re.match(r"^(\s*)\d+[.)]\s+\S", raw_line)
+        if ordered:
+            indent = len(ordered.group(1).expandtabs(2)) // 2
+            codes.append(7 + 3 * (indent + 1))
+            continue
+    return tuple(codes)
+
+
+def should_infer_plain_reference_controls(markdown: str) -> bool:
+    lines = _non_fenced_stripped_lines(markdown)
+    if len(lines) < 3:
+        return False
+    if any(re.match(r"^#{1,6}\s+\S", line) for line in lines):
+        return False
+    has_loose_table = any(
+        _loose_table_cells(line) is not None
+        for line in lines
+    )
+    if has_loose_table:
+        return True
+    has_strict_table = any(
+        _strict_table_cells(line) is not None
+        for line in lines
+    )
+    if has_strict_table:
+        return False
+    return any(re.match(r"^[-*+]\s+\S", line) for line in lines)
+
+
+def lint_markdown_controls(markdown: str) -> tuple[str, ...]:
+    errors = []
+    fence_open = False
+    for line_number, raw_line in enumerate(markdown.splitlines(), start=1):
+        line = raw_line.lstrip()
+        if line.startswith("```"):
+            fence_open = not fence_open
+            continue
+        if re.match(r"^#{1,6}\s*$", line) or re.match(r"^#{7,}\s", line):
+            errors.append(f"line {line_number}: invalid heading")
+        if re.match(r"^[-*+]\s*$", line):
+            errors.append(f"line {line_number}: invalid list item")
+    if fence_open:
+        errors.append("unclosed code fence")
+    return tuple(errors)
+
+
+def sequence_token_score(
+    actual: tuple[str, ...],
+    expected: tuple[str, ...],
+) -> float:
+    if not expected:
+        return 100.0
+    if not actual:
+        return 0.0
+
+    positions: dict[str, int] = {}
+    for index, token in enumerate(expected):
+        positions[token] = positions.get(token, 0) | (1 << index)
+
+    state = 0
+    for actual_token in actual:
+        matches = positions.get(actual_token, 0)
+        combined = matches | state
+        shifted = (state << 1) | 1
+        state = combined & ~(combined - shifted)
+    matched = state.bit_count()
+    return matched / max(len(actual), len(expected)) * 100.0
+
+
+def score_markdown_structure(
+    actual_markdown: str,
+    expected_markdown: str,
+) -> tuple[float | None, str]:
+    table_score, table_notes = score_table_structure(
+        actual_markdown,
+        expected_markdown,
+    )
+    if table_notes == "reference_table_structure_missing":
+        return table_score, table_notes
+    infer_expected_controls = should_infer_plain_reference_controls(
+        expected_markdown,
+    )
+    expected_tokens = markdown_control_tokens(
+        expected_markdown,
+        infer_plain_headings=infer_expected_controls,
+    )
+    expected_shadow = markdown_shadow_codes(
+        expected_markdown,
+        infer_plain_headings=infer_expected_controls,
+    )
+    if table_score is None and not expected_shadow:
+        return None, ""
+    actual_tokens = markdown_control_tokens(
+        actual_markdown,
+        infer_plain_headings=infer_expected_controls,
+    )
+    actual_shadow = markdown_shadow_codes(
+        actual_markdown,
+        infer_plain_headings=infer_expected_controls,
+    )
+    lint_errors = lint_markdown_controls(actual_markdown)
+    token_score = sequence_token_score(actual_tokens, expected_tokens)
+    shadow_score = sequence_token_score(actual_shadow, expected_shadow)
+    lint_score = 0.0 if lint_errors else 100.0
+    syntax_notes = (
+        f"controls={len(actual_tokens)}/{len(expected_tokens)}; "
+        f"sequence={token_score:.2f}; "
+        f"shadow={len(actual_shadow)}/{len(expected_shadow)};"
+        f"{shadow_score:.2f}; "
+        f"lint={'fail:' + ','.join(lint_errors) if lint_errors else 'pass'}"
+    )
+    if table_score is not None:
+        notes = f"{table_notes}; {syntax_notes}"
+        return min(table_score, shadow_score, lint_score), notes
+    return min(token_score, shadow_score, lint_score), syntax_notes
+
+
+def fuzzy_table_anchor_score(table: list[list[str]], anchors: tuple[str, ...]) -> float:
+    if not anchors:
+        return 100.0
+    row_texts = [normalize_markdown(" ".join(row)) for row in table]
+    row_tokens = [set(tokens(text)) for text in row_texts]
+    matched = 0
+    for anchor in anchors:
+        anchor_normalized = normalize_markdown(anchor)
+        anchor_tokens = [token for token in tokens(anchor) if len(token) > 1]
+        if any(anchor_normalized and anchor_normalized in text for text in row_texts):
+            matched += 1
+            continue
+        if not anchor_tokens:
+            continue
+        required = 1.0 if len(anchor_tokens) <= 3 else 0.65
+        if any(
+            sum(1 for token in anchor_tokens if token in row) / len(anchor_tokens)
+            >= required
+            for row in row_tokens
+        ):
+            matched += 1
+    return matched / len(anchors) * 100.0
+
+
+def duplicate_anchor_score(actual_markdown: str, anchors: tuple[str, ...]) -> float:
+    if not anchors:
+        return 100.0
+    text = non_table_text(actual_markdown)
+    actual_normalized = normalize_markdown(text)
+    actual_token_set = set(tokens(text))
+    actual_compact = compact(text)
+    duplicate_hits = sum(
+        1
+        for anchor in anchors
+        if expected_line_matches(
+            anchor,
+            actual_normalized,
+            actual_token_set,
+            actual_compact,
+        )
+    )
+    duplicate_ratio = duplicate_hits / len(anchors)
+    if duplicate_ratio <= 0.30:
+        return 100.0
+    return max(0.0, 100.0 - duplicate_ratio * 100.0)
+
+
+def scored_expected_match(actual: str, expected: str) -> MatchScore:
+    text_percent, matched_lines, total_lines = expected_match(actual, expected)
+    quality_percent = compact_quality_percent(actual, expected)
+    quality_gate = percent_gate(quality_percent)
+    t9_percent = lexical_t9_percent(text_percent, quality_percent)
+    t9_gate = percent_gate(t9_percent)
+    if text_percent == "n/a":
+        return MatchScore(
+            "n/a",
+            matched_lines,
+            total_lines,
+            text_percent,
+            quality_percent,
+            quality_gate,
+            t9_percent,
+            t9_gate,
+            NOT_APPLICABLE,
+            MISSING_REFERENCE,
+            "",
+            NOT_CHECKED,
+            MISSING_REFERENCE,
+            "missing_text_reference",
+        )
+
+    structure_percent, structure_notes = score_markdown_structure(actual, expected)
+    grammar_probability = "100.00"
+    grammar_gate = NOT_APPLICABLE
+    if structure_percent is None:
+        failure_kind = classify_failure_kind(text_percent, quality_percent, "n/a")
+        success_probability = weighted_success_percent(
+            quality_percent,
+            grammar_probability,
+            t9_percent,
+        )
+        return MatchScore(
+            text_percent,
+            matched_lines,
+            total_lines,
+            text_percent,
+            quality_percent,
+            quality_gate,
+            t9_percent,
+            t9_gate,
+            NOT_APPLICABLE,
+            grammar_gate,
+            "",
+            success_probability,
+            percent_gate(success_probability),
+            failure_kind,
+        )
+
+    grammar_percent = f"{structure_percent:.2f}"
+    grammar_gate = percent_gate(grammar_percent)
+    success_probability = weighted_success_percent(
+        quality_percent,
+        grammar_percent,
+        t9_percent,
+    )
+    return MatchScore(
+        text_percent,
+        matched_lines,
+        total_lines,
+        text_percent,
+        quality_percent,
+        quality_gate,
+        t9_percent,
+        t9_gate,
+        grammar_percent,
+        grammar_gate,
+        structure_notes,
+        success_probability,
+        percent_gate(success_probability),
+        classify_failure_kind(text_percent, quality_percent, grammar_gate),
+    )
+
+
+def classify_failure_kind(
+    text_percent: str,
+    quality_percent: str,
+    markdown_grammar_gate: str,
+) -> str:
+    if markdown_grammar_gate == "fail":
+        return "markdown_grammar"
+    if percent_gate(quality_percent) == "fail":
+        return "ocr_quality_loss"
+    if percent_gate(text_percent) == "fail" and percent_gate(quality_percent) == "pass":
+        return "lexical_t9_or_order"
+    if percent_gate(text_percent) == "pass":
+        return "pass"
+    return "unknown"
 
 
 def compact(value: str) -> str:
@@ -318,6 +1289,20 @@ def is_curriculum_practice_table_row(normalized_line: str) -> bool:
     return normalized_line.startswith("|") and "практика" in normalized_line
 
 
+def homework_label_token_matches(
+    token_compact: str,
+    actual_token_compacts: set[str],
+) -> bool:
+    match = re.fullmatch(r"hw(\d+)", token_compact)
+    if not match:
+        return False
+    digit = match.group(1)
+    aliases = {f"hw{digit}", "hn", "hm"}
+    if digit == "7":
+        aliases.add("hwz")
+    return bool(aliases & actual_token_compacts)
+
+
 def fuzzy_compact_contains(haystack: str, needle: str) -> bool:
     if len(needle) < 8 or len(needle) > MAX_FUZZY_COMPACT_CHARS:
         return False
@@ -343,11 +1328,53 @@ def fuzzy_compact_contains(haystack: str, needle: str) -> bool:
 
 
 def fuzzy_token_matches(token: str, actual_token_compacts: set[str]) -> bool:
-    if len(token) < 8:
+    if len(token) < 8 or len(token) > MAX_FUZZY_COMPACT_CHARS:
         return False
+    max_distance = _max_fuzzy_token_distance(len(token))
+    min_size = max(8, len(token) - max_distance)
+    max_size = len(token) + max_distance
     return any(
-        fuzzy_compact_contains(candidate, token) for candidate in actual_token_compacts
+        fuzzy_token_distance_matches(token, candidate, max_distance)
+        for candidate in actual_token_compacts
+        if min_size <= len(candidate) <= max_size
     )
+
+
+def _max_fuzzy_token_distance(length: int) -> int:
+    if length <= 12:
+        return 1
+    if length <= 32:
+        return 2
+    return 3
+
+
+def fuzzy_token_distance_matches(token: str, candidate: str, max_distance: int) -> bool:
+    if token == candidate:
+        return True
+    if abs(len(token) - len(candidate)) > max_distance:
+        return False
+    min_len = min(len(token), len(candidate))
+    shared_chars = len(set(token) & set(candidate))
+    if shared_chars < max(4, int(min_len * 0.55)):
+        return False
+
+    previous = list(range(len(candidate) + 1))
+    for row_index, token_char in enumerate(token, start=1):
+        current = [row_index]
+        row_min = current[0]
+        for column_index, candidate_char in enumerate(candidate, start=1):
+            cost = 0 if token_char == candidate_char else 1
+            value = min(
+                previous[column_index] + 1,
+                current[column_index - 1] + 1,
+                previous[column_index - 1] + cost,
+            )
+            current.append(value)
+            row_min = min(row_min, value)
+        if row_min > max_distance:
+            return False
+        previous = current
+    return previous[-1] <= max_distance
 
 
 def expected_cell_detected(
@@ -467,7 +1494,7 @@ def main() -> int:
     }
     rows.sort(key=lambda row: (row["file"], method_order[row["engine"]]))
 
-    report_rows: list[tuple[str, str, str, str, str, str, str]] = []
+    report_rows: list[tuple[str, str, str, str, str, str, str, str, str, str, str, str, str]] = []
     for row in rows:
         file_name = row["file"]
         engine = row["engine"]
@@ -475,6 +1502,17 @@ def main() -> int:
         match_percent = "n/a"
         matched_lines = ""
         total_lines = ""
+        text_match_percent = "n/a"
+        compact_quality = "n/a"
+        compact_quality_gate = NOT_CHECKED
+        lexical_t9 = "n/a"
+        lexical_t9_gate = NOT_CHECKED
+        markdown_grammar_percent = "n/a"
+        markdown_grammar_gate = NOT_CHECKED
+        markdown_grammar_notes = ""
+        success_probability = "n/a"
+        success_probability_gate = NOT_CHECKED
+        failure_kind = NOT_CHECKED
         table_markdown_files = ""
 
         reference_path = None
@@ -490,14 +1528,44 @@ def main() -> int:
             reference_body = result_body(reference_path)
             if args.expected_root is not None:
                 try:
-                    match_percent, matched_lines, total_lines = expected_match(
+                    match_score = scored_expected_match(
                         actual_body,
                         reference_body,
                     )
+                    match_percent = match_score.match_percent
+                    matched_lines = match_score.matched_lines
+                    total_lines = match_score.total_lines
+                    text_match_percent = match_score.text_match_percent
+                    compact_quality = match_score.compact_quality_percent
+                    compact_quality_gate = match_score.compact_quality_gate
+                    lexical_t9 = match_score.lexical_t9_percent
+                    lexical_t9_gate = match_score.lexical_t9_gate
+                    markdown_grammar_percent = match_score.markdown_grammar_percent
+                    markdown_grammar_gate = match_score.markdown_grammar_gate
+                    markdown_grammar_notes = match_score.markdown_grammar_notes
+                    success_probability = match_score.success_probability_percent
+                    success_probability_gate = match_score.success_probability_gate
+                    failure_kind = match_score.failure_kind
                 except ValueError as exc:
                     raise SystemExit(f"{reference_path}: {exc}") from exc
             else:
                 match_percent = similarity_percent(actual_body, reference_body)
+                text_match_percent = match_percent
+                compact_quality = compact_quality_percent(actual_body, reference_body)
+                compact_quality_gate = percent_gate(compact_quality)
+                lexical_t9 = lexical_t9_percent(match_percent, compact_quality)
+                lexical_t9_gate = percent_gate(lexical_t9)
+                success_probability = weighted_success_percent(
+                    compact_quality,
+                    "100.00",
+                    lexical_t9,
+                )
+                success_probability_gate = percent_gate(success_probability)
+                failure_kind = classify_failure_kind(
+                    match_percent,
+                    compact_quality,
+                    "n/a",
+                )
 
         if successful(row) and actual_path.is_file() and args.tables_root is not None:
             table_count = write_table_markdown_files(
@@ -515,6 +1583,17 @@ def main() -> int:
                 match_percent,
                 matched_lines,
                 total_lines,
+                text_match_percent,
+                compact_quality,
+                compact_quality_gate,
+                lexical_t9,
+                lexical_t9_gate,
+                markdown_grammar_percent,
+                markdown_grammar_gate,
+                markdown_grammar_notes,
+                success_probability,
+                success_probability_gate,
+                failure_kind,
                 table_markdown_files,
             )
         )
@@ -532,6 +1611,17 @@ def main() -> int:
                 "match_percent",
                 "matched_expected_lines",
                 "total_expected_lines",
+                "text_match_percent",
+                "compact_quality_percent",
+                "compact_quality_gate",
+                "lexical_t9_percent",
+                "lexical_t9_gate",
+                "markdown_grammar_percent",
+                "markdown_grammar_gate",
+                "markdown_grammar_notes",
+                "success_probability_percent",
+                "success_probability_gate",
+                "failure_kind",
                 "table_markdown_files",
             )
         )
@@ -540,7 +1630,7 @@ def main() -> int:
     if args.expected_root is not None:
         reference_note = (
             "Match is verified-line recall against manual `reference/<file>.md`; "
-            "missing reference files are `n/a`."
+            f"missing reference files are `{MISSING_REFERENCE}`."
         )
     else:
         reference_note = (
@@ -558,19 +1648,24 @@ def main() -> int:
             f"good {TABLE_QUALITY_GOOD:.0f}%, target {TABLE_QUALITY_TARGET:.0f}%."
         ),
         "",
-        "| File | Method | Time | Match | Lines | Table blocks |",
-        "| --- | --- | ---: | ---: | ---: | ---: |",
+        "| File | Method | Time | Success P | Text | Quality | T9 | Grammar | Failure | Lines | Table blocks |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: |",
     ]
     markdown.extend(
-        "| `{}` | `{}` | {} s | {} | {} | {} |".format(
+        "| `{}` | `{}` | {} s | {} | {} | {} | {} | {} | {} | {} | {} |".format(
             escape_markdown(file_name),
             escape_markdown(method),
             elapsed,
+            f"{success_probability}%" if success_probability != "n/a" else success_probability,
             f"{match_percent}%" if match_percent != "n/a" else match_percent,
+            f"{compact_quality}%" if compact_quality != "n/a" else compact_quality,
+            f"{lexical_t9}%" if lexical_t9 != "n/a" else lexical_t9,
+            f"{markdown_grammar_percent}%" if markdown_grammar_percent != "n/a" else markdown_grammar_percent,
+            failure_kind,
             f"{matched_lines}/{total_lines}" if total_lines else "n/a",
             table_markdown_files or "0",
         )
-        for file_name, method, elapsed, match_percent, matched_lines, total_lines, table_markdown_files in report_rows
+        for file_name, method, elapsed, match_percent, matched_lines, total_lines, text_match_percent, compact_quality, compact_quality_gate, lexical_t9, lexical_t9_gate, markdown_grammar_percent, markdown_grammar_gate, markdown_grammar_notes, success_probability, success_probability_gate, failure_kind, table_markdown_files in report_rows
     )
     table = "\n".join(markdown) + "\n"
     args.markdown.write_text(table, encoding="utf-8")

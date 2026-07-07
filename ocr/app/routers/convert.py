@@ -7,7 +7,7 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
-from app.pipeline_flags import ensure_flag_overrides_allowed, pipeline_flags_payload
+from app.pipeline_flags import apply_pipeline_flag_overrides, pipeline_flags_payload
 from app.pipeline_config import resolve_pipeline_profile
 from app.schemas import ConvertResponse, ConvertMeta
 from app.services import convert_service
@@ -84,7 +84,10 @@ async def convert_endpoint(
     file: UploadFile = File(...),
     engine_type: str = Query("auto", description="Engine type: auto, tesseract, or easyocr"),
     pipeline_profile: str | None = Query(None, description="High-level OCR pipeline profile name"),
-    pipeline_flags: str | None = Query(None, description="Reserved pipeline flag overrides. Disabled for now."),
+    pipeline_flags: str | None = Query(
+        None,
+        description="Pipeline flag overrides for lexical correction, table slots, or structural debug output.",
+    ),
     pdf_mode: str = Query(
         "auto",
         description="PDF handling: auto uses a trustworthy text layer; raster forces page OCR.",
@@ -95,9 +98,11 @@ async def convert_endpoint(
     start_time = time.time()
 
     try:
-        ensure_flag_overrides_allowed(pipeline_flags)
         content = await read_upload_limited(file)
-        pipeline = resolve_pipeline_profile(engine_type, pipeline_profile)
+        pipeline = apply_pipeline_flag_overrides(
+            resolve_pipeline_profile(engine_type, pipeline_profile),
+            pipeline_flags,
+        )
         normalized_pdf_mode = convert_service.normalize_pdf_mode(pdf_mode)
         markdown_text, meta_info = await run_in_threadpool(
             convert_service.convert_bytes,
@@ -137,7 +142,10 @@ async def convert_stream_endpoint(
     file: UploadFile = File(...),
     engine_type: str = Query("auto", description="Engine type: auto, tesseract, or easyocr"),
     pipeline_profile: str | None = Query(None, description="High-level OCR pipeline profile name"),
-    pipeline_flags: str | None = Query(None, description="Reserved pipeline flag overrides. Disabled for now."),
+    pipeline_flags: str | None = Query(
+        None,
+        description="Pipeline flag overrides for lexical correction, table slots, or structural debug output.",
+    ),
     pdf_mode: str = Query(
         "auto",
         description="PDF handling: auto uses a trustworthy text layer; raster forces page OCR.",
@@ -148,9 +156,11 @@ async def convert_stream_endpoint(
         f"(content_type={file.content_type}), engine={engine_type}"
     )
     try:
-        ensure_flag_overrides_allowed(pipeline_flags)
         content = await read_upload_limited(file)
-        pipeline = resolve_pipeline_profile(engine_type, pipeline_profile)
+        pipeline = apply_pipeline_flag_overrides(
+            resolve_pipeline_profile(engine_type, pipeline_profile),
+            pipeline_flags,
+        )
         normalized_pdf_mode = convert_service.normalize_pdf_mode(pdf_mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

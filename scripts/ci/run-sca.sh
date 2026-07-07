@@ -120,12 +120,14 @@ run_trivy fs \
   --include-dev-deps \
   --skip-dirs "/work/$output" \
   --format json \
-  /work >"$repo_root/$output/source-vuln.json"
+  --output "/work/$output/source-vuln.json" \
+  /work
 run_trivy fs \
   --include-dev-deps \
   --skip-dirs "/work/$output" \
   --format cyclonedx \
-  /work >"$repo_root/$output/source.cdx.json"
+  --output "/work/$output/source.cdx.json" \
+  /work
 
 for image_spec in \
   "gateway:$gateway_image" \
@@ -138,10 +140,12 @@ for image_spec in \
   run_trivy image \
     --scanners vuln \
     --format json \
-    "$image_name" >"$repo_root/$output/$name-vuln.json"
+    --output "/work/$output/$name-vuln.json" \
+    "$image_name"
   run_trivy image \
     --format cyclonedx \
-    "$image_name" >"$repo_root/$output/$name.cdx.json"
+    --output "/work/$output/$name.cdx.json" \
+    "$image_name"
 done
 
 if ! verify_accepted_risk; then

@@ -5,9 +5,8 @@ This directory is a local OCR debugging workspace.
 Tracked files:
 
 - `fixtures/` - two tracked SAMPLE inputs plus ignored local real fixtures.
-- `reference/*.md` - manual reference text paired by filename.
+- `reference/SAMPLE*.md` - manual reference text for tracked SAMPLE inputs.
 - `fixtures/.gitkeep` and `reference/.gitkeep` - empty directory anchors.
-- `private-report.md` - local investigation report.
 - `.env.sample` - API-engine placeholders.
 
 Ignored files:
@@ -138,6 +137,38 @@ Browser only is supported for image fixtures:
 scripts/debug/debug-all.sh --engines browser-tesseract --fixture '*.png'
 ```
 
+Run all implemented image engines in parallel for a block of new or repaired
+references. The default block is three image fixtures:
+
+```bash
+scripts/debug/debug-image-engines-parallel.sh
+```
+
+This writes a visible artifact bundle instead of only the shared `debug/tmp/`
+workspace:
+
+```text
+debug/artifacts/parallel-reference-block/manifest.md
+debug/artifacts/parallel-reference-block/result.csv
+debug/artifacts/parallel-reference-block/time.csv
+debug/tmp/parallel-reference-block/<engine>/run.log
+debug/tmp/parallel-reference-block/<engine>/<fixture>.md
+```
+
+The parallel runner launches independent `tesseract`, `easyocr`, `auto`, and
+`browser-tesseract` jobs for the same fixture block, then merges their summaries.
+API engines are still rejected because they do not have local runners yet.
+
+Pass `--fixture` multiple times to test exactly the block that just received
+new references:
+
+```bash
+scripts/debug/debug-image-engines-parallel.sh \
+  --fixture 'photo_2026-06-20_15-38-09.jpg' \
+  --fixture 'photo_2026-06-26_19-56-47.jpg' \
+  --fixture 'image.png'
+```
+
 ## Select Flags
 
 By default every backend engine uses its automatic profile.
@@ -213,6 +244,44 @@ scripts/debug/run-debug.sh \
 
 Generated files stay under `debug/tmp/`. The probe limits copied expected text
 to the same first pages that were rendered.
+
+For reviewable long screenshots paired with Markdown references, generate a
+separate artifact bundle:
+
+```bash
+scripts/debug/build-reference-screenshots.sh
+```
+
+This renders one tall image per PDF fixture and writes matching references:
+
+```text
+debug/artifacts/reference-screenshots/manifest.md
+debug/artifacts/reference-screenshots/images/<file>.pdf.raster.png
+debug/artifacts/reference-screenshots/reference/<file>.pdf.raster.png.md
+```
+
+The default bundle renders the first five pages at 220 DPI. Use `--fixture`,
+`--max-pages`, `--dpi`, and `--format png,jpg` when a narrower or heavier visual
+check is needed.
+
+When a debug image was made from project documentation, build the reference from
+the documentation source and keep a browser screenshot beside it:
+
+```bash
+python3 scripts/debug/build-doc-reference-fixture.py \
+  --source '49162f3:docs/ru/course/course_tasks.md' \
+  --fixture 'photo_2026-06-20_15-38-09.jpg' \
+  --write-reference
+```
+
+This writes:
+
+```text
+debug/artifacts/doc-reference/<fixture>/render.html
+debug/artifacts/doc-reference/<fixture>/screenshot.png
+debug/artifacts/doc-reference/<fixture>/reference.md
+debug/reference/<fixture>.md
+```
 
 ## API Environment
 

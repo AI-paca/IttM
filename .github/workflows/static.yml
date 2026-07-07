@@ -37,6 +37,8 @@ jobs:
           node-version: 24
       - name: Install dependencies
         run: npm ci
+      - name: Prepare browser reviewer model
+        run: npm run model:browser-reviewer
       - name: Build project
         run: npm run build:pages
       - name: Verify GitHub Pages OCR assets

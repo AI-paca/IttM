@@ -19,10 +19,19 @@ function profile(): BrowserOcrProfile {
     imagePreprocessing: ["browser_resize", "ocr_border"],
     textRegionPsm: "6",
     denseGridFallback: true,
+    spatialFullPageFallback: false,
+    darkUiTextFallback: false,
+    contextualMarkdownGrammar: false,
     denseGridTargetWidth: 3300,
     ocrBorderPixels: 10,
     edgeWordFallbackPsm: "7",
     edgeWordFallbackMinTokens: 1,
+    lexicalCorrection: "off",
+    ocrLanguageRetry: "off",
+    tableSlotBuilder: "off",
+    tableSlotMaxColumns: 4,
+    recursiveTableCellOcr: "auto",
+    recursiveTableCellOcrBatchPixels: 8_000_000,
     layout: BROWSER_PIPELINE_PROFILES.browser_tesseract_raw.layout,
   };
 }
@@ -145,6 +154,160 @@ test("empty primary OCR retries with the profile edge-word PSM", async () => {
     { tessedit_pageseg_mode: "6" },
     { tessedit_pageseg_mode: "7" },
   ]);
+  await lease.release();
+  await pool.releaseCached();
+});
+
+test("small reviewer language retry ranks browser candidates from prior text", async () => {
+  let activeLanguages = "rus+eng+chi_sim";
+  const recognizedLanguages: string[] = [];
+  const pool = new BrowserOcrWorkerPool(async () => ({
+    async setParameters() {},
+    async reinitialize(languages) {
+      activeLanguages = languages;
+    },
+    async recognize() {
+      recognizedLanguages.push(activeLanguages);
+      const text =
+        activeLanguages === "rus+eng+chi_sim"
+          ? ""
+          : activeLanguages === "eng"
+            ? "PDF API"
+            : activeLanguages === "chi_sim"
+              ? ""
+              : "РЕС";
+      return { data: { text } };
+    },
+    async terminate() {},
+  }));
+  const t9Profile: BrowserOcrProfile = {
+    ...profile(),
+    languages: "rus+eng+chi_sim",
+    lexicalCorrection: "t9_small",
+    ocrLanguageRetry: "t9_small",
+  };
+
+  const lease = await pool.acquire(t9Profile, () => {});
+
+  assert.equal(await lease.recognize(new Blob(["first"])), "PDF API");
+  assert.equal(await lease.recognize(new Blob(["second"])), "PDF API");
+  assert.deepEqual(recognizedLanguages.slice(0, 4), [
+    "rus+eng+chi_sim",
+    "rus",
+    "eng",
+    "chi_sim",
+  ]);
+  assert.deepEqual(recognizedLanguages.slice(4, 6), ["ell", "equ"]);
+  assert.deepEqual(recognizedLanguages.slice(6, 10), [
+    "rus+eng+chi_sim",
+    "eng",
+    "rus",
+    "chi_sim",
+  ]);
+  assert.deepEqual(recognizedLanguages.slice(10, 12), ["ell", "equ"]);
+
+  await lease.release();
+  await pool.releaseCached();
+});
+
+test("small reviewer language retry learns numeric table segments", async () => {
+  let activeLanguages = "rus+eng";
+  const recognizedLanguages: string[] = [];
+  const pool = new BrowserOcrWorkerPool(async () => ({
+    async setParameters() {},
+    async reinitialize(languages) {
+      activeLanguages = languages;
+    },
+    async recognize() {
+      recognizedLanguages.push(activeLanguages);
+      return { data: { text: "36 72 4 3" } };
+    },
+    async terminate() {},
+  }));
+  const t9Profile: BrowserOcrProfile = {
+    ...profile(),
+    languages: "rus+eng",
+    lexicalCorrection: "t9_small",
+    ocrLanguageRetry: "t9_small",
+  };
+
+  const lease = await pool.acquire(t9Profile, () => {});
+
+  await lease.recognize(new Blob(["first"]));
+  await lease.recognize(new Blob(["second"]));
+  await lease.recognize(new Blob(["third"]));
+  await lease.recognize(new Blob(["fourth"]));
+
+  assert.deepEqual(recognizedLanguages.slice(0, 5), [
+    "rus+eng",
+    "rus",
+    "eng",
+    "ell",
+    "equ",
+  ]);
+  assert.deepEqual(recognizedLanguages.slice(15, 17), ["rus+eng", "equ"]);
+
+  await lease.release();
+  await pool.releaseCached();
+});
+
+test("detailed OCR requests blocks and exposes word boxes", async () => {
+  const outputs: Array<Record<string, boolean> | undefined> = [];
+  const pool = new BrowserOcrWorkerPool(async () => ({
+    async setParameters() {},
+    async recognize(_input, _options, output) {
+      outputs.push(output);
+      return {
+        data: {
+          text: "A B",
+          blocks: [
+            {
+              paragraphs: [
+                {
+                  lines: [
+                    {
+                      words: [
+                        {
+                          text: "A",
+                          confidence: 91,
+                          bbox: { x0: 10, y0: 12, x1: 20, y1: 30 },
+                        },
+                        {
+                          text: "B",
+                          confidence: 92,
+                          bbox: { x0: 80, y0: 12, x1: 90, y1: 30 },
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      };
+    },
+    async terminate() {},
+  }));
+
+  const lease = await pool.acquire(profile(), () => {});
+  const result = await lease.recognizeDetailed(new Blob(["image"]));
+
+  assert.deepEqual(outputs, [{ text: true, blocks: true }]);
+  assert.equal(result.text, "A B");
+  assert.deepEqual(result.words, [
+    {
+      text: "A",
+      confidence: 91,
+      bbox: { x0: 10, y0: 12, x1: 20, y1: 30 },
+    },
+    {
+      text: "B",
+      confidence: 92,
+      bbox: { x0: 80, y0: 12, x1: 90, y1: 30 },
+    },
+  ]);
+
   await lease.release();
   await pool.releaseCached();
 });

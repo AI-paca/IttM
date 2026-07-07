@@ -10,6 +10,7 @@ export interface EngineControlsState {
   llmKey: string;
   llmModel: string;
   llmProvider: LlmProvider;
+  lexicalCorrectionEnabled: boolean;
   pingUrl: string;
   rememberChoice: boolean;
   selectedSource: SourceType;
@@ -19,6 +20,7 @@ export interface EngineControlsState {
 
 export interface EngineControlsActions {
   onInstallEasyOcr: () => void;
+  onLexicalCorrectionChange: (checked: boolean) => void;
   onLlmProviderChange: (provider: LlmProvider) => void;
   onRememberChange: (checked: boolean) => void;
   onSourceSelect: (source: SourceType) => void;

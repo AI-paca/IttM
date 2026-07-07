@@ -99,6 +99,11 @@ def test_pipeline_flags_catalog_is_available_but_overrides_disabled():
         flag == "ocr_language_priority:rus+eng+kaz+kir+chi_sim"
         for flag in payload["profiles"]["backend_tesseract_standard"]
     )
+    assert any(
+        flag == "ocr_language_priority:rus+eng+kaz+kir+chi_sim+ell+equ"
+        for flag in payload["profiles"]["backend_tesseract_greek_math"]
+    )
+    assert any(flag == "lexical_correction:t9_small" for flag in payload["profiles"]["backend_tesseract_standard"])
     assert any(entry["key"] == "pipeline_flags" for entry in payload["available_flags"])
 
 

@@ -8,6 +8,7 @@ import {
   dewarpProjectorSlideCanvas,
 } from "./projected-document-dewarp";
 import {
+  denseGridContentBoxPixels,
   denseGridLineIndexes,
   looksLikeDenseGridPixels,
   looksLikeSparseCoverPixels,
@@ -24,6 +25,8 @@ export interface PreparedBrowserOcrInput {
   input: File | Blob;
   index: number;
   total: number;
+  width?: number;
+  height?: number;
   pageSegmentationMode?: string;
 }
 
@@ -105,6 +108,8 @@ export function streamImagesFromResizeWorker(
           ocrBorderPixels: profile.imagePreprocessing.includes("ocr_border")
             ? profile.ocrBorderPixels
             : 0,
+          spatialFullPageFallback: profile.spatialFullPageFallback,
+          darkUiTextFallback: profile.darkUiTextFallback,
           layout: profile.layout,
         },
       });
@@ -113,7 +118,13 @@ export function streamImagesFromResizeWorker(
         const response = await next();
         if (response.type === "plan") continue;
         if (response.type === "passthrough") {
-          yield { input: file, index: 0, total: 1 };
+          yield {
+            input: file,
+            index: 0,
+            total: 1,
+            width: response.width,
+            height: response.height,
+          };
           continue;
         }
         if (response.type === "tile") {
@@ -121,6 +132,8 @@ export function streamImagesFromResizeWorker(
             input: response.blob,
             index: response.index,
             total: response.total,
+            width: response.width,
+            height: response.height,
           };
           worker.postMessage({ type: "next" });
           continue;
@@ -385,20 +398,121 @@ async function looksLikeEdgeToEdgeWordImage(
   );
 }
 
+async function looksLikeDarkUiTextImage(
+  image: CanvasImageSource & ImageSize,
+): Promise<boolean> {
+  if (image.width < 800 || image.height < 400) return false;
+  const scale = Math.min(1, 1200 / image.width, 900 / image.height);
+  const analysis = await renderTileToCanvas(image, {
+    sourceX: 0,
+    sourceY: 0,
+    sourceWidth: image.width,
+    sourceHeight: image.height,
+    targetWidth: Math.max(1, Math.round(image.width * scale)),
+    targetHeight: Math.max(1, Math.round(image.height * scale)),
+  });
+  if (!analysis) return false;
+  const context = analysis.getContext("2d");
+  if (!context) return false;
+  const imageData = context.getImageData(0, 0, analysis.width, analysis.height);
+  let dark = 0;
+  let light = 0;
+  const total = analysis.width * analysis.height;
+  for (let index = 0; index < total; index += 1) {
+    const offset = index * 4;
+    const luminance =
+      imageData.data[offset] * 0.299 +
+      imageData.data[offset + 1] * 0.587 +
+      imageData.data[offset + 2] * 0.114;
+    if (luminance < 90) dark += 1;
+    if (luminance > 190) light += 1;
+  }
+  return (
+    dark / Math.max(1, total) >= 0.65 && light / Math.max(1, total) >= 0.04
+  );
+}
+
+async function cropDenseGridContentCanvas(
+  image: CanvasImageSource & ImageSize,
+): Promise<(BrowserCanvas & ImageSize) | null> {
+  const scale = Math.min(1, 1800 / image.width, 1200 / image.height);
+  const analysis = await renderTileToCanvas(image, {
+    sourceX: 0,
+    sourceY: 0,
+    sourceWidth: image.width,
+    sourceHeight: image.height,
+    targetWidth: Math.max(1, Math.round(image.width * scale)),
+    targetHeight: Math.max(1, Math.round(image.height * scale)),
+  });
+  if (!analysis) return null;
+  const context = analysis.getContext("2d");
+  if (!context) return null;
+  const imageData = context.getImageData(0, 0, analysis.width, analysis.height);
+  const content = denseGridContentBoxPixels(
+    imageData.data,
+    analysis.width,
+    analysis.height,
+    Math.max(4, Math.round(12 * scale)),
+  );
+  if (!content) return null;
+
+  const sourceX = Math.max(0, Math.floor(content.sourceX / scale));
+  const sourceY = Math.max(0, Math.floor(content.sourceY / scale));
+  const sourceRight = Math.min(
+    image.width,
+    Math.ceil((content.sourceX + content.sourceWidth) / scale),
+  );
+  const sourceBottom = Math.min(
+    image.height,
+    Math.ceil((content.sourceY + content.sourceHeight) / scale),
+  );
+  if (
+    sourceX <= 0 &&
+    sourceY <= 0 &&
+    sourceRight >= image.width &&
+    sourceBottom >= image.height
+  ) {
+    return null;
+  }
+
+  return renderTileToCanvas(image, {
+    sourceX,
+    sourceY,
+    sourceWidth: Math.max(1, sourceRight - sourceX),
+    sourceHeight: Math.max(1, sourceBottom - sourceY),
+    targetWidth: Math.max(1, sourceRight - sourceX),
+    targetHeight: Math.max(1, sourceBottom - sourceY),
+  }) as Promise<(BrowserCanvas & ImageSize) | null>;
+}
+
+function invertCanvas(canvas: BrowserCanvas): void {
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  for (let index = 0; index < imageData.data.length; index += 4) {
+    imageData.data[index] = 255 - imageData.data[index];
+    imageData.data[index + 1] = 255 - imageData.data[index + 1];
+    imageData.data[index + 2] = 255 - imageData.data[index + 2];
+  }
+  context.putImageData(imageData, 0, 0);
+}
+
 async function* streamDenseGridCanvas(
   image: CanvasImageSource & ImageSize,
   profile: BrowserOcrProfile,
 ): AsyncGenerator<PreparedBrowserOcrInput> {
+  const contentImage = await cropDenseGridContentCanvas(image);
+  const ocrImage = contentImage ?? image;
   const crops = planDenseGridCrops(
-    image.width,
-    image.height,
+    ocrImage.width,
+    ocrImage.height,
     profile.denseGridTargetWidth,
   );
   const originalPsms = [profile.textRegionPsm, "3", "11"];
   const total = crops.length + originalPsms.length;
   const original = await renderTileToCanvas(
-    image,
-    planImageTiles(image.width, image.height, profile)[0],
+    ocrImage,
+    planImageTiles(ocrImage.width, ocrImage.height, profile)[0],
     profile.imagePreprocessing.includes("ocr_border")
       ? profile.ocrBorderPixels
       : 0,
@@ -411,12 +525,14 @@ async function* streamDenseGridCanvas(
       input: originalBlob,
       index,
       total,
+      width: original.width,
+      height: original.height,
       pageSegmentationMode,
     };
   }
 
   for (const [index, crop] of crops.entries()) {
-    const canvas = await renderTileToCanvas(image, crop);
+    const canvas = await renderTileToCanvas(ocrImage, crop);
     if (!canvas) throw new Error("Could not create dense-grid OCR canvas");
     eraseDenseGridLines(canvas);
     const blob = await canvasToJpegBlob(canvas);
@@ -425,6 +541,8 @@ async function* streamDenseGridCanvas(
       input: blob,
       index: index + originalPsms.length,
       total,
+      width: canvas.width,
+      height: canvas.height,
       pageSegmentationMode: crop.pageSegmentationMode,
     };
     await yieldToBrowser();
@@ -452,6 +570,8 @@ async function* streamWideLandscapeCanvas(
       input: blob,
       index,
       total: psms.length,
+      width: canvas.width,
+      height: canvas.height,
       pageSegmentationMode,
     };
   }
@@ -512,6 +632,8 @@ async function* streamSparseCoverCanvas(
       input: blob,
       index,
       total: passes.length,
+      width: canvas.width,
+      height: canvas.height,
       pageSegmentationMode: pass.psm,
     };
     await yieldToBrowser();
@@ -632,6 +754,7 @@ async function* streamCanvasTiles(
   profile: BrowserOcrProfile,
   pageSegmentationMode?: string,
   borderOverride?: number,
+  invert = false,
 ): AsyncGenerator<PreparedBrowserOcrInput> {
   const tiles = planImageTiles(image.width, image.height, profile);
   const borderPixels =
@@ -642,10 +765,18 @@ async function* streamCanvasTiles(
   for (const [index, tile] of tiles.entries()) {
     const canvas = await renderTileToCanvas(image, tile, borderPixels);
     if (!canvas) throw new Error("Could not create browser OCR canvas");
+    if (invert) invertCanvas(canvas);
 
     const blob = await canvasToJpegBlob(canvas);
     if (!blob) throw new Error("Could not encode browser OCR tile");
-    yield { input: blob, index, total: tiles.length, pageSegmentationMode };
+    yield {
+      input: blob,
+      index,
+      total: tiles.length,
+      width: canvas.width,
+      height: canvas.height,
+      pageSegmentationMode,
+    };
     await yieldToBrowser();
   }
 }
@@ -659,6 +790,15 @@ async function* streamInBrowserCanvas(
 
   try {
     yield* streamCanvasTiles(image, profile);
+    if (profile.darkUiTextFallback && (await looksLikeDarkUiTextImage(image))) {
+      yield* streamCanvasTiles(
+        image,
+        profile,
+        profile.textRegionPsm,
+        undefined,
+        true,
+      );
+    }
   } finally {
     if ("close" in image && typeof image.close === "function") {
       image.close();
@@ -722,6 +862,18 @@ export async function* streamImagesForBrowserOcr(
         undefined,
         profile.ocrBorderPixels * 2,
       );
+      if (
+        profile.darkUiTextFallback &&
+        (await looksLikeDarkUiTextImage(dewarped))
+      ) {
+        yield* streamCanvasTiles(
+          dewarped,
+          profile,
+          profile.textRegionPsm,
+          profile.ocrBorderPixels,
+          true,
+        );
+      }
       return;
     }
   }
@@ -730,6 +882,18 @@ export async function* streamImagesForBrowserOcr(
     const dewarped = await prepareDewarpedBrowserImage(file, profile);
     if (dewarped) {
       yield* streamCanvasTiles(dewarped, profile, "3");
+      if (
+        profile.darkUiTextFallback &&
+        (await looksLikeDarkUiTextImage(dewarped))
+      ) {
+        yield* streamCanvasTiles(
+          dewarped,
+          profile,
+          profile.textRegionPsm,
+          undefined,
+          true,
+        );
+      }
       return;
     }
   }

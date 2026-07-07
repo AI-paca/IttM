@@ -27,7 +27,7 @@ jobs:
         run: npm run test:sca
 
       - name: Upload vulnerability reports and SBOMs
-        if: ${{ always() && env.ACT != 'true' }}
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: sca-sbom-${{ github.run_id }}

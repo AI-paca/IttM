@@ -163,7 +163,9 @@ class ProjectorSlideDewarpStep(ImagePreprocessingStep):
         if center.resize((1, 1)).getpixel((0, 0)) < 120:
             return image
 
-        source = tuple((int(width * x), int(height * y)) for x, y in _projector_slide_source_ratios(gray))
+        source = _detected_projector_quad(image)
+        if source is None:
+            source = tuple((int(width * x), int(height * y)) for x, y in _projector_slide_source_ratios(gray))
         target_width, target_height = 2000, 1200
         destination = (
             (0, 0),
@@ -179,6 +181,43 @@ class ProjectorSlideDewarpStep(ImagePreprocessingStep):
             coefficients,
             resample,
         ).convert("RGB")
+
+
+class RecursivePageDewarpStep(ImagePreprocessingStep):
+    name = "recursive_page_dewarp"
+
+    def apply(self, image: Image.Image) -> Image.Image:
+        if min(image.size) < 220:
+            return image
+        if image.size[0] * image.size[1] > max_dewarp_pixels():
+            return image
+
+        source = _detected_projector_quad(image)
+        if source is not None:
+            top_width = math.dist(source[0], source[1])
+            bottom_width = math.dist(source[3], source[2])
+            left_height = math.dist(source[0], source[3])
+            right_height = math.dist(source[1], source[2])
+            target_width = max(250, round((top_width + bottom_width) / 2))
+            target_height = max(
+                180,
+                round((left_height + right_height) / 2),
+            )
+            destination = (
+                (0, 0),
+                (target_width, 0),
+                (target_width, target_height),
+                (0, target_height),
+            )
+            coefficients = _perspective_coefficients(destination, source)
+            return image.transform(
+                (target_width, target_height),
+                Image.Transform.PERSPECTIVE,
+                coefficients,
+                getattr(Image, "Resampling", Image).BICUBIC,
+            ).convert("RGB")
+
+        return ProjectedDocumentDewarpStep().apply(image)
 
 
 class OcrPreprocessingPipeline:
@@ -275,6 +314,99 @@ def _projector_slide_source_ratios(
     )
 
 
+def _detected_projector_quad(
+    image: Image.Image,
+) -> tuple[tuple[int, int], ...] | None:
+    import numpy as np
+
+    rgb = np.asarray(image.convert("RGB"), dtype=np.int16)
+    height, width = rgb.shape[:2]
+    if height < 220 or width < 220:
+        return None
+
+    red = rgb[:, :, 0]
+    green = rgb[:, :, 1]
+    blue = rgb[:, :, 2]
+    field = (green - red > 16) & (blue - red > 28) & (blue > 105)
+    window = max(15, min(61, (height // 40) | 1))
+    padded = np.pad(
+        field.astype(np.int16),
+        ((window // 2, window // 2), (0, 0)),
+        mode="constant",
+    )
+    cumulative = np.vstack(
+        (
+            np.zeros((1, width), dtype=np.int32),
+            np.cumsum(padded, axis=0, dtype=np.int32),
+        )
+    )
+    smooth = cumulative[window:] - cumulative[:-window]
+    active = smooth >= max(3, round(window * 0.25))
+    any_active = np.any(active, axis=0)
+    first = np.argmax(active, axis=0)
+    last = height - 1 - np.argmax(active[::-1], axis=0)
+    valid = any_active & ((last - first) >= height * 0.35)
+    columns = np.flatnonzero(valid)
+    if columns.size < width * 0.35:
+        return None
+
+    left = int(columns[0])
+    right = int(columns[-1])
+    if right - left < width * 0.45:
+        return None
+
+    top_fit = _robust_line_fit(columns, first[columns])
+    bottom_fit = _robust_line_fit(columns, last[columns])
+    if top_fit is None or bottom_fit is None:
+        return None
+    top_slope, top_intercept = top_fit
+    bottom_slope, bottom_intercept = bottom_fit
+    inset = max(2, round(window * 0.28))
+    top_left = int(round(top_slope * left + top_intercept + inset))
+    top_right = int(round(top_slope * right + top_intercept + inset))
+    bottom_left = int(round(bottom_slope * left + bottom_intercept - inset))
+    bottom_right = int(round(bottom_slope * right + bottom_intercept - inset))
+    top_left = max(0, min(height - 1, top_left))
+    top_right = max(0, min(height - 1, top_right))
+    bottom_left = max(0, min(height - 1, bottom_left))
+    bottom_right = max(0, min(height - 1, bottom_right))
+    if min(bottom_left - top_left, bottom_right - top_right) < height * 0.25:
+        return None
+
+    margin = max(8, round(min(width, height) * 0.025))
+    near_full_frame = (
+        left <= margin
+        and right >= width - 1 - margin
+        and max(top_left, top_right) <= margin
+        and min(bottom_left, bottom_right) >= height - 1 - margin
+    )
+    if near_full_frame:
+        return None
+
+    return (
+        (left, top_left),
+        (right, top_right),
+        (right, bottom_right),
+        (left, bottom_left),
+    )
+
+
+def _robust_line_fit(x, y) -> tuple[float, float] | None:
+    import numpy as np
+
+    if len(x) < 8:
+        return None
+    selected = np.ones(len(x), dtype=bool)
+    for _ in range(3):
+        if int(np.count_nonzero(selected)) < 8:
+            return None
+        slope, intercept = np.polyfit(x[selected], y[selected], 1)
+        residual = np.abs(y - (slope * x + intercept))
+        scale = float(np.median(residual[selected]))
+        selected = residual <= max(3.0, scale * 3.0)
+    return float(slope), float(intercept)
+
+
 def _is_near_full_frame_quad(corners, width: int, height: int, area_ratio: float) -> bool:
     if area_ratio < 0.85:
         return False
@@ -292,4 +424,5 @@ IMAGE_PREPROCESSING_STEPS: dict[str, type[ImagePreprocessingStep]] = {
     MobileScreenUpscaleStep.name: MobileScreenUpscaleStep,
     SmallTextUpscaleStep.name: SmallTextUpscaleStep,
     ProjectedDocumentDewarpStep.name: ProjectedDocumentDewarpStep,
+    RecursivePageDewarpStep.name: RecursivePageDewarpStep,
 }

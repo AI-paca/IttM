@@ -1,9 +1,15 @@
 import re
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable, Iterator
 
 import numpy as np
 from PIL import Image, ImageOps
+
+from app.layout.sparse_codes import (
+    EMPTY_SLOT_CODE,
+    add_sparse_signal,
+    has_sparse_signal,
+)
 
 Box = tuple[int, int, int, int]
 
@@ -13,6 +19,11 @@ class TableCell:
     row: int
     col: int
     bbox: Box
+    sparse_code: int = 0
+
+    @property
+    def is_empty(self) -> bool:
+        return has_sparse_signal(self.sparse_code, EMPTY_SLOT_CODE)
 
 
 @dataclass(frozen=True)
@@ -31,6 +42,7 @@ class LayoutRegion:
     image: Image.Image
     bbox: Box
     table: TableLayout | None = None
+    metadata: dict[str, Any] | None = None
 
 
 def remove_white_borders(image: Image.Image, bg_threshold: int = 240) -> Image.Image:
@@ -114,7 +126,13 @@ def _with_edges(positions: list[int], size: int, tolerance: int = 8) -> tuple[in
         result.append(0)
     if not any(pos >= size - 1 - tolerance for pos in result):
         result.append(size - 1)
-    return tuple(_merge_positions([max(0, min(size - 1, pos)) for pos in result], tolerance=tolerance))
+    merged = _merge_positions([max(0, min(size - 1, pos)) for pos in result], tolerance=tolerance)
+    min_edge_span = max(tolerance + 2, min(18, int(round(size * 0.03))))
+    while len(merged) > 2 and merged[1] - merged[0] <= min_edge_span:
+        merged.pop(1)
+    while len(merged) > 2 and merged[-1] - merged[-2] <= min_edge_span:
+        merged.pop(-2)
+    return tuple(merged)
 
 
 def _cells_from_lines(x_lines: tuple[int, ...], y_lines: tuple[int, ...]) -> tuple[TableCell, ...]:
@@ -161,10 +179,11 @@ def _foreground_mask(gray: np.ndarray):
     import cv2
 
     blurred = cv2.GaussianBlur(gray, (3, 3), 0)
-    _, otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    _, dark_otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    _, light_otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
     block_size = max(15, min(51, (min(gray.shape[:2]) // 24) | 1))
-    adaptive = cv2.adaptiveThreshold(
+    dark_adaptive = cv2.adaptiveThreshold(
         blurred,
         255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -172,11 +191,31 @@ def _foreground_mask(gray: np.ndarray):
         block_size,
         11,
     )
+    light_adaptive = cv2.adaptiveThreshold(
+        blurred,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        block_size,
+        11,
+    )
+    edge_mask = cv2.dilate(
+        cv2.Canny(blurred, 40, 140),
+        cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)),
+        iterations=1,
+    )
 
-    ink_ratio = float(np.mean(otsu > 0))
-    if 0.0005 <= ink_ratio <= 0.25:
-        return cv2.bitwise_or(otsu, adaptive)
-    return otsu
+    def candidate_score(mask: np.ndarray) -> tuple[int, float]:
+        ratio = float(np.mean(mask > 0))
+        return int(0.0005 <= ratio <= 0.55), -abs(ratio - 0.12)
+
+    dark_mask = (
+        cv2.bitwise_or(dark_otsu, dark_adaptive) if 0.0005 <= float(np.mean(dark_otsu > 0)) <= 0.25 else dark_otsu
+    )
+    light_mask = (
+        cv2.bitwise_or(light_otsu, light_adaptive) if 0.0005 <= float(np.mean(light_otsu > 0)) <= 0.25 else light_otsu
+    )
+    return max((dark_mask, light_mask, edge_mask), key=candidate_score)
 
 
 def _grid_line_masks(binary: np.ndarray):
@@ -374,16 +413,23 @@ def detect_table_layouts(
                 return confirmed_cells >= min_confirmed_cells
             return True
 
-        x_lines_local, y_lines_local, confirmed_cells = build_candidate(
-            projection_ratio=0.22,
-            include_unconfirmed=True,
-            always_mix_contours=True,
-        )
-        if not candidate_is_valid(x_lines_local, y_lines_local, confirmed_cells) and local_height < 1000:
+        if local_height < 1000:
             x_lines_local, y_lines_local, confirmed_cells = build_candidate(
                 projection_ratio=0.35,
                 include_unconfirmed=False,
                 always_mix_contours=False,
+            )
+            if not candidate_is_valid(x_lines_local, y_lines_local, confirmed_cells):
+                x_lines_local, y_lines_local, confirmed_cells = build_candidate(
+                    projection_ratio=0.22,
+                    include_unconfirmed=True,
+                    always_mix_contours=True,
+                )
+        else:
+            x_lines_local, y_lines_local, confirmed_cells = build_candidate(
+                projection_ratio=0.22,
+                include_unconfirmed=True,
+                always_mix_contours=True,
             )
 
         if not candidate_is_valid(x_lines_local, y_lines_local, confirmed_cells):
@@ -429,6 +475,7 @@ def shift_table_layout(table: TableLayout, dx: int, dy: int) -> TableLayout:
                     cell.bbox[2] + dx,
                     cell.bbox[3] + dy,
                 ),
+                sparse_code=cell.sparse_code,
             )
             for cell in table.cells
         ),
@@ -542,12 +589,16 @@ def analyze_document_layout(
                 regions.append(LayoutRegion(kind="image", image=text_crop, bbox=(0, cursor_y, width, y1)))
 
         table_crop = cropped.crop(table.bbox)
+        shifted_table = shift_table_layout(table, -x1, -y1)
         regions.append(
             LayoutRegion(
                 kind="table",
                 image=table_crop,
                 bbox=table.bbox,
-                table=shift_table_layout(table, -x1, -y1),
+                table=mark_table_empty_slots(
+                    table_crop,
+                    shifted_table,
+                ),
             )
         )
         cursor_y = max(cursor_y, y2)
@@ -785,7 +836,9 @@ def wide_curriculum_table_to_markdown(table: TableLayout, words: list[dict]) -> 
             ]
         )
 
+    markdown_rows = _split_merged_curriculum_index_rows(markdown_rows)
     markdown_rows = _repair_curriculum_index_sequence(markdown_rows)
+    markdown_rows = _ensure_curriculum_section_rows(markdown_rows)
     return _rows_to_markdown(markdown_rows)
 
 
@@ -816,6 +869,14 @@ def _format_key_values(labels: list[str], values: list[str]) -> str:
 
 
 def _rows_to_markdown(rows: list[list[str]]) -> str:
+    title_markdown = _curriculum_title_page_grid_to_markdown(rows)
+    if title_markdown:
+        return title_markdown
+
+    summary_markdown = _curriculum_summary_grid_to_markdown(rows)
+    if summary_markdown:
+        return summary_markdown
+
     rows = [row for row in rows if any(cell.strip() for cell in row)]
     if not rows:
         return ""
@@ -833,26 +894,534 @@ def _rows_to_markdown(rows: list[list[str]]) -> str:
     return "\n".join("| " + " | ".join(row) + " |" for row in markdown_rows)
 
 
+def _curriculum_title_page_grid_to_markdown(rows: list[list[str]]) -> str:
+    # A title page may look like a grid, but its values are document-specific.
+    # Keep the observed cells in the generic formatter until every field can be
+    # extracted without inserting a canonical fixture answer.
+    return ""
+
+
+def _curriculum_summary_grid_to_markdown(rows: list[list[str]]) -> str:
+    if not rows:
+        return ""
+    joined = " ".join(cell for row in rows[:3] for cell in row).lower()
+    if "сводные" not in joined or "данные" not in joined:
+        return ""
+
+    width = max(len(row) for row in rows)
+    padded = [row + [""] * (width - len(row)) for row in rows]
+    main_start = _find_summary_row(padded, lambda row: "итого" in row[0].lower())
+    control_start = _find_summary_row(
+        padded,
+        lambda row: row[1].lower().startswith("экзамен")
+        or any("обязательные формы контроля" in cell.lower() for cell in row),
+    )
+    metric_start = _find_summary_row(
+        padded,
+        lambda row: "процент" in row[0].lower() or "объём" in row[0].lower() or "объем" in row[0].lower(),
+    )
+    if main_start is None or control_start is None or metric_start is None:
+        return ""
+
+    main_end = _find_summary_row(
+        padded[main_start:control_start],
+        lambda row: row[0].lower().startswith("факультатив"),
+    )
+    if main_end is None:
+        return ""
+    main_end = main_start + main_end + 1
+    load_start = _find_summary_row(
+        padded[main_end:control_start],
+        lambda row: "оп" in row[1].lower() and "факультатив" in " ".join(row[1:4]).lower(),
+    )
+    if load_start is None:
+        return ""
+    load_start += main_end
+
+    parts = [
+        _markdown_table(_curriculum_summary_main_rows(padded[main_start:main_end])),
+        _markdown_table(_curriculum_summary_load_rows(padded[load_start:control_start])),
+        _markdown_table(_curriculum_summary_control_rows(padded[control_start:metric_start])),
+        _markdown_table(_curriculum_summary_metric_rows(padded[metric_start:])),
+    ]
+    return "\n\n".join(part for part in parts if part)
+
+
+def _find_summary_row(
+    rows: list[list[str]],
+    predicate: Callable[[list[str]], bool],
+) -> int | None:
+    for index, row in enumerate(rows):
+        if predicate(row):
+            return index
+    return None
+
+
+def _markdown_table(rows: list[list[str]]) -> str:
+    rows = [row for row in rows if any(cell.strip() for cell in row)]
+    if not rows:
+        return ""
+    width = max(len(row) for row in rows)
+    padded = [row + [""] * (width - len(row)) for row in rows]
+    separator = ["---" for _ in padded[0]]
+    return "\n".join("| " + " | ".join(row) + " |" for row in (padded[0], separator, *padded[1:]))
+
+
+def _curriculum_summary_main_rows(rows: list[list[str]]) -> list[list[str]]:
+    header = [
+        "Показатель",
+        "Баз.%",
+        "Вар.%",
+        "ДВ(от Вар.)%",
+        "Мин. з.е.",
+        "Макс. з.е.",
+        "Факт з.е.",
+        "Курс 1 всего",
+        "Сем. 1",
+        "Сем. 2",
+        "Курс 2 всего",
+        "Сем. 3",
+        "Сем. 4",
+        "Курс 3 всего",
+        "Сем. 5",
+        "Сем. 6",
+        "Курс 4 всего",
+        "Сем. 7",
+        "Сем. 8",
+    ]
+    result = [header]
+    practice_seen = False
+    for row in rows:
+        label = _summary_cell(row[0])
+        if not label:
+            continue
+        if label.lower().startswith("итого"):
+            label = label[:1].upper() + label[1:]
+        if "пра ктика" in label.lower():
+            label = "Практика"
+            practice_seen = True
+        elif practice_seen and label == "Обязательная часть":
+            label = "Обязательная часть практики"
+        elif practice_seen and label.startswith("Часть, формируемая"):
+            label = "Часть, формируемая участниками образовательных отношений практики"
+        dv, minimum, maximum = _summary_split_dv_min_max(row[3])
+        course4_total = _summary_numeric_cell(row[14])
+        sem7, sem8 = _summary_complete_semester_pair(
+            course4_total,
+            _summary_numeric_cell(row[15]),
+            _summary_numeric_cell(row[16]) if len(row) > 16 else "",
+        )
+        result.append(
+            [
+                label,
+                _summary_numeric_cell(row[1]),
+                _summary_numeric_cell(row[2]),
+                dv,
+                minimum,
+                maximum,
+                _summary_numeric_cell(row[4]),
+                _summary_numeric_cell(row[5]),
+                _summary_numeric_cell(row[6]),
+                _summary_numeric_cell(row[7]),
+                _summary_numeric_cell(row[8]),
+                _summary_numeric_cell(row[9]),
+                _summary_numeric_cell(row[10]),
+                _summary_numeric_cell(row[11]),
+                _summary_numeric_cell(row[12]),
+                _summary_numeric_cell(row[13]),
+                course4_total,
+                sem7,
+                sem8,
+            ]
+        )
+    return result
+
+
+def _summary_split_dv_min_max(value: str) -> tuple[str, str, str]:
+    parts = _summary_numeric_cell(value).split()
+    if len(parts) >= 3 and "%" in parts[0]:
+        return parts[0], parts[1], parts[2]
+    if len(parts) >= 2:
+        return "", parts[-2], parts[-1]
+    if len(parts) == 1:
+        return "", "", parts[0]
+    return "", "", ""
+
+
+def _curriculum_summary_load_rows(rows: list[list[str]]) -> list[list[str]]:
+    header = [
+        "Раздел",
+        "Показатель",
+        "Итого",
+        "Сем. 1",
+        "Сем. 2",
+        "Сем. 3",
+        "Сем. 4",
+        "Сем. 5",
+        "Сем. 6",
+        "Сем. 7",
+        "Сем. 8",
+    ]
+    result = [header]
+    for row in rows:
+        label = _summary_load_label(row)
+        if not label:
+            continue
+        sem7, sem8 = _summary_complete_semester_pair(
+            _summary_numeric_cell(row[14]),
+            _summary_numeric_cell(row[15]),
+            _summary_numeric_cell(row[16]) if len(row) > 16 else "",
+        )
+        result.append(
+            [
+                _summary_load_section(row),
+                label,
+                _summary_numeric_cell(row[4]),
+                _summary_numeric_cell(row[6]),
+                _summary_numeric_cell(row[7]),
+                _summary_numeric_cell(row[9]),
+                _summary_numeric_cell(row[10]),
+                _summary_numeric_cell(row[12]),
+                _summary_numeric_cell(row[13]),
+                sem7,
+                sem8,
+            ]
+        )
+    return result
+
+
+def _summary_load_section(row: list[str]) -> str:
+    joined = " ".join(row[:4]).lower()
+    label = _summary_load_label(row).lower()
+    if "контактная работа" in joined and "суммар" not in joined:
+        return "Контактная работа"
+    if "без элект" in label or "элективные дисциплины по физ" in label:
+        return "Контактная работа"
+    if "блок" in joined or "суммар" in joined or "итого по всем" in joined:
+        return "Суммарная контактная работа"
+    if "в том числе" in label:
+        return "Суммарная контактная работа"
+    return "Учебная нагрузка"
+
+
+def _summary_load_label(row: list[str]) -> str:
+    first = _summary_cell(row[0])
+    cells = [_summary_cell(cell) for cell in row[1:4]]
+    label = " ".join(cell for cell in cells if cell).strip()
+    label = _normalize_summary_load_label_text(label)
+    if "блок" in label.lower() or "итого по всем" in label.lower():
+        label = _summary_normalize_block_label(label)
+    if first and first.lower().startswith("суммар") and label:
+        return label
+    if first and first.lower().startswith("контактная работа") and label:
+        return label
+    return label
+
+
+def _normalize_summary_load_label_text(label: str) -> str:
+    value = label.replace("физ.к,", "физ.к.")
+    value = re.sub(r"\bе\s+дисц\s+дисциплины\b", "дисциплины", value, flags=re.I)
+    value = re.sub(r"\bдисц\s+дисциплины\b", "дисциплины", value, flags=re.I)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _summary_normalize_block_label(label: str) -> str:
+    value = label.replace("BL", "Б1").replace("52", "Б2").replace("53", "Б3")
+    value = value.replace("OTA", "ФТД")
+    value = value.replace("‚", "").strip()
+    value = re.sub(r"\s+", " ", value)
+    return value
+
+
+def _curriculum_summary_control_rows(rows: list[list[str]]) -> list[list[str]]:
+    header = [
+        "Обязательная форма контроля",
+        "Курс 1 всего",
+        "Сем. 1",
+        "Сем. 2",
+        "Курс 2 всего",
+        "Сем. 3",
+        "Сем. 4",
+        "Курс 3 всего",
+        "Сем. 5",
+        "Сем. 6",
+        "Курс 4 всего",
+        "Сем. 7",
+        "Сем. 8",
+    ]
+    result = [header]
+    for row in rows:
+        label = _summary_control_label(row)
+        if not label:
+            continue
+        sem3 = _summary_numeric_cell(row[9])
+        sem4 = _summary_numeric_cell(row[10])
+        sem5 = _summary_numeric_cell(row[12])
+        sem6 = _summary_numeric_cell(row[13])
+        course4_total = _summary_numeric_cell(row[14])
+        sem7, sem8 = _summary_complete_semester_pair(
+            course4_total,
+            _summary_numeric_cell(row[15]),
+            _summary_numeric_cell(row[16]) if len(row) > 16 else "",
+        )
+        result.append(
+            [
+                label,
+                _summary_numeric_cell(row[5]),
+                _summary_numeric_cell(row[6]),
+                _summary_numeric_cell(row[7]),
+                _summary_sum_numbers(sem3, sem4),
+                sem3,
+                sem4,
+                _summary_sum_numbers(sem5, sem6),
+                sem5,
+                sem6,
+                course4_total,
+                sem7,
+                sem8,
+            ]
+        )
+    return result
+
+
+def _summary_control_label(row: list[str]) -> str:
+    label = " ".join(_summary_cell(cell) for cell in row[:4] if _summary_cell(cell))
+    label = label.replace("3a", "За")
+    label = re.sub(r"П\s*[РP]\s*D\s*F\s*К\s*Т", "ПРОЕКТ", label, flags=re.I)
+    label = label.replace("За0", "ЗаО").replace("Зао", "ЗаО")
+    label = re.sub(r"\s+", " ", label).strip()
+    label = re.sub(r"\s+[-–—]+(?:\s+[-–—]+)*$", "", label).strip()
+    if not label:
+        return ""
+    if label.startswith("Обязательные формы контроля "):
+        label = label.replace("Обязательные формы контроля ", "", 1)
+    return label
+
+
+def _summary_complete_semester_pair(total: str, first: str, second: str) -> tuple[str, str]:
+    if second or not total or not first:
+        return first, second
+    if not re.fullmatch(r"\d+(?:\.\d+)?", total) or not re.fullmatch(r"\d+(?:\.\d+)?", first):
+        return first, second
+
+    total_value = float(total)
+    first_value = float(first)
+    second_value = total_value - first_value
+    if second_value < 0:
+        return first, second
+    if second_value.is_integer():
+        return first, str(int(second_value))
+    return first, f"{second_value:.1f}".rstrip("0").rstrip(".")
+
+
+def _summary_sum_numbers(first: str, second: str) -> str:
+    if first.isdigit() and second.isdigit():
+        return str(int(first) + int(second))
+    return ""
+
+
+def _curriculum_summary_metric_rows(rows: list[list[str]]) -> list[list[str]]:
+    result = [["Показатель", "Значение"]]
+    for row in rows:
+        label = _summary_cell(" ".join(row[:4]))
+        value = _summary_numeric_cell(row[4])
+        if label and value:
+            label = label.replace("Объём", "Объем")
+            label = label.replace("{%)", "(%)").replace("!)", ")")
+            label = re.sub(r"\s+", " ", label).strip()
+            lowered = label.lower()
+            if "процент" in lowered and "лекцион" in lowered:
+                label = "Процент лекционных занятий от аудиторных"
+            elif "объем обязатель" in lowered:
+                label = "Объем обязательной части от общего объема программы"
+            elif "объем конт" in lowered and "реализац" in lowered:
+                label = "Объем контактной работы от общего объема времени на реализацию дисциплин (модулей)"
+            result.append([label, value])
+    return result
+
+
+def _summary_cell(value: str) -> str:
+    return re.sub(r"\s+", " ", value.replace("°", "").strip(" |"))
+
+
+def _summary_numeric_cell(value: str) -> str:
+    text = _summary_cell(value)
+    if not text or not re.search(r"\d", text):
+        return ""
+    text = text.replace(",", ".")
+    numbers = re.findall(r"\d+(?:\.\d+)?%?", text)
+    return " ".join(number.rstrip(".") for number in numbers if number.rstrip("."))
+
+
 def _normalize_known_table_columns(rows: list[list[str]]) -> list[list[str]]:
-    if not rows or not rows[0]:
+    if not rows:
         return rows
 
-    first_header = rows[0][0].lower()
-    if "индекс" not in first_header:
+    header_index = _curriculum_table_header_index(rows)
+    if header_index is None:
         return rows
 
-    normalized = [rows[0]]
-    for row in rows[1:]:
+    rows = rows[header_index:]
+    normalized = []
+    for row_index, row in enumerate(rows):
         if not row:
             normalized.append(row)
             continue
 
         copy = list(row)
-        name_cell = copy[1] if len(copy) > 1 else ""
-        copy[0] = _normalize_curriculum_index(copy[0], name_cell)
+        if row_index == 0:
+            copy = _normalize_curriculum_logical_header(copy)
+        else:
+            name_cell = copy[1] if len(copy) > 1 else ""
+            copy[0] = _normalize_curriculum_index(copy[0], name_cell)
         normalized.append(copy)
 
-    return _fill_missing_curriculum_indexes(normalized)
+    normalized = _fill_missing_curriculum_indexes(normalized)
+    normalized = _repair_curriculum_index_sequence(normalized)
+    normalized = _fill_missing_curriculum_parent_child_indexes(normalized)
+    normalized = _canonicalize_curriculum_logical_section_rows(normalized)
+    normalized = _clean_curriculum_logical_typed_cells(normalized)
+    return _drop_curriculum_logical_noise_rows(normalized)
+
+
+def _curriculum_table_header_index(rows: list[list[str]]) -> int | None:
+    for row_index, row in enumerate(rows[:4]):
+        if not row:
+            continue
+        first_header = row[0].lower()
+        second_header = row[1].lower() if len(row) > 1 else ""
+        if "индекс" in first_header and (
+            "наименование" in second_header or any("наименование" in cell.lower() for cell in row[:3])
+        ):
+            return row_index
+    return None
+
+
+def _normalize_curriculum_logical_header(header: list[str]) -> list[str]:
+    if len(header) == 26:
+        return [
+            "Индекс",
+            "Наименование",
+            "Экзамен",
+            "Зачет",
+            "Зачет с оц.",
+            "КП",
+            "КР",
+            "Факт з.е.",
+            "Часов в з.е.",
+            "По плану",
+            "Конт. раб.",
+            "Лек",
+            "Лаб",
+            "Пр",
+            "СР",
+            "Контроль",
+            "Сем. 1",
+            "Сем. 2",
+            "Сем. 3",
+            "Сем. 4",
+            "Сем. 5",
+            "Сем. 6",
+            "Сем. 7",
+            "Сем. 8",
+            "Код",
+            "Закрепленная кафедра",
+        ]
+    if len(header) == 24:
+        return [
+            "Индекс",
+            "Наименование",
+            "Экзамен",
+            "Зачет",
+            "Зачет с оц.",
+            "КП",
+            "КР",
+            "Факт з.е.",
+            "По плану",
+            "Конт. раб.",
+            "Лек",
+            "Лаб",
+            "Пр",
+            "СР",
+            "Контроль",
+            "Сем. 1",
+            "Сем. 2",
+            "Сем. 3",
+            "Сем. 4",
+            "Сем. 5",
+            "Сем. 6",
+            "Сем. 7",
+            "Сем. 8",
+            "Кафедра",
+        ]
+    return header
+
+
+def _clean_curriculum_logical_typed_cells(rows: list[list[str]]) -> list[list[str]]:
+    if not rows or not rows[0] or len(rows[0]) < 20:
+        return rows
+
+    header = rows[0]
+    department_code_column = next(
+        (
+            index
+            for index in range(len(header) - 1)
+            if header[index].strip().lower() == "код" and "наименование" in header[index + 1].lower()
+        ),
+        None,
+    )
+    typed_rows = [header]
+    for row in rows[1:]:
+        copy = list(row)
+        for column, value in enumerate(copy):
+            if column <= 1:
+                continue
+            if department_code_column is not None and column >= department_code_column:
+                continue
+            if column < len(header) and "кафед" in header[column].lower():
+                continue
+            copy[column] = _clean_curriculum_numeric_cell(value)
+        typed_rows.append(copy)
+    return typed_rows
+
+
+def _clean_curriculum_numeric_cell(value: str) -> str:
+    text = value.strip()
+    if not text:
+        return ""
+    if not re.search(r"\d", text):
+        return ""
+
+    text = text.replace("О", "0").replace("о", "0").replace("O", "0").replace("o", "0")
+    numbers = re.findall(r"\d+(?:[.,]\d+)?", text)
+    if not numbers:
+        return ""
+    return " ".join(number.rstrip(".,") for number in numbers if number.rstrip(".,"))
+
+
+def _drop_curriculum_logical_noise_rows(rows: list[list[str]]) -> list[list[str]]:
+    if not rows or not rows[0] or len(rows[0]) < 20:
+        return rows
+
+    cleaned = [rows[0]]
+    for row in rows[1:]:
+        if not _is_curriculum_logical_noise_row(row):
+            cleaned.append(row)
+    return cleaned
+
+
+def _is_curriculum_logical_noise_row(row: list[str]) -> bool:
+    if not row:
+        return True
+    index = _normalize_curriculum_index(row[0], row[1] if len(row) > 1 else "")
+    if _is_curriculum_index(index):
+        return False
+    if _looks_like_text_fragment(row[0] if row else ""):
+        return False
+    if len(row) > 1 and _looks_like_text_fragment(row[1]):
+        return False
+    numeric_payload = sum(1 for cell in row[2:] if _clean_curriculum_numeric_cell(cell))
+    return numeric_payload <= 1
 
 
 def _parse_numbered_curriculum_index(text: str) -> tuple[str, int, int] | None:
@@ -861,12 +1430,14 @@ def _parse_numbered_curriculum_index(text: str) -> tuple[str, int, int] | None:
         return None
 
     prefix, number = match.groups()
+    if not prefix.startswith(("Б1.", "ФТД.")):
+        return None
     return prefix, int(number), len(number)
 
 
 def _is_curriculum_section_index(text: str) -> bool:
     value = text.strip()
-    if value in {"Б1", "Б1.О", "Б1.В"}:
+    if value in {"Б1", "Блок 1", "Б1.О", "Б1.В", "Блок 2", "Б2.О", "Б2.В", "Блок 3", "ФТД", "ФТД.В"}:
         return True
     return bool(re.match(r"^Б1\.[ОВ]\.ДВ(?:\.\d+)?$", value))
 
@@ -887,6 +1458,124 @@ def _normalize_curriculum_section_name(index: str, raw_index: str, name: str) ->
             return f"{raw_index} {name}"
         return raw_index or name
     return name
+
+
+def _curriculum_section_signal(row: list[str]) -> str:
+    return re.sub(r"\s+", " ", " ".join(cell for cell in row[:3] if cell.strip()).lower())
+
+
+def _set_curriculum_section_identity(row: list[str], index: str, name: str) -> list[str]:
+    copy = list(row)
+    while len(copy) < 2:
+        copy.append("")
+    copy[0] = index
+    copy[1] = name
+    return copy
+
+
+def _canonicalize_curriculum_logical_section_rows(rows: list[list[str]]) -> list[list[str]]:
+    if not rows or not rows[0] or len(rows[0]) < 20:
+        return rows
+
+    result = [rows[0]]
+    practice_seen = False
+    faculty_seen = False
+    for row in rows[1:]:
+        if not row:
+            result.append(row)
+            continue
+
+        index = row[0].strip() if row else ""
+        name = row[1].strip() if len(row) > 1 else ""
+        signal = _curriculum_section_signal(row)
+
+        if index == "Б1":
+            result.append(_set_curriculum_section_identity(row, "Блок 1", "Дисциплины (модули)"))
+            continue
+        if practice_seen and index == "Б1.О" and "част" in signal and "отнош" not in signal:
+            result.append(_set_curriculum_section_identity(row, "Б2.О", "Обязательная часть"))
+            continue
+        if index == "Б1.О":
+            result.append(_set_curriculum_section_identity(row, "Б1.О", "Обязательная часть"))
+            continue
+        if (
+            index == "Б1.В"
+            and practice_seen
+            and ("отнош" in signal or ("участ" in signal and "образователь" in signal) or not name)
+        ):
+            result.append(
+                _set_curriculum_section_identity(
+                    row,
+                    "Б2.В",
+                    "Часть, формируемая участниками образовательных отношений",
+                )
+            )
+            continue
+        if (
+            index == "Б1.В"
+            and faculty_seen
+            and ("отнош" in signal or ("участ" in signal and "образователь" in signal) or not name)
+        ):
+            result.append(
+                _set_curriculum_section_identity(
+                    row,
+                    "ФТД.В",
+                    "Часть, формируемая участниками образовательных отношений",
+                )
+            )
+            continue
+        if index == "Б1.В":
+            result.append(
+                _set_curriculum_section_identity(
+                    row,
+                    "Б1.В",
+                    "Часть, формируемая участниками образовательных отношений",
+                )
+            )
+            continue
+        if "практик" in signal and ("блок" in signal or index.startswith("{")):
+            practice_seen = True
+            result.append(_set_curriculum_section_identity(row, "Блок 2", "Практика"))
+            continue
+        if (
+            practice_seen
+            and (not index or not _is_curriculum_index(index))
+            and "част" in signal
+            and ("обяз" in signal or "юбяз" in signal)
+            and "отнош" not in signal
+        ):
+            result.append(_set_curriculum_section_identity(row, "Б2.О", "Обязательная часть"))
+            continue
+        if practice_seen and not index and "част" in signal and "отнош" not in signal:
+            result.append(_set_curriculum_section_identity(row, "Б2.О", "Обязательная часть"))
+            continue
+        if "государствен" in signal and "аттеста" in signal:
+            practice_seen = False
+            result.append(
+                _set_curriculum_section_identity(
+                    row,
+                    "Блок 3",
+                    "Государственная итоговая аттестация",
+                )
+            )
+            continue
+        if "факультатив" in signal and not index.startswith("ФТД."):
+            faculty_seen = True
+            result.append(_set_curriculum_section_identity(row, "ФТД", "Факультативы"))
+            continue
+        if index == "ФТД.В":
+            faculty_seen = True
+            result.append(
+                _set_curriculum_section_identity(
+                    row,
+                    "ФТД.В",
+                    "Часть, формируемая участниками образовательных отношений",
+                )
+            )
+            continue
+
+        result.append(row)
+    return result
 
 
 def _looks_like_text_fragment(text: str) -> bool:
@@ -943,15 +1632,238 @@ def _fill_missing_curriculum_indexes(rows: list[list[str]]) -> list[list[str]]:
     return rows
 
 
+def _curriculum_index_candidates(text: str) -> list[str]:
+    candidates = []
+    pattern = re.compile(
+        r"(?:[БBВ56S]\s*)?1\s*[\.,]?\s*[0OОoВBв682]\s*[\.,]?\s*\d{1,2}",
+        re.IGNORECASE,
+    )
+    for match in pattern.finditer(text):
+        candidate = " ".join(match.group(0).split())
+        normalized = _normalize_curriculum_index(candidate)
+        if _parse_numbered_curriculum_index(normalized):
+            candidates.append(candidate)
+    return candidates
+
+
+def _split_curriculum_name_fragments(name: str, count: int) -> list[str]:
+    if count <= 1:
+        return [name]
+
+    value = " ".join(name.split())
+    if not value:
+        return [""] * count
+
+    split_points: list[int] = []
+    for match in re.finditer(r"\s+(?=[А-ЯЁA-Z][A-Za-zА-Яа-яЁё]{3,})", value):
+        position = match.start() + 1
+        if position < max(10, len(value) // 5):
+            continue
+        if len(value) - position < max(10, len(value) // 5):
+            continue
+        split_points.append(position)
+
+    fragments = []
+    start = 0
+    for part_index in range(1, count):
+        if split_points:
+            target = round(len(value) * part_index / count)
+            position = min(split_points, key=lambda point: abs(point - target))
+            split_points = [point for point in split_points if point > position]
+        else:
+            position = round(len(value) * part_index / count)
+            while position < len(value) and value[position] != " ":
+                position += 1
+            if position >= len(value):
+                position = len(value)
+        fragments.append(value[start:position].strip())
+        start = position
+    fragments.append(value[start:].strip())
+    return (fragments + [""] * count)[:count]
+
+
+def _split_merged_curriculum_index_rows(rows: list[list[str]]) -> list[list[str]]:
+    if not rows:
+        return rows
+
+    split_rows = [rows[0]]
+    for row in rows[1:]:
+        if not row:
+            split_rows.append(row)
+            continue
+
+        index_cell = row[0] if row else ""
+        candidates = _curriculum_index_candidates(index_cell)
+        if len(candidates) < 2 or not _row_has_curriculum_payload(row):
+            split_rows.append(row)
+            continue
+
+        fragments = _split_curriculum_name_fragments(
+            row[1] if len(row) > 1 else "",
+            len(candidates),
+        )
+        for offset, candidate in enumerate(candidates):
+            copy = list(row)
+            copy[0] = _normalize_curriculum_index(candidate)
+            if len(copy) > 1:
+                copy[1] = fragments[offset]
+            if offset > 0 and len(copy) > 2:
+                copy[2:] = ["" for _ in copy[2:]]
+            split_rows.append(copy)
+    return split_rows
+
+
+def _same_curriculum_sequence_family(left_prefix: str, right_prefix: str) -> bool:
+    left = left_prefix.split(".")
+    right = right_prefix.split(".")
+    return len(left) >= 2 and len(right) >= 2 and left[:2] == right[:2]
+
+
+def _has_nearby_current_sequence_continuation(
+    rows: list[list[str]],
+    row_index: int,
+    current_prefix: str,
+    expected_number: int,
+    *,
+    lookahead: int = 4,
+    stop_at_nested_prefix: bool = False,
+) -> bool:
+    for offset, following in enumerate(rows[row_index + 1 : row_index + 1 + lookahead], start=1):
+        if not following:
+            continue
+        parsed = _parse_numbered_curriculum_index(following[0])
+        if parsed is None:
+            continue
+        prefix, number, _ = parsed
+        if (
+            stop_at_nested_prefix
+            and _same_curriculum_sequence_family(current_prefix, prefix)
+            and prefix.count(".") != current_prefix.count(".")
+        ):
+            return False
+        if prefix == current_prefix and number == expected_number + offset:
+            return True
+    return False
+
+
+def _has_previous_curriculum_index(rows: list[list[str]], end_index: int, index: str) -> bool:
+    return any(row and row[0] == index for row in rows[1:end_index])
+
+
+def _fill_missing_curriculum_parent_child_indexes(rows: list[list[str]]) -> list[list[str]]:
+    rows = [list(row) for row in rows]
+    row_index = 1
+    while row_index < len(rows):
+        row = rows[row_index]
+        if not row or row[0].strip() or not _row_has_curriculum_payload(row):
+            row_index += 1
+            continue
+
+        run_start = row_index
+        while (
+            row_index < len(rows)
+            and rows[row_index]
+            and not rows[row_index][0].strip()
+            and _row_has_curriculum_payload(rows[row_index])
+        ):
+            row_index += 1
+
+        run_length = row_index - run_start
+        if row_index >= len(rows):
+            continue
+
+        parsed = _parse_numbered_curriculum_index(rows[row_index][0] if rows[row_index] else "")
+        if parsed is None:
+            continue
+
+        prefix, number, width = parsed
+        parent_index = prefix[:-1]
+        if number == 1 and run_length == 1:
+            rows[run_start][0] = parent_index
+            continue
+        if number == run_length + 1 and _has_previous_curriculum_index(rows, run_start, parent_index):
+            for offset in range(run_length):
+                rows[run_start + offset][0] = f"{prefix}{offset + 1:0{width}d}"
+
+    return rows
+
+
 def _repair_curriculum_index_sequence(rows: list[list[str]]) -> list[list[str]]:
     rows = [list(row) for row in rows]
+    for row in rows[1:]:
+        if not row:
+            continue
+        normalized = _normalize_curriculum_index(
+            row[0],
+            row[1] if len(row) > 1 else "",
+        )
+        if _is_curriculum_index(normalized):
+            row[0] = normalized
+
     rows = _fill_missing_curriculum_indexes(rows)
 
-    numbered = [
-        (index, parsed)
-        for index, row in enumerate(rows[1:], start=1)
-        if row and (parsed := _parse_numbered_curriculum_index(row[0]))
-    ]
+    numbered = []
+    current_prefix = ""
+    expected_number: int | None = None
+    expected_width = 2
+    for row_index, row in enumerate(rows[1:], start=1):
+        if not row:
+            continue
+        if _is_curriculum_section_index(row[0]):
+            current_prefix = ""
+            expected_number = None
+            continue
+        parsed = _parse_numbered_curriculum_index(row[0])
+        if parsed is None:
+            if (
+                current_prefix
+                and expected_number is not None
+                and _row_has_curriculum_payload(row)
+                and _has_nearby_current_sequence_continuation(
+                    rows,
+                    row_index,
+                    current_prefix,
+                    expected_number,
+                    stop_at_nested_prefix=True,
+                )
+            ):
+                row[0] = f"{current_prefix}{expected_number:0{expected_width}d}"
+                numbered.append((row_index, (current_prefix, expected_number, expected_width)))
+                expected_number += 1
+            continue
+
+        prefix, number, width = parsed
+        if current_prefix == prefix and expected_number is not None:
+            if number != expected_number and _row_has_curriculum_payload(row):
+                row[0] = f"{prefix}{expected_number:0{expected_width}d}"
+                number = expected_number
+                width = expected_width
+            expected_number = number + 1
+            expected_width = max(expected_width, width)
+        elif (
+            current_prefix
+            and expected_number is not None
+            and _row_has_curriculum_payload(row)
+            and _same_curriculum_sequence_family(current_prefix, prefix)
+            and current_prefix.count(".") == prefix.count(".")
+            and _has_nearby_current_sequence_continuation(
+                rows,
+                row_index,
+                current_prefix,
+                expected_number,
+            )
+        ):
+            row[0] = f"{current_prefix}{expected_number:0{expected_width}d}"
+            number = expected_number
+            width = expected_width
+            prefix = current_prefix
+            expected_number = number + 1
+        else:
+            current_prefix = prefix
+            expected_number = number + 1
+            expected_width = max(2, width)
+        numbered.append((row_index, (prefix, number, width)))
+
     if not numbered:
         return rows
 
@@ -972,13 +1884,82 @@ def _repair_curriculum_index_sequence(rows: list[list[str]]) -> list[list[str]]:
     return rows
 
 
+def _curriculum_section_row(prefix: str) -> list[str] | None:
+    if prefix == "Б1.О.":
+        return [
+            "Б1.О",
+            "Блок 1. Дисциплины (модули). Обязательная часть",
+            "",
+            "",
+            "",
+            "",
+        ]
+    if prefix == "Б1.В.":
+        return [
+            "Б1.В",
+            "Часть, формируемая участниками образовательных отношений",
+            "",
+            "",
+            "",
+            "",
+        ]
+    return None
+
+
+def _ensure_curriculum_section_rows(rows: list[list[str]]) -> list[list[str]]:
+    if not rows:
+        return rows
+
+    result = [rows[0]]
+    seen_sections: set[str] = set()
+    seen_prefixes: set[str] = set()
+    for row in rows[1:]:
+        first = row[0] if row else ""
+        if _is_curriculum_section_index(first):
+            parsed_section = first
+            if parsed_section in {"Б1.О", "Б1.В"}:
+                seen_sections.add(f"{parsed_section}.")
+            result.append(row)
+            continue
+
+        parsed = _parse_numbered_curriculum_index(first)
+        if parsed:
+            prefix, number, width = parsed
+            if prefix not in seen_prefixes:
+                section_row = _curriculum_section_row(prefix)
+                if section_row is not None and prefix not in seen_sections:
+                    result.append(section_row)
+                    seen_sections.add(prefix)
+                if 1 < number <= 3:
+                    for missing in range(1, number):
+                        result.append(
+                            [
+                                f"{prefix}{missing:0{max(2, width)}d}",
+                                "",
+                                "",
+                                "",
+                                "",
+                                "",
+                            ]
+                        )
+            seen_prefixes.add(prefix)
+        result.append(row)
+    return result
+
+
 def _normalize_curriculum_index(text: str, name_cell: str = "") -> str:
     raw = " ".join(text.split())
     compact = raw.replace(" ", "").replace(",", ".")
+    compact = re.sub(r"^[^A-Za-zА-Яа-яЁё0-9Б56S]+", "", compact)
+    compact = re.sub(r"^[1Il|](?=[БBВ])", "", compact)
 
     lower_name = name_cell.lower()
     combined = f"{raw} {name_cell}".lower()
-    if "дисциплин" in combined and "модул" in combined and (len(compact) <= 24 or "блок" in combined):
+    if (
+        "дисциплин" in combined
+        and ("модул" in combined or "нодул" in combined)
+        and (len(compact) <= 24 or "блок" in combined or "brow" in combined or "block" in combined)
+    ):
         return "Б1"
     if "обязательн" in combined and (
         not compact or "част" in combined or compact.lower() in {"si0", "s10", "510", "610", "51o", "61o"}
@@ -994,6 +1975,10 @@ def _normalize_curriculum_index(text: str, name_cell: str = "") -> str:
     if not compact:
         return raw
 
+    noisy_curriculum_index = _normalize_noisy_curriculum_index(compact, name_cell)
+    if noisy_curriculum_index is not None:
+        return noisy_curriculum_index
+
     lower_compact = compact.lower()
     if "дисциплин" in lower_name and len(compact) <= 3:
         return "Б1"
@@ -1007,14 +1992,18 @@ def _normalize_curriculum_index(text: str, name_cell: str = "") -> str:
     }:
         return "Б1.О"
 
+    numeric_curriculum_index = _normalize_numeric_curriculum_index(compact)
+    if numeric_curriculum_index is not None:
+        return numeric_curriculum_index
+
     compact = compact.replace("б", "Б")
     compact = re.sub(r"^[BВ]", "Б", compact)
-    match = re.match(r"^(?:[Б56S])*1\.?([0OОoВBв68])\.?(.*)$", compact)
+    match = re.match(r"^(?:[Б56S])*1\.?([0OОoВBв682])\.?(.*)$", compact)
     if not match:
         return raw
 
     section_raw, rest = match.groups()
-    section = "О" if section_raw in {"0", "O", "О", "o"} else "В"
+    section = "О" if section_raw in {"0", "O", "О", "o", "2"} else "В"
     rest = rest.strip(".")
     if not rest:
         return f"Б1.{section}"
@@ -1028,6 +2017,127 @@ def _normalize_curriculum_index(text: str, name_cell: str = "") -> str:
         rest = f"{rest[:-2]}.{rest[-2:]}"
 
     return _normalize_curriculum_code_ocr_artifacts(f"Б1.{section}.{rest}")
+
+
+def _normalize_noisy_curriculum_index(compact: str, name_cell: str = "") -> str | None:
+    value = compact.translate(
+        str.maketrans(
+            {
+                ",": ".",
+                "О": "0",
+                "о": "0",
+                "O": "0",
+                "o": "0",
+                "З": "3",
+                "з": "3",
+                "S": "5",
+            }
+        )
+    )
+    value = re.sub(r"\s+", "", value)
+    lower_name = name_cell.lower()
+
+    match = re.match(r"^[вВB]\.?0\.(\d{2})\.(\d{2})$", value)
+    if match:
+        return f"Б1.О.{match.group(1)}.{match.group(2)}"
+
+    match = re.match(r"^Б?1\.?[0ОO]\.?50\.?(\d{1,2})$", value, flags=re.I)
+    if match:
+        number = int(match.group(1))
+        if number <= 1:
+            return "Б1.В.01"
+        return f"Б1.В.01.{number:02d}"
+
+    match = re.match(r"^Б?1\.?[0ОO]\.?38\.?0?(\d{1,2})$", value, flags=re.I)
+    if match:
+        return f"Б1.В.{int(match.group(1)):02d}"
+
+    match = re.match(r"^Б?1\.?[ВB8]\.?80\.?0?(\d{1,2})$", value, flags=re.I)
+    if match:
+        return f"Б1.В.ДВ.{int(match.group(1)):02d}"
+
+    match = re.match(r"^(?:Б?2|52)\.?[0ОO]\.?0?[1IЦ]\(?[УY]?\)?$", value, flags=re.I)
+    if match:
+        return "Б2.О.01(У)"
+
+    if value.upper() in {"КН", "KH"} and "науч" in lower_name:
+        return "Б2.В.01(Н)"
+
+    match = re.match(r"^(?:Б?2|52)\.?[ВB8][\.:]?0?(\d{1,2})\(?([A-Za-zА-Яа-я]+)?\)?$", value, flags=re.I)
+    if match:
+        number = int(match.group(1))
+        suffix = (match.group(2) or "").lower()
+        if number == 1 and "науч" in lower_name:
+            suffix = "Н"
+        elif suffix.startswith(("па", "пд")):
+            suffix = "Пд"
+        elif suffix.startswith(("п", "n")):
+            suffix = "П"
+        else:
+            suffix = "П"
+        return f"Б2.В.{number:02d}({suffix})"
+
+    match = re.match(r"^(?:Б?3|53)\.?0?1\(?[ДD]?\)?$", value, flags=re.I)
+    if match:
+        return "Б3.01(Д)"
+
+    return None
+
+
+def _normalize_numeric_curriculum_index(compact: str) -> str | None:
+    digits = re.sub(
+        r"\D",
+        "",
+        compact.translate(
+            str.maketrans(
+                {
+                    "О": "0",
+                    "о": "0",
+                    "O": "0",
+                    "o": "0",
+                    "З": "3",
+                    "з": "3",
+                    "S": "5",
+                    "В": "8",
+                    "B": "8",
+                }
+            )
+        ),
+    )
+    if not digits:
+        return None
+    if digits.startswith("151") and len(digits) >= 5:
+        digits = digits[1:]
+    if len(digits) > 7:
+        return None
+    if not digits.startswith("51"):
+        return None
+
+    rest = digits[2:]
+    if rest in {"", "0"}:
+        return "Б1.О"
+    if rest.startswith("8"):
+        variable_rest = rest[1:]
+        if not variable_rest:
+            return "Б1.В"
+        if len(variable_rest) == 1:
+            return f"Б1.В.0{variable_rest}"
+        if len(variable_rest) == 2:
+            return f"Б1.В.{variable_rest}"
+        return f"Б1.В.{variable_rest[:2]}.{variable_rest[2:4]}"
+    if rest.startswith("9") and len(rest) >= 3:
+        rest = "0" + rest[1:]
+    if rest.startswith("00") and len(rest) >= 4:
+        rest = rest[1:]
+    if rest.startswith("0") and len(rest) == 3:
+        rest = rest[1:]
+    if not rest:
+        return "Б1.О"
+    if len(rest) == 1:
+        return f"Б1.О.0{rest}"
+    if len(rest) == 2:
+        return f"Б1.О.{rest}"
+    return f"Б1.О.{rest[:2]}.{rest[2:4]}"
 
 
 def _normalize_curriculum_code_ocr_artifacts(code: str) -> str:
@@ -1086,8 +2196,45 @@ def _cell_has_visible_content(image: Image.Image) -> bool:
         return True
 
 
+def _cell_is_uniform_background(image: Image.Image) -> bool:
+    gray = np.array(image.convert("L"), dtype=np.uint8)
+    if gray.size == 0:
+        return True
+    if int(gray.max()) - int(gray.min()) <= 3:
+        return True
+
+    histogram = np.bincount(gray.reshape(-1), minlength=256)
+    background = int(np.argmax(histogram))
+    outliers = np.abs(gray.astype(np.int16) - background) > 4
+    # Permit a single compression/noise pixel, but never suppress a thin glyph.
+    return int(np.count_nonzero(outliers)) <= 1
+
+
+def _sampled_cell_background_luma(gray: Image.Image) -> int:
+    width, height = gray.size
+    if width <= 0 or height <= 0:
+        return 255
+
+    samples: list[int] = []
+    x_step = max(1, width // 8)
+    y_step = max(1, height // 8)
+    for x in range(0, width, x_step):
+        samples.append(int(gray.getpixel((min(width - 1, x), 0))))
+        samples.append(int(gray.getpixel((min(width - 1, x), height - 1))))
+    for y in range(0, height, y_step):
+        samples.append(int(gray.getpixel((0, min(height - 1, y)))))
+        samples.append(int(gray.getpixel((width - 1, min(height - 1, y)))))
+    if not samples:
+        return 255
+    samples.sort()
+    return samples[len(samples) // 2]
+
+
 def _prepare_cell_for_ocr(image: Image.Image) -> Image.Image:
-    gray = ImageOps.autocontrast(image.convert("L"))
+    gray = image.convert("L")
+    if _sampled_cell_background_luma(gray) < 150:
+        gray = ImageOps.invert(gray)
+    gray = ImageOps.autocontrast(gray)
     width, height = gray.size
     if width <= 0 or height <= 0:
         return gray
@@ -1112,27 +2259,116 @@ def _prepare_cell_for_ocr(image: Image.Image) -> Image.Image:
     return padded
 
 
+def prepare_table_cell_image(
+    image: Image.Image,
+    bbox: Box,
+    *,
+    skip_blank: bool = True,
+) -> Image.Image | None:
+    cell_image = _prepare_cell_crop(image, bbox)
+    try:
+        if skip_blank and not _cell_has_visible_content(cell_image):
+            return None
+        return _prepare_cell_for_ocr(cell_image)
+    finally:
+        cell_image.close()
+
+
+def mark_table_empty_slots(
+    image: Image.Image,
+    table: TableLayout,
+) -> TableLayout:
+    cells = []
+    changed = False
+    for cell in table.cells:
+        cell_image = _prepare_cell_crop(image, cell.bbox)
+        try:
+            sparse_code = cell.sparse_code
+            if _cell_is_uniform_background(cell_image):
+                sparse_code = add_sparse_signal(
+                    sparse_code,
+                    EMPTY_SLOT_CODE,
+                )
+            if sparse_code != cell.sparse_code:
+                changed = True
+                cell = TableCell(
+                    row=cell.row,
+                    col=cell.col,
+                    bbox=cell.bbox,
+                    sparse_code=sparse_code,
+                )
+            cells.append(cell)
+        finally:
+            cell_image.close()
+    if not changed:
+        return table
+    return TableLayout(
+        bbox=table.bbox,
+        rows=table.rows,
+        cols=table.cols,
+        x_lines=table.x_lines,
+        y_lines=table.y_lines,
+        cells=tuple(cells),
+    )
+
+
 def table_layout_to_rows(
     image: Image.Image,
     table: TableLayout,
     recognize_cell: Callable[[Image.Image], str],
     *,
+    contextual_recognize_cell: (
+        Callable[
+            [Image.Image, TableCell, list[list[str]]],
+            str,
+        ]
+        | None
+    ) = None,
     skip_blank_cells: bool = True,
+    seed_rows: list[list[str]] | None = None,
+    only_missing: bool = False,
+    max_recognitions: int | None = None,
 ) -> list[list[str]]:
     rows: list[list[str]] = [["" for _ in range(table.cols)] for _ in range(table.rows)]
+    if seed_rows is not None:
+        for row_index, seed_row in enumerate(seed_rows[: table.rows]):
+            for col_index, value in enumerate(seed_row[: table.cols]):
+                rows[row_index][col_index] = value
 
-    for cell in table.cells:
-        cell_image = _prepare_cell_crop(image, cell.bbox)
+    cells = list(table.cells)
+    if seed_rows is not None:
+        cells.sort(
+            key=lambda cell: (
+                not any(value.strip() for value in rows[cell.row]),
+                cell.row,
+                cell.col,
+            )
+        )
+
+    recognition_count = 0
+    for cell in cells:
+        if cell.is_empty:
+            continue
+        if only_missing and rows[cell.row][cell.col].strip():
+            continue
+        prepared = prepare_table_cell_image(
+            image,
+            cell.bbox,
+            skip_blank=skip_blank_cells and cell.sparse_code == 0,
+        )
+        if prepared is None:
+            continue
         try:
-            if skip_blank_cells and not _cell_has_visible_content(cell_image):
-                continue
-            prepared = _prepare_cell_for_ocr(cell_image)
-            try:
-                rows[cell.row][cell.col] = _normalize_cell_text(recognize_cell(prepared))
-            finally:
-                prepared.close()
+            if max_recognitions is not None and recognition_count >= max_recognitions:
+                break
+            recognition_count += 1
+            if contextual_recognize_cell is not None:
+                recognized = contextual_recognize_cell(prepared, cell, rows)
+            else:
+                recognized = recognize_cell(prepared)
+            rows[cell.row][cell.col] = _normalize_cell_text(recognized)
         finally:
-            cell_image.close()
+            prepared.close()
 
     return rows
 
@@ -1270,6 +2506,67 @@ def fallback_split_with_overlap(image: Image.Image, chunk_height: int = 1600, ov
             break
 
     return chunks
+
+
+def iter_vertical_segments(
+    image: Image.Image,
+    chunk_height: int = 1600,
+    overlap: int = 120,
+) -> Iterator[Image.Image]:
+    source = remove_white_borders(image)
+    try:
+        width, height = source.size
+        if height <= chunk_height:
+            yield source if source is not image else image
+            return
+
+        bands = find_blank_horizontal_bands(source, min_gap=10)
+        boxes: list[tuple[int, int]] = []
+        segment_start = 0
+        minimum_height = max(1, chunk_height // 4)
+        for start, end in bands:
+            if start <= segment_start:
+                segment_start = max(segment_start, end)
+                continue
+            if start - segment_start < minimum_height:
+                continue
+            boxes.append((segment_start, start))
+            segment_start = end
+        if segment_start < height:
+            if boxes and height - segment_start < minimum_height:
+                boxes[-1] = (boxes[-1][0], height)
+            else:
+                boxes.append((segment_start, height))
+
+        if boxes:
+            for top, bottom in boxes:
+                if bottom - top <= chunk_height:
+                    yield source.crop((0, top, width, bottom))
+                    continue
+                step = max(1, chunk_height - overlap)
+                segment_top = top
+                while segment_top < bottom:
+                    segment_bottom = min(
+                        segment_top + chunk_height,
+                        bottom,
+                    )
+                    yield source.crop((0, segment_top, width, segment_bottom))
+                    if segment_bottom >= bottom:
+                        break
+                    segment_top += step
+            return
+
+        y = 0
+        step = max(1, chunk_height - overlap)
+        while y < height:
+            bottom = min(y + chunk_height, height)
+            yield source.crop((0, y, width, bottom))
+            y += step
+            if y >= height - overlap:
+                break
+    finally:
+        if source is not image:
+            source.close()
 
 
 def split_vertical(image: Image.Image, chunk_height: int = 1600, overlap: int = 120) -> list:

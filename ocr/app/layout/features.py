@@ -46,14 +46,20 @@ def _foreground_mask(gray: np.ndarray) -> np.ndarray:
     import cv2
 
     blurred = cv2.GaussianBlur(gray, (3, 3), 0)
-    _, otsu = cv2.threshold(
+    _, dark_otsu = cv2.threshold(
         blurred,
         0,
         255,
         cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU,
     )
+    _, light_otsu = cv2.threshold(
+        blurred,
+        0,
+        255,
+        cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+    )
     block_size = max(15, min(51, (min(gray.shape[:2]) // 24) | 1))
-    adaptive = cv2.adaptiveThreshold(
+    dark_adaptive = cv2.adaptiveThreshold(
         blurred,
         255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -61,10 +67,34 @@ def _foreground_mask(gray: np.ndarray) -> np.ndarray:
         block_size,
         11,
     )
-    ink_ratio = float(np.mean(otsu > 0))
-    if 0.0005 <= ink_ratio <= 0.25:
-        return cv2.bitwise_or(otsu, adaptive) > 0
-    return otsu > 0
+    light_adaptive = cv2.adaptiveThreshold(
+        blurred,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        block_size,
+        11,
+    )
+    edge_mask = cv2.dilate(
+        cv2.Canny(blurred, 40, 140),
+        cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)),
+        iterations=1,
+    )
+
+    def candidate_score(mask: np.ndarray) -> tuple[int, float]:
+        ratio = float(np.mean(mask > 0))
+        # Layout masks should describe sparse-ish neighboring objects, not a
+        # whole dark or light page background.
+        in_range = int(0.0005 <= ratio <= 0.55)
+        return in_range, -abs(ratio - 0.12)
+
+    dark_mask = (
+        cv2.bitwise_or(dark_otsu, dark_adaptive) if 0.0005 <= float(np.mean(dark_otsu > 0)) <= 0.25 else dark_otsu
+    )
+    light_mask = (
+        cv2.bitwise_or(light_otsu, light_adaptive) if 0.0005 <= float(np.mean(light_otsu > 0)) <= 0.25 else light_otsu
+    )
+    return max((dark_mask, light_mask, edge_mask), key=candidate_score) > 0
 
 
 def _groups(mask: np.ndarray) -> Iterable[tuple[int, int]]:

@@ -4,9 +4,22 @@ import os
 from dataclasses import dataclass
 from typing import Iterable, Protocol
 
-from app.pipeline_config import OCR_PIPELINE_PROFILES, OcrPipelineProfile
+from app.pipeline_config import (
+    OCR_PIPELINE_PROFILES,
+    OcrPipelineProfile,
+    with_lexical_correction,
+    with_ocr_language_retry,
+    with_recursive_table_cell_ocr,
+    with_structural_output,
+    with_table_slot_builder,
+)
 
 PIPELINE_FLAG_OVERRIDES_ENV = "OCR_PIPELINE_FLAG_OVERRIDES"
+LEXICAL_CORRECTION_MODES = frozenset({"off", "t9_small"})
+OCR_LANGUAGE_RETRY_MODES = frozenset({"off", "t9_small"})
+RECURSIVE_TABLE_CELL_OCR_MODES = frozenset({"off", "auto", "always"})
+TABLE_SLOT_BUILDER_MODES = frozenset({"off", "line_merge_v1", "recursive_gaps_v1"})
+STRUCTURAL_OUTPUT_MODES = frozenset({"markdown", "records"})
 
 
 @dataclass(frozen=True)
@@ -38,12 +51,87 @@ def flag_overrides_enabled() -> bool:
 def ensure_flag_overrides_allowed(raw_flags: str | None) -> None:
     if not raw_flags:
         return
-    if flag_overrides_enabled():
-        raise ValueError("Pipeline flag overrides are not implemented yet.")
-    raise ValueError(
-        "Pipeline flag overrides are exposed in the API contract but disabled. "
-        f"Set {PIPELINE_FLAG_OVERRIDES_ENV}=1 only after an override resolver is implemented."
-    )
+    parse_pipeline_flag_overrides(raw_flags)
+
+
+def _split_raw_flags(raw_flags: str) -> list[str]:
+    return [part.strip() for part in raw_flags.replace(",", ";").split(";") if part.strip()]
+
+
+def parse_pipeline_flag_overrides(raw_flags: str | None) -> dict[str, str]:
+    if not raw_flags:
+        return {}
+
+    overrides: dict[str, str] = {}
+    for part in _split_raw_flags(raw_flags):
+        if "=" in part:
+            key, value = part.split("=", 1)
+        elif ":" in part:
+            key, value = part.split(":", 1)
+        else:
+            raise ValueError(f"Invalid pipeline flag override '{part}'. Use key:value or key=value.")
+        key = key.strip()
+        value = value.strip()
+        if key not in {
+            "lexical_correction",
+            "ocr_language_retry",
+            "recursive_table_cell_ocr",
+            "structural_output",
+            "table_slot_builder",
+        }:
+            if flag_overrides_enabled():
+                raise ValueError(f"Pipeline flag override '{key}' is not implemented yet.")
+            raise ValueError(
+                "Pipeline flag overrides are exposed in the API contract but disabled except "
+                "for lexical_correction, ocr_language_retry, recursive_table_cell_ocr, and table_slot_builder. "
+                f"Set {PIPELINE_FLAG_OVERRIDES_ENV}=1 only after a broader override resolver is implemented."
+            )
+        if key == "lexical_correction" and value not in LEXICAL_CORRECTION_MODES:
+            known = ", ".join(sorted(LEXICAL_CORRECTION_MODES))
+            raise ValueError(f"Unknown lexical_correction mode '{value}'. Known modes: {known}")
+        if key == "ocr_language_retry" and value not in OCR_LANGUAGE_RETRY_MODES:
+            known = ", ".join(sorted(OCR_LANGUAGE_RETRY_MODES))
+            raise ValueError(f"Unknown ocr_language_retry mode '{value}'. Known modes: {known}")
+        if key == "recursive_table_cell_ocr" and value not in RECURSIVE_TABLE_CELL_OCR_MODES:
+            known = ", ".join(sorted(RECURSIVE_TABLE_CELL_OCR_MODES))
+            raise ValueError(f"Unknown recursive_table_cell_ocr mode '{value}'. Known modes: {known}")
+        if key == "table_slot_builder" and value not in TABLE_SLOT_BUILDER_MODES:
+            known = ", ".join(sorted(TABLE_SLOT_BUILDER_MODES))
+            raise ValueError(f"Unknown table_slot_builder mode '{value}'. Known modes: {known}")
+        if key == "structural_output" and value not in STRUCTURAL_OUTPUT_MODES:
+            known = ", ".join(sorted(STRUCTURAL_OUTPUT_MODES))
+            raise ValueError(f"Unknown structural_output mode '{value}'. Known modes: {known}")
+        overrides[key] = value
+    return overrides
+
+
+def apply_pipeline_flag_overrides(
+    profile: OcrPipelineProfile,
+    raw_flags: str | None,
+) -> OcrPipelineProfile:
+    overrides = parse_pipeline_flag_overrides(raw_flags)
+    lexical_correction = overrides.get("lexical_correction")
+    if lexical_correction is not None:
+        profile = with_lexical_correction(profile, lexical_correction)
+    ocr_language_retry = overrides.get("ocr_language_retry")
+    if ocr_language_retry is not None:
+        profile = with_ocr_language_retry(profile, ocr_language_retry)
+    recursive_table_cell_ocr = overrides.get("recursive_table_cell_ocr")
+    if recursive_table_cell_ocr is not None:
+        profile = with_recursive_table_cell_ocr(
+            profile,
+            recursive_table_cell_ocr,
+        )
+    table_slot_builder = overrides.get("table_slot_builder")
+    if table_slot_builder is not None:
+        profile = with_table_slot_builder(profile, table_slot_builder)
+    structural_output = overrides.get("structural_output")
+    if structural_output is not None:
+        profile = with_structural_output(
+            profile,
+            structural_output,
+        )
+    return profile
 
 
 def _flag(key: str, value, source: str) -> PipelineFlag:
@@ -138,6 +226,21 @@ def profile_flag_items(profile: OcrPipelineProfile) -> list[PipelineFlag]:
                 "OcrPipelineProfile.dense_grid_fallback",
             ),
             _flag(
+                "spatial_full_page_fallback",
+                profile.spatial_full_page_fallback,
+                "OcrPipelineProfile.spatial_full_page_fallback",
+            ),
+            _flag(
+                "dark_ui_text_fallback",
+                profile.dark_ui_text_fallback,
+                "OcrPipelineProfile.dark_ui_text_fallback",
+            ),
+            _flag(
+                "contextual_markdown_grammar",
+                profile.contextual_markdown_grammar,
+                "OcrPipelineProfile.contextual_markdown_grammar",
+            ),
+            _flag(
                 "dense_grid_target_width",
                 profile.dense_grid_target_width,
                 "OcrPipelineProfile.dense_grid_target_width",
@@ -188,9 +291,39 @@ def profile_flag_items(profile: OcrPipelineProfile) -> list[PipelineFlag]:
                 "OcrPipelineProfile.table_layout_normalization",
             ),
             _flag(
+                "table_slot_builder",
+                profile.table_slot_builder,
+                "OcrPipelineProfile.table_slot_builder",
+            ),
+            _flag(
                 "table_word_recognition",
                 profile.table_word_recognition,
                 "OcrPipelineProfile.table_word_recognition",
+            ),
+            _flag(
+                "lexical_correction",
+                profile.lexical_correction,
+                "OcrPipelineProfile.lexical_correction",
+            ),
+            _flag(
+                "ocr_language_retry",
+                profile.ocr_language_retry,
+                "OcrPipelineProfile.ocr_language_retry",
+            ),
+            _flag(
+                "recursive_table_cell_ocr",
+                profile.recursive_table_cell_ocr,
+                "OcrPipelineProfile.recursive_table_cell_ocr",
+            ),
+            _flag(
+                "recursive_table_cell_ocr_batch_pixels",
+                profile.recursive_table_cell_ocr_batch_pixels,
+                "OcrPipelineProfile.recursive_table_cell_ocr_batch_pixels",
+            ),
+            _flag(
+                "structural_output",
+                profile.structural_output,
+                "OcrPipelineProfile.structural_output",
             ),
         ]
     )
@@ -263,6 +396,18 @@ def pipeline_flag_catalog() -> list[dict[str, str]]:
     by_key.setdefault(
         "preprocess_runtime",
         _flag("preprocess_runtime", "browser_canvas|python_compat|none", "debug runner"),
+    )
+    by_key.setdefault(
+        "layout_decision",
+        _flag("layout_decision", "table_like_grid|spatial_blocks", "runtime layout selector"),
+    )
+    by_key.setdefault(
+        "layout_runtime_stage",
+        _flag("layout_runtime_stage", "spatial_regions|table_regions", "runtime layout selector"),
+    )
+    by_key.setdefault(
+        "layout_runtime_param",
+        _flag("layout_runtime_param:layout_class", "table_like_grid", "runtime layout selector"),
     )
     return [
         {

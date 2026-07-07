@@ -81,6 +81,7 @@ interface UseOcrExtractionArgs {
   lastExtractedPage: number;
   totalPdfPages: number | null;
   externalLlmConsent: boolean;
+  lexicalCorrectionEnabled: boolean;
   llmKey: string;
   llmModel: string;
   llmProvider: LlmProvider;
@@ -107,6 +108,7 @@ export function useOcrExtraction({
   lastExtractedPage,
   totalPdfPages,
   externalLlmConsent,
+  lexicalCorrectionEnabled,
   llmKey,
   llmModel,
   llmProvider,
@@ -253,9 +255,17 @@ export function useOcrExtraction({
       let progressiveText = lastExtractedPage > 1 ? extractedText || "" : "";
       try {
         let result: OcrResult | null = null;
+        const browserPipelineProfile =
+          browserPipelineProfileForSource("browser");
         const browserProfile = createBrowserOcrProfile(
           diagnostics,
-          browserPipelineProfileForSource("browser"),
+          lexicalCorrectionEnabled
+            ? {
+                ...browserPipelineProfile,
+                lexicalCorrection: "t9_small",
+                ocrLanguageRetry: "t9_small",
+              }
+            : browserPipelineProfile,
         );
         const pdfCropMode = effectivePdfCropMode(readCropMode());
         const activateSource = (source: SourceType) => {
@@ -387,7 +397,10 @@ export function useOcrExtraction({
               effectiveSource === "local_tess" ? "tesseract" : "easyocr";
             const url = buildApiUrl("", "/api/convert/stream", {
               engine_type: engineType,
-              ...(backendPipelineParams(effectiveSource) || {}),
+              ...(backendPipelineParams(
+                effectiveSource,
+                lexicalCorrectionEnabled,
+              ) || {}),
             });
 
             result = await executeBackendOcrStreaming(
@@ -433,7 +446,7 @@ export function useOcrExtraction({
               const gatewayUrl = buildApiUrl(
                 pingUrl,
                 "/api/convert/stream",
-                backendPipelineParams("gateway"),
+                backendPipelineParams("gateway", lexicalCorrectionEnabled),
               );
               result = await executeBackendOcrStreaming(
                 file,
@@ -451,7 +464,7 @@ export function useOcrExtraction({
                 autoBackendCandidates,
                 active,
                 setProgress,
-                backendPipelineParams("auto"),
+                backendPipelineParams("auto", lexicalCorrectionEnabled),
                 handleChunk,
                 { stallTimeoutMs: 35_000 },
               );

@@ -35,21 +35,23 @@
   `table_min_word_cell_coverage`, `wide_table_min_word_cell_coverage`,
   `table_min_cell_coverage`, `max_table_cell_ocr_calls`,
   `table_layout_normalization`, `table_word_recognition`,
-  `table_word_formatters`.
+  `table_word_formatters`;
+- post-OCR contract flag `lexical_correction`.
 
 Параметры layout, используемые текущими профилями: `max_region_height`,
-`min_region_height`, `min_separator_coverage`, `direct_region_ocr`.
+`min_region_height`, `min_separator_coverage`, `direct_region_ocr`,
+`medium_page_segmentation`.
 
 ## Профили
 
 | Профиль                      | Preprocessing                                                                                        | Layout                                                         | Назначение                            |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------- |
-| `backend_auto_standard`      | `projector_slide_dewarp`, `mobile_screen_upscale`, `small_text_upscale`, `projected_document_dewarp` | `projection_geometry`, `uniform_spatial_v1`, `spatial_regions` | default для `auto`                    |
-| `backend_tesseract_standard` | `projector_slide_dewarp`, `mobile_screen_upscale`, `small_text_upscale`, `projected_document_dewarp` | `projection_geometry`, `uniform_spatial_v1`, `spatial_regions` | default для Tesseract                 |
-| `backend_easyocr_standard`   | `projector_slide_dewarp`, `mobile_screen_upscale`, `small_text_upscale`, `projected_document_dewarp` | `projection_geometry`, `uniform_spatial_v1`, `spatial_regions` | default для EasyOCR                   |
+| `backend_auto_standard`      | `projector_slide_dewarp`, `mobile_screen_upscale`, `small_text_upscale`, `projected_document_dewarp` | `projection_geometry`, `table_first_heuristic_v1`, `table_regions`, `spatial_regions` | default для `auto`                    |
+| `backend_tesseract_standard` | `projector_slide_dewarp`, `mobile_screen_upscale`, `small_text_upscale`, `projected_document_dewarp` | `projection_geometry`, `table_first_heuristic_v1`, `table_regions`, `spatial_regions` | default для Tesseract                 |
+| `backend_easyocr_standard`   | `projector_slide_dewarp`, `mobile_screen_upscale`, `small_text_upscale`, `projected_document_dewarp` | `projection_geometry`, `table_first_heuristic_v1`, `table_regions`, `spatial_regions` | default для EasyOCR                   |
 | `backend_easyocr_table`      | `projected_document_dewarp`                                                                          | `table_regions`                                                | diagnostic bounded table path EasyOCR |
-| `backend_easyocr_spatial`    | `projected_document_dewarp`                                                                          | `spatial_regions`, `direct_region_ocr=True`                    | сложные layout-страницы               |
-| `backend_curriculum`         | `projected_document_dewarp`                                                                          | `spatial_regions`                                              | учебные планы и широкие таблицы       |
+| `backend_easyocr_spatial`    | `projected_document_dewarp`                                                                          | `table_first_heuristic_v1`, `spatial_regions`, `direct_region_ocr=True` | сложные layout-страницы               |
+| `backend_curriculum`         | `projected_document_dewarp`                                                                          | `table_first_heuristic_v1`, `table_regions`, `spatial_regions` | учебные планы и широкие таблицы       |
 | `backend_plain_text`         | `projected_document_dewarp`                                                                          | без layout stages                                              | plain text fallback                   |
 | `backend_raw`                | пусто                                                                                                | пусто                                                          | сырой OCR без preprocessing/layout    |
 
@@ -84,6 +86,10 @@ Default mapping:
 | `table_raw_text_fallback_min_ratio` | `0.75`                                          | table fallback может быть короче noisy primary, если он полезен для компоновки |
 | `dense_grid_fallback`               | `True` в standard backend profiles              | включает multi-pass OCR для плотных A3/landscape-сеток                         |
 | `dense_grid_target_width`           | `3300`                                          | минимальная ширина dense-grid рабочего растра                                  |
+| `spatial_full_page_fallback`        | `True` в standard backend profiles              | разрешает full-page fallback после spatial segmentation                        |
+| `dark_ui_text_fallback`             | `True` в standard backend profiles              | включает text recovery для темных UI screenshots                               |
+| `contextual_markdown_grammar`       | `True` для auto/easyocr/curriculum              | включает финальный contextual Markdown repair                                  |
+| `structural_output`                 | `markdown`                                      | режим вывода structural layer                                                  |
 
 Raw fallback не заменяет Markdown-таблицу. Он добавляет второй текстовый блок
 после таблицы, когда 10x14-style формы со слитыми subsection rows теряют часть
@@ -102,12 +108,16 @@ profiles без междвижкового recovery.
 
 | Флаг                          | Default/значение профиля  | Эффект                                 |
 | ----------------------------- | ------------------------- | -------------------------------------- |
-| `tesseract_language_priority` | `rus+eng+kaz+kir+chi_sim` | порядок `-l` языков Tesseract          |
+| `tesseract_language_priority` | `rus+eng+kaz+kir+chi_sim+ell+equ` | порядок `-l` языков Tesseract          |
 | `text_region_psm`             | `6`                       | PSM компактных text regions            |
 | `document_region_psm`         | `3`                       | PSM обычных document-like regions      |
 | `wide_text_region_psm`        | `11`                      | PSM широких страниц и sparse layouts   |
 | `table_word_psm`              | `6`                       | PSM word-level table OCR               |
 | `large_table_word_psm`        | `11`                      | PSM tiled OCR для очень больших таблиц |
+| `lexical_correction`          | `off` / `t9_small`        | временный reviewer/post-OCR backend    |
+| `ocr_language_retry`          | `off` / `t9_small`        | повторный OCR по языковым кандидатам   |
+| `recursive_table_cell_ocr`    | `off` / `auto` / `always` | микропроход OCR по ячейкам recursive grid |
+| `recursive_table_cell_ocr_max_calls` | `256`                | бюджет микропроходов OCR по ячейкам   |
 
 ## Sparse text fallback
 
@@ -125,13 +135,21 @@ profiles без междвижкового recovery.
 | Поле                     | Текущие значения                             |
 | ------------------------ | -------------------------------------------- |
 | `feature_extractors`     | `projection_geometry` или пусто              |
-| `selector`               | `uniform_spatial_v1` или `fixed`             |
+| `selector`               | `table_first_heuristic_v1`, `uniform_spatial_v1` или `fixed` |
 | `allowed_stages`         | `spatial_regions`, `table_regions` или пусто |
 | `default_parameters`     | пары параметр/значение                       |
 | `max_region_height`      | `1400` или `2800`                            |
 | `min_region_height`      | `300`                                        |
+| `min_cell_height`        | `24`                                         |
+| `min_region_width`       | `80`                                         |
 | `min_separator_coverage` | `0.55`                                       |
+| `min_separator_gap`      | `8`                                          |
+| `chunk_overlap`          | `16`                                         |
+| `max_depth`              | `32`                                         |
+| `region_page_dewarp`     | `True`                                       |
+| `region_deskew`          | `True`                                       |
 | `direct_region_ocr`      | `True` только в spatial EasyOCR profile      |
+| `medium_page_segmentation` | `True` в `table_first_heuristic_v1` runtime stage | режет средние multi-section страницы по сильным whitespace bands |
 
 ## Effective flag keys
 
@@ -148,12 +166,52 @@ Runtime/debug/API используют сериализованные ключи
 | `ocr_wide_text_region_psm`            | `OcrPipelineProfile.wide_text_region_psm`        |
 | `ocr_table_word_psm`                  | `OcrPipelineProfile.table_word_psm`              |
 | `ocr_large_table_word_psm`            | `OcrPipelineProfile.large_table_word_psm`        |
+| `lexical_correction`                  | `OcrPipelineProfile.lexical_correction`          |
+| `ocr_language_retry`                  | `OcrPipelineProfile.ocr_language_retry`          |
+| `recursive_table_cell_ocr`            | `OcrPipelineProfile.recursive_table_cell_ocr`    |
+| `recursive_table_cell_ocr_max_calls`  | `OcrPipelineProfile.recursive_table_cell_ocr_max_calls` |
+| `structural_output`                   | `OcrPipelineProfile.structural_output`           |
+| `table_layout_normalization`          | `OcrPipelineProfile.table_layout_normalization`  |
+| `table_slot_builder`                  | `OcrPipelineProfile.table_slot_builder`          |
+| `table_word_recognition`              | `OcrPipelineProfile.table_word_recognition`      |
+| `max_table_cell_ocr_calls`            | `OcrPipelineProfile.max_table_cell_ocr_calls`    |
+| `table_min_cell_coverage`             | `OcrPipelineProfile.table_min_cell_coverage`     |
+| `table_min_word_cell_coverage`        | `OcrPipelineProfile.table_min_word_cell_coverage` |
+| `wide_table_min_word_cell_coverage`   | `OcrPipelineProfile.wide_table_min_word_cell_coverage` |
+| `grid_min_confirmed_cell_ratio`       | `OcrPipelineProfile.grid_min_confirmed_cell_ratio` |
+| `table_raw_text_fallback`             | `OcrPipelineProfile.table_raw_text_fallback`     |
+| `table_raw_text_fallback_psm`         | `OcrPipelineProfile.table_raw_text_fallback_psm` |
+| `table_raw_text_fallback_min_rows`    | `OcrPipelineProfile.table_raw_text_fallback_min_rows` |
+| `table_raw_text_fallback_min_cols`    | `OcrPipelineProfile.table_raw_text_fallback_min_cols` |
+| `table_raw_text_fallback_max_cols`    | `OcrPipelineProfile.table_raw_text_fallback_max_cols` |
+| `table_raw_text_fallback_min_ratio`   | `OcrPipelineProfile.table_raw_text_fallback_min_ratio` |
+| `sparse_text_fallback_engine`         | `OcrPipelineProfile.sparse_text_fallback_engine` |
+| `sparse_text_fallback_min_tokens`     | `OcrPipelineProfile.sparse_text_fallback_min_tokens` |
+| `sparse_text_fallback_min_ratio`      | `OcrPipelineProfile.sparse_text_fallback_min_ratio` |
+| `dense_grid_fallback`                 | `OcrPipelineProfile.dense_grid_fallback`         |
+| `dense_grid_target_width`             | `OcrPipelineProfile.dense_grid_target_width`     |
+| `ocr_border_pixels`                   | `OcrPipelineProfile.ocr_border_pixels`           |
+| `edge_word_fallback_psm`              | `OcrPipelineProfile.edge_word_fallback_psms`     |
+| `edge_word_fallback_min_tokens`       | `OcrPipelineProfile.edge_word_fallback_min_tokens` |
+| `spatial_full_page_fallback`          | `OcrPipelineProfile.spatial_full_page_fallback`  |
+| `dark_ui_text_fallback`               | `OcrPipelineProfile.dark_ui_text_fallback`       |
+| `contextual_markdown_grammar`         | `OcrPipelineProfile.contextual_markdown_grammar` |
 | `layout_selector`                     | `LayoutPipelineConfig.selector`                  |
 | `layout_stage`                        | `LayoutPipelineConfig.allowed_stages`            |
 | `layout_param:max_region_height`      | `LayoutPipelineConfig.default_parameters`        |
 | `layout_param:min_region_height`      | `LayoutPipelineConfig.default_parameters`        |
+| `layout_param:min_cell_height`        | `LayoutPipelineConfig.default_parameters`        |
+| `layout_param:min_region_width`       | `LayoutPipelineConfig.default_parameters`        |
 | `layout_param:min_separator_coverage` | `LayoutPipelineConfig.default_parameters`        |
+| `layout_param:min_separator_gap`      | `LayoutPipelineConfig.default_parameters`        |
+| `layout_param:chunk_overlap`          | `LayoutPipelineConfig.default_parameters`        |
+| `layout_param:max_depth`              | `LayoutPipelineConfig.default_parameters`        |
+| `layout_param:region_page_dewarp`     | `LayoutPipelineConfig.default_parameters`        |
+| `layout_param:region_deskew`          | `LayoutPipelineConfig.default_parameters`        |
 | `layout_param:direct_region_ocr`      | `LayoutPipelineConfig.default_parameters`        |
+| `layout_runtime_param:*`              | фактическое решение layout selector              |
+| `layout_decision`                     | фактическая метка layout selector                |
+| `layout_runtime_stage`                | фактическая layout stage                         |
 | `table_word_formatter`                | `OcrPipelineProfile.table_word_formatters`       |
 | `ocr_runtime`                         | backend/browser runtime                          |
 | `ocr_languages`                       | browser Tesseract.js language order              |
@@ -163,26 +221,40 @@ Runtime/debug/API используют сериализованные ключи
 | `browser_profile_reason`              | browser profile resource reason                  |
 | `pdf_render_scale`                    | browser PDF render scale                         |
 | `pdf_mode`                            | API/CLI: `auto` или принудительный `raster`      |
+| `pipeline_flags`                      | API/CLI override parameter                       |
+| `overrides_enabled`                   | API flag override switch                         |
 | `preprocess_runtime`                  | browser/debug runner фактический runtime         |
 
 API публикует каталог через `GET /v1/pipeline/flags`. Параметр
-`pipeline_flags` зарезервирован для будущих overrides, но сейчас
-`overrides_enabled` равен `false`, и любой непустой `pipeline_flags` завершает
-запрос ошибкой 400. Это нужно, чтобы будущие API/LLM-движки, включая малые
-модели вроде Gemma, подключались к тому же flag resolver, а не получали
-изолированную строку настроек.
+`pipeline_flags` остается fail-closed для общих overrides:
+`overrides_enabled` равен `false`, и любые низкоуровневые настройки, кроме
+`lexical_correction`, `ocr_language_retry` и `table_slot_builder`, завершают
+запрос ошибкой 400. Разрешенные варианты `lexical_correction:t9_small` и
+`ocr_language_retry:t9_small` остаются совместимым именем временного reviewer
+backend-а; целевой слой проверки кандидатов должен заменяться малой моделью, а
+не словарным T9, который переписывает имена и фамилии.
 
 ## Tesseract Runtime
 
-Профили хранят приоритет `rus+eng+kaz+kir+chi_sim`, но runtime не смешивает
+Профили хранят приоритет `rus+eng+kaz+kir+chi_sim+ell+equ`, но runtime не смешивает
 `kaz` с обычным multi-script проходом: default Tesseract запускается как
-`rus+eng+kir+chi_sim`. `kaz` включается только при явном первом приоритете,
-например `kaz+rus+eng`. Это сохраняет поддержку казахского OCR, не ухудшая
-обычные русско-английские изображения похожими кириллическими символами.
+`rus+eng+kir+chi_sim+ell+equ`, если соответствующие traineddata установлены.
+`kaz` включается только при явном первом приоритете, например `kaz+rus+eng`.
+Это сохраняет поддержку казахского OCR, не ухудшая обычные русско-английские
+изображения похожими кириллическими символами. `ell` и `equ` являются
+опциональной базой для греческого текста и старого Tesseract equation OCR:
+без установленных `ell.traineddata`/`equ.traineddata` runtime отфильтрует их и
+пойдёт по доступным языкам.
 
 Для text-mode OCR движок добавляет внутреннюю белую рамку 10 px. Это не меняет
 исходный файл, но стабилизирует случаи, где слово или строка касается границ
 изображения.
+
+При `ocr_language_retry:t9_small` Tesseract ведет вероятностную таблицу языков
+для текущего движка. Каждый распознанный регион обновляет веса по фактическим
+скриптам текста; следующие регионы проверяются через смешанный язык профиля,
+все одиночные языки профиля и дополнительные Greek/math кандидаты. Выбор делает
+reviewer по качеству текста, а не словарь исправлений.
 
 PDF pages рендерятся постранично. Большие широкие страницы распознаются с
 `psm=11` вместо uniform-block `psm=6`, потому что учебные планы, обложки и

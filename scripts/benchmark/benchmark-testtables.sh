@@ -11,6 +11,7 @@ Usage:
     [--engines tesseract,easyocr] \
     [--pipeline-profile PROFILE] \
     [--engine-profile tesseract=PROFILE] \
+    [--engine-flags tesseract='lexical_correction:off;table_slot_builder:off'] \
     [--gpu auto|on|off] \
     [--expected-root /path/to/manual-expected] \
     [--fixture 'photo*.jpg'] \
@@ -37,6 +38,7 @@ original_args=("$@")
 engines_csv="${OCR_BENCHMARK_ENGINES:-tesseract,easyocr}"
 pipeline_profile=""
 engine_profile_rules=()
+engine_flag_rules=()
 gpu_mode="${OCR_BENCHMARK_GPU:-auto}"
 page_selection=""
 max_pages=""
@@ -77,6 +79,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --engine-profile)
       engine_profile_rules+=("$2")
+      shift 2
+      ;;
+    --engine-flags)
+      engine_flag_rules+=("$2")
       shift 2
       ;;
     --gpu)
@@ -177,13 +183,14 @@ is_page_selection() {
   [[ "$1" =~ ^[1-9][0-9]*(-[1-9][0-9]*)?(,[1-9][0-9]*(-[1-9][0-9]*)?)*$ ]]
 }
 
-validate_page_selection_for_pdf() {
+normalize_page_selection_for_pdf() {
   local fixture="$1"
   local pages="$2"
-  local page_count token first last
+  local page_count token first last normalized=()
+  local IFS=',' tokens
 
   page_count="$(qpdf --show-npages "$fixture")"
-  IFS=',' read -r -a tokens <<< "$pages"
+  read -r -a tokens <<< "$pages"
   for token in "${tokens[@]}"; do
     if [[ "$token" == *-* ]]; then
       first="${token%-*}"
@@ -196,11 +203,21 @@ validate_page_selection_for_pdf() {
       echo "Invalid page range '$token' for $(basename "$fixture"): start is greater than end" >&2
       return 2
     fi
-    if (( last > page_count )); then
+    if (( first > page_count )); then
       echo "Invalid page range '$token' for $(basename "$fixture"): PDF has $page_count pages" >&2
       return 2
     fi
+    if (( last > page_count )); then
+      last="$page_count"
+    fi
+    if [[ "$first" == "$last" ]]; then
+      normalized+=("$first")
+    else
+      normalized+=("$first-$last")
+    fi
   done
+  IFS=','
+  printf '%s' "${normalized[*]}"
 }
 
 if [[ -n "$page_selection" && -n "$max_pages" ]]; then
@@ -234,6 +251,12 @@ done
 for rule in "${engine_profile_rules[@]}"; do
   if [[ "$rule" != *=* || -z "${rule%=*}" || -z "${rule#*=}" ]]; then
     echo "--engine-profile must have the form 'engine=profile'" >&2
+    exit 2
+  fi
+done
+for rule in "${engine_flag_rules[@]}"; do
+  if [[ "$rule" != *=* || -z "${rule%=*}" ]]; then
+    echo "--engine-flags must have the form 'engine=flag:value;flag:value'" >&2
     exit 2
   fi
 done
@@ -352,7 +375,7 @@ if [[ -n "$page_selection" || ${#fixture_page_selection_rules[@]} -gt 0 ]]; then
       limited_fixtures+=("$fixture")
       continue
     fi
-    validate_page_selection_for_pdf "$fixture" "$selected_pages"
+    selected_pages="$(normalize_page_selection_for_pdf "$fixture" "$selected_pages")"
     limited_fixture="$page_limited_dir/$file_name"
     qpdf --empty --pages "$fixture" "$selected_pages" -- "$limited_fixture"
     limited_fixtures+=("$limited_fixture")
@@ -422,6 +445,7 @@ cat >"$manifest" <<EOF
 - engines: \`$engines_csv\`
 - pipeline profile: \`${pipeline_profile:-per-engine default}\`
 - engine profile overrides: \`${engine_profile_rules[*]:-none}\`
+- engine flag overrides: \`${engine_flag_rules[*]:-none}\`
 - GPU: \`$gpu_mode\` ($gpu_reason)
 - expected root: \`$expected_root\`
 - PDF pages: \`${page_selection:-all}\`
@@ -464,43 +488,70 @@ profile_for_engine() {
   esac
 }
 
-profiles=()
+flags_for_engine() {
+  local rule engine_name raw_flags
+  for rule in "${engine_flag_rules[@]}"; do
+    engine_name="${rule%%=*}"
+    raw_flags="${rule#*=}"
+    if [[ "$1" == "$engine_name" ]]; then
+      echo "$raw_flags"
+      return
+    fi
+  done
+  echo ""
+}
+
+profile_specs=()
 for engine in "${engines[@]}"; do
-  profiles+=("$(profile_for_engine "$engine")")
+  profile_specs+=("$engine=$(profile_for_engine "$engine")=$(flags_for_engine "$engine")")
 done
-PYTHONPATH="$source_root/ocr" python3 - "$output_root/profiles.json" "$profile_flags_file" "${profiles[@]}" <<'PY'
+PYTHONPATH="$source_root/ocr" python3 - "$output_root/profiles.json" "$profile_flags_file" "${profile_specs[@]}" <<'PY'
 import dataclasses
 import json
 import pathlib
 import sys
 
 from app.pipeline_config import resolve_pipeline_profile
-from app.pipeline_flags import profile_flags_string
+from app.pipeline_flags import apply_pipeline_flag_overrides, profile_flags_string
 
 output_path = pathlib.Path(sys.argv[1])
 flags_path = pathlib.Path(sys.argv[2])
-profile_names = sys.argv[3:]
+specs = []
+for raw_spec in sys.argv[3:]:
+    engine, profile_name, raw_flags = raw_spec.split("=", 2)
+    profile = apply_pipeline_flag_overrides(
+        resolve_pipeline_profile(engine, profile_name),
+        raw_flags,
+    )
+    specs.append((engine, profile_name, raw_flags, profile))
 payload = {
-    name: dataclasses.asdict(resolve_pipeline_profile("auto", name))
-    for name in dict.fromkeys(profile_names)
+    engine: {
+        "requested_profile": profile_name,
+        "raw_flags": raw_flags,
+        "resolved_profile": dataclasses.asdict(profile),
+    }
+    for engine, profile_name, raw_flags, profile in specs
 }
 output_path.write_text(
     json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
     encoding="utf-8",
 )
 with flags_path.open("w", encoding="utf-8") as output:
-    for name in dict.fromkeys(profile_names):
-        output.write(f"{name}\t{profile_flags_string(resolve_pipeline_profile('auto', name))}\n")
+    for engine, profile_name, raw_flags, profile in specs:
+        output.write(
+            f"{engine}\t{profile_name}\t{raw_flags}\t{profile_flags_string(profile)}\n"
+        )
 PY
 
-declare -A profile_flags_by_name=()
-while IFS=$'\t' read -r profile_name profile_flags; do
-  profile_flags_by_name["$profile_name"]="$profile_flags"
+declare -A profile_flags_by_engine=()
+while IFS=$'\t' read -r engine_name profile_name raw_flags profile_flags; do
+  profile_flags_by_engine["$engine_name"]="$profile_flags"
 done <"$profile_flags_file"
 
 for engine in "${engines[@]}"; do
   profile="$(profile_for_engine "$engine")"
-  profile_flags="${profile_flags_by_name[$profile]:-}"
+  pipeline_flags="$(flags_for_engine "$engine")"
+  profile_flags="${profile_flags_by_engine[$engine]:-}"
   engine_dir="$output_root/$engine"
   mkdir -p "$engine_dir"
 
@@ -515,13 +566,25 @@ for engine in "${engines[@]}"; do
     start_ms="$(date +%s%3N)"
 
     set +e
+    query="$(
+      python3 - "$engine" "$profile" "$pipeline_flags" <<'PY'
+import sys
+import urllib.parse
+
+engine, profile, pipeline_flags = sys.argv[1:]
+params = {"engine_type": engine, "pipeline_profile": profile}
+if pipeline_flags:
+    params["pipeline_flags"] = pipeline_flags
+print(urllib.parse.urlencode(params))
+PY
+    )"
     http_status="$(
       curl --silent --show-error \
         --max-time "$timeout_seconds" \
         --output "$response_file" \
         --write-out '%{http_code}' \
         --form "file=@\"$fixture\"" \
-        "$base_url/convert?engine_type=$engine&pipeline_profile=$profile" \
+        "$base_url/convert?$query" \
         2>"$curl_error_file"
     )"
     curl_exit=$?

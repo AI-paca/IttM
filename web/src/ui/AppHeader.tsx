@@ -10,7 +10,6 @@ interface AppHeaderProps {
   appState: AppState;
   file: File | null;
   isDragging: boolean;
-  isExtracting: boolean;
   selectedSource: SourceType;
   showHeader: boolean;
   onDragOver: (event: DragEvent<HTMLDivElement>) => void;
@@ -24,7 +23,6 @@ export function AppHeader({
   appState,
   file,
   isDragging,
-  isExtracting,
   selectedSource,
   showHeader,
   onDragOver,
@@ -35,8 +33,6 @@ export function AppHeader({
 }: AppHeaderProps) {
   const selectedSourceLabel =
     SOURCES.find((s) => s.id === selectedSource)?.label ?? selectedSource;
-  const fileLabel =
-    file?.name ?? (appState === "loading" ? "Документ обрабатывается" : "");
 
   const ghostButton =
     "inline-flex items-center justify-center rounded-md text-[var(--color-text-muted)] opacity-75 transition-all hover:bg-[var(--color-bg-elevated)]/70 hover:text-[var(--color-text-primary)] hover:opacity-100 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-ring)]";
@@ -104,36 +100,11 @@ export function AppHeader({
                     className="group flex min-w-0 items-center gap-2"
                   >
                     <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[var(--color-text-muted)]">
-                      <AnimatePresence mode="popLayout" initial={false}>
-                        {isExtracting ? (
-                          <motion.span
-                            key="spinner"
-                            initial={{ opacity: 0, scale: 0.6 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.6 }}
-                            transition={{ duration: 0.18 }}
-                            className="absolute inset-0 flex items-center justify-center text-[var(--color-accent)]"
-                            aria-label="Идёт извлечение"
-                          >
-                            <span className="spinner !h-3.5 !w-3.5 !border-2" />
-                          </motion.span>
-                        ) : (
-                          <motion.span
-                            key="file-icon"
-                            initial={{ opacity: 0, scale: 0.6 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.6 }}
-                            transition={{ duration: 0.18 }}
-                            className="absolute inset-0 flex items-center justify-center"
-                          >
-                            <FileText className="h-3.5 w-3.5 transition-opacity duration-200 group-hover:opacity-0" />
-                            <RefreshCw className="absolute h-3.5 w-3.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
-                          </motion.span>
-                        )}
-                      </AnimatePresence>
+                      <FileText className="h-3.5 w-3.5 transition-opacity duration-200 group-hover:opacity-0" />
+                      <RefreshCw className="absolute h-3.5 w-3.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
                     </span>
                     <span className="max-w-[150px] truncate text-[12px] font-medium text-[var(--color-text-secondary)] group-hover:text-[var(--color-text-primary)] md:max-w-[260px] md:text-[13px]">
-                      {fileLabel}
+                      {file?.name}
                     </span>
                   </motion.div>
                 )}

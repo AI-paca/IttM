@@ -42,12 +42,14 @@ export function SettingsSidebar({
     easyOcrInstallMessage,
     easyOcrInstallProgress,
     easyOcrInstalling,
+    lexicalCorrectionEnabled,
     pingUrl,
     rememberChoice,
     selectedSource,
     themeLevel,
     themeAuto,
     onInstallEasyOcr,
+    onLexicalCorrectionChange,
     onRememberChange,
     onSourceSelect,
     setPingUrl,
@@ -200,6 +202,17 @@ export function SettingsSidebar({
 
                   {/* Нижняя секция: reveal ниже не влияет на позицию темы. */}
                   <div className="mt-auto flex flex-col gap-3 shrink-0">
+                    <label className="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] px-3 py-2.5 text-sm text-secondary">
+                      <span className="font-medium text-primary">T9 OCR</span>
+                      <input
+                        type="checkbox"
+                        checked={lexicalCorrectionEnabled}
+                        onChange={(event) =>
+                          onLexicalCorrectionChange(event.target.checked)
+                        }
+                        className="h-4 w-4 accent-[var(--color-accent)]"
+                      />
+                    </label>
                     <RememberToggle
                       checked={rememberChoice}
                       onChange={onRememberChange}

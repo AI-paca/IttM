@@ -94,11 +94,45 @@ function foregroundMask(raster: LayoutAnalysisRaster): Uint8Array {
   }
 
   const threshold = otsuThreshold(gray);
-  const mask = new Uint8Array(pixelCount);
+  const darkMask = new Uint8Array(pixelCount);
+  const lightMask = new Uint8Array(pixelCount);
+  const edgeMask = new Uint8Array(pixelCount);
   for (let index = 0; index < pixelCount; index += 1) {
-    mask[index] = gray[index] <= threshold && gray[index] < 245 ? 1 : 0;
+    darkMask[index] = gray[index] <= threshold && gray[index] < 245 ? 1 : 0;
+    lightMask[index] = gray[index] >= threshold && gray[index] > 10 ? 1 : 0;
   }
-  return mask;
+  for (let y = 0; y < raster.height; y += 1) {
+    for (let x = 0; x < raster.width; x += 1) {
+      const index = y * raster.width + x;
+      const here = gray[index];
+      const right = x + 1 < raster.width ? gray[index + 1] : here;
+      const down = y + 1 < raster.height ? gray[index + raster.width] : here;
+      if (Math.max(Math.abs(here - right), Math.abs(here - down)) >= 18) {
+        edgeMask[index] = 1;
+        if (x + 1 < raster.width) edgeMask[index + 1] = 1;
+        if (y + 1 < raster.height) edgeMask[index + raster.width] = 1;
+      }
+    }
+  }
+
+  const score = (mask: Uint8Array): [number, number] => {
+    let foreground = 0;
+    for (const value of mask) foreground += value;
+    const ratio = foreground / Math.max(1, mask.length);
+    return [ratio >= 0.0005 && ratio <= 0.55 ? 1 : 0, -Math.abs(ratio - 0.12)];
+  };
+  const darkScore = score(darkMask);
+  const lightScore = score(lightMask);
+  const edgeScore = score(edgeMask);
+  const candidates: Array<[Uint8Array, [number, number]]> = [
+    [darkMask, darkScore],
+    [lightMask, lightScore],
+    [edgeMask, edgeScore],
+  ];
+  candidates.sort(
+    (left, right) => right[1][0] - left[1][0] || right[1][1] - left[1][1],
+  );
+  return candidates[0][0];
 }
 
 function scaledInterval(

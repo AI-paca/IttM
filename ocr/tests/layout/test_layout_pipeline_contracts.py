@@ -81,7 +81,7 @@ def test_profile_limits_selector_to_explicitly_allowed_layout_stages():
     assert profile.layout_analysis == ("table_regions", "xy_cut_regions")
 
 
-def test_standard_backend_profiles_enable_uniform_spatial_layout():
+def test_standard_backend_profiles_keep_spatial_layout_baseline():
     for name in (
         "backend_auto_standard",
         "backend_tesseract_standard",
@@ -97,6 +97,18 @@ def test_standard_backend_profiles_enable_uniform_spatial_layout():
         assert layout.feature_extractors == ("projection_geometry",)
         assert layout.selector == "uniform_spatial_v1"
         assert layout.allowed_stages == ("spatial_regions",)
+
+
+def test_table_first_profiles_are_explicitly_experimental():
+    for name in (
+        "backend_auto_table_first",
+        "backend_tesseract_table_first",
+        "backend_easyocr_table_first",
+    ):
+        layout = OCR_PIPELINE_PROFILES[name].layout
+        assert layout.feature_extractors == ("projection_geometry",)
+        assert layout.selector == "table_first_heuristic_v1"
+        assert layout.allowed_stages == ("table_regions", "spatial_regions")
 
 
 def test_easyocr_table_profile_keeps_table_only_diagnostic_path():
@@ -115,3 +127,55 @@ def test_easyocr_spatial_profile_is_explicitly_experimental():
     easy_parameters = dict(layout.default_parameters)
     assert easy_parameters["direct_region_ocr"] is True
     assert easy_parameters["max_region_height"] == 2800
+
+
+def test_table_first_selector_prefers_line_grid_when_available():
+    features = LayoutFeatures(
+        width=1200,
+        height=900,
+        foreground_ratio=0.12,
+        separators=(
+            *(
+                SeparatorCandidate("y", index * 100, index * 100 + 2, 0, 1200, "ink", 0.9)
+                for index in range(1, 5)
+            ),
+            *(
+                SeparatorCandidate("x", index * 200, index * 200 + 2, 0, 900, "ink", 0.9)
+                for index in range(1, 4)
+            ),
+        ),
+    )
+
+    from app.layout.selectors import select_layout_pipeline
+
+    decision = select_layout_pipeline(
+        features,
+        selector_name="table_first_heuristic_v1",
+        allowed_stages=("table_regions", "spatial_regions"),
+        default_parameters=(),
+    )
+
+    assert decision.label == "table_like_grid"
+    assert decision.stages[0].name == "table_regions"
+    assert decision.stages[0].parameter("layout_class") == "table_like_grid"
+
+
+def test_table_first_selector_keeps_vertical_pages_as_spatial_blocks():
+    features = LayoutFeatures(
+        width=800,
+        height=4200,
+        foreground_ratio=0.08,
+        scalars=(("aspect_ratio", 5.25), ("extractor_available", True)),
+    )
+
+    from app.layout.selectors import select_layout_pipeline
+
+    decision = select_layout_pipeline(
+        features,
+        selector_name="table_first_heuristic_v1",
+        allowed_stages=("table_regions", "spatial_regions"),
+        default_parameters=(),
+    )
+
+    assert decision.label == "long_vertical_blocks"
+    assert decision.stages[0].name == "spatial_regions"

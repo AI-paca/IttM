@@ -11,6 +11,10 @@ const repoRoot = path.resolve(webRoot, "..");
 const distRoot = path.resolve(repoRoot, "dist");
 const tesseractVendorRoute = "vendor/tesseract";
 const pdfJsWasmVendorRoute = "vendor/pdfjs/wasm";
+const transformersWasmVendorRoute = "vendor/transformers/wasm";
+const browserModelVendorRoute = "vendor/models";
+const browserModelRoot = path.resolve(repoRoot, ".models/browser");
+const browserModelIds = ["HuggingFaceTB/SmolLM2-135M-Instruct"];
 const tesseractCoreFiles = [
   "tesseract-core-lstm.wasm.js",
   "tesseract-core-simd-lstm.wasm.js",
@@ -49,6 +53,45 @@ function pdfJsWasmAssetFiles(): Map<string, string> {
   const wasmDir = path.resolve(repoRoot, "node_modules/pdfjs-dist/wasm");
   for (const fileName of pdfJsWasmFileNames) {
     files.set(fileName, path.resolve(wasmDir, fileName));
+  }
+  return files;
+}
+
+function transformersWasmAssetFiles(): Map<string, string> {
+  const wasmDir = path.resolve(repoRoot, "node_modules/onnxruntime-web/dist");
+  return new Map([
+    [
+      "ort-wasm-simd-threaded.mjs",
+      path.resolve(wasmDir, "ort-wasm-simd-threaded.mjs"),
+    ],
+    [
+      "ort-wasm-simd-threaded.wasm",
+      path.resolve(wasmDir, "ort-wasm-simd-threaded.wasm"),
+    ],
+  ]);
+}
+
+function browserModelAssetFiles(): Map<string, string> {
+  const files = new Map<string, string>();
+  if (!fs.existsSync(browserModelRoot)) return files;
+
+  const visit = (directory: string) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const sourcePath = path.resolve(directory, entry.name);
+      if (entry.isDirectory()) {
+        visit(sourcePath);
+        continue;
+      }
+      const relativePath = path
+        .relative(browserModelRoot, sourcePath)
+        .split(path.sep)
+        .join("/");
+      files.set(relativePath, sourcePath);
+    }
+  };
+  for (const modelId of browserModelIds) {
+    const modelRoot = path.resolve(browserModelRoot, modelId);
+    if (fs.existsSync(modelRoot)) visit(modelRoot);
   }
   return files;
 }
@@ -135,6 +178,50 @@ function pdfJsAssetsPlugin(base: string): Plugin {
   };
 }
 
+function transformersAssetsPlugin(base: string): Plugin {
+  return {
+    name: "local-transformers-assets",
+    configureServer(server) {
+      const wasmFiles = transformersWasmAssetFiles();
+      const modelFiles = browserModelAssetFiles();
+      server.middlewares.use((req, res, next) => {
+        serveVendorAsset(
+          base,
+          transformersWasmVendorRoute,
+          wasmFiles,
+          req,
+          res,
+          next,
+        );
+      });
+      server.middlewares.use((req, res, next) => {
+        serveVendorAsset(
+          base,
+          browserModelVendorRoute,
+          modelFiles,
+          req,
+          res,
+          next,
+        );
+      });
+    },
+    closeBundle() {
+      for (const [vendorRoute, files] of [
+        [transformersWasmVendorRoute, transformersWasmAssetFiles()],
+        [browserModelVendorRoute, browserModelAssetFiles()],
+      ] as const) {
+        const outDir = path.resolve(distRoot, vendorRoute);
+        fs.mkdirSync(outDir, { recursive: true });
+        for (const [fileName, sourcePath] of files) {
+          const destination = path.resolve(outDir, fileName);
+          fs.mkdirSync(path.dirname(destination), { recursive: true });
+          fs.copyFileSync(sourcePath, destination);
+        }
+      }
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, repoRoot, "");
   const base = env.VITE_BASE_PATH || "/";
@@ -146,6 +233,7 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       tesseractAssetsPlugin(base),
       pdfJsAssetsPlugin(base),
+      transformersAssetsPlugin(base),
     ],
     resolve: {
       alias: {

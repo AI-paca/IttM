@@ -8,6 +8,13 @@ export interface DenseGridCrop {
   pageSegmentationMode: string;
 }
 
+export interface DenseGridContentBox {
+  sourceX: number;
+  sourceY: number;
+  sourceWidth: number;
+  sourceHeight: number;
+}
+
 const TARGET_WIDTH = 3300;
 
 export function overlappingStarts(
@@ -171,6 +178,50 @@ export function denseGridLineIndexes(
     }
   }
   return { rows, columns };
+}
+
+export function denseGridContentBoxPixels(
+  rgba: Uint8ClampedArray,
+  width: number,
+  height: number,
+  padding = 8,
+): DenseGridContentBox | null {
+  let left = width;
+  let top = height;
+  let right = -1;
+  let bottom = -1;
+  let foreground = 0;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4;
+      const alpha = rgba[offset + 3];
+      if (alpha === 0) continue;
+      const luminance =
+        rgba[offset] * 0.299 + rgba[offset + 1] * 0.587 + rgba[offset + 2] * 0.114;
+      if (luminance >= 245) continue;
+      foreground += 1;
+      left = Math.min(left, x);
+      top = Math.min(top, y);
+      right = Math.max(right, x + 1);
+      bottom = Math.max(bottom, y + 1);
+    }
+  }
+
+  if (foreground < Math.max(16, width * height * 0.0002) || right <= left || bottom <= top) {
+    return null;
+  }
+
+  const paddedLeft = Math.max(0, left - padding);
+  const paddedTop = Math.max(0, top - padding);
+  const paddedRight = Math.min(width, right + padding);
+  const paddedBottom = Math.min(height, bottom + padding);
+  return {
+    sourceX: paddedLeft,
+    sourceY: paddedTop,
+    sourceWidth: Math.max(1, paddedRight - paddedLeft),
+    sourceHeight: Math.max(1, paddedBottom - paddedTop),
+  };
 }
 
 export function planDenseGridCrops(

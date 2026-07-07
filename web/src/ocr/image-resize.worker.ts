@@ -13,6 +13,10 @@ import {
 const MAX_ANALYSIS_PIXELS = 2_000_000;
 const MAX_ANALYSIS_DIMENSION = 4096;
 
+interface PlannedWorkerTile extends ImageTile {
+  invert?: boolean;
+}
+
 function analysisSize(width: number, height: number) {
   const scale = Math.min(
     1,
@@ -28,7 +32,7 @@ function analysisSize(width: number, height: number) {
 function planLayoutTiles(
   bitmap: ImageBitmap,
   request: ResizeWorkerRequest,
-): ImageTile[] {
+): PlannedWorkerTile[] {
   if (request.layout.featureExtractors.length === 0) {
     return planImageTiles(bitmap.width, bitmap.height, request);
   }
@@ -49,7 +53,46 @@ function planLayoutTiles(
     },
     request.layout,
   );
-  return planRegionTiles(regions, request);
+  const tiles = planRegionTiles(regions, request);
+  if (request.spatialFullPageFallback && tiles.length > 1) {
+    tiles.push(planImageTiles(bitmap.width, bitmap.height, request)[0]);
+  }
+  return tiles;
+}
+
+function looksLikeDarkUiTextBitmap(bitmap: ImageBitmap): boolean {
+  if (bitmap.width < 800 || bitmap.height < 400) return false;
+  const size = analysisSize(bitmap.width, bitmap.height);
+  const canvas = new OffscreenCanvas(size.width, size.height);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return false;
+  ctx.drawImage(bitmap, 0, 0, size.width, size.height);
+  const imageData = ctx.getImageData(0, 0, size.width, size.height);
+  let dark = 0;
+  let light = 0;
+  const total = size.width * size.height;
+  for (let index = 0; index < total; index += 1) {
+    const offset = index * 4;
+    const luminance =
+      imageData.data[offset] * 0.299 +
+      imageData.data[offset + 1] * 0.587 +
+      imageData.data[offset + 2] * 0.114;
+    if (luminance < 90) dark += 1;
+    if (luminance > 190) light += 1;
+  }
+  return dark / Math.max(1, total) >= 0.65 && light / Math.max(1, total) >= 0.04;
+}
+
+function invertCanvas(canvas: OffscreenCanvas): void {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  for (let index = 0; index < imageData.data.length; index += 4) {
+    imageData.data[index] = 255 - imageData.data[index];
+    imageData.data[index + 1] = 255 - imageData.data[index + 1];
+    imageData.data[index + 2] = 255 - imageData.data[index + 2];
+  }
+  ctx.putImageData(imageData, 0, 0);
 }
 
 let releaseNextTile: (() => void) | undefined;
@@ -65,6 +108,12 @@ async function processImage(request: ResizeWorkerRequest) {
   try {
     bitmap = await createImageBitmap(request.file);
     const tiles = planLayoutTiles(bitmap, request);
+    if (request.darkUiTextFallback && looksLikeDarkUiTextBitmap(bitmap)) {
+      tiles.push({
+        ...planImageTiles(bitmap.width, bitmap.height, request)[0],
+        invert: true,
+      });
+    }
     self.postMessage({
       type: "plan",
       total: tiles.length,
@@ -83,6 +132,8 @@ async function processImage(request: ResizeWorkerRequest) {
       self.postMessage({
         type: "passthrough",
         total: 1,
+        width: bitmap.width,
+        height: bitmap.height,
       } satisfies ResizeWorkerResponse);
       self.postMessage({
         type: "complete",
@@ -117,6 +168,7 @@ async function processImage(request: ResizeWorkerRequest) {
         tile.targetWidth,
         tile.targetHeight,
       );
+      if (tile.invert) invertCanvas(canvas);
       const blob = await canvas.convertToBlob({
         type: "image/jpeg",
         quality: 0.92,
@@ -126,6 +178,8 @@ async function processImage(request: ResizeWorkerRequest) {
         index,
         total: tiles.length,
         blob,
+        width: outputWidth,
+        height: outputHeight,
       } satisfies ResizeWorkerResponse);
       if (index < tiles.length - 1) await waitForNextTile();
     }

@@ -1,7 +1,10 @@
 import type { SourceType } from "../ocr/types";
 
 export type SourceSafetyTier =
-  "on_device" | "variable" | "controlled_backend" | "external_cloud";
+  | "on_device"
+  | "variable"
+  | "controlled_backend"
+  | "external_cloud";
 
 /**
  * Семантическая шкала безопасности источников.

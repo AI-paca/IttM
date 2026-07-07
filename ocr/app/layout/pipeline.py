@@ -1,6 +1,8 @@
+from dataclasses import replace
+
 from PIL import Image
 
-from app.chunking.vertical import LayoutRegion
+from app.chunking.vertical import LayoutRegion, mark_table_empty_slots
 from app.layout.contracts import LayoutDecision
 from app.layout.features import collect_layout_features
 from app.layout.selectors import select_layout_pipeline
@@ -30,4 +32,13 @@ def analyze_layout(
         decision,
         min_confirmed_cell_ratio=min_confirmed_cell_ratio,
     )
+    regions = [
+        replace(
+            region,
+            table=mark_table_empty_slots(region.image, region.table),
+        )
+        if region.kind == "table" and region.table is not None
+        else region
+        for region in regions
+    ]
     return regions, decision

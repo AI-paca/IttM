@@ -17,21 +17,24 @@ if str(OCR_ROOT) not in sys.path:
 
 from app.pipeline_config import OCR_PIPELINE_PROFILES  # noqa: E402
 from app.pipeline_flags import profile_flags  # noqa: E402
-from scripts.debug.debug_report import expected_match, result_body  # noqa: E402
+from scripts.debug.debug_report import (  # noqa: E402
+    MISSING_REFERENCE,
+    NOT_APPLICABLE,
+    NOT_CHECKED,
+    result_body,
+    scored_expected_match,
+)
 
-DEFAULT_THRESHOLD = 87.0
+DEFAULT_THRESHOLD = 90.0
 PDF_THRESHOLD = 90.0
-THRESHOLD_OVERRIDES = {
-    "Adobe Scan Oct 26, 2022 (1).pdf": 70.0,
-    "photo_6_2026-05-12_22-26-36.jpg": 50.0,
-}
+THRESHOLD_OVERRIDES: dict[str, float] = {}
 
 BROWSER_TESSERACT_METHOD = "browser-tesseract"
 DEFAULT_BROWSER_TESSERACT_PROFILE = "browser_tesseract_dewarp"
 
 
 def _float_or_none(value: str) -> float | None:
-    if value in {"", "n/a"}:
+    if value in {"", "n/a", NOT_APPLICABLE, NOT_CHECKED, MISSING_REFERENCE}:
         return None
     try:
         return float(value)
@@ -87,8 +90,31 @@ def _threshold_for_file(file_name: str) -> float:
 def _gate(value: str, threshold: float) -> str:
     parsed = _float_or_none(value)
     if parsed is None:
-        return "n/a"
+        if value in {NOT_APPLICABLE, NOT_CHECKED, MISSING_REFERENCE}:
+            return value
+        return NOT_CHECKED
     return "pass" if parsed >= threshold else "fail"
+
+
+def _quality_gate(row: dict[str, str], threshold: float) -> str:
+    success_gate = _gate(row.get("success_probability_percent", "n/a"), threshold)
+    compact_gate = row.get("compact_quality_gate", NOT_CHECKED) or NOT_CHECKED
+    grammar_gate = row.get("markdown_grammar_gate", NOT_CHECKED) or NOT_CHECKED
+    if (
+        success_gate == NOT_CHECKED
+        and compact_gate == NOT_CHECKED
+        and grammar_gate == NOT_CHECKED
+    ):
+        return _gate(row.get("match_percent", "n/a"), threshold)
+    if success_gate == "fail" or compact_gate == "fail" or grammar_gate == "fail":
+        return "fail"
+    if success_gate == "pass" and compact_gate in {"pass", NOT_APPLICABLE} and grammar_gate in {"pass", NOT_APPLICABLE}:
+        return "pass"
+    if MISSING_REFERENCE in {success_gate, compact_gate, grammar_gate}:
+        return MISSING_REFERENCE
+    if NOT_CHECKED in {success_gate, compact_gate, grammar_gate}:
+        return NOT_CHECKED
+    return NOT_APPLICABLE
 
 
 def _summary_index(rows: list[dict[str, str]]) -> dict[tuple[str, str], dict[str, str]]:
@@ -103,6 +129,18 @@ def _method_order(rows: list[dict[str, str]], include_auto: bool) -> list[str]:
             continue
         methods.setdefault(method, None)
     return list(methods)
+
+
+def _row_value(
+    row_by_method: dict[str, dict[str, str]],
+    method: str,
+    key: str,
+    default: str = NOT_CHECKED,
+) -> str:
+    row = row_by_method.get(method)
+    if row is None:
+        return default
+    return row.get(key) or default
 
 
 def _profile_name(
@@ -131,13 +169,38 @@ def _browser_comparison_rows(
         match_percent = "n/a"
         matched_lines = ""
         total_lines = ""
+        text_match_percent = "n/a"
+        compact_quality_percent = "n/a"
+        compact_quality_gate = NOT_CHECKED
+        lexical_t9_percent = "n/a"
+        lexical_t9_gate = NOT_CHECKED
+        markdown_grammar_percent = "n/a"
+        markdown_grammar_gate = NOT_CHECKED
+        markdown_grammar_notes = ""
+        success_probability_percent = "n/a"
+        success_probability_gate = NOT_CHECKED
+        failure_kind = NOT_CHECKED
         actual_path = browser_root / f"{file_name}.md"
         expected_path = expected_root / f"{file_name}.md"
         if row.get("exit") == "0" and actual_path.exists() and expected_path.exists():
-            match_percent, matched_lines, total_lines = expected_match(
+            match_score = scored_expected_match(
                 result_body(actual_path),
                 expected_path.read_text(encoding="utf-8", errors="replace"),
             )
+            match_percent = match_score.match_percent
+            matched_lines = match_score.matched_lines
+            total_lines = match_score.total_lines
+            text_match_percent = match_score.text_match_percent
+            compact_quality_percent = match_score.compact_quality_percent
+            compact_quality_gate = match_score.compact_quality_gate
+            lexical_t9_percent = match_score.lexical_t9_percent
+            lexical_t9_gate = match_score.lexical_t9_gate
+            markdown_grammar_percent = match_score.markdown_grammar_percent
+            markdown_grammar_gate = match_score.markdown_grammar_gate
+            markdown_grammar_notes = match_score.markdown_grammar_notes
+            success_probability_percent = match_score.success_probability_percent
+            success_probability_gate = match_score.success_probability_gate
+            failure_kind = match_score.failure_kind
 
         wall_seconds = "n/a"
         if row.get("wall_ms"):
@@ -152,6 +215,17 @@ def _browser_comparison_rows(
                 "match_percent": match_percent,
                 "matched_expected_lines": matched_lines,
                 "total_expected_lines": total_lines,
+                "text_match_percent": text_match_percent,
+                "compact_quality_percent": compact_quality_percent,
+                "compact_quality_gate": compact_quality_gate,
+                "lexical_t9_percent": lexical_t9_percent,
+                "lexical_t9_gate": lexical_t9_gate,
+                "markdown_grammar_percent": markdown_grammar_percent,
+                "markdown_grammar_gate": markdown_grammar_gate,
+                "markdown_grammar_notes": markdown_grammar_notes,
+                "success_probability_percent": success_probability_percent,
+                "success_probability_gate": success_probability_gate,
+                "failure_kind": failure_kind,
                 "table_markdown_files": "0",
             }
         )
@@ -193,6 +267,17 @@ def build_tables(
 
     result_header = ["file", "threshold"]
     result_header.extend(f"{method} %" for method in methods)
+    result_header.extend(f"{method} text gate" for method in methods)
+    result_header.extend(f"{method} compact quality %" for method in methods)
+    result_header.extend(f"{method} compact quality gate" for method in methods)
+    result_header.extend(f"{method} lexical t9 %" for method in methods)
+    result_header.extend(f"{method} lexical t9 gate" for method in methods)
+    result_header.extend(f"{method} markdown grammar %" for method in methods)
+    result_header.extend(f"{method} markdown grammar gate" for method in methods)
+    result_header.extend(f"{method} markdown grammar notes" for method in methods)
+    result_header.extend(f"{method} success probability %" for method in methods)
+    result_header.extend(f"{method} success probability gate" for method in methods)
+    result_header.extend(f"{method} failure kind" for method in methods)
     result_header.extend(f"{method} gate" for method in methods)
     result_header.extend(f"{method} profile" for method in methods)
     result_header.extend(f"{method} flags" for method in methods)
@@ -220,11 +305,55 @@ def build_tables(
         ]
         result_row = [file_name, f"{threshold:.0f}"]
         result_row.extend(
-            row_by_method.get(method, {}).get("match_percent", "n/a")
+            _row_value(row_by_method, method, "match_percent")
             for method in methods
         )
         result_row.extend(
-            _gate(row_by_method.get(method, {}).get("match_percent", "n/a"), threshold)
+            _gate(_row_value(row_by_method, method, "match_percent"), threshold)
+            for method in methods
+        )
+        result_row.extend(
+            _row_value(row_by_method, method, "compact_quality_percent")
+            for method in methods
+        )
+        result_row.extend(
+            _row_value(row_by_method, method, "compact_quality_gate")
+            for method in methods
+        )
+        result_row.extend(
+            _row_value(row_by_method, method, "lexical_t9_percent")
+            for method in methods
+        )
+        result_row.extend(
+            _row_value(row_by_method, method, "lexical_t9_gate")
+            for method in methods
+        )
+        result_row.extend(
+            _row_value(row_by_method, method, "markdown_grammar_percent")
+            for method in methods
+        )
+        result_row.extend(
+            _row_value(row_by_method, method, "markdown_grammar_gate")
+            for method in methods
+        )
+        result_row.extend(
+            _row_value(row_by_method, method, "markdown_grammar_notes", "")
+            for method in methods
+        )
+        result_row.extend(
+            _row_value(row_by_method, method, "success_probability_percent")
+            for method in methods
+        )
+        result_row.extend(
+            _row_value(row_by_method, method, "success_probability_gate")
+            for method in methods
+        )
+        result_row.extend(
+            _row_value(row_by_method, method, "failure_kind")
+            for method in methods
+        )
+        result_row.extend(
+            _quality_gate(row_by_method.get(method, {}), threshold)
             for method in methods
         )
         result_row.extend(profiles)
@@ -232,7 +361,7 @@ def build_tables(
 
         time_row = [file_name]
         time_row.extend(
-            row_by_method.get(method, {}).get("wall_seconds", "n/a")
+            _row_value(row_by_method, method, "wall_seconds")
             for method in methods
         )
         time_row.extend(profiles)

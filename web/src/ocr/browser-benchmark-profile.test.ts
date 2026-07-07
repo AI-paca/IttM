@@ -29,6 +29,10 @@ test("browser benchmark accepts explicit diagnostic profiles", () => {
     resolveBrowserBenchmarkProfile("browser_tesseract_raw").name,
     "browser_tesseract_raw",
   );
+  assert.equal(
+    resolveBrowserBenchmarkProfile("browser_tesseract_greek_math").languages,
+    "rus+eng+ell+equ",
+  );
   assert.throws(
     () => resolveBrowserBenchmarkProfile("missing-profile"),
     /Unknown browser OCR profile 'missing-profile'/,

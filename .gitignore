@@ -128,6 +128,7 @@ debug/reference/*
 !debug/reference/.gitkeep
 !debug/reference/SAMPLE_4k.png.md
 !debug/reference/SAMPLE_mixed_ru_en_zh_table_image.pdf.md
+!debug/reference/SAMPLE_mixed_ru_en_zh_table_image.pdf.raster.png.md
 
 # LLM review drafts
 docs/ревью от LLM/
@@ -140,6 +141,7 @@ docs/ревью от LLM/
 *.pt
 *.pth
 *.weights
+/.models/
 
 # Local Ollama deployment workdir
 scripts/ollama-deploy/.env
@@ -163,3 +165,8 @@ LLM-OCR/tmp/
 # Local agent and planning workspaces
 .zoo/
 draft-to-do.md
+PR_SAMPLE.md
+
+# Local one-off debug launchers
+scripts/debug/run-v*-full.sh
+scripts/debug/monitor-restart-v*-if-empty.sh

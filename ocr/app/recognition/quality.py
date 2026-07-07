@@ -16,11 +16,7 @@ def text_quality_score(text: str) -> float:
         letters = sum(character.isalpha() for character in token)
         digits = sum(character.isdigit() for character in token)
         separators = sum(character in "._:/-+" for character in token)
-        weird = sum(
-            not character.isalnum()
-            and character not in "._:/-+%()[]№₽$€"
-            for character in token
-        )
+        weird = sum(not character.isalnum() and character not in "._:/-+%()[]№₽$€" for character in token)
         script_count = sum(
             bool(re.search(pattern, token))
             for pattern in (
@@ -46,9 +42,7 @@ def text_quality_score(text: str) -> float:
     punctuation_noise = sum(
         1
         for character in text
-        if not character.isspace()
-        and not character.isalnum()
-        and character not in "._:/-+%()[]№₽$€=<>^{}*,;:!?|"
+        if not character.isspace() and not character.isalnum() and character not in "._:/-+%()[]№₽$€=<>^{}*,;:!?|"
     )
     non_space_chars = max(1, sum(not character.isspace() for character in text))
     useful_ratio = useful_chars / non_space_chars
@@ -56,13 +50,7 @@ def text_quality_score(text: str) -> float:
     avg_token_score = score / max(1, len(tokens))
     length_bonus = min(24.0, len(tokens) * 1.4)
     raw_noise_penalty = max(0, len(raw_tokens) - len(tokens)) * 0.4
-    return (
-        (avg_token_score * 6.0)
-        + length_bonus
-        + (useful_ratio * 24.0)
-        - (noisy_ratio * 60.0)
-        - raw_noise_penalty
-    )
+    return (avg_token_score * 6.0) + length_bonus + (useful_ratio * 24.0) - (noisy_ratio * 60.0) - raw_noise_penalty
 
 
 def text_noise_ratio(text: str) -> float:
@@ -72,8 +60,7 @@ def text_noise_ratio(text: str) -> float:
     noisy = [
         character
         for character in non_space
-        if not character.isalnum()
-        and character not in "._:/-+%()[]№₽$€=<>^{}*,;:!?|"
+        if not character.isalnum() and character not in "._:/-+%()[]№₽$€=<>^{}*,;:!?|"
     ]
     return len(noisy) / len(non_space)
 
@@ -138,11 +125,7 @@ def merge_language_word_candidates(
             overlaps_primary = False
             for existing in merged:
                 existing_bbox = existing.get("bbox")
-                if (
-                    existing_bbox
-                    and len(existing_bbox) == 4
-                    and bbox_overlap_ratio(bbox, existing_bbox) >= 0.72
-                ):
+                if existing_bbox and len(existing_bbox) == 4 and bbox_overlap_ratio(bbox, existing_bbox) >= 0.72:
                     overlaps_primary = True
                     break
             if not overlaps_primary:

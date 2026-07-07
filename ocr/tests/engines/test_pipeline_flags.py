@@ -38,9 +38,7 @@ def test_profile_flags_are_effective_runtime_strings():
 
 
 def test_table_first_profile_flags_are_explicitly_opt_in():
-    flags = profile_flags(
-        resolve_pipeline_profile("tesseract", "backend_tesseract_table_first")
-    )
+    flags = profile_flags(resolve_pipeline_profile("tesseract", "backend_tesseract_table_first"))
 
     assert "layout_selector:table_first_heuristic_v1" in flags
     assert "layout_stage:table_regions" in flags

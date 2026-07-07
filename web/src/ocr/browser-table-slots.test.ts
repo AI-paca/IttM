@@ -64,7 +64,7 @@ test("browser table reviewer clears noise without deleting its slot", async () =
   );
 
   assert.match(markdown, /^\| Name \| Value \| Note \|/m);
-  assert.match(markdown, /^\| Alice \| 10 \|  \|$/m);
+  assert.match(markdown, /^\| Alice \| 10 \| {2}\|$/m);
   assert.match(markdown, /^\| Bob \| 20 \| ok \|$/m);
 });
 

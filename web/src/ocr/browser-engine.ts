@@ -52,18 +52,17 @@ export async function runBrowserOcrLowMemory(
           `Обработка сегмента ${prepared.index + 1}/${prepared.total}...`,
         );
       }
-      const text =
-        !shouldUseBrowserTableSlots(prepared, profile)
-          ? await workerLease.recognize(
-              prepared.input,
-              prepared.pageSegmentationMode,
-            )
-          : await recognizeBrowserTableAware(
-              workerLease,
-              prepared.input,
-              profile,
-              prepared.pageSegmentationMode,
-            );
+      const text = !shouldUseBrowserTableSlots(prepared, profile)
+        ? await workerLease.recognize(
+            prepared.input,
+            prepared.pageSegmentationMode,
+          )
+        : await recognizeBrowserTableAware(
+            workerLease,
+            prepared.input,
+            profile,
+            prepared.pageSegmentationMode,
+          );
       chunks.push(text);
       const nextMerged = mergeOcrTextChunks(chunks);
       onChunkExtracted?.(nextMerged.slice(merged.length));

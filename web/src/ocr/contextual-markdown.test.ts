@@ -13,7 +13,8 @@ test("contextual markdown grammar does not invent Amazon or rubric scaffolds", (
     /\| Badge \| Product \| Rating \| Bought \| Deal \| Price \| Extra \| Action \|/,
   );
 
-  const rubricInput = "Задание Дедлайн 4/10 6/10 Репозиторий ДЗ 5. Тестирование Тесты есть";
+  const rubricInput =
+    "Задание Дедлайн 4/10 6/10 Репозиторий ДЗ 5. Тестирование Тесты есть";
   const rubric = applyContextualMarkdownGrammar(rubricInput, true);
   assert.equal(rubric, rubricInput);
   assert.doesNotMatch(rubric, /\| ДЗ 5\. Тестирование \| 05\.06\.2026 \|/);

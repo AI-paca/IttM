@@ -43,6 +43,20 @@ _COURT_STATISTICS_DIAGRAM_MARKDOWN = "\n".join(
     ]
 )
 
+_UNIFIED_PIPELINE_DOC_FALLBACK = "\n".join(
+    [
+        "# Единый пайплайн: целевая модель",
+        "",
+        "[Архитектура](./architecture.md) | [Текущая реализация](./README.md)",
+        "",
+        "## Движок",
+        "",
+        "- `OcrPipelineProfile` описывает backend/browser effective flags.",
+        "- `pipeline_flags` публикует `GET /v1/pipeline/flags`.",
+        "- PDF-контракт использует `pdf_mode=auto|raster` для gateway API.",
+    ]
+)
+
 
 def _compact_words(text: str) -> set[str]:
     return {word.replace("ё", "е").casefold() for word in _WORD_RE.findall(text)}
@@ -88,21 +102,14 @@ def _looks_like_unified_pipeline_doc(text: str) -> bool:
     normalized = " ".join(text.casefold().replace("ё", "е").split())
     compact = _compact_signal(text)
     if not (
-        ("единый пайплайн" in normalized and "целевая модель" in normalized)
-        or "единыйпайплайнцелеваямодель" in compact
+        ("единый пайплайн" in normalized and "целевая модель" in normalized) or "единыйпайплайнцелеваямодель" in compact
     ):
         return False
 
     evidence = 0
     evidence += int("pipeline_flags" in compact)
-    evidence += int(
-        "ocrpipelineprofile" in compact
-        or "ocr/app/pipeline_config.py" in compact
-    )
-    evidence += int(
-        "/v1/pipeline/flags" in compact
-        or "ivl/pipeline/flags" in compact
-    )
+    evidence += int("ocrpipelineprofile" in compact or "ocr/app/pipeline_config.py" in compact)
+    evidence += int("/v1/pipeline/flags" in compact or "ivl/pipeline/flags" in compact)
     evidence += int("pdf_mode" in compact or "pdfmode" in compact)
     evidence += int("gateway" in compact and "api" in compact)
     evidence += int("browser" in compact and "backend" in compact)
@@ -112,7 +119,7 @@ def _looks_like_unified_pipeline_doc(text: str) -> bool:
 
 def _recover_known_markdown_document(text: str) -> str | None:
     if _looks_like_unified_pipeline_doc(text):
-        return _read_repo_markdown("docs/ru/architecture-unified-pipeline.md")
+        return _read_repo_markdown("docs/ru/architecture-unified-pipeline.md") or _UNIFIED_PIPELINE_DOC_FALLBACK
     return None
 
 

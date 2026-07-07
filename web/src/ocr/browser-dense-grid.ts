@@ -198,7 +198,9 @@ export function denseGridContentBoxPixels(
       const alpha = rgba[offset + 3];
       if (alpha === 0) continue;
       const luminance =
-        rgba[offset] * 0.299 + rgba[offset + 1] * 0.587 + rgba[offset + 2] * 0.114;
+        rgba[offset] * 0.299 +
+        rgba[offset + 1] * 0.587 +
+        rgba[offset + 2] * 0.114;
       if (luminance >= 245) continue;
       foreground += 1;
       left = Math.min(left, x);
@@ -208,7 +210,11 @@ export function denseGridContentBoxPixels(
     }
   }
 
-  if (foreground < Math.max(16, width * height * 0.0002) || right <= left || bottom <= top) {
+  if (
+    foreground < Math.max(16, width * height * 0.0002) ||
+    right <= left ||
+    bottom <= top
+  ) {
     return null;
   }
 

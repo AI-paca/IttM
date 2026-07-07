@@ -257,7 +257,7 @@ def test_tesseract_t9_candidate_selection_rejects_cjk_symbol_noise():
 
 def test_tesseract_t9_word_retry_uses_quality_not_only_count():
     noisy_words = [
-        {"text": "ЖЕ\"", "bbox": (0, 0, 10, 10), "conf": 42},
+        {"text": 'ЖЕ"', "bbox": (0, 0, 10, 10), "conf": 42},
         {"text": "(((", "bbox": (12, 0, 20, 10), "conf": 42},
         {"text": "///", "bbox": (22, 0, 30, 10), "conf": 42},
         {"text": "©", "bbox": (32, 0, 40, 10), "conf": 42},

@@ -9,10 +9,7 @@ test("small reviewer parses strict and descriptive decisions", () => {
     parseTextReviewerDecision("The candidate is a random glyph."),
     false,
   );
-  assert.equal(
-    parseTextReviewerDecision("This is meaningful number."),
-    true,
-  );
+  assert.equal(parseTextReviewerDecision("This is meaningful number."), true);
 });
 
 test("small reviewer fails open when the tiny model only echoes input", () => {

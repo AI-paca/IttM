@@ -30,12 +30,7 @@ def test_expected_lines_skip_single_column_table_separator():
 
 def test_two_column_reference_is_scored_as_a_table():
     debug_report = _load_debug_report()
-    markdown = (
-        "| Name | Score |\n"
-        "| --- | --- |\n"
-        "| Alice | 10 |\n"
-        "| Bob | 9 |\n"
-    )
+    markdown = "| Name | Score |\n" "| --- | --- |\n" "| Alice | 10 |\n" "| Bob | 9 |\n"
 
     spec = debug_report.table_fixture_spec(markdown)
 
@@ -47,19 +42,17 @@ def test_two_column_reference_is_scored_as_a_table():
 
 def test_table_parser_keeps_escaped_pipes_inside_cells():
     debug_report = _load_debug_report()
-    markdown = (
-        "| Product | Shop |\n"
-        "| --- | --- |\n"
-        "| SPF50 \\| Sun | Store |\n"
-    )
+    markdown = "| Product | Shop |\n" "| --- | --- |\n" "| SPF50 \\| Sun | Store |\n"
 
     tables = debug_report.strict_reference_tables(markdown)
     spec = debug_report.table_fixture_spec(markdown)
 
-    assert tables == [[
-        ["Product", "Shop"],
-        ["SPF50 | Sun", "Store"],
-    ]]
+    assert tables == [
+        [
+            ["Product", "Shop"],
+            ["SPF50 | Sun", "Store"],
+        ]
+    ]
     assert spec is not None
     assert spec.expected_rows == 2
     assert spec.expected_cols == 2
@@ -142,13 +135,7 @@ def test_plain_reference_headings_are_inferred_symmetrically():
 
 def test_identical_plain_reference_structure_scores_one_hundred():
     debug_report = _load_debug_report()
-    markdown = (
-        "Policy\n"
-        "Trust boundaries\n"
-        "Local processing\n"
-        "- upload stays local\n"
-        "- no network request\n"
-    )
+    markdown = "Policy\n" "Trust boundaries\n" "Local processing\n" "- upload stays local\n" "- no network request\n"
 
     score = debug_report.scored_expected_match(markdown, markdown)
 
@@ -166,13 +153,7 @@ def test_strict_table_reference_does_not_infer_plain_paragraphs_as_headings():
         "- first\n"
         "- second\n"
     )
-    actual = (
-        "| x x |  |\n"
-        "| --- | --- |\n\n"
-        "x x x\n\n"
-        "- x\n"
-        "- x\n"
-    )
+    actual = "| x x |  |\n" "| --- | --- |\n\n" "x x x\n\n" "- x\n" "- x\n"
 
     score, notes = debug_report.score_markdown_structure(actual, expected)
 
@@ -182,17 +163,12 @@ def test_strict_table_reference_does_not_infer_plain_paragraphs_as_headings():
 
 def test_large_table_shape_ignores_tiny_actual_prefix_table():
     debug_report = _load_debug_report()
-    expected = (
-        "| A | B | C |\n"
-        "| --- | --- | --- |\n"
-        + "\n".join("| 1 | 2 | 3 |" for _ in range(28))
-    )
+    expected = "| A | B | C |\n" "| --- | --- | --- |\n" + "\n".join("| 1 | 2 | 3 |" for _ in range(28))
     actual = (
         "| noise |  |\n"
         "| --- | --- |\n\n"
         "| x | x | x |\n"
-        "| --- | --- | --- |\n"
-        + "\n".join("| x | x | x |" for _ in range(31))
+        "| --- | --- | --- |\n" + "\n".join("| x | x | x |" for _ in range(31))
     )
 
     score, notes = debug_report.score_table_structure(actual, expected)
@@ -205,12 +181,7 @@ def test_large_table_shape_ignores_tiny_actual_prefix_table():
 def test_expected_match_keeps_table_cell_score_diagnostic():
     debug_report = _load_debug_report()
 
-    expected = (
-        "| A | B | C |\n"
-        "| --- | --- | --- |\n"
-        "| alpha | beta | gamma |\n"
-        "| one | two | three |\n"
-    )
+    expected = "| A | B | C |\n" "| --- | --- | --- |\n" "| alpha | beta | gamma |\n" "| one | two | three |\n"
     actual = (
         "| A B C | Column 2 | Column 3 |\n"
         "| --- | --- | --- |\n"
@@ -232,10 +203,7 @@ def test_scored_expected_match_rejects_table_token_soup():
     debug_report = _load_debug_report()
 
     expected = (
-        "| Name | Score | Status |\n"
-        "| --- | --- | --- |\n"
-        "| Alice | Ten | Pass |\n"
-        "| Bob | Nine | Fail |\n"
+        "| Name | Score | Status |\n" "| --- | --- | --- |\n" "| Alice | Ten | Pass |\n" "| Bob | Nine | Fail |\n"
     )
     actual = "Name Score Status Alice Ten Pass Bob Nine Fail"
 
@@ -280,12 +248,7 @@ def test_scored_expected_match_penalizes_duplicate_table_fallback():
 def test_scored_expected_match_allows_small_non_table_anchor_footer():
     debug_report = _load_debug_report()
 
-    expected = (
-        "| № | Код | Русский |\n"
-        "| --- | --- | --- |\n"
-        "| 01 | й-A1 | Привет |\n"
-        "| 02 | й-B2 | Москва |\n"
-    )
+    expected = "| № | Код | Русский |\n" "| --- | --- | --- |\n" "| 01 | й-A1 | Привет |\n" "| 02 | й-B2 | Москва |\n"
     actual = expected + "\nExpected tokens й-A1 Привет\n"
 
     score = debug_report.scored_expected_match(actual, expected)
@@ -301,11 +264,7 @@ def test_scored_expected_match_rejects_table_reference_without_markdown_structur
         "Image-only PDF merged subsection rows Markdown placeholder cells\n"
         "01 й-A1 Привет\n"
     )
-    actual = (
-        "| № | Код | Русский |\n"
-        "| --- | --- | --- |\n"
-        "| 01 | й-A1 | Привет |\n"
-    )
+    actual = "| № | Код | Русский |\n" "| --- | --- | --- |\n" "| 01 | й-A1 | Привет |\n"
 
     score = debug_report.scored_expected_match(actual, expected)
 
@@ -591,13 +550,7 @@ def test_markdown_grammar_compares_control_symbols_without_text():
         "- second noisy item\n"
         "- third noisy item"
     )
-    expected = (
-        "# clean heading\n\n"
-        "clean paragraph\n\n"
-        "- first item\n"
-        "- second item\n"
-        "- third item"
-    )
+    expected = "# clean heading\n\n" "clean paragraph\n\n" "- first item\n" "- second item\n" "- third item"
 
     score = debug_report.scored_expected_match(actual, expected)
     assert score.markdown_grammar_percent == "100.00"
@@ -674,18 +627,8 @@ def test_markdown_grammar_scores_mixed_width_table_shapes_in_order():
 
 def test_large_table_shape_filter_is_symmetric_for_tiny_reference_tables():
     debug_report = _load_debug_report()
-    small = (
-        "| Key | Value |\n"
-        "| --- | --- |\n"
-        "| a | b |\n"
-        "| c | d |\n"
-        "| e | f |\n"
-    )
-    large = (
-        "| A | B | C | D |\n"
-        "| --- | --- | --- | --- |\n"
-        + "\n".join("| 1 | 2 | 3 | 4 |" for _ in range(40))
-    )
+    small = "| Key | Value |\n" "| --- | --- |\n" "| a | b |\n" "| c | d |\n" "| e | f |\n"
+    large = "| A | B | C | D |\n" "| --- | --- | --- | --- |\n" + "\n".join("| 1 | 2 | 3 | 4 |" for _ in range(40))
     expected = f"{small}\n\n{large}"
     actual = f"{small}\n\n{large}"
 
@@ -700,9 +643,12 @@ def test_large_table_shape_filter_is_symmetric_for_tiny_reference_tables():
 def test_markdown_linter_does_not_treat_data_as_broken_controls():
     debug_report = _load_debug_report()
 
-    assert debug_report.lint_markdown_controls(
-        "---\n-5\n#84} FA\nx+y\n",
-    ) == ()
+    assert (
+        debug_report.lint_markdown_controls(
+            "---\n-5\n#84} FA\nx+y\n",
+        )
+        == ()
+    )
     assert debug_report.lint_markdown_controls("- \n####### bad") == (
         "line 1: invalid list item",
         "line 2: invalid heading",
@@ -711,14 +657,7 @@ def test_markdown_linter_does_not_treat_data_as_broken_controls():
 
 def test_markdown_shadow_uses_sparse_357_state_sums():
     debug_report = _load_debug_report()
-    markdown = (
-        "# Заголовок\n"
-        "- пункт\n"
-        "  - вложенный пункт\n"
-        "| A | B |\n"
-        "| --- | --- |\n"
-        "| C | D |\n"
-    )
+    markdown = "# Заголовок\n" "- пункт\n" "  - вложенный пункт\n" "| A | B |\n" "| --- | --- |\n" "| C | D |\n"
 
     assert debug_report.markdown_shadow_codes(markdown) == (
         3,

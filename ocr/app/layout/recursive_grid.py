@@ -5,18 +5,18 @@ from dataclasses import dataclass, replace
 import numpy as np
 from PIL import Image, ImageFilter
 
+from app.layout import sparse_codes as _sparse_codes
 from app.layout.sparse_codes import (
     EMPTY_SLOT_CODE,
-    MERGE_BOTH_CODE,
     MERGE_LEFT_CODE,
     MERGE_LEFT_CODES,
     MERGE_UP_CODE,
     MERGE_UP_CODES,
-    SPARSE_SHADOW_CODES,
 )
 from app.preprocessing import IMAGE_PREPROCESSING_STEPS
 
 Box = tuple[int, int, int, int]
+SPARSE_SHADOW_CODES = _sparse_codes.SPARSE_SHADOW_CODES
 
 
 @dataclass(frozen=True)
@@ -177,10 +177,7 @@ def project_sparse_shadow(
     anchor_track_by_leaf: dict[int, int] = {}
     projection_tracks_by_leaf: dict[int, tuple[int, ...]] = {}
     for group in groups:
-        group_anchor = min(
-            _leaf_content_track(leaf)
-            for leaf in group.leaves
-        )
+        group_anchor = min(_leaf_content_track(leaf) for leaf in group.leaves)
         for leaf in group.leaves:
             anchor_track_by_leaf[id(leaf)] = group_anchor
             projection_tracks_by_leaf[id(leaf)] = _merge_positions(
@@ -191,11 +188,7 @@ def project_sparse_shadow(
                 tolerance=max(2, page_width // 300),
             )
     x_tracks = _merge_positions(
-        [
-            track
-            for leaf in ordered
-            for track in projection_tracks_by_leaf[id(leaf)]
-        ],
+        [track for leaf in ordered for track in projection_tracks_by_leaf[id(leaf)]],
         tolerance=max(4, page_width // 250),
     )
     occupied: set[tuple[int, int]] = set()
@@ -211,9 +204,7 @@ def project_sparse_shadow(
                 {
                     min(
                         range(len(x_tracks)),
-                        key=lambda index: abs(
-                            x_tracks[index] - track
-                        ),
+                        key=lambda index: abs(x_tracks[index] - track),
                     )
                     for track in tracks
                 }
@@ -226,26 +217,19 @@ def project_sparse_shadow(
                         row,
                         min(
                             range(len(x_tracks)),
-                            key=lambda index: abs(
-                                x_tracks[index] - track
-                            ),
+                            key=lambda index: abs(x_tracks[index] - track),
                         ),
                     )
                 )
             anchor_column = min(
                 range(len(x_tracks)),
-                key=lambda index: abs(
-                    x_tracks[index] - anchor_track_by_leaf[id(leaf)]
-                ),
+                key=lambda index: abs(x_tracks[index] - anchor_track_by_leaf[id(leaf)]),
             )
             anchor = (row, anchor_column)
             projected_cells.append((leaf, anchor, cells))
             row += 1
     codes = set()
-    payload_cells = {
-        anchor
-        for _, anchor, _ in projected_cells
-    }
+    payload_cells = {anchor for _, anchor, _ in projected_cells}
     cells_by_row: dict[int, list[tuple[int, int]]] = {}
     for cell in occupied:
         cells_by_row.setdefault(cell[0], []).append(cell)
@@ -262,13 +246,7 @@ def project_sparse_shadow(
                 codes.add((cell[0], cell[1], code))
     projection = []
     for leaf, anchor, cells in projected_cells:
-        leaf_codes = tuple(
-            sorted(
-                code
-                for code in codes
-                if (code[0], code[1]) in cells
-            )
-        )
+        leaf_codes = tuple(sorted(code for code in codes if (code[0], code[1]) in cells))
         projection.append((leaf, anchor, leaf_codes))
     return SparseShadowProjection(
         codes=frozenset(codes),
@@ -285,14 +263,7 @@ def sparse_shadow_signature(
     return SparseShadowSignature(
         rows=projection.rows,
         cols=projection.cols,
-        anchors=tuple(
-            sorted(
-                {
-                    anchor
-                    for _, anchor, _ in projection.leaf_projection
-                }
-            )
-        ),
+        anchors=tuple(sorted({anchor for _, anchor, _ in projection.leaf_projection})),
         codes=tuple(sorted(projection.codes)),
         x_tracks=projection.x_tracks,
     )
@@ -302,27 +273,9 @@ def classify_sparse_shadow(
     signature: SparseShadowSignature,
 ) -> SparseShadowProfile:
     occupied_rows = len({row for row, _ in signature.anchors})
-    merge_up_rows = len(
-        {
-            row
-            for row, _, code in signature.codes
-            if code in MERGE_UP_CODES
-        }
-    )
-    merge_left_rows = len(
-        {
-            row
-            for row, _, code in signature.codes
-            if code in MERGE_LEFT_CODES
-        }
-    )
-    indented_rows = len(
-        {
-            row
-            for row, column in signature.anchors
-            if column > 0
-        }
-    )
+    merge_up_rows = len({row for row, _, code in signature.codes if code in MERGE_UP_CODES})
+    merge_left_rows = len({row for row, _, code in signature.codes if code in MERGE_LEFT_CODES})
+    indented_rows = len({row for row, column in signature.anchors if column > 0})
     dash_rows = 0
 
     if (
@@ -332,11 +285,7 @@ def classify_sparse_shadow(
         and indented_rows * 2 >= max(1, occupied_rows)
     ):
         kind = "list"
-    elif (
-        signature.cols >= 3
-        and merge_left_rows >= 2
-        and merge_left_rows * 2 >= max(1, occupied_rows)
-    ):
+    elif signature.cols >= 3 and merge_left_rows >= 2 and merge_left_rows * 2 >= max(1, occupied_rows):
         kind = "table"
     elif signature.cols <= 2 or merge_left_rows == 0:
         kind = "text"
@@ -364,20 +313,9 @@ def group_recursive_leaves(
     if not ordered:
         return []
 
-    centers = [
-        (leaf.content_bbox[1] + leaf.content_bbox[3]) / 2
-        for leaf in ordered
-    ]
-    distances = [
-        current - previous
-        for previous, current in zip(centers, centers[1:])
-        if current > previous
-    ]
-    normal_pitch = (
-        float(np.quantile(distances, 0.65))
-        if distances
-        else 0.0
-    )
+    centers = [(leaf.content_bbox[1] + leaf.content_bbox[3]) / 2 for leaf in ordered]
+    distances = [current - previous for previous, current in zip(centers, centers[1:]) if current > previous]
+    normal_pitch = float(np.quantile(distances, 0.65)) if distances else 0.0
     content_gaps = [
         current.content_bbox[1] - previous.content_bbox[3]
         for previous, current in zip(ordered, ordered[1:])
@@ -388,21 +326,10 @@ def group_recursive_leaves(
     groups: list[list[RecursiveGridLeaf]] = []
     for leaf_index, leaf in enumerate(ordered):
         starts_marker = _starts_with_marker(leaf)
-        content_gap = (
-            leaf.content_bbox[1] - ordered[leaf_index - 1].content_bbox[3]
-            if leaf_index > 0
-            else 0
-        )
-        large_gap = (
-            leaf_index > 0
-            and (
-                content_gap > gap_threshold
-                or (
-                    normal_pitch > 0
-                    and centers[leaf_index] - centers[leaf_index - 1]
-                    > normal_pitch * 1.55
-                )
-            )
+        content_gap = leaf.content_bbox[1] - ordered[leaf_index - 1].content_bbox[3] if leaf_index > 0 else 0
+        large_gap = leaf_index > 0 and (
+            content_gap > gap_threshold
+            or (normal_pitch > 0 and centers[leaf_index] - centers[leaf_index - 1] > normal_pitch * 1.55)
         )
         if not groups or starts_marker or large_gap:
             groups.append([leaf])
@@ -433,27 +360,16 @@ def _starts_with_marker(leaf: RecursiveGridLeaf) -> bool:
     if leaf.left_tracks[0] <= leaf.source_bbox[0] + max(8, width * 0.02):
         return False
     gap = leaf.left_tracks[1] - leaf.left_tracks[0]
-    return (
-        gap >= max(12, width * 0.015)
-        and gap <= max(120, width * 0.12)
-    )
+    return gap >= max(12, width * 0.015) and gap <= max(120, width * 0.12)
 
 
 def _leaf_content_track(leaf: RecursiveGridLeaf) -> int:
     excluded = {
         *leaf.merge_left_tracks,
-        *(
-            (leaf.dash_track,)
-            if leaf.dash_track is not None
-            else ()
-        ),
+        *((leaf.dash_track,) if leaf.dash_track is not None else ()),
     }
     return next(
-        (
-            track
-            for track in leaf.left_tracks
-            if track not in excluded
-        ),
+        (track for track in leaf.left_tracks if track not in excluded),
         leaf.content_bbox[0],
     )
 
@@ -467,10 +383,7 @@ def _segment_node(
     history: tuple[RegionDecision, ...],
     edge_insets: tuple[float, float],
 ) -> list[RecursiveGridLeaf]:
-    if (
-        depth < config.max_depth
-        and image.height > config.max_region_height
-    ):
+    if depth < config.max_depth and image.height > config.max_region_height:
         children = []
         parent_decision = RegionDecision(
             depth=depth,
@@ -559,9 +472,7 @@ def _segment_node(
                     split=f"horizontal_seam:{seam_cost:.4f}",
                 )
                 upper = aligned.crop((0, 0, aligned.width, upper_bottom))
-                lower = aligned.crop(
-                    (0, lower_top, aligned.width, aligned.height)
-                )
+                lower = aligned.crop((0, lower_top, aligned.width, aligned.height))
                 upper_bbox = _map_local_box(
                     (0, 0, aligned.width, upper_bottom),
                     aligned.size,
@@ -604,9 +515,7 @@ def _segment_node(
                 split=f"vertical_gutter:{gutter_width}",
             )
             left = aligned.crop((0, 0, cut, aligned.height))
-            right = aligned.crop(
-                (cut, 0, aligned.width, aligned.height)
-            )
+            right = aligned.crop((cut, 0, aligned.width, aligned.height))
             left_bbox = _map_local_box(
                 (0, 0, cut, aligned.height),
                 aligned.size,
@@ -666,10 +575,7 @@ def _segment_node(
         raw_mask,
         min_gap=config.min_separator_gap,
     )
-    if (
-        not left_tracks
-        or float(np.mean(structural_mask)) < 0.0005
-    ):
+    if not left_tracks or float(np.mean(structural_mask)) < 0.0005:
         aligned.close()
         return []
 
@@ -678,13 +584,9 @@ def _segment_node(
         aligned.size,
         source_bbox,
     )
-    source_tracks = tuple(
-        _map_x(track, aligned.width, source_bbox)
-        for track in left_tracks
-    )
+    source_tracks = tuple(_map_x(track, aligned.width, source_bbox) for track in left_tracks)
     source_merge_left_tracks = tuple(
-        _map_x(track, aligned.width, source_bbox)
-        for track in (*merge_left_tracks, *rule_tracks)
+        _map_x(track, aligned.width, source_bbox) for track in (*merge_left_tracks, *rule_tracks)
     )
     return [
         RecursiveGridLeaf(
@@ -795,18 +697,14 @@ def _dominant_vertical_rule_tracks(
     vertical_tracks = tuple(
         (start + end) // 2
         for start, end in _true_groups(column_coverage >= 0.55)
-        if end - start <= maximum_rule_width
-        and start > left + min_gap
-        and end < right - min_gap
+        if end - start <= maximum_rule_width and start > left + min_gap and end < right - min_gap
     )
     row_coverage = np.mean(mask[:, left:right], axis=1)
     maximum_rule_height = max(4, mask.shape[0] // 100)
     horizontal_rules = tuple(
         (start + end) // 2
         for start, end in _true_groups(row_coverage >= 0.30)
-        if end - start <= maximum_rule_height
-        and start > top + min_gap
-        and end < bottom - min_gap
+        if end - start <= maximum_rule_height and start > top + min_gap and end < bottom - min_gap
     )
     if len(vertical_tracks) < 2 or len(horizontal_rules) < 5:
         return ()
@@ -857,17 +755,10 @@ def _deskew_region(
         )
 
     coarse_angles = (-6.0, -4.0, -2.0, 0.0, 2.0, 4.0, 6.0)
-    scores = {
-        angle: _row_concentration(mask_image, angle)
-        for angle in coarse_angles
-    }
+    scores = {angle: _row_concentration(mask_image, angle) for angle in coarse_angles}
     best = max(scores, key=scores.get)
     refined_angles = (best - 1.0, best - 0.5, best, best + 0.5, best + 1.0)
-    refined = {
-        angle: _row_concentration(mask_image, angle)
-        for angle in refined_angles
-        if -7.0 <= angle <= 7.0
-    }
+    refined = {angle: _row_concentration(mask_image, angle) for angle in refined_angles if -7.0 <= angle <= 7.0}
     best = max(refined, key=refined.get)
     baseline = max(1e-6, scores[0.0])
     if abs(best) < 0.5 or refined[best] < baseline * 1.04:
@@ -912,11 +803,7 @@ def _vertical_lane_separator(
     min_gap: int,
 ) -> tuple[int, int] | None:
     height, width = mask.shape
-    if (
-        width < max(160, min_cell_height * 4)
-        or height < min_cell_height
-        or not np.any(mask)
-    ):
+    if width < max(160, min_cell_height * 4) or height < min_cell_height or not np.any(mask):
         return None
 
     active_groups = _true_groups(np.any(mask, axis=0))
@@ -941,44 +828,24 @@ def _vertical_lane_separator(
         gutter_right = right_group[0]
         gutter_width = gutter_right - gutter_left
         cut = (gutter_left + gutter_right) // 2
-        if (
-            gutter_width < minimum_gutter
-            or cut < minimum_lane_width
-            or width - cut < minimum_lane_width
-        ):
+        if gutter_width < minimum_gutter or cut < minimum_lane_width or width - cut < minimum_lane_width:
             continue
 
-        left_rows = np.flatnonzero(
-            np.any(mask[:, :gutter_left], axis=1)
-        )
-        right_rows = np.flatnonzero(
-            np.any(mask[:, gutter_right:], axis=1)
-        )
+        left_rows = np.flatnonzero(np.any(mask[:, :gutter_left], axis=1))
+        right_rows = np.flatnonzero(np.any(mask[:, gutter_right:], axis=1))
         if not left_rows.size or not right_rows.size:
             continue
 
         def logical_row_count(lane: np.ndarray) -> int:
             lane_width = lane.shape[1]
             row_ink = np.count_nonzero(lane, axis=1)
-            row_groups = _true_groups(
-                row_ink >= max(1, round(lane_width * 0.001))
-            )
-            return sum(
-                end - start >= 2
-                for start, end in row_groups
-            )
+            row_groups = _true_groups(row_ink >= max(1, round(lane_width * 0.001)))
+            return sum(end - start >= 2 for start, end in row_groups)
 
-        if (
-            logical_row_count(mask[:, :gutter_left]) < 2
-            or logical_row_count(mask[:, gutter_right:]) < 2
-        ):
+        if logical_row_count(mask[:, :gutter_left]) < 2 or logical_row_count(mask[:, gutter_right:]) < 2:
             continue
 
-        overlap = (
-            min(int(left_rows[-1]), int(right_rows[-1]))
-            - max(int(left_rows[0]), int(right_rows[0]))
-            + 1
-        )
+        overlap = min(int(left_rows[-1]), int(right_rows[-1])) - max(int(left_rows[0]), int(right_rows[0])) + 1
         smaller_span = min(
             int(left_rows[-1] - left_rows[0] + 1),
             int(right_rows[-1] - right_rows[0] + 1),
@@ -1052,9 +919,7 @@ def _horizontal_projection(
         return mask, inherited_insets
 
     column_ink = np.count_nonzero(mask, axis=0)
-    groups = _true_groups(
-        column_ink >= max(2, round(height * 0.01))
-    )
+    groups = _true_groups(column_ink >= max(2, round(height * 0.01)))
     merge_gap = max(min_gap * 2, width // 200, 4)
     merged: list[list[int]] = []
     for start, end in groups:
@@ -1090,14 +955,10 @@ def _horizontal_projection(
             if end - start > max_clutter_width:
                 continue
 
-            active_rows = np.flatnonzero(
-                np.any(mask[:, start:end], axis=1)
-            )
+            active_rows = np.flatnonzero(np.any(mask[:, start:end], axis=1))
             if not active_rows.size:
                 continue
-            row_span = (
-                int(active_rows[-1] - active_rows[0] + 1) / height
-            )
+            row_span = int(active_rows[-1] - active_rows[0] + 1) / height
             row_coverage = active_rows.size / height
             if row_span < 0.65 or row_coverage < 0.05:
                 continue
@@ -1139,11 +1000,7 @@ def _left_tracks(
             merged.append([start, end])
         else:
             merged[-1][1] = end
-    wide = [
-        (start, end)
-        for start, end in merged
-        if end - start >= max(2, min_gap // 2)
-    ]
+    wide = [(start, end) for start, end in merged if end - start >= max(2, min_gap // 2)]
     if not wide:
         return (0, 0, width, height), (), None, ()
 
@@ -1151,27 +1008,21 @@ def _left_tracks(
     if (
         len(active_groups) >= 2
         and active_groups[0][0] <= min_gap
-        and active_groups[0][1] - active_groups[0][0]
-        <= min_gap * 2
-        and active_groups[1][0] - active_groups[0][1]
-        >= min_gap * 2
+        and active_groups[0][1] - active_groups[0][0] <= min_gap * 2
+        and active_groups[1][0] - active_groups[0][1] >= min_gap * 2
     ):
         active_groups = active_groups[1:]
     if (
         len(active_groups) >= 2
         and width - active_groups[-1][1] <= min_gap
-        and active_groups[-1][1] - active_groups[-1][0]
-        <= min_gap * 2
-        and active_groups[-1][0] - active_groups[-2][1]
-        >= min_gap * 2
+        and active_groups[-1][1] - active_groups[-1][0] <= min_gap * 2
+        and active_groups[-1][0] - active_groups[-2][1] >= min_gap * 2
     ):
         active_groups = active_groups[:-1]
     content_left = max(0, active_groups[0][0] - min_gap)
     content_right = min(width, active_groups[-1][1] + min_gap)
     row_ink = np.count_nonzero(mask, axis=1)
-    row_groups = _true_groups(
-        row_ink >= max(2, round(width * 0.008))
-    )
+    row_groups = _true_groups(row_ink >= max(2, round(width * 0.008)))
     if row_groups:
         content_top = max(0, row_groups[0][0] - min_gap)
         content_bottom = min(height, row_groups[-1][1] + min_gap)
@@ -1189,43 +1040,29 @@ def _left_tracks(
         if (
             marker_width <= marker_limit
             and second_start - first_end >= min_gap
-            and second_start - first_end
-            <= max(120, round(width * 0.12))
+            and second_start - first_end <= max(120, round(width * 0.12))
         ):
-            marker_rows = np.flatnonzero(
-                np.any(mask[:, first_start:first_end], axis=1)
-            )
-            marker_height = (
-                int(marker_rows[-1] - marker_rows[0] + 1)
+            marker_rows = np.flatnonzero(np.any(mask[:, first_start:first_end], axis=1))
+            marker_height = int(marker_rows[-1] - marker_rows[0] + 1) if marker_rows.size else height
+            marker_area = (
+                mask[
+                    marker_rows[0] : marker_rows[-1] + 1,
+                    first_start:first_end,
+                ]
                 if marker_rows.size
-                else height
+                else mask[:, first_start:first_end]
             )
-            marker_area = mask[
-                marker_rows[0]:marker_rows[-1] + 1,
-                first_start:first_end,
-            ] if marker_rows.size else mask[:, first_start:first_end]
             marker_fill = float(np.mean(marker_area))
             left_contact = float(np.mean(marker_area[:, 0]))
             right_contact = float(np.mean(marker_area[:, -1]))
-            marker_row_fill = float(
-                np.max(np.mean(marker_area, axis=1))
-            )
-            marker_column_fill = float(
-                np.max(np.mean(marker_area, axis=0))
-            )
-            following_rows = np.flatnonzero(
-                np.any(mask[:, second_start:second_end], axis=1)
-            )
-            following_height = (
-                int(following_rows[-1] - following_rows[0] + 1)
-                if following_rows.size
-                else height
-            )
+            marker_row_fill = float(np.max(np.mean(marker_area, axis=1)))
+            marker_column_fill = float(np.max(np.mean(marker_area, axis=0)))
+            following_rows = np.flatnonzero(np.any(mask[:, second_start:second_end], axis=1))
+            following_height = int(following_rows[-1] - following_rows[0] + 1) if following_rows.size else height
             is_dash = (
                 marker_height >= 3
                 and marker_width >= max(5, round(marker_height * 1.4))
-                and marker_height
-                <= max(4, round(following_height * 0.45))
+                and marker_height <= max(4, round(following_height * 0.45))
             )
             is_bullet = (
                 marker_height >= 5
@@ -1268,16 +1105,21 @@ def _left_tracks(
             tracks.append(current[0])
             merge_left_tracks.append(current[0])
     return (
-        content_left,
-        content_top,
-        content_right,
-        content_bottom,
-    ), _merge_positions(
-        tracks,
-        tolerance=max(2, min_gap),
-    ), dash_track, _merge_positions(
-        merge_left_tracks,
-        tolerance=max(2, min_gap),
+        (
+            content_left,
+            content_top,
+            content_right,
+            content_bottom,
+        ),
+        _merge_positions(
+            tracks,
+            tolerance=max(2, min_gap),
+        ),
+        dash_track,
+        _merge_positions(
+            merge_left_tracks,
+            tolerance=max(2, min_gap),
+        ),
     )
 
 
@@ -1290,18 +1132,15 @@ def _column_pair_cooccurs(
 ) -> bool:
     width = mask.shape[1]
     minimum_width = max(min_gap, round(width * 0.01))
-    if (
-        previous[1] - previous[0] < minimum_width
-        or current[1] - current[0] < minimum_width
-    ):
+    if previous[1] - previous[0] < minimum_width or current[1] - current[0] < minimum_width:
         return False
 
     previous_rows = np.any(
-        mask[:, previous[0]:previous[1]],
+        mask[:, previous[0] : previous[1]],
         axis=1,
     )
     current_rows = np.any(
-        mask[:, current[0]:current[1]],
+        mask[:, current[0] : current[1]],
         axis=1,
     )
     overlap = int(np.count_nonzero(previous_rows & current_rows))
@@ -1309,10 +1148,7 @@ def _column_pair_cooccurs(
         int(np.count_nonzero(previous_rows)),
         int(np.count_nonzero(current_rows)),
     )
-    return (
-        overlap >= 4
-        and overlap / max(1, smaller_span) >= 0.25
-    )
+    return overlap >= 4 and overlap / max(1, smaller_span) >= 0.25
 
 
 def _true_groups(values: np.ndarray) -> list[tuple[int, int]]:
@@ -1427,9 +1263,7 @@ def _deduplicate_leaves(
         if duplicate is None:
             selected.append(leaf)
             continue
-        if _box_area(leaf.content_bbox) > _box_area(
-            duplicate.content_bbox
-        ):
+        if _box_area(leaf.content_bbox) > _box_area(duplicate.content_bbox):
             duplicate.image.close()
             selected[selected.index(duplicate)] = leaf
         else:
@@ -1445,10 +1279,7 @@ def _axis_overlap_ratio(
 ) -> float:
     start_index = axis
     end_index = axis + 2
-    overlap = (
-        min(first[end_index], second[end_index])
-        - max(first[start_index], second[start_index])
-    )
+    overlap = min(first[end_index], second[end_index]) - max(first[start_index], second[start_index])
     if overlap <= 0:
         return 0.0
     smaller = min(

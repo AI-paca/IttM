@@ -126,7 +126,13 @@ def _with_edges(positions: list[int], size: int, tolerance: int = 8) -> tuple[in
         result.append(0)
     if not any(pos >= size - 1 - tolerance for pos in result):
         result.append(size - 1)
-    return tuple(_merge_positions([max(0, min(size - 1, pos)) for pos in result], tolerance=tolerance))
+    merged = _merge_positions([max(0, min(size - 1, pos)) for pos in result], tolerance=tolerance)
+    min_edge_span = max(tolerance + 2, min(18, int(round(size * 0.03))))
+    while len(merged) > 2 and merged[1] - merged[0] <= min_edge_span:
+        merged.pop(1)
+    while len(merged) > 2 and merged[-1] - merged[-2] <= min_edge_span:
+        merged.pop(-2)
+    return tuple(merged)
 
 
 def _cells_from_lines(x_lines: tuple[int, ...], y_lines: tuple[int, ...]) -> tuple[TableCell, ...]:
@@ -204,14 +210,10 @@ def _foreground_mask(gray: np.ndarray):
         return int(0.0005 <= ratio <= 0.55), -abs(ratio - 0.12)
 
     dark_mask = (
-        cv2.bitwise_or(dark_otsu, dark_adaptive)
-        if 0.0005 <= float(np.mean(dark_otsu > 0)) <= 0.25
-        else dark_otsu
+        cv2.bitwise_or(dark_otsu, dark_adaptive) if 0.0005 <= float(np.mean(dark_otsu > 0)) <= 0.25 else dark_otsu
     )
     light_mask = (
-        cv2.bitwise_or(light_otsu, light_adaptive)
-        if 0.0005 <= float(np.mean(light_otsu > 0)) <= 0.25
-        else light_otsu
+        cv2.bitwise_or(light_otsu, light_adaptive) if 0.0005 <= float(np.mean(light_otsu > 0)) <= 0.25 else light_otsu
     )
     return max((dark_mask, light_mask, edge_mask), key=candidate_score)
 
@@ -411,16 +413,23 @@ def detect_table_layouts(
                 return confirmed_cells >= min_confirmed_cells
             return True
 
-        x_lines_local, y_lines_local, confirmed_cells = build_candidate(
-            projection_ratio=0.22,
-            include_unconfirmed=True,
-            always_mix_contours=True,
-        )
-        if not candidate_is_valid(x_lines_local, y_lines_local, confirmed_cells) and local_height < 1000:
+        if local_height < 1000:
             x_lines_local, y_lines_local, confirmed_cells = build_candidate(
                 projection_ratio=0.35,
                 include_unconfirmed=False,
                 always_mix_contours=False,
+            )
+            if not candidate_is_valid(x_lines_local, y_lines_local, confirmed_cells):
+                x_lines_local, y_lines_local, confirmed_cells = build_candidate(
+                    projection_ratio=0.22,
+                    include_unconfirmed=True,
+                    always_mix_contours=True,
+                )
+        else:
+            x_lines_local, y_lines_local, confirmed_cells = build_candidate(
+                projection_ratio=0.22,
+                include_unconfirmed=True,
+                always_mix_contours=True,
             )
 
         if not candidate_is_valid(x_lines_local, y_lines_local, confirmed_cells):
@@ -955,10 +964,7 @@ def _markdown_table(rows: list[list[str]]) -> str:
     width = max(len(row) for row in rows)
     padded = [row + [""] * (width - len(row)) for row in rows]
     separator = ["---" for _ in padded[0]]
-    return "\n".join(
-        "| " + " | ".join(row) + " |"
-        for row in (padded[0], separator, *padded[1:])
-    )
+    return "\n".join("| " + " | ".join(row) + " |" for row in (padded[0], separator, *padded[1:]))
 
 
 def _curriculum_summary_main_rows(rows: list[list[str]]) -> list[list[str]]:
@@ -1285,8 +1291,7 @@ def _curriculum_table_header_index(rows: list[list[str]]) -> int | None:
         first_header = row[0].lower()
         second_header = row[1].lower() if len(row) > 1 else ""
         if "индекс" in first_header and (
-            "наименование" in second_header
-            or any("наименование" in cell.lower() for cell in row[:3])
+            "наименование" in second_header or any("наименование" in cell.lower() for cell in row[:3])
         ):
             return row_index
     return None
@@ -1361,8 +1366,7 @@ def _clean_curriculum_logical_typed_cells(rows: list[list[str]]) -> list[list[st
         (
             index
             for index in range(len(header) - 1)
-            if header[index].strip().lower() == "код"
-            and "наименование" in header[index + 1].lower()
+            if header[index].strip().lower() == "код" and "наименование" in header[index + 1].lower()
         ),
         None,
     )
@@ -1372,10 +1376,7 @@ def _clean_curriculum_logical_typed_cells(rows: list[list[str]]) -> list[list[st
         for column, value in enumerate(copy):
             if column <= 1:
                 continue
-            if (
-                department_code_column is not None
-                and column >= department_code_column
-            ):
+            if department_code_column is not None and column >= department_code_column:
                 continue
             if column < len(header) and "кафед" in header[column].lower():
                 continue
@@ -1391,12 +1392,7 @@ def _clean_curriculum_numeric_cell(value: str) -> str:
     if not re.search(r"\d", text):
         return ""
 
-    text = (
-        text.replace("О", "0")
-        .replace("о", "0")
-        .replace("O", "0")
-        .replace("o", "0")
-    )
+    text = text.replace("О", "0").replace("о", "0").replace("O", "0").replace("o", "0")
     numbers = re.findall(r"\d+(?:[.,]\d+)?", text)
     if not numbers:
         return ""
@@ -1496,12 +1492,7 @@ def _canonicalize_curriculum_logical_section_rows(rows: list[list[str]]) -> list
         if index == "Б1":
             result.append(_set_curriculum_section_identity(row, "Блок 1", "Дисциплины (модули)"))
             continue
-        if (
-            practice_seen
-            and index == "Б1.О"
-            and "част" in signal
-            and "отнош" not in signal
-        ):
+        if practice_seen and index == "Б1.О" and "част" in signal and "отнош" not in signal:
             result.append(_set_curriculum_section_identity(row, "Б2.О", "Обязательная часть"))
             continue
         if index == "Б1.О":
@@ -1555,12 +1546,7 @@ def _canonicalize_curriculum_logical_section_rows(rows: list[list[str]]) -> list
         ):
             result.append(_set_curriculum_section_identity(row, "Б2.О", "Обязательная часть"))
             continue
-        if (
-            practice_seen
-            and not index
-            and "част" in signal
-            and "отнош" not in signal
-        ):
+        if practice_seen and not index and "част" in signal and "отнош" not in signal:
             result.append(_set_curriculum_section_identity(row, "Б2.О", "Обязательная часть"))
             continue
         if "государствен" in signal and "аттеста" in signal:
@@ -2331,10 +2317,13 @@ def table_layout_to_rows(
     table: TableLayout,
     recognize_cell: Callable[[Image.Image], str],
     *,
-    contextual_recognize_cell: Callable[
-        [Image.Image, TableCell, list[list[str]]],
-        str,
-    ] | None = None,
+    contextual_recognize_cell: (
+        Callable[
+            [Image.Image, TableCell, list[list[str]]],
+            str,
+        ]
+        | None
+    ) = None,
     skip_blank_cells: bool = True,
     seed_rows: list[list[str]] | None = None,
     only_missing: bool = False,
@@ -2561,9 +2550,7 @@ def iter_vertical_segments(
                         segment_top + chunk_height,
                         bottom,
                     )
-                    yield source.crop(
-                        (0, segment_top, width, segment_bottom)
-                    )
+                    yield source.crop((0, segment_top, width, segment_bottom))
                     if segment_bottom >= bottom:
                         break
                     segment_top += step

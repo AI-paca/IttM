@@ -107,8 +107,8 @@ function normalizePersonLabel(value: string): string {
     тошевиков: "Тощевиков",
     чалурин: "Чапурин",
     залурин: "Чапурин",
-    "шlубин": "Шубин",
-    "ш1убин": "Шубин",
+    шlубин: "Шубин",
+    ш1убин: "Шубин",
   };
   const compacted = compactIdentifier(cleaned);
   if (knownLabels[compacted]) return knownLabels[compacted];

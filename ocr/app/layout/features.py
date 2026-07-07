@@ -89,14 +89,10 @@ def _foreground_mask(gray: np.ndarray) -> np.ndarray:
         return in_range, -abs(ratio - 0.12)
 
     dark_mask = (
-        cv2.bitwise_or(dark_otsu, dark_adaptive)
-        if 0.0005 <= float(np.mean(dark_otsu > 0)) <= 0.25
-        else dark_otsu
+        cv2.bitwise_or(dark_otsu, dark_adaptive) if 0.0005 <= float(np.mean(dark_otsu > 0)) <= 0.25 else dark_otsu
     )
     light_mask = (
-        cv2.bitwise_or(light_otsu, light_adaptive)
-        if 0.0005 <= float(np.mean(light_otsu > 0)) <= 0.25
-        else light_otsu
+        cv2.bitwise_or(light_otsu, light_adaptive) if 0.0005 <= float(np.mean(light_otsu > 0)) <= 0.25 else light_otsu
     )
     return max((dark_mask, light_mask, edge_mask), key=candidate_score) > 0
 

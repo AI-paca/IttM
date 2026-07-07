@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 
-
 SUPPORTED_LEXICAL_CORRECTION_MODES = frozenset({"off", "t9_small"})
 
 _CODE_CYRILLIC_TO_LATIN = str.maketrans(
@@ -68,9 +67,7 @@ _TEXT_LATIN_TO_CYRILLIC = str.maketrans(
 )
 
 
-_ACADEMIC_CODE_TOKEN_RE = re.compile(
-    r"(?P<prefix>[A-Za-zА-Яа-яЁёІіЇї0]+)(?P<suffix>(?:[-.]\d+)+)"
-)
+_ACADEMIC_CODE_TOKEN_RE = re.compile(r"(?P<prefix>[A-Za-zА-Яа-яЁёІіЇї0]+)(?P<suffix>(?:[-.]\d+)+)")
 _ACADEMIC_CODE_IN_TEXT_RE = re.compile(
     r"(?<![\wА-Яа-яЁёІіЇї])"
     r"(?P<prefix>[OО0oо][PПNНnп][KКkк]|[PП][KКkк]|N[KkКк]|[UУYуy][KКkк])"
@@ -159,11 +156,7 @@ def _correct_russian_academic_codes(text: str) -> str:
     if not matches:
         return text
 
-    has_academic_context = (
-        len(matches) >= 2
-        or _has_cyrillic(text)
-        or bool(re.search(r"(?<!\w)Б\d\.", text))
-    )
+    has_academic_context = len(matches) >= 2 or _has_cyrillic(text) or bool(re.search(r"(?<!\w)Б\d\.", text))
     if not has_academic_context:
         return text
 
@@ -272,15 +265,18 @@ def _correct_identifier_token(match: re.Match[str]) -> str:
             and re.fullmatch(r"[А-Яа-яЁёІіЇї]{1,2}", parts[0])
             and any(re.search(r"[A-Z0-9]", part) for part in parts[1:])
         )
-        has_upper_or_digit_code_parts = sum(
-            1
-            for part in parts
-            if any(char.isdigit() for char in part)
-            or (
-                any("A" <= char <= "Z" for char in part)
-                and not any("а" <= char <= "я" or char == "ё" for char in part)
+        has_upper_or_digit_code_parts = (
+            sum(
+                1
+                for part in parts
+                if any(char.isdigit() for char in part)
+                or (
+                    any("A" <= char <= "Z" for char in part)
+                    and not any("а" <= char <= "я" or char == "ё" for char in part)
+                )
             )
-        ) >= 2
+            >= 2
+        )
         if not (has_digit or has_short_cyrillic_code_prefix or has_upper_or_digit_code_parts):
             return token
 
@@ -456,9 +452,7 @@ _KNOWN_SNAKE_IDENTIFIERS = (
 
 
 def _identifier_phrase_pattern(identifier: str) -> str:
-    return r"(?<![\w])" + r"[\s_]+".join(
-        re.escape(part) for part in identifier.split("_")
-    ) + r"(?![\w])"
+    return r"(?<![\w])" + r"[\s_]+".join(re.escape(part) for part in identifier.split("_")) + r"(?![\w])"
 
 
 def _correct_doc_identifier_phrases(text: str) -> str:
@@ -536,10 +530,18 @@ def _correct_doc_identifier_phrases(text: str) -> str:
     text = re.sub(r"\boff[\s/]+t9_small\b", "off / t9_small", text, flags=re.I)
     text = re.sub(r"\blarge[\s_]+tabte[\s_]+word[\s_]+р[тm]\b", "large_table_word_psm", text, flags=re.I)
     text = re.sub(r"\btabtLe[\s_]+мог4[\s_]+recognition\b", "table_word_recognition", text, flags=re.I)
-    text = re.sub(r"\bedge[\s_]+word[\s_]+fallback[\s_]+toke[\s_]*ns\b", "edge_word_fallback_min_tokens", text, flags=re.I)
-    text = re.sub(r"\bейде[\s_]+word[\s_]+fallback[\s_]+toke[\s_]*ns\b", "edge_word_fallback_min_tokens", text, flags=re.I)
-    text = re.sub(r"\bsparse[\s_]+text_fallback[\s_]+min[\s_]+to[\s_]*kens\b", "sparse_text_fallback_min_tokens", text, flags=re.I)
-    text = re.sub(r"\bsparse[\s_]*_?text_fallback[\s_]+тїп[\s_]+га[\s_]+tio\b", "sparse_text_fallback_min_ratio", text, flags=re.I)
+    text = re.sub(
+        r"\bedge[\s_]+word[\s_]+fallback[\s_]+toke[\s_]*ns\b", "edge_word_fallback_min_tokens", text, flags=re.I
+    )
+    text = re.sub(
+        r"\bейде[\s_]+word[\s_]+fallback[\s_]+toke[\s_]*ns\b", "edge_word_fallback_min_tokens", text, flags=re.I
+    )
+    text = re.sub(
+        r"\bsparse[\s_]+text_fallback[\s_]+min[\s_]+to[\s_]*kens\b", "sparse_text_fallback_min_tokens", text, flags=re.I
+    )
+    text = re.sub(
+        r"\bsparse[\s_]*_?text_fallback[\s_]+тїп[\s_]+га[\s_]+tio\b", "sparse_text_fallback_min_ratio", text, flags=re.I
+    )
     text = re.sub(
         r"\b(ocr|web|docs|scripts|debug)\s*/\s*([^\s,;:|)]+)",
         _collapse_known_root_slash_spacing,
@@ -655,10 +657,22 @@ def _correct_mixed_table_terms(text: str) -> str:
         ("最 终", "最终"),
         ("占 位", "占位"),
         ("单 元", "单元"),
-        ("SAMPLE hard OCR table: 10 x 14, русский + English + ЕНХ + 123 +7", "SAMPLE hard OCR table 10 x 14 русский English 中文 123 й"),
-        ("SAMPLE hard OCR table: 10 х 14, русский English нх + 123 + й", "SAMPLE hard OCR table 10 x 14 русский English 中文 123 й"),
-        ("Image-only PDF: merged subsection rows must keep Markdown placeholder cells.", "Image-only PDF merged subsection rows Markdown placeholder cells"),
-        ("Image-only PDF: merged subsection rows must keep Markdown placeholder cells:", "Image-only PDF merged subsection rows Markdown placeholder cells"),
+        (
+            "SAMPLE hard OCR table: 10 x 14, русский + English + ЕНХ + 123 +7",
+            "SAMPLE hard OCR table 10 x 14 русский English 中文 123 й",
+        ),
+        (
+            "SAMPLE hard OCR table: 10 х 14, русский English нх + 123 + й",
+            "SAMPLE hard OCR table 10 x 14 русский English 中文 123 й",
+        ),
+        (
+            "Image-only PDF: merged subsection rows must keep Markdown placeholder cells.",
+            "Image-only PDF merged subsection rows Markdown placeholder cells",
+        ),
+        (
+            "Image-only PDF: merged subsection rows must keep Markdown placeholder cells:",
+            "Image-only PDF merged subsection rows Markdown placeholder cells",
+        ),
         ("Ng", "№"),
         ("Код Й", "Код й"),
         ("нх", "中文"),

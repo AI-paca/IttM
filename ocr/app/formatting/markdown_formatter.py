@@ -31,9 +31,7 @@ class MarkdownFormatter:
             split_lines = MarkdownFormatter._split_inline_ordered_list(stripped)
             if len(split_lines) > 1:
                 for split_line in split_lines:
-                    formatted_lines.extend(
-                        MarkdownFormatter._format_single_line(split_line)
-                    )
+                    formatted_lines.extend(MarkdownFormatter._format_single_line(split_line))
                 continue
 
             formatted_lines.extend(MarkdownFormatter._format_single_line(stripped))
@@ -73,9 +71,7 @@ class MarkdownFormatter:
 
         numbered = re.match(r"^(\d+)[.)]\s+(.*)$", stripped)
         if numbered:
-            formatted_lines.append(
-                f"{numbered.group(1)}. {numbered.group(2).strip()}"
-            )
+            formatted_lines.append(f"{numbered.group(1)}. {numbered.group(2).strip()}")
             return formatted_lines
 
         formatted_lines.append(stripped)
@@ -137,27 +133,16 @@ class MarkdownFormatter:
     @staticmethod
     def _is_pipe_art_candidate_line(line: str) -> bool:
         stripped = line.strip()
-        return (
-            MarkdownFormatter._is_pipe_row(stripped)
-            or MarkdownFormatter._is_pipe_art_connector_line(stripped)
-        )
+        return MarkdownFormatter._is_pipe_row(stripped) or MarkdownFormatter._is_pipe_art_connector_line(stripped)
 
     @staticmethod
     def _looks_like_pipe_art_group(group: list[str]) -> bool:
-        pipe_rows = [
-            line
-            for line in group
-            if MarkdownFormatter._is_pipe_row(line)
-        ]
+        pipe_rows = [line for line in group if MarkdownFormatter._is_pipe_row(line)]
         if len(pipe_rows) < 2:
             return False
         if any(MarkdownFormatter._is_separator_row(line) for line in group):
             return False
-        connector_count = sum(
-            1
-            for line in group
-            if MarkdownFormatter._is_pipe_art_connector_line(line)
-        )
+        connector_count = sum(1 for line in group if MarkdownFormatter._is_pipe_art_connector_line(line))
         return (
             any("->" in line or "→" in line for line in group)
             or any(re.search(r"\|\s*\|", line) for line in pipe_rows)
@@ -221,15 +206,15 @@ class MarkdownFormatter:
         for index, line in enumerate(group):
             if MarkdownFormatter._is_separator_row(line):
                 separator_seen = True
-                repaired.append(
-                    MarkdownFormatter._format_pipe_row(["---"] * column_count, column_count)
-                )
+                repaired.append(MarkdownFormatter._format_pipe_row(["---"] * column_count, column_count))
                 continue
             repaired.append(MarkdownFormatter._format_pipe_row(rows[index], column_count))
-            if index == 0 and not separator_seen and (len(group) == 1 or not MarkdownFormatter._is_separator_row(group[1])):
-                repaired.append(
-                    MarkdownFormatter._format_pipe_row(["---"] * column_count, column_count)
-                )
+            if (
+                index == 0
+                and not separator_seen
+                and (len(group) == 1 or not MarkdownFormatter._is_separator_row(group[1]))
+            ):
+                repaired.append(MarkdownFormatter._format_pipe_row(["---"] * column_count, column_count))
                 separator_seen = True
         return repaired
 

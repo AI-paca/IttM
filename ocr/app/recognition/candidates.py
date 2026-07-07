@@ -97,17 +97,11 @@ class LanguageCandidateSelector:
         )
         non_space = max(1, sum(not character.isspace() for character in text))
         ascii_noise = sum(
-            character.isascii()
-            and not character.isspace()
-            and not character.isalpha()
-            for character in text
+            character.isascii() and not character.isspace() and not character.isalpha() for character in text
         )
         ascii_noise_ratio = ascii_noise / non_space
 
-        if (
-            single_char_ratio >= 0.62
-            and multi_char_ratio < 0.25
-        ) or ascii_noise_ratio >= 0.28:
+        if (single_char_ratio >= 0.62 and multi_char_ratio < 0.25) or ascii_noise_ratio >= 0.28:
             return 45.0
         return 0.0
 
@@ -135,10 +129,7 @@ class LanguageCandidateSelector:
             return "", ""
 
         primary_lang, primary_text = candidates[0]
-        scored = [
-            (lang, text, self.text_candidate_score(text, lang, context))
-            for lang, text in candidates
-        ]
+        scored = [(lang, text, self.text_candidate_score(text, lang, context)) for lang, text in candidates]
         best_lang, best_text, best_score = max(
             scored,
             key=lambda candidate: candidate[2],
@@ -148,11 +139,7 @@ class LanguageCandidateSelector:
         primary_margin = max(6.0, primary_score * 0.12)
         if primary_noise >= 0.18 or primary_score < 18.0:
             primary_margin = 0.0
-        if (
-            best_lang != primary_lang
-            and primary_text.strip()
-            and best_score < primary_score + primary_margin
-        ):
+        if best_lang != primary_lang and primary_text.strip() and best_score < primary_score + primary_margin:
             return primary_lang, primary_text
         return best_lang, best_text
 
@@ -192,10 +179,6 @@ class LanguageCandidateSelector:
         primary_margin = max(8.0, primary_score * 0.15)
         if primary_noise >= 0.18 or primary_score < 18.0:
             primary_margin = 0.0
-        if (
-            best_lang != primary_lang
-            and primary_words
-            and best_score < primary_score + primary_margin
-        ):
+        if best_lang != primary_lang and primary_words and best_score < primary_score + primary_margin:
             return primary_lang, primary_words
         return best_lang, best_words

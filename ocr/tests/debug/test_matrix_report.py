@@ -98,10 +98,7 @@ def test_writes_per_method_csv(tmp_path):
     assert sample["easyocr gate"] == "pass"
     assert sample["browser-tesseract gate"] == "pass"
     assert sample["browser-tesseract profile"] == "browser_tesseract_dewarp"
-    assert (
-        "ocr_language_priority:rus+eng+kaz+kir+chi_sim"
-        in sample["tesseract flags"]
-    )
+    assert "ocr_language_priority:rus+eng+kaz+kir+chi_sim" in sample["tesseract flags"]
     assert "ocr_table_word_psm:6" in sample["tesseract flags"]
     assert "ocr_large_table_word_psm:11" in sample["tesseract flags"]
     assert "table_raw_text_fallback:True" in sample["tesseract flags"]

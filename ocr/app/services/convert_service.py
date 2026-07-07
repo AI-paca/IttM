@@ -19,7 +19,6 @@ from app.chunking.vertical import (
     _curriculum_title_page_grid_to_markdown,
     logical_table_layout,
     mark_table_empty_slots,
-    _is_curriculum_index,
     _is_curriculum_section_index,
     _normalize_curriculum_index,
     _parse_numbered_curriculum_index,
@@ -545,13 +544,7 @@ def _recognize_dense_grid_page(
     if target_width != content.width:
         target_height = max(
             1,
-            int(
-                round(
-                    content.height
-                    * target_width
-                    / content.width
-                )
-            ),
+            int(round(content.height * target_width / content.width)),
         )
         resample = getattr(Image, "Resampling", Image).LANCZOS
         working = content.resize(
@@ -1090,10 +1083,7 @@ def _render_table_words(
     word_cell_coverage = table_word_cell_coverage(table, words)
     table_slot_builder = profile.table_slot_builder
     auto_slot_builder = False
-    if (
-        table_slot_builder == "off"
-        and table_has_horizontal_slot_merges(image, table)
-    ):
+    if table_slot_builder == "off" and table_has_horizontal_slot_merges(image, table):
         table_slot_builder = LINE_MERGE_MODE
         auto_slot_builder = True
 
@@ -1178,9 +1168,7 @@ def _raw_fallback_adds_content(existing: str, raw_text: str) -> bool:
     raw_tokens = set(re.findall(r"[\w]+", raw_text.casefold(), re.UNICODE))
     if not raw_tokens:
         return False
-    existing_tokens = set(
-        re.findall(r"[\w]+", existing.casefold(), re.UNICODE)
-    )
+    existing_tokens = set(re.findall(r"[\w]+", existing.casefold(), re.UNICODE))
     overlap = len(raw_tokens & existing_tokens) / len(raw_tokens)
     return overlap < 0.65
 
@@ -1222,11 +1210,7 @@ def _append_sparse_table_raw_fallback(
     existing = "\n\n".join(page_parts)
     normalized_existing = " ".join(existing.split())
     normalized_raw = " ".join(raw_text.split())
-    if (
-        normalized_raw
-        and normalized_raw not in normalized_existing
-        and _raw_fallback_adds_content(existing, raw_text)
-    ):
+    if normalized_raw and normalized_raw not in normalized_existing and _raw_fallback_adds_content(existing, raw_text):
         page_parts.append(raw_text)
     return 1 + fallback_calls
 
@@ -1234,9 +1218,7 @@ def _append_sparse_table_raw_fallback(
 def _finalize_markdown(text: str, profile: OcrPipelineProfile) -> str:
     if profile.structural_output == "records":
         return text.strip()
-    corrected = recover_known_ocr_phrases(
-        apply_lexical_correction(text, profile.lexical_correction)
-    )
+    corrected = recover_known_ocr_phrases(apply_lexical_correction(text, profile.lexical_correction))
     formatted = MarkdownFormatter.format_text(corrected)
     return apply_contextual_markdown_grammar(
         formatted,
@@ -1266,10 +1248,7 @@ def _region_recursion_runtime_flags(
         (
             decision
             for decision in reversed(decisions)
-            if (
-                isinstance(decision, dict)
-                and decision.get("mask_mode") != "deferred"
-            )
+            if (isinstance(decision, dict) and decision.get("mask_mode") != "deferred")
         ),
         None,
     )
@@ -1290,11 +1269,7 @@ def _region_recursion_runtime_flags(
             continue
         steps = decision.get("preprocess_steps")
         if isinstance(steps, tuple):
-            flags.update(
-                f"ocr_region_preprocess:{step}"
-                for step in steps
-                if isinstance(step, str)
-            )
+            flags.update(f"ocr_region_preprocess:{step}" for step in steps if isinstance(step, str))
         angle = decision.get("deskew_angle")
         if isinstance(angle, (int, float)) and abs(angle) >= 0.05:
             flags.add("ocr_region_deskew:applied")
@@ -1422,9 +1397,7 @@ def _convert_layout_region(
         )
         if table_plan.reason:
             runtime_flags.add(f"table_processing_plan:{table_plan.reason}")
-        runtime_flags.add(
-            f"table_layout_normalization:{table_plan.layout_normalization}"
-        )
+        runtime_flags.add(f"table_layout_normalization:{table_plan.layout_normalization}")
         runtime_flags.add(f"table_word_recognition:{table_plan.word_recognition}")
 
         if table_plan.layout_normalization == "preserve_grid":
@@ -1435,10 +1408,7 @@ def _convert_layout_region(
                 region.table,
             )
         else:
-            raise ValueError(
-                "Unknown table layout normalization "
-                f"'{table_plan.layout_normalization}'"
-            )
+            raise ValueError("Unknown table layout normalization " f"'{table_plan.layout_normalization}'")
         table_layout = mark_table_empty_slots(
             region.image,
             table_layout,
@@ -1482,10 +1452,7 @@ def _convert_layout_region(
             min_word_cell_coverage=profile.table_min_word_cell_coverage,
         ):
             runtime_flags.add("ocr_region_micro_cells:recursive_grid")
-            runtime_flags.add(
-                "ocr_region_micro_cells:batch_pixels="
-                f"{profile.recursive_table_cell_ocr_batch_pixels}"
-            )
+            runtime_flags.add("ocr_region_micro_cells:batch_pixels=" f"{profile.recursive_table_cell_ocr_batch_pixels}")
             cell_candidate = recognize_table_cell_candidate(
                 engine,
                 region.image,
@@ -1513,13 +1480,11 @@ def _convert_layout_region(
                 )
                 if augmented_auto_slot_builder:
                     runtime_flags.add("table_slot_builder:auto_line_merge_v1")
-                select_augmented, selection_reason = (
-                    should_select_augmented_table_candidate(
-                        table_layout,
-                        cell_candidate,
-                        previous_coverage=word_cell_coverage,
-                        augmented_coverage=augmented_coverage,
-                    )
+                select_augmented, selection_reason = should_select_augmented_table_candidate(
+                    table_layout,
+                    cell_candidate,
+                    previous_coverage=word_cell_coverage,
+                    augmented_coverage=augmented_coverage,
                 )
                 if augmented_md.strip() and select_augmented:
                     table_words = augmented_words
@@ -1528,14 +1493,8 @@ def _convert_layout_region(
                     runtime_flags.add("ocr_region_micro_cells:selected")
                 else:
                     runtime_flags.add("ocr_region_micro_cells:rejected")
-                    runtime_flags.add(
-                        "ocr_region_micro_cells:rejected_"
-                        f"{selection_reason}"
-                    )
-            elif (
-                not table_md.strip()
-                and cell_candidate.coverage >= profile.table_min_cell_coverage
-            ):
+                    runtime_flags.add("ocr_region_micro_cells:rejected_" f"{selection_reason}")
+            elif not table_md.strip() and cell_candidate.coverage >= profile.table_min_cell_coverage:
                 table_md = table_rows_to_markdown(cell_candidate.rows)
                 runtime_flags.add("ocr_region_micro_cells:selected")
             else:
@@ -1703,31 +1662,17 @@ def _contains_large_markdown_table(page_parts: list[str]) -> bool:
 def _markdown_table_part(
     value: str,
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]] | None:
-    lines = tuple(
-        line.strip()
-        for line in value.splitlines()
-        if line.strip()
-    )
-    if len(lines) < 2 or any(
-        not line.startswith("|") or not line.endswith("|")
-        for line in lines
-    ):
+    lines = tuple(line.strip() for line in value.splitlines() if line.strip())
+    if len(lines) < 2 or any(not line.startswith("|") or not line.endswith("|") for line in lines):
         return None
     separator_cells = tuple(_split_markdown_table_cells(lines[1]))
-    if not separator_cells or any(
-        not re.fullmatch(r":?-{3,}:?", cell)
-        for cell in separator_cells
-    ):
+    if not separator_cells or any(not re.fullmatch(r":?-{3,}:?", cell) for cell in separator_cells):
         return None
     header_cells = tuple(_split_markdown_table_cells(lines[0]))
     if len(header_cells) != len(separator_cells):
         return None
     body = lines[2:]
-    if any(
-        len(tuple(_split_markdown_table_cells(line)))
-        != len(header_cells)
-        for line in body
-    ):
+    if any(len(tuple(_split_markdown_table_cells(line))) != len(header_cells) for line in body):
         return None
     return header_cells, separator_cells, body
 
@@ -1776,25 +1721,14 @@ def _markdown_text_items(parts: Iterable[str]) -> list[str]:
                 continue
             if line.startswith("|") and line.endswith("|"):
                 cells = _split_markdown_table_cells(line)
-                if cells and all(
-                    re.fullmatch(r":?-{3,}:?", cell)
-                    for cell in cells
-                ):
+                if cells and all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells):
                     continue
-                items.extend(
-                    _markdown_cell(cell)
-                    for cell in cells
-                    if _markdown_cell(cell)
-                )
+                items.extend(_markdown_cell(cell) for cell in cells if _markdown_cell(cell))
                 continue
             line = re.sub(r"^[-=]+\s*", "", line).strip()
             if line:
                 items.append(_markdown_cell(line))
-    return [
-        item
-        for item in items
-        if item
-    ]
+    return [item for item in items if item]
 
 
 def _markdown_table_shapes(parts: Iterable[str]) -> list[tuple[int, int]]:
@@ -1815,9 +1749,7 @@ def _looks_like_fragmented_long_card_grid(parts: list[str], items: list[str]) ->
     if len(table_shapes) < 3:
         return False
     if any(
-        rows >= LONG_CARD_GRID_MAX_EXISTING_TABLE_ROWS
-        and cols >= LONG_CARD_GRID_COLUMNS
-        for rows, cols in table_shapes
+        rows >= LONG_CARD_GRID_MAX_EXISTING_TABLE_ROWS and cols >= LONG_CARD_GRID_COLUMNS for rows, cols in table_shapes
     ):
         return False
     price_items = sum(
@@ -1852,13 +1784,10 @@ def _long_card_filter_items(items: list[str]) -> list[str]:
         if not re.search(r"(?:==|[×Хx]\s+| v | V | › | > )", normalized):
             continue
         candidates = [
-            candidate.strip(" -_=×ХxvV›>.,")
-            for candidate in re.split(r"(?:==|[×Хx]|\sv\s|\sV\s|›|>)", normalized)
+            candidate.strip(" -_=×ХxvV›>.,") for candidate in re.split(r"(?:==|[×Хx]|\sv\s|\sV\s|›|>)", normalized)
         ]
         filters = [
-            candidate
-            for candidate in candidates
-            if len(candidate) >= 3 and re.search(r"[A-Za-zА-Яа-яЁё]", candidate)
+            candidate for candidate in candidates if len(candidate) >= 3 and re.search(r"[A-Za-zА-Яа-яЁё]", candidate)
         ]
         if len(filters) >= 2:
             return filters[:3]
@@ -1902,10 +1831,7 @@ def _recover_long_card_grid_table(parts: list[str]) -> str | None:
         8,
         min(40, (len(items) + 2) // 3 + 1),
     )
-    chunks = [
-        " ".join(items[index:index + 3]).strip()
-        for index in range(0, len(items), 3)
-    ][:body_rows]
+    chunks = [" ".join(items[index : index + 3]).strip() for index in range(0, len(items), 3)][:body_rows]
     while len(chunks) < body_rows:
         chunks.append("")
 
@@ -1929,10 +1855,7 @@ def _looks_like_repository_activity_text(text: str) -> bool:
     compact = _compact_signal_text(text)
     return (
         "contributionactivity" in compact
-        and (
-            "pullrequests" in compact
-            or "commits" in compact
-        )
+        and ("pullrequests" in compact or "commits" in compact)
         and "repository" in compact
     )
 
@@ -1940,24 +1863,10 @@ def _looks_like_repository_activity_text(text: str) -> bool:
 def _looks_like_coupon_screen_text(text: str) -> bool:
     compact = _compact_signal_text(text)
     return (
-        (
-            "лавка" in compact
-            and "скидкиназаказ" in compact
-            and (
-                "промокоды" in compact
-                or "yandexrulegal" in compact
-                or "newyeargamesevent" in compact
-            )
-        )
-        or (
-            "такси" in compact
-            and "скидки" in compact
-            and (
-                "комфорт" in compact
-                or "plusdaily" in compact
-            )
-        )
-    )
+        "лавка" in compact
+        and "скидкиназаказ" in compact
+        and ("промокоды" in compact or "yandexrulegal" in compact or "newyeargamesevent" in compact)
+    ) or ("такси" in compact and "скидки" in compact and ("комфорт" in compact or "plusdaily" in compact))
 
 
 def _is_decorative_coupon_noise_line(line: str) -> bool:
@@ -2042,10 +1951,7 @@ def _canonical_coupon_screen_text(text: str) -> str | None:
                 code,
                 "Истекает 2 января в 12:59",
                 "Полученные призы ждут в разделе Промокоды.",
-                (
-                    "Использовать скидку можете только вы.\n"
-                    "Подробнее: https://yandex.ru/legal/newyear_games_event"
-                ),
+                ("Использовать скидку можете только вы.\n" "Подробнее: https://yandex.ru/legal/newyear_games_event"),
                 "Перейти в Лавку",
             ]
         )
@@ -2108,20 +2014,12 @@ def _looks_like_fragmented_search_results_screen(parts: list[str]) -> bool:
     if not table_shapes:
         return False
     if any(
-        rows == SEARCH_RESULTS_TABLE_ROWS + 1
-        and cols == SEARCH_RESULTS_TABLE_COLUMNS
-        for rows, cols in table_shapes
+        rows == SEARCH_RESULTS_TABLE_ROWS + 1 and cols == SEARCH_RESULTS_TABLE_COLUMNS for rows, cols in table_shapes
     ):
         return False
     largest_area = max(rows * cols for rows, cols in table_shapes)
-    has_fragmented_tables = (
-        len(table_shapes) >= 2
-        and largest_area >= 24
-    )
-    has_wide_broken_table = any(
-        rows >= 4 and cols >= 6
-        for rows, cols in table_shapes
-    )
+    has_fragmented_tables = len(table_shapes) >= 2 and largest_area >= 24
+    has_wide_broken_table = any(rows >= 4 and cols >= 6 for rows, cols in table_shapes)
     return has_fragmented_tables or has_wide_broken_table
 
 
@@ -2165,11 +2063,7 @@ def _search_results_account_line(text: str) -> str:
         ("Basket", r"\bbasket\b"),
         ("Cart", r"\bcart\b"),
     )
-    visible = [
-        label
-        for label, pattern in labels
-        if re.search(pattern, text, re.I)
-    ]
+    visible = [label for label, pattern in labels if re.search(pattern, text, re.I)]
     return " · ".join(visible)
 
 
@@ -2198,11 +2092,7 @@ def _search_results_summary(text: str, query: str) -> str:
 
 
 def _slot_values(_prefix: str, slots: int, candidates: Iterable[str] = ()) -> list[str]:
-    values = [
-        _markdown_cell(candidate)
-        for candidate in candidates
-        if _markdown_cell(candidate)
-    ][:slots]
+    values = [_markdown_cell(candidate) for candidate in candidates if _markdown_cell(candidate)][:slots]
     while len(values) < slots:
         values.append("")
     return values
@@ -2215,10 +2105,7 @@ def _visible_phrases(
     compact = _compact_signal_text(text)
     result = []
     for label, variants in phrases:
-        if any(
-            _compact_signal_text(variant) in compact
-            for variant in variants
-        ):
+        if any(_compact_signal_text(variant) in compact for variant in variants):
             result.append(label)
     return result
 
@@ -2315,21 +2202,14 @@ def _delivery_slots(text: str) -> list[str]:
 
 def _word_bbox(word: dict) -> tuple[int, int, int, int] | None:
     bbox = word.get("bbox")
-    if (
-        isinstance(bbox, tuple)
-        and len(bbox) == 4
-        and all(isinstance(value, int) for value in bbox)
-    ):
+    if isinstance(bbox, tuple) and len(bbox) == 4 and all(isinstance(value, int) for value in bbox):
         return bbox
     return None
 
 
 def _word_lines(words: list[dict], y_tolerance: int = 8) -> list[str]:
     ordered = sorted(
-        (
-            (word, _word_bbox(word))
-            for word in words
-        ),
+        ((word, _word_bbox(word)) for word in words),
         key=lambda item: (
             item[1][1] if item[1] else 0,
             item[1][0] if item[1] else 0,
@@ -2347,11 +2227,7 @@ def _word_lines(words: list[dict], y_tolerance: int = 8) -> list[str]:
         y_center = (bbox[1] + bbox[3]) / 2
         if current_y is None or abs(y_center - current_y) <= y_tolerance:
             current.append((text, bbox))
-            current_y = (
-                y_center
-                if current_y is None
-                else current_y * 0.7 + y_center * 0.3
-            )
+            current_y = y_center if current_y is None else current_y * 0.7 + y_center * 0.3
             continue
         lines.append(current)
         current = [(text, bbox)]
@@ -2451,11 +2327,7 @@ def _search_result_detail_texts(
         "bought": (0.665, 0.705, 5, 6),
         "price": (0.675, 0.790, 4, 6),
     }
-    price_whitelist = (
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "abcdefghijklmnopqrstuvwxyz"
-        "0123456789€£$.,:%°+-"
-    )
+    price_whitelist = "ABCDEFGHIJKLMNOPQRSTUVWXYZ" "abcdefghijklmnopqrstuvwxyz" "0123456789€£$.,:%°+-"
     details: list[dict[str, str]] = []
     resample = getattr(getattr(Image, "Resampling", Image), "BICUBIC")
     for left, right in columns:
@@ -2487,19 +2359,14 @@ def _search_result_detail_texts(
                         extra = pytesseract.image_to_string(
                             enlarged,
                             lang="eng",
-                            config=(
-                                f"--oem 1 --psm {extra_psm} "
-                                f"-c tessedit_char_whitelist={price_whitelist!r}"
-                            ),
+                            config=(f"--oem 1 --psm {extra_psm} " f"-c tessedit_char_whitelist={price_whitelist!r}"),
                         )
                         if extra.strip():
                             extra_texts.append(extra.strip())
                 except Exception:
                     pass
             if text.strip():
-                column_details[name] = "\n".join(
-                    dict.fromkeys([text.strip(), *extra_texts])
-                )
+                column_details[name] = "\n".join(dict.fromkeys([text.strip(), *extra_texts]))
             elif extra_texts:
                 column_details[name] = "\n".join(dict.fromkeys(extra_texts))
         details.append(column_details)
@@ -2628,20 +2495,14 @@ def _search_result_columns_from_words(
         top_words, body_words = _search_result_column_words(words, column, image_size)
         body_text = " ".join(_word_lines(body_words))
         top_text = " ".join(_word_lines(top_words))
-        detail = (
-            detail_texts[index]
-            if detail_texts is not None and index < len(detail_texts)
-            else {}
-        )
+        detail = detail_texts[index] if detail_texts is not None and index < len(detail_texts) else {}
         detail_text = " ".join(detail.values())
         if _search_results_signal_count(body_text) < 1:
             continue
         product = _search_result_product_text(body_text)
         if not product:
             continue
-        overrides = _search_result_card_overrides(
-            " ".join((product, body_text, top_text, detail_text))
-        )
+        overrides = _search_result_card_overrides(" ".join((product, body_text, top_text, detail_text)))
         product = overrides.get("Product", product)
         rows = [["Field", "Value"]]
         badge = ""
@@ -2655,8 +2516,7 @@ def _search_result_columns_from_words(
         rows.append(["Product", product])
         rating = (
             overrides.get("Rating", "")
-            or
-            _search_result_rating(detail.get("rating", ""))
+            or _search_result_rating(detail.get("rating", ""))
             or _search_result_value(r"\b([345][.,]\d\s*\(\s*\d{1,3}\s*\))", body_text)
         )
         rows.append(["Rating", rating.replace(",", ".") if rating else ""])
@@ -2673,25 +2533,25 @@ def _search_result_columns_from_words(
             rows.append(["Bought", "100+ bought in past month"])
         elif re.search(r"50.{0,16}(?:bought|bough|past|month)", bought_text, re.I):
             rows.append(["Bought", "50+ bought in past month"])
-        elif (
-            index == 2
-            and re.search(r"\b(?:bought|bough|past|onth|month)\b", bought_text, re.I)
-        ):
+        elif index == 2 and re.search(r"\b(?:bought|bough|past|onth|month)\b", bought_text, re.I):
             rows.append(["Bought", "50+ bought in past month"])
         deal_text = " ".join((top_text, body_text, detail_text))
         if overrides.get("Deal"):
             rows.append(["Deal", overrides["Deal"]])
         elif re.search(r"prime\s+day\s+deal|primedaydeal", deal_text, re.I):
             rows.append(["Deal", "Prime Day Deal"])
-        rows.append([
-            "Price",
-            overrides.get("Price")
-            or _search_result_price(body_text, detail.get("price", "")),
-        ])
-        rows.append([
-            "Extra",
-            overrides.get("Extra") or _search_result_extra_text(body_text, detail_text),
-        ])
+        rows.append(
+            [
+                "Price",
+                overrides.get("Price") or _search_result_price(body_text, detail.get("price", "")),
+            ]
+        )
+        rows.append(
+            [
+                "Extra",
+                overrides.get("Extra") or _search_result_extra_text(body_text, detail_text),
+            ]
+        )
         if overrides.get("Action"):
             rows.append(["Action", overrides["Action"]])
         elif re.search(r"add.{0,12}basket|order", body_text, re.I):
@@ -2717,28 +2577,13 @@ def _search_result_grid_from_columns(
         "Extra",
         "Action",
     )
-    values_by_result = [
-        {
-            row[0]: row[1]
-            for row in table[1:]
-            if len(row) >= 2
-        }
-        for table in result_columns
-    ]
-    rows = [
-        ["Field", *(
-            f"Result {index}"
-            for index in range(1, len(result_columns) + 1)
-        )]
-    ]
+    values_by_result = [{row[0]: row[1] for row in table[1:] if len(row) >= 2} for table in result_columns]
+    rows = [["Field", *(f"Result {index}" for index in range(1, len(result_columns) + 1))]]
     for field in fields:
         rows.append(
             [
                 field,
-                *(
-                    values.get(field, "")
-                    for values in values_by_result
-                ),
+                *(values.get(field, "") for values in values_by_result),
             ]
         )
     return rows
@@ -2762,7 +2607,7 @@ def _search_result_row_chunks(items: list[str]) -> list[str]:
     productish.extend(item for item in broad if item not in seen)
     chunks = []
     for index in range(0, len(productish), 3):
-        chunk = " ".join(productish[index:index + 3]).strip()
+        chunk = " ".join(productish[index : index + 3]).strip()
         if chunk:
             chunks.append(chunk[:160])
     return _slot_values("Result item", SEARCH_RESULTS_TABLE_ROWS, chunks)
@@ -2777,11 +2622,7 @@ def _recover_search_results_screen(
         return None
     items = _markdown_text_items(parts)
     if extra_text.strip():
-        items.extend(
-            line.strip()
-            for line in extra_text.splitlines()
-            if line.strip()
-        )
+        items.extend(line.strip() for line in extra_text.splitlines() if line.strip())
     text = " ".join(items)
     heading = _search_results_heading(text)
     query = _search_results_query(text)
@@ -2791,11 +2632,7 @@ def _recover_search_results_screen(
     prices = _price_filter_slots(text)
     screen_sizes = _screen_size_slots(text)
     brands = _brand_slots(text)
-    result_items = [
-        item
-        for item in _search_result_row_chunks(items)
-        if item
-    ]
+    result_items = [item for item in _search_result_row_chunks(items) if item]
     delivery = _delivery_slots(text)
     delivery_line = _search_results_delivery_line(text)
     account_line = _search_results_account_line(text)
@@ -2804,11 +2641,7 @@ def _recover_search_results_screen(
 
     result_blocks: list[str]
     if result_columns:
-        result_blocks = [
-            _markdown_table(
-                _search_result_grid_from_columns(result_columns)
-            )
-        ]
+        result_blocks = [_markdown_table(_search_result_grid_from_columns(result_columns))]
     else:
         table_rows = [
             [
@@ -2871,28 +2704,15 @@ def _recover_search_results_screen(
 
 
 def _lenient_markdown_table_rows(value: str) -> list[list[str]] | None:
-    lines = [
-        line.strip()
-        for line in value.splitlines()
-        if line.strip()
-    ]
-    if len(lines) < 2 or any(
-        not line.startswith("|") or not line.endswith("|")
-        for line in lines
-    ):
+    lines = [line.strip() for line in value.splitlines() if line.strip()]
+    if len(lines) < 2 or any(not line.startswith("|") or not line.endswith("|") for line in lines):
         return None
     separator = _split_markdown_table_cells(lines[1])
-    if not separator or any(
-        not re.fullmatch(r":?-{3,}:?", cell)
-        for cell in separator
-    ):
+    if not separator or any(not re.fullmatch(r":?-{3,}:?", cell) for cell in separator):
         return None
     rows = [
         _split_markdown_table_cells(lines[0]),
-        *(
-            _split_markdown_table_cells(line)
-            for line in lines[2:]
-        ),
+        *(_split_markdown_table_cells(line) for line in lines[2:]),
     ]
     return rows
 
@@ -2906,8 +2726,8 @@ def _normalize_table_width(rows: list[list[str]]) -> list[list[str]]:
         if len(row) > width:
             overflow = len(row) - width
             row = [
-                _markdown_cell(" ".join(row[:overflow + 1])),
-                *row[overflow + 1:],
+                _markdown_cell(" ".join(row[: overflow + 1])),
+                *row[overflow + 1 :],
             ]
         if len(row) < width:
             row = [*row, *([""] * (width - len(row)))]
@@ -2916,11 +2736,7 @@ def _normalize_table_width(rows: list[list[str]]) -> list[list[str]]:
 
 
 def _is_trailing_table_noise_row(row: list[str]) -> bool:
-    populated = [
-        cell.strip()
-        for cell in row
-        if cell.strip()
-    ]
+    populated = [cell.strip() for cell in row if cell.strip()]
     if len(populated) != 1:
         return False
     value = populated[0]
@@ -3231,14 +3047,9 @@ def _is_short_name_score_table(rows: list[list[str]] | None) -> bool:
         return False
     names = [_compact_signal_text(row[0]) for row in normalized]
     values = [_markdown_cell(row[1]) for row in normalized]
-    name_like = sum(
-        bool(re.search(r"[а-яё]", name)) or name in _SHORT_SCORE_NAME_REPAIRS
-        for name in names
-    )
+    name_like = sum(bool(re.search(r"[а-яё]", name)) or name in _SHORT_SCORE_NAME_REPAIRS for name in names)
     value_like = sum(
-        bool(re.search(r"\d", value))
-        or "-" in value
-        or _compact_signal_text(value) in {"column2", "е", "ё"}
+        bool(re.search(r"\d", value)) or "-" in value or _compact_signal_text(value) in {"column2", "е", "ё"}
         for value in values
     )
     return name_like >= len(normalized) * 0.75 and value_like >= len(normalized) * 0.75
@@ -3281,11 +3092,7 @@ def _is_curriculum_header_excerpt_rows(rows: list[list[str]] | None) -> bool:
     header = _compact_signal_text(" ".join(normalized[0][:2]))
     if "индекс" not in header or "наименование" not in header:
         return False
-    index_values = [
-        _compact_signal_text(row[0])
-        for row in normalized[1:]
-        if row
-    ]
+    index_values = [_compact_signal_text(row[0]) for row in normalized[1:] if row]
     required_indexes = {
         "б1о15",
         "б1о24",
@@ -3294,14 +3101,8 @@ def _is_curriculum_header_excerpt_rows(rows: list[list[str]] | None) -> bool:
     if required_indexes.issubset(index_values):
         index_sequence_ok = True
     else:
-        required_course_count = sum(
-            bool(re.search(r"[бb]1[оo0]\d{1,2}", value))
-            for value in index_values
-        )
-        elective_course_count = sum(
-            bool(re.search(r"[бb]1[вb]\d{1,2}", value))
-            for value in index_values
-        )
+        required_course_count = sum(bool(re.search(r"[бb]1[оo0]\d{1,2}", value)) for value in index_values)
+        elective_course_count = sum(bool(re.search(r"[бb]1[вb]\d{1,2}", value)) for value in index_values)
         index_sequence_ok = (
             required_course_count >= 18
             and elective_course_count >= 4
@@ -3309,11 +3110,7 @@ def _is_curriculum_header_excerpt_rows(rows: list[list[str]] | None) -> bool:
         )
     if not index_sequence_ok:
         return False
-    tail_cells = [
-        cell.strip()
-        for row in normalized[1:]
-        for cell in row[2:]
-    ]
+    tail_cells = [cell.strip() for row in normalized[1:] for cell in row[2:]]
     if not tail_cells:
         return False
     blank_ratio = sum(not cell for cell in tail_cells) / len(tail_cells)
@@ -3345,20 +3142,14 @@ def _canonical_curriculum_summary_names() -> dict[str, str]:
 
 def _curriculum_summary_plan_heading(markdown: str) -> str:
     plan_match = re.search(
-        r"\b(?P<code>\d{6})\s*[-–]\s*(?P<year>\d{4}).{0,28}?"
-        r"(?P<duration>[4Ч]\s*[гr]\s*0{1,2}\s*[мm])",
+        r"\b(?P<code>\d{6})\s*[-–]\s*(?P<year>\d{4}).{0,28}?" r"(?P<duration>[4Ч]\s*[гr]\s*0{1,2}\s*[мm])",
         markdown,
         flags=re.I | re.S,
     )
     if plan_match:
         code = plan_match.group("code")
         year = plan_match.group("year")
-        duration = (
-            plan_match.group("duration")
-            .replace("Ч", "4")
-            .replace("r", "г")
-            .replace("m", "м")
-        )
+        duration = plan_match.group("duration").replace("Ч", "4").replace("r", "г").replace("m", "м")
         duration = re.sub(r"\s+", "", duration)
         duration = duration.replace("г0м", "г00м")
         return f"## УЧЕБНЫЙ ПЛАН {code}-{year}-О-ПП-{duration}-02.plx"
@@ -3377,16 +3168,12 @@ def _normalize_curriculum_summary_index(raw: str, name: str = "") -> str:
     )
     if noisy_elective is None:
         noisy_elective = re.search(
-            r"(?ix)"
-            r"^[\s\|!:\.]*Д\s*[ВB8&]\s*[\.,:&]?\s*"
-            r"0?([1-4])\s*[\.,:&]\s*([0-9ОOЗз]{1,2})",
+            r"(?ix)" r"^[\s\|!:\.]*Д\s*[ВB8&]\s*[\.,:&]?\s*" r"0?([1-4])\s*[\.,:&]\s*([0-9ОOЗз]{1,2})",
             value,
         )
     if noisy_elective is None:
         noisy_elective = re.search(
-            r"(?ix)"
-            r"^[\s\|!:\.]*[ВB8&]\s+[ВB8&]\s*[\.,:&]\s*"
-            r"0?([1-4])\s*[\.,:&]\s*([0-9ОOЗз]{1,2})",
+            r"(?ix)" r"^[\s\|!:\.]*[ВB8&]\s+[ВB8&]\s*[\.,:&]\s*" r"0?([1-4])\s*[\.,:&]\s*([0-9ОOЗз]{1,2})",
             value,
         )
     if noisy_elective is not None:
@@ -3535,12 +3322,16 @@ def _normalize_curriculum_competence_token(token: str) -> str | None:
     value = value.replace("O", "О").replace("0П", "ОП")
     value = value.replace("P", "Р").replace("K", "К").replace("Y", "У")
     value = re.sub(r"^NК", "ПК", value)
-    value = value.translate(str.maketrans({
-        "О": "0",
-        "З": "3",
-        "Б": "6",
-        "В": "8",
-    }))
+    value = value.translate(
+        str.maketrans(
+            {
+                "О": "0",
+                "З": "3",
+                "Б": "6",
+                "В": "8",
+            }
+        )
+    )
     prefix_match = re.match(r"(?:(0ПК)|(ПК)|(УК))[-–—]?(.*)$", value)
     if not prefix_match:
         return None
@@ -3614,11 +3405,7 @@ def _curriculum_index_mentions(value: str) -> list[tuple[int, int, str, str]]:
     for match in _CURRICULUM_INDEX_MENTION_RE.finditer(value):
         raw = match.group(0)
         index = _normalize_curriculum_summary_index(raw)
-        if (
-            _parse_numbered_curriculum_index(index)
-            and ".ДВ." not in index
-            and len(re.findall(r"\d", raw)) < 2
-        ):
+        if _parse_numbered_curriculum_index(index) and ".ДВ." not in index and len(re.findall(r"\d", raw)) < 2:
             continue
         if _looks_like_curriculum_summary_index(index):
             mentions.append((match.start(), match.end(), raw, index))
@@ -3654,35 +3441,18 @@ def _extract_curriculum_summary_table_rows(
             if parsed:
                 prefix, number, width = parsed
                 malformed_same_section = (
-                    bool(expected_prefix)
-                    and prefix.startswith(expected_prefix)
-                    and prefix != expected_prefix
+                    bool(expected_prefix) and prefix.startswith(expected_prefix) and prefix != expected_prefix
                 )
                 if (
-                    (
-                        expected_prefix == prefix
-                        and expected_number is not None
-                        and number > expected_number + 2
-                    )
-                    or (
-                        malformed_same_section
-                        and expected_number is not None
-                    )
-                    or (
-                        expected_prefix == prefix
-                        and expected_number is not None
-                        and index.count(".") > 2
-                    )
+                    (expected_prefix == prefix and expected_number is not None and number > expected_number + 2)
+                    or (malformed_same_section and expected_number is not None)
+                    or (expected_prefix == prefix and expected_number is not None and index.count(".") > 2)
                 ):
                     index = f"{expected_prefix}{expected_number:02d}"
                     prefix = expected_prefix
                     number = expected_number
                     width = 2
-                if (
-                    expected_prefix == prefix
-                    and expected_number is not None
-                    and number < expected_number - 1
-                ):
+                if expected_prefix == prefix and expected_number is not None and number < expected_number - 1:
                     index = f"{prefix}{expected_number:0{max(2, width)}d}"
                     number = expected_number
                 expected_prefix = prefix
@@ -3773,18 +3543,12 @@ def _curriculum_summary_main_order(observed: set[str]) -> list[str]:
         (
             parsed[1]
             for index in observed
-            if (parsed := _parse_numbered_curriculum_index(index))
-            and parsed[0] == "Б1.В."
-            and parsed[1] <= 24
+            if (parsed := _parse_numbered_curriculum_index(index)) and parsed[0] == "Б1.В." and parsed[1] <= 24
         ),
         default=8,
     )
     order.extend(f"Б1.В.{number:02d}" for number in range(1, max(8, max_variable) + 1))
-    return [
-        index
-        for index in order
-        if index in observed or index in canonical or index in {"Б1", "Б1.О", "Б1.В"}
-    ]
+    return [index for index in order if index in observed or index in canonical or index in {"Б1", "Б1.О", "Б1.В"}]
 
 
 def _curriculum_summary_elective_groups(indexes: Iterable[str]) -> dict[str, list[str]]:
@@ -3797,10 +3561,7 @@ def _curriculum_summary_elective_groups(indexes: Iterable[str]) -> dict[str, lis
         groups.setdefault(group, [])
         if option is not None:
             groups[group].append(index)
-    return {
-        group: sorted(set(items), key=_curriculum_summary_index_sort_key)
-        for group, items in groups.items()
-    }
+    return {group: sorted(set(items), key=_curriculum_summary_index_sort_key) for group, items in groups.items()}
 
 
 def _curriculum_common_option_codes(
@@ -3943,7 +3704,10 @@ def _extract_curriculum_lower_rows(
 def _repair_curriculum_summary_tables(markdown: str) -> tuple[str, int]:
     if "УЧЕБНЫЙ ПЛАН" not in markdown.upper():
         return markdown, 0
-    if _compact_signal_text(markdown).count("формированиекомпетенции") == 0 and len(_curriculum_competence_codes(markdown)) < 20:
+    if (
+        _compact_signal_text(markdown).count("формированиекомпетенции") == 0
+        and len(_curriculum_competence_codes(markdown)) < 20
+    ):
         return markdown, 0
 
     table_names, best_table_rows, first_table_block = _extract_curriculum_summary_table_rows(markdown)
@@ -4014,8 +3778,7 @@ def _repair_curriculum_summary_tables(markdown: str) -> tuple[str, int]:
         if group not in heading_name:
             heading_name = f"{heading_name} {group}"
         group_codes = "; ".join(
-            competencies.get(group, ())
-            or _curriculum_common_option_codes(option_indexes, competencies)
+            competencies.get(group, ()) or _curriculum_common_option_codes(option_indexes, competencies)
         )
         option_rows = [["Индекс", "Наименование"]]
         for index in option_indexes:
@@ -4056,11 +3819,7 @@ def _repair_curriculum_summary_tables(markdown: str) -> tuple[str, int]:
 
     blocks = _markdown_blocks(markdown)
     prefix = blocks[:first_table_block] if first_table_block is not None else []
-    prefix = [
-        block
-        for block in prefix
-        if "УЧЕБНЫЙ ПЛАН" not in block.upper() or "Индекс" not in block
-    ]
+    prefix = [block for block in prefix if "УЧЕБНЫЙ ПЛАН" not in block.upper() or "Индекс" not in block]
     return "\n\n".join([*prefix, *summary_parts]), 1
 
 
@@ -4068,11 +3827,7 @@ def _is_mixed_language_table_rows(rows: list[list[str]] | None) -> bool:
     if not rows:
         return False
     header = _compact_signal_text(" ".join(rows[0]))
-    return (
-        "english" in header
-        and ("рус" in header or "код" in header)
-        and ("中文" in header or "mix" in header)
-    )
+    return "english" in header and ("рус" in header or "код" in header) and ("中文" in header or "mix" in header)
 
 
 def _is_mixed_merged_section_row(row: list[str]) -> bool:
@@ -4081,19 +3836,10 @@ def _is_mixed_merged_section_row(row: list[str]) -> bool:
     first_cell = row[0].strip()
     if not first_cell:
         return False
-    if any(
-        cell.strip() and cell.strip() != MERGE_LEFT_MARKER
-        for cell in row[1:]
-    ):
+    if any(cell.strip() and cell.strip() != MERGE_LEFT_MARKER for cell in row[1:]):
         return False
     signal = _compact_signal_text(first_cell)
-    return (
-        "mergedsubsection" in signal
-        or (
-            "section" in signal
-            and "раздел" in signal
-        )
-    )
+    return "mergedsubsection" in signal or ("section" in signal and "раздел" in signal)
 
 
 def _normalize_mixed_merged_section_cell(value: str) -> str:
@@ -4116,10 +3862,7 @@ def _restore_mixed_table_merge_left_rows(
         restored.append(
             [
                 _normalize_mixed_merged_section_cell(row[0]),
-                *(
-                    cell.strip() or MERGE_LEFT_MARKER
-                    for cell in row[1:]
-                ),
+                *(cell.strip() or MERGE_LEFT_MARKER for cell in row[1:]),
             ]
         )
     return _canonical_mixed_debug_table_rows(restored)
@@ -4164,13 +3907,8 @@ def _mixed_table_descriptor_lines(block: str) -> list[str]:
     rows = _lenient_markdown_table_rows(block)
     if not _is_mixed_language_table_rows(rows):
         return []
-    if any(
-        _is_mixed_merged_section_row(row)
-        for row in rows[1:]
-    ):
-        return [
-            "Image-only PDF merged subsection rows Markdown placeholder cells"
-        ]
+    if any(_is_mixed_merged_section_row(row) for row in rows[1:]):
+        return ["Image-only PDF merged subsection rows Markdown placeholder cells"]
     return []
 
 
@@ -4189,15 +3927,8 @@ def _ensure_mixed_table_heading(markdown: str) -> tuple[str, bool]:
 
 
 def _is_ordered_list_block(block: str) -> bool:
-    lines = [
-        line.strip()
-        for line in block.splitlines()
-        if line.strip()
-    ]
-    return bool(lines) and all(
-        re.match(r"^\d+[.)]\s+\S", line)
-        for line in lines
-    )
+    lines = [line.strip() for line in block.splitlines() if line.strip()]
+    return bool(lines) and all(re.match(r"^\d+[.)]\s+\S", line) for line in lines)
 
 
 def _looks_like_doc_heading_repair_target(blocks: list[str]) -> bool:
@@ -4205,11 +3936,7 @@ def _looks_like_doc_heading_repair_target(blocks: list[str]) -> bool:
         return False
     if not blocks[0].lstrip().startswith("# "):
         return False
-    table_count = sum(
-        1
-        for block in blocks
-        if _lenient_markdown_table_rows(block) is not None
-    )
+    table_count = sum(1 for block in blocks if _lenient_markdown_table_rows(block) is not None)
     return table_count >= 3
 
 
@@ -4256,10 +3983,7 @@ def _repair_doc_section_headings(markdown: str) -> tuple[str, int]:
         next_block = blocks[index + 1] if index + 1 < len(blocks) else ""
         next_is_table = _lenient_markdown_table_rows(next_block) is not None
         next_is_ordered_list = _is_ordered_list_block(next_block)
-        if (
-            _is_plain_section_label(block)
-            and (next_is_table or next_is_ordered_list)
-        ):
+        if _is_plain_section_label(block) and (next_is_table or next_is_ordered_list):
             repaired.append(f"## {block.strip()}")
             repair_count += 1
             continue
@@ -4274,24 +3998,10 @@ def _merge_adjacent_compatible_table_parts(
     merge_count = 0
     for part in parts:
         current = _markdown_table_part(part)
-        previous = (
-            _markdown_table_part(merged[-1])
-            if merged
-            else None
-        )
-        if (
-            current is not None
-            and previous is not None
-            and current[:2] == previous[:2]
-        ):
-            previous_lines = tuple(
-                line.strip()
-                for line in merged[-1].splitlines()
-                if line.strip()
-            )
-            merged[-1] = "\n".join(
-                (*previous_lines, *current[2])
-            )
+        previous = _markdown_table_part(merged[-1]) if merged else None
+        if current is not None and previous is not None and current[:2] == previous[:2]:
+            previous_lines = tuple(line.strip() for line in merged[-1].splitlines() if line.strip())
+            merged[-1] = "\n".join((*previous_lines, *current[2]))
             merge_count += 1
             continue
         merged.append(part)
@@ -4299,11 +4009,7 @@ def _merge_adjacent_compatible_table_parts(
 
 
 def _markdown_blocks(markdown: str) -> list[str]:
-    return [
-        block.strip()
-        for block in re.split(r"\n\s*\n", markdown)
-        if block.strip()
-    ]
+    return [block.strip() for block in re.split(r"\n\s*\n", markdown) if block.strip()]
 
 
 def _ranked_numeric_table_rows(markdown: str) -> int:
@@ -4354,13 +4060,8 @@ def _recover_aligned_numeric_full_page(
                 psm=profile.document_region_psm,
             )
             fallback_result = aligned_numeric_text_to_markdown(fallback_text)
-            if (
-                fallback_result is not None
-                and (
-                    result is None
-                    or (fallback_result.rows, fallback_result.cols)
-                    > (result.rows, result.cols)
-                )
+            if fallback_result is not None and (
+                result is None or (fallback_result.rows, fallback_result.cols) > (result.rows, result.cols)
             ):
                 result = fallback_result
     if result is None or result.rows < 8 or result.cols < 3:
@@ -4430,49 +4131,29 @@ def _sparse_rows_have_confirmed_structure(
     for row in rows:
         for row_number, column, code in row.codes:
             if code in MERGE_LEFT_CODES:
-                merge_left_rows.setdefault(column, set()).add(
-                    row_number
-                )
-                merge_left_columns.setdefault(row_number, set()).add(
-                    column
-                )
+                merge_left_rows.setdefault(column, set()).add(row_number)
+                merge_left_columns.setdefault(row_number, set()).add(column)
             if code in MERGE_BOTH_CODES:
-                merge_both_by_row.setdefault(row_number, set()).add(
-                    column
-                )
+                merge_both_by_row.setdefault(row_number, set()).add(column)
     for columns in merge_left_columns.values():
         run = 0
         previous = None
         for column in sorted(columns):
-            run = (
-                run + 1
-                if previous is None or column == previous + 1
-                else 1
-            )
+            run = run + 1 if previous is None or column == previous + 1 else 1
             if run >= 4:
                 return True
             previous = column
-    if any(
-        len(row_numbers) >= 3
-        for row_numbers in merge_left_rows.values()
-    ):
+    if any(len(row_numbers) >= 3 for row_numbers in merge_left_rows.values()):
         return True
 
     row_numbers = sorted(merge_both_by_row)
     for first_index, first_row in enumerate(row_numbers):
-        for second_row in row_numbers[first_index + 1:]:
-            common = sorted(
-                merge_both_by_row[first_row]
-                & merge_both_by_row[second_row]
-            )
+        for second_row in row_numbers[first_index + 1 :]:
+            common = sorted(merge_both_by_row[first_row] & merge_both_by_row[second_row])
             run = 0
             previous = None
             for column in common:
-                run = (
-                    run + 1
-                    if previous is None or column == previous + 1
-                    else 1
-                )
+                run = run + 1 if previous is None or column == previous + 1 else 1
                 if run >= 2:
                     return True
                 previous = column
@@ -4517,44 +4198,26 @@ def _render_layout_journal(
         nonlocal seen_structural_markdown
         if not pending_sparse_rows:
             return
-        if (
-            not page_table_confirmed
-            and not _sparse_rows_have_confirmed_structure(
-                pending_sparse_rows,
-            )
+        if not page_table_confirmed and not _sparse_rows_have_confirmed_structure(
+            pending_sparse_rows,
         ):
-            plain_parts = [
-                part
-                for row in pending_sparse_rows
-                for part in row.parts
-                if part.strip()
-            ]
+            plain_parts = [part for row in pending_sparse_rows for part in row.parts if part.strip()]
             page_parts.extend(plain_parts)
             if plain_parts:
                 seen_structural_markdown = True
-            runtime_flags.add(
-                "structural_grammar:bypass_unconfirmed_grid"
-            )
+            runtime_flags.add("structural_grammar:bypass_unconfirmed_grid")
             runtime_flags.add("markdown_lint:pass")
             pending_sparse_rows.clear()
             return
         result = render_sparse_markdown_rows(
             pending_sparse_rows,
-            first_heading_level=(
-                2
-                if seen_structural_markdown
-                else 1
-            ),
+            first_heading_level=(2 if seen_structural_markdown else 1),
         )
         if result.markdown:
             page_parts.append(result.markdown)
             seen_structural_markdown = True
         runtime_flags.add("structural_grammar:finite_merge_v1")
-        runtime_flags.add(
-            "markdown_lint:fail"
-            if result.lint_errors
-            else "markdown_lint:pass"
-        )
+        runtime_flags.add("markdown_lint:fail" if result.lint_errors else "markdown_lint:pass")
         pending_sparse_rows.clear()
 
     for entry in entries:
@@ -4574,11 +4237,7 @@ def _render_layout_journal(
             )
             continue
         flush_sparse_rows()
-        plain_parts = [
-            part
-            for part in parts
-            if part.strip()
-        ]
+        plain_parts = [part for part in parts if part.strip()]
         page_parts.extend(plain_parts)
         if plain_parts:
             seen_structural_markdown = True
@@ -4599,13 +4258,8 @@ def _convert_page_segment(
         "table_cells": 0,
     }
     runtime_flags: set[str] = set()
-    if (
-        _looks_like_edge_to_edge_word(image)
-        or (
-            _is_dewarped_projector_slide(image)
-            and "recursive_grid"
-            not in profile.layout.allowed_stages
-        )
+    if _looks_like_edge_to_edge_word(image) or (
+        _is_dewarped_projector_slide(image) and "recursive_grid" not in profile.layout.allowed_stages
     ):
         layout_parameters = ()
         runtime_flags.add("layout_decision:bypass_single_region")
@@ -4641,7 +4295,9 @@ def _convert_page_segment(
             ]
         )
         runtime_flags.add(
-            "layout_decision:legacy_table_regions" if "table_regions" in profile.layout.allowed_stages else "layout_decision:unsegmented"
+            "layout_decision:legacy_table_regions"
+            if "table_regions" in profile.layout.allowed_stages
+            else "layout_decision:unsegmented"
         )
 
     with TemporaryStructuralJournal() as layout_journal:
@@ -4656,8 +4312,7 @@ def _convert_page_segment(
                 reference = layout_journal.append(region_parts)
                 metadata = region.metadata or {}
                 if (
-                    metadata.get("layout_kind")
-                    == "recursive_grid_cell"
+                    metadata.get("layout_kind") == "recursive_grid_cell"
                     and isinstance(metadata.get("grid_row"), int)
                     and isinstance(metadata.get("grid_col"), int)
                 ):
@@ -4680,11 +4335,7 @@ def _convert_page_segment(
                                 int(metadata["grid_row"]),
                                 int(metadata["grid_col"]),
                             ),
-                            codes=(
-                                tuple(sparse_codes)
-                                if isinstance(sparse_codes, tuple)
-                                else ()
-                            ),
+                            codes=(tuple(sparse_codes) if isinstance(sparse_codes, tuple) else ()),
                             list_marker=bool(
                                 metadata.get("list_marker"),
                             ),
@@ -4716,39 +4367,27 @@ def _convert_page_segment(
             layout_journal,
             layout_entries,
             structural_output=profile.structural_output,
-            page_table_confirmed=(
-                totals["tables_found"] > 0
-                and not _looks_like_dark_ui_text_page(image)
-            ),
+            page_table_confirmed=(totals["tables_found"] > 0 and not _looks_like_dark_ui_text_page(image)),
         )
         runtime_flags.update(grammar_flags)
 
     if (
         profile.structural_output == "markdown"
-        and "structural_grammar:bypass_unconfirmed_grid"
-        in runtime_flags
+        and "structural_grammar:bypass_unconfirmed_grid" in runtime_flags
         and not _has_confirmed_structural_markdown(runtime_flags)
-        and (
-            totals["tables_found"] == 0
-            or _looks_like_dark_ui_text_page(image)
-        )
+        and (totals["tables_found"] == 0 or _looks_like_dark_ui_text_page(image))
     ):
         plain_image = image
         owns_plain_image = False
-        if (
-            profile.dark_ui_text_fallback
-            and _looks_like_dark_ui_text_page(image)
-        ):
+        if profile.dark_ui_text_fallback and _looks_like_dark_ui_text_page(image):
             plain_image = _dark_ui_text_image(image)
             owns_plain_image = True
             runtime_flags.add("dark_ui_text_fallback:used")
         try:
-            fallback_parts, fallback_chunks, fallback_cards = (
-                _recognize_image_region(
-                    engine,
-                    plain_image,
-                    profile,
-                )
+            fallback_parts, fallback_chunks, fallback_cards = _recognize_image_region(
+                engine,
+                plain_image,
+                profile,
             )
         finally:
             if owns_plain_image:
@@ -4761,13 +4400,12 @@ def _convert_page_segment(
 
     if (
         profile.structural_output == "markdown"
-        and
-        "markdown_lint:pass" not in runtime_flags
+        and "markdown_lint:pass" not in runtime_flags
         and _should_append_spatial_full_page_fallback(
-        profile,
-        regions,
-        layout_parameters,
-        page_parts,
+            profile,
+            regions,
+            layout_parameters,
+            page_parts,
         )
     ):
         fallback_parts, fallback_chunks, fallback_cards = _recognize_image_region(
@@ -4778,16 +4416,13 @@ def _convert_page_segment(
         totals["chunks"] += fallback_chunks
         totals["cards_found"] += fallback_cards
         runtime_flags.add("spatial_full_page_fallback:used")
-        page_parts = dedupe_chunks(
-            [part for part in (*page_parts, *fallback_parts) if part.strip()]
-        )
+        page_parts = dedupe_chunks([part for part in (*page_parts, *fallback_parts) if part.strip()])
 
     if (
         profile.structural_output == "markdown"
         and profile.dark_ui_text_fallback
         and _looks_like_dark_ui_text_page(image)
-        and "structural_plain_fallback:used"
-        not in runtime_flags
+        and "structural_plain_fallback:used" not in runtime_flags
         and not _has_confirmed_structural_markdown(runtime_flags)
     ):
         dark_text_image = _dark_ui_text_image(image)
@@ -4802,18 +4437,12 @@ def _convert_page_segment(
         totals["chunks"] += fallback_chunks
         totals["cards_found"] += fallback_cards
         runtime_flags.add("dark_ui_text_fallback:used")
-        page_parts = dedupe_chunks(
-            [part for part in (*page_parts, *fallback_parts) if part.strip()]
-        )
+        page_parts = dedupe_chunks([part for part in (*page_parts, *fallback_parts) if part.strip()])
 
     if profile.structural_output == "markdown":
-        page_parts, merged_tables = (
-            _merge_adjacent_compatible_table_parts(page_parts)
-        )
+        page_parts, merged_tables = _merge_adjacent_compatible_table_parts(page_parts)
         if merged_tables:
-            runtime_flags.add(
-                "structural_grammar:merge_table_continuations"
-            )
+            runtime_flags.add("structural_grammar:merge_table_continuations")
 
     return (
         _finalize_markdown("\n\n".join(page_parts), profile),
@@ -4822,10 +4451,7 @@ def _convert_page_segment(
 
 
 def _has_confirmed_structural_markdown(runtime_flags: set[str]) -> bool:
-    return (
-        "structural_grammar:finite_merge_v1" in runtime_flags
-        and "markdown_lint:pass" in runtime_flags
-    )
+    return "structural_grammar:finite_merge_v1" in runtime_flags and "markdown_lint:pass" in runtime_flags
 
 
 def _apply_static_markdown_repairs(
@@ -4840,51 +4466,35 @@ def _apply_static_markdown_repairs(
     if repaired_tables:
         runtime_flags.add("table_repair:large_markdown_shape")
 
-    markdown, repaired_curriculum_title = (
-        _repair_curriculum_title_page_tables(markdown)
-    )
+    markdown, repaired_curriculum_title = _repair_curriculum_title_page_tables(markdown)
     if repaired_curriculum_title:
         runtime_flags.add("table_repair:curriculum_title_page")
 
-    markdown, repaired_curriculum_logical = _repair_curriculum_logical_tables(
-        markdown
-    )
+    markdown, repaired_curriculum_logical = _repair_curriculum_logical_tables(markdown)
     if repaired_curriculum_logical:
         runtime_flags.add("table_repair:curriculum_logical")
 
-    markdown, repaired_curriculum_controls = (
-        _repair_curriculum_summary_control_labels(markdown)
-    )
+    markdown, repaired_curriculum_controls = _repair_curriculum_summary_control_labels(markdown)
     if repaired_curriculum_controls:
         runtime_flags.add("table_repair:curriculum_control_labels")
 
-    markdown, repaired_curriculum_summary_numeric = (
-        _repair_curriculum_summary_numeric_noise(markdown)
-    )
+    markdown, repaired_curriculum_summary_numeric = _repair_curriculum_summary_numeric_noise(markdown)
     if repaired_curriculum_summary_numeric:
         runtime_flags.add("table_repair:curriculum_summary_numeric")
 
-    markdown, repaired_curriculum_pages = _repair_curriculum_page_headings(
-        markdown
-    )
+    markdown, repaired_curriculum_pages = _repair_curriculum_page_headings(markdown)
     if repaired_curriculum_pages:
         runtime_flags.add("doc_repair:curriculum_page_headings")
 
-    markdown, repaired_score_tables = _repair_short_name_score_tables(
-        markdown
-    )
+    markdown, repaired_score_tables = _repair_short_name_score_tables(markdown)
     if repaired_score_tables:
         runtime_flags.add("table_repair:short_name_score")
 
-    markdown, repaired_curriculum_headers = (
-        _repair_curriculum_header_excerpt_tables(markdown)
-    )
+    markdown, repaired_curriculum_headers = _repair_curriculum_header_excerpt_tables(markdown)
     if repaired_curriculum_headers:
         runtime_flags.add("table_repair:curriculum_header_excerpt")
 
-    markdown, repaired_curriculum_summary = (
-        _repair_curriculum_summary_tables(markdown)
-    )
+    markdown, repaired_curriculum_summary = _repair_curriculum_summary_tables(markdown)
     if repaired_curriculum_summary:
         runtime_flags.add("table_repair:curriculum_summary")
 
@@ -4922,24 +4532,16 @@ def _convert_page(
         markdown, totals = _convert_page_segment(main_image, engine, profile)
         fallback_text = ""
         fallback_calls = 0
-        structural_lint_passed = (
-            "structural_grammar:finite_merge_v1"
-            in totals.get("runtime_flags", [])
-            and "markdown_lint:pass" in totals.get("runtime_flags", [])
-        )
-        oversized_sparse_table = (
-            totals.get("table_cells", 0) >= 500
-            and _ocr_compact_char_count(markdown)
-            < max(120, totals.get("table_cells", 0) // 4)
+        structural_lint_passed = "structural_grammar:finite_merge_v1" in totals.get(
+            "runtime_flags", []
+        ) and "markdown_lint:pass" in totals.get("runtime_flags", [])
+        oversized_sparse_table = totals.get("table_cells", 0) >= 500 and _ocr_compact_char_count(markdown) < max(
+            120, totals.get("table_cells", 0) // 4
         )
         if (
             profile.structural_output == "markdown"
-            and
-            profile.dense_grid_fallback
-            and (
-                not structural_lint_passed
-                or oversized_sparse_table
-            )
+            and profile.dense_grid_fallback
+            and (not structural_lint_passed or oversized_sparse_table)
             and not _contains_large_markdown_table([markdown])
         ):
             if oversized_sparse_table:
@@ -5012,9 +4614,7 @@ def _convert_page(
                         "table_repair:large_markdown_shape",
                     }
                 )
-            markdown, repaired_curriculum_title = (
-                _repair_curriculum_title_page_tables(markdown)
-            )
+            markdown, repaired_curriculum_title = _repair_curriculum_title_page_tables(markdown)
             if repaired_curriculum_title:
                 totals["runtime_flags"] = sorted(
                     {
@@ -5022,9 +4622,7 @@ def _convert_page(
                         "table_repair:curriculum_title_page",
                     }
                 )
-            markdown, repaired_curriculum_logical = (
-                _repair_curriculum_logical_tables(markdown)
-            )
+            markdown, repaired_curriculum_logical = _repair_curriculum_logical_tables(markdown)
             if repaired_curriculum_logical:
                 totals["runtime_flags"] = sorted(
                     {
@@ -5032,9 +4630,7 @@ def _convert_page(
                         "table_repair:curriculum_logical",
                     }
                 )
-            markdown, repaired_curriculum_controls = (
-                _repair_curriculum_summary_control_labels(markdown)
-            )
+            markdown, repaired_curriculum_controls = _repair_curriculum_summary_control_labels(markdown)
             if repaired_curriculum_controls:
                 totals["runtime_flags"] = sorted(
                     {
@@ -5042,9 +4638,7 @@ def _convert_page(
                         "table_repair:curriculum_control_labels",
                     }
                 )
-            markdown, repaired_curriculum_summary_numeric = (
-                _repair_curriculum_summary_numeric_noise(markdown)
-            )
+            markdown, repaired_curriculum_summary_numeric = _repair_curriculum_summary_numeric_noise(markdown)
             if repaired_curriculum_summary_numeric:
                 totals["runtime_flags"] = sorted(
                     {
@@ -5052,9 +4646,7 @@ def _convert_page(
                         "table_repair:curriculum_summary_numeric",
                     }
                 )
-            markdown, repaired_curriculum_pages = (
-                _repair_curriculum_page_headings(markdown)
-            )
+            markdown, repaired_curriculum_pages = _repair_curriculum_page_headings(markdown)
             if repaired_curriculum_pages:
                 totals["runtime_flags"] = sorted(
                     {
@@ -5062,9 +4654,7 @@ def _convert_page(
                         "doc_repair:curriculum_page_headings",
                     }
                 )
-            markdown, repaired_score_tables = _repair_short_name_score_tables(
-                markdown
-            )
+            markdown, repaired_score_tables = _repair_short_name_score_tables(markdown)
             if repaired_score_tables:
                 totals["runtime_flags"] = sorted(
                     {
@@ -5072,9 +4662,7 @@ def _convert_page(
                         "table_repair:short_name_score",
                     }
                 )
-            markdown, repaired_curriculum_headers = (
-                _repair_curriculum_header_excerpt_tables(markdown)
-            )
+            markdown, repaired_curriculum_headers = _repair_curriculum_header_excerpt_tables(markdown)
             if repaired_curriculum_headers:
                 totals["runtime_flags"] = sorted(
                     {
@@ -5082,9 +4670,7 @@ def _convert_page(
                         "table_repair:curriculum_header_excerpt",
                     }
                 )
-            markdown, repaired_curriculum_summary = (
-                _repair_curriculum_summary_tables(markdown)
-            )
+            markdown, repaired_curriculum_summary = _repair_curriculum_summary_tables(markdown)
             if repaired_curriculum_summary:
                 totals["runtime_flags"] = sorted(
                     {
@@ -5106,9 +4692,7 @@ def _convert_page(
                         "table_repair:mixed_table_t9",
                     }
                 )
-            markdown, repaired_headings = _repair_doc_section_headings(
-                markdown
-            )
+            markdown, repaired_headings = _repair_doc_section_headings(markdown)
             if repaired_headings:
                 totals["runtime_flags"] = sorted(
                     {
@@ -5117,9 +4701,7 @@ def _convert_page(
                     }
                 )
             markdown_blocks = _markdown_blocks(markdown)
-            recovered_screen = _recover_search_results_screen(
-                markdown_blocks
-            )
+            recovered_screen = _recover_search_results_screen(markdown_blocks)
             if recovered_screen is not None:
                 result_columns: list[list[list[str]]] = []
                 if hasattr(engine, "recognize"):
@@ -5163,10 +4745,7 @@ def _convert_page(
                         detail_texts=result_details,
                     )
                     if result_details:
-                        totals["chunks"] += sum(
-                            len(detail)
-                            for detail in result_details
-                        )
+                        totals["chunks"] += sum(len(detail) for detail in result_details)
                         totals["runtime_flags"] = sorted(
                             {
                                 *totals.get("runtime_flags", []),
@@ -5178,13 +4757,9 @@ def _convert_page(
                         and profile.sparse_text_fallback_engine
                         and _engine_name(engine) != profile.sparse_text_fallback_engine
                     ):
-                        fallback_engine = _create_sparse_text_fallback_engine(
-                            profile
-                        )
+                        fallback_engine = _create_sparse_text_fallback_engine(profile)
                         fallback_recognize_words = (
-                            getattr(fallback_engine, "recognize_words", None)
-                            if fallback_engine is not None
-                            else None
+                            getattr(fallback_engine, "recognize_words", None) if fallback_engine is not None else None
                         )
                         if callable(fallback_recognize_words):
                             fallback_words = fallback_recognize_words(
@@ -5210,19 +4785,12 @@ def _convert_page(
                             if len(fallback_columns) > len(result_columns):
                                 result_columns = fallback_columns
                                 if fallback_details:
-                                    totals["chunks"] += sum(
-                                        len(detail)
-                                        for detail in fallback_details
-                                    )
+                                    totals["chunks"] += sum(len(detail) for detail in fallback_details)
                                 totals["runtime_flags"] = sorted(
                                     {
                                         *totals.get("runtime_flags", []),
                                         "search_results_recovery:fallback_result_grid_words",
-                                        *(
-                                            ["search_results_recovery:detail_strips"]
-                                            if fallback_details
-                                            else []
-                                        ),
+                                        *(["search_results_recovery:detail_strips"] if fallback_details else []),
                                     }
                                 )
                     if result_columns:
@@ -5274,13 +4842,9 @@ def _convert_page(
                 segment.close()
 
     if profile.structural_output == "markdown":
-        page_parts, merged_tables = (
-            _merge_adjacent_compatible_table_parts(page_parts)
-        )
+        page_parts, merged_tables = _merge_adjacent_compatible_table_parts(page_parts)
         if merged_tables:
-            runtime_flags.add(
-                "structural_grammar:merge_table_continuations"
-            )
+            runtime_flags.add("structural_grammar:merge_table_continuations")
         recovered_grid = _recover_long_card_grid_table(page_parts)
         if recovered_grid is not None:
             page_parts = [recovered_grid]

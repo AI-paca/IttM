@@ -43,13 +43,7 @@ def table_words_to_slot_markdown(
     mode: str = "line_merge_v1",
 ) -> str:
     rows = table_words_to_slot_rows(image, table, words, mode=mode)
-    visible_rows = [
-        [
-            "" if cell in MERGE_MARKERS else cell
-            for cell in row
-        ]
-        for row in rows
-    ]
+    visible_rows = [["" if cell in MERGE_MARKERS else cell for cell in row] for row in rows]
     return _slot_rows_to_markdown(visible_rows)
 
 
@@ -62,25 +56,15 @@ def _slot_rows_to_markdown(rows: list[list[str]]) -> str:
     if summary_markdown:
         return summary_markdown
 
-    visible = [
-        row
-        for row in rows
-        if any(cell.strip() for cell in row)
-    ]
+    visible = [row for row in rows if any(cell.strip() for cell in row)]
     if not visible:
         return ""
     width = max(len(row) for row in visible)
-    padded = [
-        row + [""] * (width - len(row))
-        for row in visible
-    ]
+    padded = [row + [""] * (width - len(row)) for row in visible]
     padded = _normalize_known_table_columns(padded)
     separator = ["---" for _ in range(width)]
     body = padded[1:] or [[" " for _ in range(width)]]
-    return "\n".join(
-        "| " + " | ".join(row) + " |"
-        for row in (padded[0], separator, *body)
-    )
+    return "\n".join("| " + " | ".join(row) + " |" for row in (padded[0], separator, *body))
 
 
 def table_words_to_slot_rows(
@@ -131,33 +115,18 @@ def words_to_recursive_slot_markdown(
         return ""
 
     rows = _words_to_virtual_grid(rows_by_band, x_lines)
-    populated_cell_count = sum(
-        1
-        for row in rows
-        for cell in row
-        if cell.strip() and cell.strip() not in MERGE_MARKERS
-    )
+    populated_cell_count = sum(1 for row in rows for cell in row if cell.strip() and cell.strip() not in MERGE_MARKERS)
     total_cell_count = max(1, len(rows) * (len(x_lines) - 1))
     if populated_cell_count / total_cell_count < min_density:
         return ""
 
     populated_rows = [
-        row
-        for row in rows
-        if sum(1 for cell in row if cell.strip() and cell.strip() not in MERGE_MARKERS) >= 2
+        row for row in rows if sum(1 for cell in row if cell.strip() and cell.strip() not in MERGE_MARKERS) >= 2
     ]
     if len(populated_rows) < max(3, int(np.ceil(len(rows) * 0.45))):
         return ""
 
-    return _slot_rows_to_markdown(
-        [
-            [
-                "" if cell in MERGE_MARKERS else cell
-                for cell in row
-            ]
-            for row in rows
-        ]
-    )
+    return _slot_rows_to_markdown([["" if cell in MERGE_MARKERS else cell for cell in row] for row in rows])
 
 
 class _LineMap:
@@ -215,20 +184,14 @@ def _merge_horizontal_slots(
                 continue
             cells = row[start : end + 1]
             non_empty = [
-                index
-                for index, cell in enumerate(cells)
-                if cell.strip() and cell.strip() not in MERGE_MARKERS
+                index for index, cell in enumerate(cells) if cell.strip() and cell.strip() not in MERGE_MARKERS
             ]
             if not non_empty:
                 continue
             if not _should_merge_horizontal_segment(cells):
                 continue
 
-            text = " ".join(
-                cell.strip()
-                for cell in cells
-                if cell.strip() and cell.strip() not in MERGE_MARKERS
-            )
+            text = " ".join(cell.strip() for cell in cells if cell.strip() and cell.strip() not in MERGE_MARKERS)
             row[start] = text
             for col in range(start + 1, end + 1):
                 row[col] = MERGE_LEFT

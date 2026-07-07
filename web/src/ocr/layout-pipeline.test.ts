@@ -11,8 +11,8 @@ function threeColumnRaster(): LayoutAnalysisRaster {
     for (let column = 0; column < 3; column += 1) {
       const top = row * 60 + 8;
       const left = column * 100 + 10;
-      for (let y = top; y < top + 38; y += 1) {
-        for (let x = left; x < left + 70; x += 1) {
+      for (let y = top; y < top + 44; y += 1) {
+        for (let x = left; x < left + 80; x += 1) {
           const offset = (y * width + x) * 4;
           data[offset] = 0;
           data[offset + 1] = 0;

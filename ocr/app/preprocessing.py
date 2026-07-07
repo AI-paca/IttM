@@ -165,10 +165,7 @@ class ProjectorSlideDewarpStep(ImagePreprocessingStep):
 
         source = _detected_projector_quad(image)
         if source is None:
-            source = tuple(
-                (int(width * x), int(height * y))
-                for x, y in _projector_slide_source_ratios(gray)
-            )
+            source = tuple((int(width * x), int(height * y)) for x, y in _projector_slide_source_ratios(gray))
         target_width, target_height = 2000, 1200
         destination = (
             (0, 0),
@@ -330,11 +327,7 @@ def _detected_projector_quad(
     red = rgb[:, :, 0]
     green = rgb[:, :, 1]
     blue = rgb[:, :, 2]
-    field = (
-        (green - red > 16)
-        & (blue - red > 28)
-        & (blue > 105)
-    )
+    field = (green - red > 16) & (blue - red > 28) & (blue > 105)
     window = max(15, min(61, (height // 40) | 1))
     padded = np.pad(
         field.astype(np.int16),

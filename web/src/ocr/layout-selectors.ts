@@ -69,12 +69,7 @@ const tableFirstHeuristicSelector: LayoutSelector = (features, config) => {
     "whitespace",
     0.5,
   );
-  const verticalWhitespace = countSeparators(
-    features,
-    "x",
-    "whitespace",
-    0.5,
-  );
+  const verticalWhitespace = countSeparators(features, "x", "whitespace", 0.5);
   const textGridScore = Math.min(
     1,
     Math.min(horizontalInk / 8, 1) * 0.45 +

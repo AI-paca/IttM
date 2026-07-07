@@ -80,7 +80,9 @@ function looksLikeDarkUiTextBitmap(bitmap: ImageBitmap): boolean {
     if (luminance < 90) dark += 1;
     if (luminance > 190) light += 1;
   }
-  return dark / Math.max(1, total) >= 0.65 && light / Math.max(1, total) >= 0.04;
+  return (
+    dark / Math.max(1, total) >= 0.65 && light / Math.max(1, total) >= 0.04
+  );
 }
 
 function invertCanvas(canvas: OffscreenCanvas): void {

@@ -207,8 +207,9 @@ function countPattern(text: string, pattern: RegExp): number {
 
 function numericTextEvidence(text: string): number {
   const numericTokens =
-    text.match(/(?<![\p{L}\p{N}_])[+-]?\d+(?:[.,:/-]\d+)*%?(?![\p{L}\p{N}_])/gu) ??
-    [];
+    text.match(
+      /(?<![\p{L}\p{N}_])[+-]?\d+(?:[.,:/-]\d+)*%?(?![\p{L}\p{N}_])/gu,
+    ) ?? [];
   if (!numericTokens.length) return 0;
   const digitCount = text.match(/\p{N}/gu)?.length ?? 0;
   const letterCount = text.match(/\p{L}/gu)?.length ?? 0;

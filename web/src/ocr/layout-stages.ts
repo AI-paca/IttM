@@ -184,7 +184,9 @@ function mediumHorizontalBands(
       .filter((center) => center > 0 && center < features.height),
   );
   const boundaries = [0];
-  for (const center of Array.from(centers).sort((left, right) => left - right)) {
+  for (const center of Array.from(centers).sort(
+    (left, right) => left - right,
+  )) {
     if (center - boundaries.at(-1)! < minMediumHeight) continue;
     if (features.height - center < minMediumHeight) continue;
     boundaries.push(center);
@@ -307,8 +309,9 @@ function verticalCutsForBand(
             .map((separator) => separator.end - separator.start)
             .sort((left, right) => left - right);
     const gapWidth = widths[Math.floor(widths.length / 2)];
-    const inkCount = cluster.filter((separator) => separator.kind === "ink")
-      .length;
+    const inkCount = cluster.filter(
+      (separator) => separator.kind === "ink",
+    ).length;
     const hasLinePairCut =
       inkCount >= 2 && coverage >= Math.max(0.8, minCoverage);
     const hasWhitespaceCut =
@@ -316,12 +319,12 @@ function verticalCutsForBand(
       gapWidth >= Math.max(8, features.width * 0.01);
     if (!hasWhitespaceCut && !hasLinePairCut) return null;
     return {
-        center,
-        coverage,
-        gapWidth: Math.max(1, gapWidth),
-        backedByLinePair: hasLinePairCut,
-        hasInkSupport: inkCount > 0,
-      };
+      center,
+      coverage,
+      gapWidth: Math.max(1, gapWidth),
+      backedByLinePair: hasLinePairCut,
+      hasInkSupport: inkCount > 0,
+    };
   };
 
   const strictTolerance = Math.max(4, Math.round(features.width * 0.015));
@@ -344,7 +347,8 @@ function verticalCutsForBand(
     if (summary === null) continue;
     if (
       strictCenters.some(
-        (strictCenter) => Math.abs(summary.center - strictCenter) <= looseTolerance,
+        (strictCenter) =>
+          Math.abs(summary.center - strictCenter) <= looseTolerance,
       )
     ) {
       continue;

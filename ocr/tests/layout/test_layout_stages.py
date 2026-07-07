@@ -102,14 +102,8 @@ def _table_region(
     left, top, right, bottom = bbox
     width = right - left
     height = bottom - top
-    x_lines = tuple(
-        round(width * index / cols)
-        for index in range(cols + 1)
-    )
-    y_lines = tuple(
-        round(height * index / rows)
-        for index in range(rows + 1)
-    )
+    x_lines = tuple(round(width * index / cols) for index in range(cols + 1))
+    y_lines = tuple(round(height * index / rows) for index in range(rows + 1))
     return LayoutRegion(
         kind="table",
         image=Image.new("RGB", (width, height), "white"),
@@ -223,12 +217,7 @@ def test_drawn_partition_table_is_reliable():
 
 
 def test_long_document_page_is_not_simple_two_column_table():
-    fixture = (
-        Path(__file__).resolve().parents[3]
-        / "debug"
-        / "fixtures"
-        / "doc_docs_ru_architecture.png"
-    )
+    fixture = Path(__file__).resolve().parents[3] / "debug" / "fixtures" / "doc_docs_ru_architecture.png"
     if not fixture.exists():
         pytest.skip("architecture document fixture is not available")
     image = Image.open(fixture).convert("RGB")
@@ -313,9 +302,7 @@ def test_recursive_table_uses_its_locally_prepared_image(monkeypatch):
         recursion = (table.metadata or {}).get("region_recursion")
         assert (255, 0, 0) in _colors(table.image)
         assert recursion
-        assert recursion[0]["preprocess_steps"] == (
-            "test_local_filter",
-        )
+        assert recursion[0]["preprocess_steps"] == ("test_local_filter",)
     finally:
         for region in regions:
             if region.image is not image:
@@ -438,23 +425,15 @@ def test_sparse_shadow_separates_subtable_boundary_from_dash_marker():
     ]
     try:
         shadow = project_sparse_shadow(leaves)
-        projections = {
-            id(leaf): (anchor, codes)
-            for leaf, anchor, codes in shadow.leaf_projection
-        }
+        projections = {id(leaf): (anchor, codes) for leaf, anchor, codes in shadow.leaf_projection}
 
         title_anchor, title_codes = projections[id(leaves[0])]
         bullet_anchor, bullet_codes = projections[id(leaves[1])]
-        continuation_anchor, continuation_codes = projections[
-            id(leaves[2])
-        ]
+        continuation_anchor, continuation_codes = projections[id(leaves[2])]
         assert title_anchor == (0, 0)
         assert title_codes == ((0, 2, 16),)
         assert bullet_anchor == (2, 1)
-        assert {
-            code
-            for _, _, code in shadow.codes
-        }.issubset(SPARSE_SHADOW_CODES)
+        assert {code for _, _, code in shadow.codes}.issubset(SPARSE_SHADOW_CODES)
         assert bullet_codes == ()
         assert continuation_anchor == (3, 1)
         assert continuation_codes == ((3, 1, 3),)
@@ -478,7 +457,7 @@ def test_left_tracks_marks_compact_bullet_before_merged_text():
         (1, 6),
     )
     for row, (start, end) in enumerate(marker, start=16):
-        mask[row, 68 + start:68 + end] = True
+        mask[row, 68 + start : 68 + end] = True
     mask[8:32, 87:250] = True
 
     _, tracks, dash_track, merge_left_tracks = _left_tracks(
@@ -687,21 +666,27 @@ def test_vertical_lane_separator_requires_concurrent_content():
     stacked = np.zeros((220, 800), dtype=bool)
     stacked[20:80, 40:300] = True
     stacked[130:200, 520:760] = True
-    assert _vertical_lane_separator(
-        stacked,
-        min_cell_height=24,
-        min_gap=8,
-    ) is None
+    assert (
+        _vertical_lane_separator(
+            stacked,
+            min_cell_height=24,
+            min_gap=8,
+        )
+        is None
+    )
 
     title_and_logo = np.zeros((220, 800), dtype=bool)
     title_and_logo[30:70, 40:300] = True
     title_and_logo[90:130, 40:300] = True
     title_and_logo[45:105, 520:760] = True
-    assert _vertical_lane_separator(
-        title_and_logo,
-        min_cell_height=24,
-        min_gap=8,
-    ) is None
+    assert (
+        _vertical_lane_separator(
+            title_and_logo,
+            min_cell_height=24,
+            min_gap=8,
+        )
+        is None
+    )
 
 
 def test_sparse_shadow_compresses_varying_paragraph_indents():
@@ -721,10 +706,7 @@ def test_sparse_shadow_compresses_varying_paragraph_indents():
         shadow = project_sparse_shadow(leaves)
 
         assert shadow.x_tracks == (40,)
-        assert [
-            anchor
-            for _, anchor, _ in shadow.leaf_projection
-        ] == [(0, 0), (1, 0), (2, 0)]
+        assert [anchor for _, anchor, _ in shadow.leaf_projection] == [(0, 0), (1, 0), (2, 0)]
         assert shadow.codes == frozenset(
             {
                 (1, 0, 3),
@@ -758,10 +740,7 @@ def test_sparse_shadow_signature_does_not_retain_leaf_images():
 
     assert signature.rows == 2
     assert signature.anchors == ((1, 0),)
-    assert all(
-        not isinstance(value, Image.Image)
-        for value in signature.__dict__.values()
-    )
+    assert all(not isinstance(value, Image.Image) for value in signature.__dict__.values())
     leaf.image.close()
 
 
@@ -811,14 +790,8 @@ def test_gradient_table_layout_supports_many_thin_columns():
     image = Image.new("RGB", (1200, 900), "white")
     draw = ImageDraw.Draw(image)
     left, top, right, bottom = 80, 100, 1120, 800
-    x_lines = [
-        round(left + (right - left) * index / 10)
-        for index in range(11)
-    ]
-    y_lines = [
-        round(top + (bottom - top) * index / 14)
-        for index in range(15)
-    ]
+    x_lines = [round(left + (right - left) * index / 10) for index in range(11)]
+    y_lines = [round(top + (bottom - top) * index / 14) for index in range(15)]
     for x in x_lines:
         draw.line((x, top, x, bottom), fill=(90, 90, 90), width=2)
     for y in y_lines:
@@ -841,14 +814,8 @@ def test_recursive_table_prefers_rules_over_text_row_oversegmentation():
         cols: int,
     ) -> TableLayout:
         left, top, right, bottom = bbox
-        x_lines = tuple(
-            round(left + (right - left) * index / cols)
-            for index in range(cols + 1)
-        )
-        y_lines = tuple(
-            round(top + (bottom - top) * index / rows)
-            for index in range(rows + 1)
-        )
+        x_lines = tuple(round(left + (right - left) * index / cols) for index in range(cols + 1))
+        y_lines = tuple(round(top + (bottom - top) * index / rows) for index in range(rows + 1))
         return TableLayout(
             bbox=bbox,
             rows=rows,
@@ -936,10 +903,7 @@ def test_full_page_card_grid_with_late_columns_returns_to_recursion():
         rows=15,
         cols=6,
         x_lines=(0, 200, 400, 600, 800, 1000, 1200),
-        y_lines=tuple(
-            round(700 * index / 15)
-            for index in range(16)
-        ),
+        y_lines=tuple(round(700 * index / 15) for index in range(16)),
         cells=(),
     )
     try:
@@ -961,10 +925,7 @@ def test_full_page_table_with_early_rules_keeps_table_path():
         rows=15,
         cols=6,
         x_lines=(0, 200, 400, 600, 800, 1000, 1200),
-        y_lines=tuple(
-            round(700 * index / 15)
-            for index in range(16)
-        ),
+        y_lines=tuple(round(700 * index / 15) for index in range(16)),
         cells=(),
     )
     try:
@@ -1045,14 +1006,8 @@ def test_gradient_table_layout_refines_partial_lower_rules():
     image = Image.new("RGB", (1200, 900), "white")
     draw = ImageDraw.Draw(image)
     left, top, right, bottom = 80, 100, 1120, 800
-    x_lines = [
-        round(left + (right - left) * index / 10)
-        for index in range(11)
-    ]
-    y_lines = [
-        round(top + (bottom - top) * index / 14)
-        for index in range(15)
-    ]
+    x_lines = [round(left + (right - left) * index / 10) for index in range(11)]
+    y_lines = [round(top + (bottom - top) * index / 14) for index in range(15)]
     for x in x_lines:
         draw.line((x, top, x, bottom), fill=(90, 90, 90), width=2)
     for index, y in enumerate(y_lines):
@@ -1090,11 +1045,14 @@ def test_horizontal_projection_ignores_tall_edge_binding():
     mask[35:85, 80:330] = True
     mask[155:205, 80:330] = True
 
-    assert _horizontal_separator(
-        mask,
-        min_cell_height=24,
-        min_separator_gap=8,
-    ) is None
+    assert (
+        _horizontal_separator(
+            mask,
+            min_cell_height=24,
+            min_separator_gap=8,
+        )
+        is None
+    )
 
     projected = _horizontal_projection_mask(mask, min_gap=8)
     separator = _horizontal_separator(
@@ -1121,11 +1079,14 @@ def test_horizontal_projection_keeps_short_edge_logo():
     projected = _horizontal_projection_mask(mask, min_gap=8)
 
     assert projected[:, 365:392].any()
-    assert _horizontal_separator(
-        projected,
-        min_cell_height=24,
-        min_separator_gap=8,
-    ) is not None
+    assert (
+        _horizontal_separator(
+            projected,
+            min_cell_height=24,
+            min_separator_gap=8,
+        )
+        is not None
+    )
     _, tracks, _, merge_left_tracks = _left_tracks(
         projected,
         min_gap=8,
@@ -1331,21 +1292,20 @@ def test_whitespace_cut_crossing_wide_component_is_rejected():
         width=1000,
         height=500,
         foreground_ratio=0.1,
-        separators=(
-            SeparatorCandidate("x", 490, 510, 0, 500, "whitespace", 1.0),
-        ),
-        components=(
-            ComponentFeature((200, 40, 800, 460), 250_000, 0.3),
-        ),
+        separators=(SeparatorCandidate("x", 490, 510, 0, 500, "whitespace", 1.0),),
+        components=(ComponentFeature((200, 40, 800, 460), 250_000, 0.3),),
     )
 
-    assert _vertical_cuts_for_band(
-        features,
-        top=0,
-        bottom=500,
-        min_cell_width=100,
-        min_coverage=0.55,
-    ) == []
+    assert (
+        _vertical_cuts_for_band(
+            features,
+            top=0,
+            bottom=500,
+            min_cell_width=100,
+            min_coverage=0.55,
+        )
+        == []
+    )
 
 
 def test_low_density_grid_component_does_not_block_whitespace_cut():

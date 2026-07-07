@@ -81,10 +81,7 @@ def test_single_column_sparse_grid_stays_heading_and_paragraphs():
         ]
     )
 
-    assert result.markdown == (
-        "# Заголовок\n\n"
-        "Обычный текст продолжение текста"
-    )
+    assert result.markdown == ("# Заголовок\n\n" "Обычный текст продолжение текста")
     assert "|" not in result.markdown
     assert result.lint_errors == ()
 
@@ -105,10 +102,7 @@ def test_zero_matrix_row_separates_neighboring_tables():
             SparseMarkdownRow(
                 parts=("cards",),
                 anchor=(2, 0),
-                codes=tuple(
-                    (2, column, 5)
-                    for column in range(2, 8)
-                ),
+                codes=tuple((2, column, 5) for column in range(2, 8)),
             ),
             SparseMarkdownRow(
                 parts=("filters",),
@@ -119,16 +113,10 @@ def test_zero_matrix_row_separates_neighboring_tables():
     )
 
     table_lines = [
-        line
-        for line in result.markdown.splitlines()
-        if line.startswith("|")
-        and not line.startswith("| ---")
+        line for line in result.markdown.splitlines() if line.startswith("|") and not line.startswith("| ---")
     ]
     assert len(table_lines) == 3
-    assert sum(
-        line.startswith("| ---")
-        for line in result.markdown.splitlines()
-    ) == 2
+    assert sum(line.startswith("| ---") for line in result.markdown.splitlines()) == 2
     assert "header summary" in table_lines[0]
     assert "cards" in table_lines[1]
     assert "filters" in table_lines[2]
@@ -198,11 +186,7 @@ def test_zero_row_before_column_zero_component_splits_heading_tail():
         ]
     )
 
-    assert result.markdown == (
-        "# Документ вводный текст\n\n"
-        "## Раздел\n\n"
-        "первая строка вторая строка"
-    )
+    assert result.markdown == ("# Документ вводный текст\n\n" "## Раздел\n\n" "первая строка вторая строка")
     assert result.lint_errors == ()
 
 
@@ -233,11 +217,7 @@ def test_sparse_codes_are_additive_and_marker_drives_list_grammar():
         ]
     )
 
-    assert result.markdown == (
-        "| Заголовок продолжение |  |\n"
-        "| --- | --- |\n\n"
-        "- пункт продолжение пункта"
-    )
+    assert result.markdown == ("| Заголовок продолжение |  |\n" "| --- | --- |\n\n" "- пункт продолжение пункта")
     assert result.lint_errors == ()
 
 
@@ -257,11 +237,7 @@ def test_single_late_merge_left_always_creates_table():
         ]
     )
 
-    assert result.markdown == (
-        "# Заголовок\n\n"
-        "| Логотип справа |  |\n"
-        "| --- | --- |"
-    )
+    assert result.markdown == ("# Заголовок\n\n" "| Логотип справа |  |\n" "| --- | --- |")
     assert result.lint_errors == ()
 
 
@@ -276,10 +252,7 @@ def test_first_merge_left_component_renders_table():
         ]
     )
 
-    assert result.markdown == (
-        "| Заголовок слева Логотип справа |  |\n"
-        "| --- | --- |"
-    )
+    assert result.markdown == ("| Заголовок слева Логотип справа |  |\n" "| --- | --- |")
     assert result.lint_errors == ()
 
 
@@ -299,10 +272,7 @@ def test_sparse_header_slots_do_not_expand_table_width_without_matrix_signal():
         ]
     )
 
-    assert result.markdown == (
-        "| Основные показатели НГУЭУ |  |\n"
-        "| --- | --- |"
-    )
+    assert result.markdown == ("| Основные показатели НГУЭУ |  |\n" "| --- | --- |")
     assert result.lint_errors == ()
 
 
@@ -370,10 +340,7 @@ def test_single_sparse_component_uses_merge_left_rows_as_table_rows():
     )
 
     assert result.markdown == (
-        "| header |  |  |  |\n"
-        "| --- | --- | --- | --- |\n"
-        "| row 1 |  |  |  |\n"
-        "| row 2 |  |  |  |"
+        "| header |  |  |  |\n" "| --- | --- | --- | --- |\n" "| row 1 |  |  |  |\n" "| row 2 |  |  |  |"
     )
     assert result.lint_errors == ()
 
@@ -399,11 +366,7 @@ def test_sparse_matrix_signal_renders_full_component_table_rows():
         ]
     )
 
-    table_lines = [
-        line
-        for line in result.markdown.splitlines()
-        if line.startswith("|")
-    ]
+    table_lines = [line for line in result.markdown.splitlines() if line.startswith("|")]
     assert len(table_lines) == 3
     assert table_lines[0] == "| navigation filters |  |  |  |  |  |  |"
     assert table_lines[1] == "| --- | --- | --- | --- | --- | --- | --- |"
@@ -490,10 +453,7 @@ def test_wide_merge_left_gap_does_not_render_empty_matrix_segment():
         ]
     )
 
-    assert sum(
-        line.startswith("| ---")
-        for line in result.markdown.splitlines()
-    ) == 1
+    assert sum(line.startswith("| ---") for line in result.markdown.splitlines()) == 1
     assert "left wide row" in result.markdown
     assert "left tail" in result.markdown
     assert result.lint_errors == ()
@@ -545,15 +505,8 @@ def test_repeating_vertical_grid_renders_filter_list_and_one_table():
 
     result = render_sparse_markdown_rows(rows)
 
-    assert result.markdown.startswith(
-        "- filter one\n"
-        "- filter two\n"
-        "- filter three\n\n"
-    )
-    assert sum(
-        line.startswith("| ---")
-        for line in result.markdown.splitlines()
-    ) == 1
+    assert result.markdown.startswith("- filter one\n" "- filter two\n" "- filter three\n\n")
+    assert sum(line.startswith("| ---") for line in result.markdown.splitlines()) == 1
     assert result.markdown.count("| card") == 4
     assert result.lint_errors == ()
 
@@ -702,11 +655,11 @@ def test_indented_tail_after_list_renders_section_list():
     assert result.markdown == (
         "# Intro\n\n"
         "- first\n\n"
-            "## Generated assets\n\n"
-            "When adding a case keep the oracle explicit before the checklist\n\n"
-            "1. describe it with seed\n"
-            "2. connect metrics"
-        )
+        "## Generated assets\n\n"
+        "When adding a case keep the oracle explicit before the checklist\n\n"
+        "1. describe it with seed\n"
+        "2. connect metrics"
+    )
     assert result.lint_errors == ()
 
 
@@ -731,22 +684,18 @@ def test_structural_grammar_discards_ocr_markdown_noise():
         ]
     )
 
-    assert result.markdown == (
-        "# Заголовок:\n\n"
-        "Абзац с формулой x=5.\n\n"
-        "- пункт"
-    )
+    assert result.markdown == ("# Заголовок:\n\n" "Абзац с формулой x=5.\n\n" "- пункт")
     assert result.lint_errors == ()
 
 
 def test_structural_linter_rejects_unmerged_list_continuation():
-    assert lint_markdown_structure("- пункт\nпродолжение") == (
-        "line 2: unmerged list continuation",
-    )
+    assert lint_markdown_structure("- пункт\nпродолжение") == ("line 2: unmerged list continuation",)
 
 
 def test_structural_linter_accepts_horizontal_rules_and_data_prefixes():
     assert lint_markdown_structure("---\n-5\n#84} FA") == ()
+
+
 def test_structural_journal_uses_numeric_refs_and_round_trips_utf8():
     with TemporaryStructuralJournal() as journal:
         reference = journal.append(
@@ -967,10 +916,7 @@ def test_indented_component_without_markers_becomes_ordered_list_run():
     )
 
     assert result.markdown == (
-        "# Принципы\n\n"
-        "1. Один контракт. продолжение\n"
-        "2. Один резолвер. хвост\n"
-        "3. Один профиль. длинный хвост"
+        "# Принципы\n\n" "1. Один контракт. продолжение\n" "2. Один резолвер. хвост\n" "3. Один профиль. длинный хвост"
     )
     assert result.lint_errors == ()
 

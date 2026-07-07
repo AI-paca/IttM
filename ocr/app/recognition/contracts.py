@@ -5,7 +5,6 @@ from typing import Protocol
 
 from PIL import Image
 
-
 WordBox = tuple[int, int, int, int]
 
 
@@ -51,8 +50,7 @@ class TextOcrEngine(Protocol):
         image: Image.Image,
         mode: str = "text_mode",
         psm: int = 6,
-    ) -> str:
-        ...
+    ) -> str: ...
 
 
 class WordOcrEngine(Protocol):
@@ -61,5 +59,4 @@ class WordOcrEngine(Protocol):
         image: Image.Image,
         psm: int = 6,
         min_conf: int = 20,
-    ) -> list[dict]:
-        ...
+    ) -> list[dict]: ...

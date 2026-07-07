@@ -120,7 +120,10 @@ for (const source of sources) {
     const extension = prepared.input.type.includes("png") ? "png" : "jpg";
     const name = `input-${String(prepared.index + 1).padStart(3, "0")}-of-${String(
       prepared.total,
-    ).padStart(3, "0")}-psm-${prepared.pageSegmentationMode || "profile"}.${extension}`;
+    ).padStart(
+      3,
+      "0",
+    )}-psm-${prepared.pageSegmentationMode || "profile"}.${extension}`;
     const buffer = Buffer.from(await prepared.input.arrayBuffer());
     await writeFile(join(fileDir, name), buffer);
     count += 1;

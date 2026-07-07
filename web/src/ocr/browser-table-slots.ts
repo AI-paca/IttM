@@ -1,4 +1,7 @@
-import type { BrowserOcrDetailedResult, BrowserOcrWordBox } from "./tesseract-worker-session";
+import type {
+  BrowserOcrDetailedResult,
+  BrowserOcrWordBox,
+} from "./tesseract-worker-session";
 import type { BrowserTextCandidate } from "./text-reviewer-protocol";
 
 const MERGE_LEFT = "::merge-left::";
@@ -17,7 +20,10 @@ interface SlotWord {
 }
 
 function cleanWord(text: string): string {
-  return text.trim().replace(/[|[\]'"\u2018\u2019\u201c\u201d]+/g, "").replace(/\s+/g, " ");
+  return text
+    .trim()
+    .replace(/[|[\]'"\u2018\u2019\u201c\u201d]+/g, "")
+    .replace(/\s+/g, " ");
 }
 
 function toSlotWord(word: BrowserOcrWordBox): SlotWord | null {
@@ -48,7 +54,10 @@ function groupRows(words: readonly SlotWord[]): SlotWord[][] {
   const tolerance = Math.max(6, median(heights, 12) * 0.72);
   const rows: Array<{ center: number; words: SlotWord[] }> = [];
 
-  for (const word of [...words].sort((a, b) => (a.top + a.bottom) / 2 - (b.top + b.bottom) / 2 || a.left - b.left)) {
+  for (const word of [...words].sort(
+    (a, b) =>
+      (a.top + a.bottom) / 2 - (b.top + b.bottom) / 2 || a.left - b.left,
+  )) {
     const center = (word.top + word.bottom) / 2;
     const current = rows[rows.length - 1];
     if (!current || Math.abs(center - current.center) > tolerance) {
@@ -56,14 +65,18 @@ function groupRows(words: readonly SlotWord[]): SlotWord[][] {
       continue;
     }
     current.words.push(word);
-    current.center = (current.center * (current.words.length - 1) + center) / current.words.length;
+    current.center =
+      (current.center * (current.words.length - 1) + center) /
+      current.words.length;
   }
 
   return rows.map((row) => row.words.sort((a, b) => a.left - b.left));
 }
 
 function recursiveCuts(words: readonly SlotWord[], minGap: number): number[] {
-  const ordered = [...words].sort((a, b) => a.left - b.left || a.right - b.right);
+  const ordered = [...words].sort(
+    (a, b) => a.left - b.left || a.right - b.right,
+  );
   if (ordered.length < 2) return [];
 
   let bestGap = 0;
@@ -83,7 +96,9 @@ function recursiveCuts(words: readonly SlotWord[], minGap: number): number[] {
 }
 
 function mergeLines(lines: readonly number[], tolerance: number): number[] {
-  const ordered = [...new Set(lines.map((line) => Math.round(line)))].sort((a, b) => a - b);
+  const ordered = [...new Set(lines.map((line) => Math.round(line)))].sort(
+    (a, b) => a - b,
+  );
   if (ordered.length === 0) return [];
   const groups: number[][] = [[ordered[0]]];
   for (const line of ordered.slice(1)) {
@@ -94,11 +109,21 @@ function mergeLines(lines: readonly number[], tolerance: number): number[] {
       groups.push([line]);
     }
   }
-  return groups.map((group) => Math.round(group.reduce((sum, line) => sum + line, 0) / group.length));
+  return groups.map((group) =>
+    Math.round(group.reduce((sum, line) => sum + line, 0) / group.length),
+  );
 }
 
-function positionToInterval(position: number, lines: readonly number[]): number | null {
-  if (lines.length < 2 || position < lines[0] || position > lines[lines.length - 1]) return null;
+function positionToInterval(
+  position: number,
+  lines: readonly number[],
+): number | null {
+  if (
+    lines.length < 2 ||
+    position < lines[0] ||
+    position > lines[lines.length - 1]
+  )
+    return null;
   if (position === lines[lines.length - 1]) return lines.length - 2;
   for (let index = 0; index < lines.length - 1; index += 1) {
     if (lines[index] <= position && position < lines[index + 1]) return index;
@@ -115,11 +140,20 @@ function tableRowsToMarkdown(
     : rows.filter((row) => row.some((cell) => cell.trim()));
   if (nonEmptyRows.length === 0) return "";
   const maxCols = Math.max(...nonEmptyRows.map((row) => row.length));
-  const paddedRows = nonEmptyRows.map((row) => [...row, ...Array<string>(maxCols - row.length).fill("")]);
-  const header = paddedRows[0].map((cell, index) => cell || `Column ${index + 1}`);
+  const paddedRows = nonEmptyRows.map((row) => [
+    ...row,
+    ...Array<string>(maxCols - row.length).fill(""),
+  ]);
+  const header = paddedRows[0].map(
+    (cell, index) => cell || `Column ${index + 1}`,
+  );
   const separator = header.map(() => "---");
   const body = paddedRows.slice(1);
-  return [header, separator, ...(body.length > 0 ? body : [header.map(() => " ")])]
+  return [
+    header,
+    separator,
+    ...(body.length > 0 ? body : [header.map(() => " ")]),
+  ]
     .map((row) => `| ${row.join(" | ")} |`)
     .join("\n");
 }
@@ -128,7 +162,9 @@ export function browserWordsToTableMarkdown(
   result: BrowserOcrDetailedResult,
   options: BrowserTableSlotOptions = {},
 ): string {
-  const words = result.words.map(toSlotWord).filter((word): word is SlotWord => word !== null);
+  const words = result.words
+    .map(toSlotWord)
+    .filter((word): word is SlotWord => word !== null);
   if (words.length < 8) return "";
 
   const rows = groupRows(words);
@@ -146,11 +182,7 @@ export function browserWordsToTableMarkdown(
     tableWidth * 0.012,
   );
   const xLines = mergeLines(
-    [
-      left,
-      right,
-      ...rows.flatMap((row) => recursiveCuts(row, minGap)),
-    ],
+    [left, right, ...rows.flatMap((row) => recursiveCuts(row, minGap))],
     Math.max(3, tableWidth * 0.003),
   );
   if (xLines.length < 4) return "";
@@ -166,8 +198,15 @@ export function browserWordsToTableMarkdown(
       const col = positionToInterval(center, xLines);
       if (col === null) continue;
       cells[col] = [cells[col], word.text].filter(Boolean).join(" ").trim();
-      for (let boundary = col + 1; boundary < xLines.length - 1; boundary += 1) {
-        if (word.left + 1 < xLines[boundary] && xLines[boundary] < word.right - 1) {
+      for (
+        let boundary = col + 1;
+        boundary < xLines.length - 1;
+        boundary += 1
+      ) {
+        if (
+          word.left + 1 < xLines[boundary] &&
+          xLines[boundary] < word.right - 1
+        ) {
           mergeCells.add(boundary);
         }
       }
@@ -180,16 +219,19 @@ export function browserWordsToTableMarkdown(
 
   const populatedCellCount = cellRows.reduce(
     (count, row) =>
-      count +
-      row.filter((cell) => cell.trim() && cell !== MERGE_LEFT).length,
+      count + row.filter((cell) => cell.trim() && cell !== MERGE_LEFT).length,
     0,
   );
   if (populatedCellCount / Math.max(1, cellRows.length * columnCount) < 0.35) {
     return "";
   }
 
-  const populatedRows = cellRows.filter((row) => row.filter((cell) => cell.trim() && cell !== MERGE_LEFT).length >= 2);
-  if (populatedRows.length < Math.max(3, Math.ceil(cellRows.length * 0.45))) return "";
+  const populatedRows = cellRows.filter(
+    (row) =>
+      row.filter((cell) => cell.trim() && cell !== MERGE_LEFT).length >= 2,
+  );
+  if (populatedRows.length < Math.max(3, Math.ceil(cellRows.length * 0.45)))
+    return "";
 
   return tableRowsToMarkdown(cellRows);
 }
@@ -215,13 +257,19 @@ export async function browserWordsToReviewedTableMarkdown(
 
   const reviewed = tableRows.map((row) => [...row]);
   for (let rowIndex = 0; rowIndex < reviewed.length; rowIndex += 1) {
-    for (let colIndex = 0; colIndex < reviewed[rowIndex].length; colIndex += 1) {
+    for (
+      let colIndex = 0;
+      colIndex < reviewed[rowIndex].length;
+      colIndex += 1
+    ) {
       const text = reviewed[rowIndex][colIndex];
       if (!text || text === MERGE_LEFT || /^Column \d+$/.test(text)) continue;
       const matchingConfidences = result.words
         .filter((word) => text.includes(cleanWord(word.text)))
         .map((word) => word.confidence)
-        .filter((confidence): confidence is number => typeof confidence === "number");
+        .filter(
+          (confidence): confidence is number => typeof confidence === "number",
+        );
       const isText = await review({
         text,
         left: reviewed[rowIndex][colIndex - 1] || "",

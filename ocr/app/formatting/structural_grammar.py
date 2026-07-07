@@ -51,11 +51,7 @@ def render_sparse_markdown_rows(
         if repeating_grid:
             list_groups, table_groups = repeating_grid
             for group_rows, _, _, _ in list_groups:
-                lines = [
-                    line
-                    for row in group_rows
-                    for line in _content_lines(row.parts)
-                ]
+                lines = [line for row in group_rows for line in _content_lines(row.parts)]
                 if lines:
                     rendered.append(
                         (
@@ -93,15 +89,8 @@ def render_sparse_markdown_rows(
             merge_left_count,
             dash_count,
         ) = groups[index]
-        lines_by_row = [
-            _content_lines(tuple(row.parts))
-            for row in group_rows
-        ]
-        lines = [
-            line
-            for row_lines in lines_by_row
-            for line in row_lines
-        ]
+        lines_by_row = [_content_lines(tuple(row.parts)) for row in group_rows]
+        lines = [line for row_lines in lines_by_row for line in row_lines]
         if not lines:
             index += 1
             continue
@@ -111,11 +100,7 @@ def render_sparse_markdown_rows(
             merge_left_count=merge_left_count,
             first_content_group=first_content_group,
             previous_group_rows=previous_rendered_group_rows,
-            previous_rendered_kind=(
-                rendered[-1][0]
-                if rendered
-                else ""
-            ),
+            previous_rendered_kind=(rendered[-1][0] if rendered else ""),
         )
 
         if implicit_list := _implicit_indented_list_render(
@@ -145,11 +130,7 @@ def render_sparse_markdown_rows(
             value = f"{first_heading_marker} " + " ".join(lines)
             kind = "heading"
         elif first_content_group:
-            tail_rows = [
-                " ".join(row_lines).strip()
-                for row_lines in lines_by_row[1:]
-                if row_lines
-            ]
+            tail_rows = [" ".join(row_lines).strip() for row_lines in lines_by_row[1:] if row_lines]
             tail_heading_count = _first_component_tail_heading_count(
                 groups,
                 index,
@@ -158,24 +139,13 @@ def render_sparse_markdown_rows(
             rendered.append(
                 (
                     "heading",
-                    f"{first_heading_marker} "
-                    + " ".join(lines_by_row[0]).strip(),
+                    f"{first_heading_marker} " + " ".join(lines_by_row[0]).strip(),
                 )
             )
-            paragraph_tail = (
-                tail_rows[:-tail_heading_count]
-                if tail_heading_count
-                else tail_rows
-            )
-            heading_tail = (
-                tail_rows[-tail_heading_count:]
-                if tail_heading_count
-                else []
-            )
+            paragraph_tail = tail_rows[:-tail_heading_count] if tail_heading_count else tail_rows
+            heading_tail = tail_rows[-tail_heading_count:] if tail_heading_count else []
             if paragraph_tail:
-                rendered.append(
-                    ("paragraph", " ".join(paragraph_tail).strip())
-                )
+                rendered.append(("paragraph", " ".join(paragraph_tail).strip()))
             for heading in heading_tail:
                 rendered.append(("heading", "## " + heading))
             first_content_group = False
@@ -215,11 +185,7 @@ def render_sparse_markdown_rows(
                     "## " + " ".join(lines_by_row[0]).strip(),
                 )
             )
-            tail = [
-                " ".join(row_lines).strip()
-                for row_lines in lines_by_row[1:]
-                if row_lines
-            ]
+            tail = [" ".join(row_lines).strip() for row_lines in lines_by_row[1:] if row_lines]
             if tail:
                 rendered.append(("paragraph", " ".join(tail)))
             first_content_group = False
@@ -235,9 +201,7 @@ def render_sparse_markdown_rows(
             merge_up_count=merge_up_count,
             dash_count=1 if list_like else 0,
             previous_rendered_kind=rendered[-1][0] if rendered else "",
-            previous_heading_level=_heading_level(rendered[-1][1])
-            if rendered
-            else 0,
+            previous_heading_level=_heading_level(rendered[-1][1]) if rendered else 0,
         ):
             value = "## " + " ".join(lines)
             kind = "heading"
@@ -252,11 +216,7 @@ def render_sparse_markdown_rows(
     chunks = []
     previous_kind = ""
     for kind, value in rendered:
-        separator = (
-            "\n"
-            if kind == previous_kind and kind in {"list", "table"}
-            else "\n\n"
-        )
+        separator = "\n" if kind == previous_kind and kind in {"list", "table"} else "\n\n"
         if chunks:
             chunks.append(separator)
         chunks.append(value)
@@ -272,16 +232,10 @@ def _markdown_table(rows: list[list[str]]) -> str:
     if not rows:
         return ""
     width = max(len(row) for row in rows)
-    normalized_rows = [
-        [*row, *([""] * (width - len(row)))]
-        for row in rows
-    ]
+    normalized_rows = [[*row, *([""] * (width - len(row)))] for row in rows]
     header = "| " + " | ".join(normalized_rows[0]) + " |"
     separator = "| " + " | ".join("---" for _ in range(width)) + " |"
-    body = [
-        "| " + " | ".join(row) + " |"
-        for row in normalized_rows[1:]
-    ]
+    body = ["| " + " | ".join(row) + " |" for row in normalized_rows[1:]]
     return "\n".join((header, separator, *body))
 
 
@@ -306,10 +260,7 @@ def _sparse_table_row(
     if len(logical_rows) >= 3:
         width = max(
             2,
-            max(
-                _row_table_width(row)
-                for row in logical_rows
-            ),
+            max(_row_table_width(row) for row in logical_rows),
         )
         table_rows = []
         for row in logical_rows:
@@ -345,10 +296,7 @@ def _component_matrix_table_rows(
 ) -> list[list[str]]:
     if len(columns) < 2:
         return []
-    column_index = {
-        column: index
-        for index, column in enumerate(columns)
-    }
+    column_index = {column: index for index, column in enumerate(columns)}
     rows_by_number: dict[int, list[str]] = {}
     for row in sorted(group_rows, key=lambda value: value.anchor):
         row_lines = _content_lines(row.parts)
@@ -362,11 +310,7 @@ def _component_matrix_table_rows(
         )
         index = column_index[row.anchor[1]]
         text = " ".join(row_lines).strip()
-        cells[index] = (
-            f"{cells[index]} {text}".strip()
-            if cells[index]
-            else text
-        )
+        cells[index] = f"{cells[index]} {text}".strip() if cells[index] else text
     return [
         rows_by_number[row_number]
         for row_number in sorted(rows_by_number)
@@ -397,11 +341,7 @@ def _component_column_segments(
                 segments.append([])
             continue
         segments[-1].append(column)
-    return [
-        tuple(segment)
-        for segment in segments
-        if len(segment) >= 2
-    ] or [all_columns]
+    return [tuple(segment) for segment in segments if len(segment) >= 2] or [all_columns]
 
 
 def _matrix_boundary_columns(
@@ -412,16 +352,9 @@ def _matrix_boundary_columns(
     for row in group_rows:
         for row_number, column, code in row.codes:
             if code in MERGE_UP_ONLY_CODES:
-                up_only_rows_by_column.setdefault(column, set()).add(
-                    row_number
-                )
+                up_only_rows_by_column.setdefault(column, set()).add(row_number)
 
-    candidates = {
-        column
-        for column, rows in up_only_rows_by_column.items()
-        if len(rows) >= 2
-        and column not in anchors
-    }
+    candidates = {column for column, rows in up_only_rows_by_column.items() if len(rows) >= 2 and column not in anchors}
     boundary_columns: set[int] = set()
     run: list[int] = []
     for column in sorted(candidates):
@@ -433,11 +366,7 @@ def _matrix_boundary_columns(
             run = [column]
     if len(run) >= 2:
         boundary_columns.update(run)
-    boundary_columns.update(
-        column
-        for column in _wide_row_gap_boundary_columns(group_rows)
-        if column not in anchors
-    )
+    boundary_columns.update(column for column in _wide_row_gap_boundary_columns(group_rows) if column not in anchors)
     return boundary_columns
 
 
@@ -450,19 +379,12 @@ def _wide_row_gap_boundary_columns(
             {
                 column
                 for row_number, column, code in row.codes
-                if (
-                    row_number == row.anchor[0]
-                    and code in MERGE_LEFT_CODES
-                )
+                if (row_number == row.anchor[0] and code in MERGE_LEFT_CODES)
             }
         )
         if len(merge_columns) < 6:
             continue
-        runs = [
-            run
-            for run in _consecutive_column_runs(merge_columns)
-            if len(run) >= 2
-        ]
+        runs = [run for run in _consecutive_column_runs(merge_columns) if len(run) >= 2]
         if len(runs) < 2:
             continue
         for first, second in zip(runs, runs[1:]):
@@ -486,10 +408,7 @@ def _component_table_islands(
     group_rows: list[SparseMarkdownRow],
 ) -> list[_TableIsland]:
     accepted_single_runs = _single_left_table_runs(group_rows)
-    blocked_ranges = [
-        (run[0].anchor[0], run[-1].anchor[0])
-        for run in accepted_single_runs
-    ]
+    blocked_ranges = [(run[0].anchor[0], run[-1].anchor[0]) for run in accepted_single_runs]
     strong_islands = _strong_table_islands(
         group_rows,
         blocked_ranges=blocked_ranges,
@@ -502,11 +421,7 @@ def _component_table_islands(
         for rows in strong_islands
     ]
 
-    strong_rows = [
-        row
-        for row in group_rows
-        if _row_merge_left_count(row) >= 2
-    ]
+    strong_rows = [row for row in group_rows if _row_merge_left_count(row) >= 2]
     for run in accepted_single_runs:
         schema = _nearest_schema_row(strong_rows, run)
         rows = tuple((*((schema,) if schema is not None else ()), *run))
@@ -534,20 +449,13 @@ def _strong_table_islands(
     *,
     blocked_ranges: list[tuple[int, int]],
 ) -> list[list[SparseMarkdownRow]]:
-    strong_rows = [
-        row
-        for row in sorted(group_rows, key=lambda row: row.anchor)
-        if _row_merge_left_count(row) >= 2
-    ]
+    strong_rows = [row for row in sorted(group_rows, key=lambda row: row.anchor) if _row_merge_left_count(row) >= 2]
     if len(strong_rows) < 3:
         return []
 
     islands: list[list[SparseMarkdownRow]] = [[strong_rows[0]]]
     for previous, row in zip(strong_rows, strong_rows[1:]):
-        crosses_single_run = any(
-            previous.anchor[0] < start <= end < row.anchor[0]
-            for start, end in blocked_ranges
-        )
+        crosses_single_run = any(previous.anchor[0] < start <= end < row.anchor[0] for start, end in blocked_ranges)
         if row.anchor[0] - previous.anchor[0] > 10 or crosses_single_run:
             islands.append([row])
         else:
@@ -568,30 +476,19 @@ def _strong_table_islands(
 def _single_left_table_runs(
     group_rows: list[SparseMarkdownRow],
 ) -> list[tuple[SparseMarkdownRow, ...]]:
-    candidates = [
-        row
-        for row in sorted(group_rows, key=lambda row: row.anchor)
-        if _row_merge_left_count(row) == 1
-    ]
+    candidates = [row for row in sorted(group_rows, key=lambda row: row.anchor) if _row_merge_left_count(row) == 1]
     if not candidates:
         return []
 
     runs: list[list[SparseMarkdownRow]] = [[candidates[0]]]
     for row in candidates[1:]:
         previous = runs[-1][-1]
-        if (
-            row.anchor[0] - previous.anchor[0] <= 4
-            and _single_left_run_compatible(runs[-1], row)
-        ):
+        if row.anchor[0] - previous.anchor[0] <= 4 and _single_left_run_compatible(runs[-1], row):
             runs[-1].append(row)
         else:
             runs.append([row])
 
-    return [
-        tuple(run)
-        for run in runs
-        if len(run) >= 4
-    ]
+    return [tuple(run) for run in runs if len(run) >= 4]
 
 
 def _single_left_run_compatible(
@@ -609,11 +506,7 @@ def _single_left_run_compatible(
         for column in _row_merge_left_columns(row):
             counts[column] = counts.get(column, 0) + 1
     maximum = max(counts.values(), default=0)
-    dominant = {
-        column
-        for column, count in counts.items()
-        if count == maximum and count >= 2
-    }
+    dominant = {column for column, count in counts.items() if count == maximum and count >= 2}
     if not dominant:
         return True
     return bool(candidate_columns & dominant)
@@ -626,11 +519,7 @@ def _nearest_schema_row(
     if len(run) < 6:
         return None
     first_row = run[0].anchor[0]
-    candidates = [
-        row
-        for row in strong_rows
-        if 0 < first_row - row.anchor[0] <= 2
-    ]
+    candidates = [row for row in strong_rows if 0 < first_row - row.anchor[0] <= 2]
     if not candidates:
         return None
     return max(candidates, key=lambda row: row.anchor[0])
@@ -642,11 +531,7 @@ def _sparse_table_band(
     width = _band_table_width(groups)
     rows = []
     for group_rows, _, _, _ in groups:
-        lines = [
-            line
-            for row in group_rows
-            for line in _content_lines(row.parts)
-        ]
+        lines = [line for row in group_rows for line in _content_lines(row.parts)]
         cells = [""] * width
         cells[0] = " ".join(lines).strip()
         rows.append(cells)
@@ -656,10 +541,13 @@ def _sparse_table_band(
 def _repeating_vertical_grid_at(
     groups: list[tuple[list[SparseMarkdownRow], int, int, int]],
     start: int,
-) -> tuple[
-    list[tuple[list[SparseMarkdownRow], int, int, int]],
-    list[tuple[list[SparseMarkdownRow], int, int, int]],
-] | None:
+) -> (
+    tuple[
+        list[tuple[list[SparseMarkdownRow], int, int, int]],
+        list[tuple[list[SparseMarkdownRow], int, int, int]],
+    ]
+    | None
+):
     list_groups = []
     index = start
     while index < len(groups) and _is_leading_grid_chip(groups[index]):
@@ -671,11 +559,7 @@ def _repeating_vertical_grid_at(
     table_groups = groups[index:]
     if len(table_groups) < 4:
         return None
-    repeated = [
-        group
-        for group in table_groups
-        if _is_repeated_vertical_grid_component(group)
-    ]
+    repeated = [group for group in table_groups if _is_repeated_vertical_grid_component(group)]
     if len(repeated) < 4:
         return None
 
@@ -732,18 +616,11 @@ def _repeating_vertical_grid_table(
 ) -> str:
     width = max(
         2,
-        max(
-            _component_column_span(group_rows)
-            for group_rows, _, _, _ in groups
-        ),
+        max(_component_column_span(group_rows) for group_rows, _, _, _ in groups),
     )
     rows = []
     for group_rows, _, _, _ in groups:
-        lines = [
-            line
-            for row in group_rows
-            for line in _content_lines(row.parts)
-        ]
+        lines = [line for row in group_rows for line in _content_lines(row.parts)]
         if not lines:
             continue
         cells = [""] * width
@@ -763,21 +640,14 @@ def _band_table_width(
 ) -> int:
     return max(
         2,
-        max(
-            _component_width(group_rows)
-            for group_rows, _, _, _ in groups
-        ),
+        max(_component_width(group_rows) for group_rows, _, _, _ in groups),
     )
 
 
 def _component_logical_table_rows(
     group_rows: list[SparseMarkdownRow],
 ) -> list[SparseMarkdownRow]:
-    rows = [
-        row
-        for row in group_rows
-        if _row_merge_left_count(row) >= 2
-    ]
+    rows = [row for row in group_rows if _row_merge_left_count(row) >= 2]
     rows.extend(_bridging_single_left_rows(group_rows, rows))
     rows = sorted(rows, key=lambda row: row.anchor)
     if len(rows) < 3:
@@ -796,37 +666,21 @@ def _bridging_single_left_rows(
     strong_numbers = sorted(row.anchor[0] for row in strong_rows)
     result = []
     for first, second in zip(strong_numbers, strong_numbers[1:]):
-        candidates = [
-            row
-            for row in group_rows
-            if first < row.anchor[0] < second
-            and _row_merge_left_count(row) == 1
-        ]
+        candidates = [row for row in group_rows if first < row.anchor[0] < second and _row_merge_left_count(row) == 1]
         if len(candidates) != 1:
             continue
         candidate = candidates[0]
-        if (
-            candidate.anchor[0] - first >= 3
-            and second - candidate.anchor[0] >= 3
-        ):
+        if candidate.anchor[0] - first >= 3 and second - candidate.anchor[0] >= 3:
             result.append(candidate)
     return result
 
 
 def _row_merge_left_count(row: SparseMarkdownRow) -> int:
-    return sum(
-        1
-        for _, _, code in row.codes
-        if code in MERGE_LEFT_CODES
-    )
+    return sum(1 for _, _, code in row.codes if code in MERGE_LEFT_CODES)
 
 
 def _row_merge_left_columns(row: SparseMarkdownRow) -> tuple[int, ...]:
-    return tuple(
-        column
-        for _, column, code in row.codes
-        if code in MERGE_LEFT_CODES
-    )
+    return tuple(column for _, column, code in row.codes if code in MERGE_LEFT_CODES)
 
 
 def _row_table_width(row: SparseMarkdownRow) -> int:
@@ -835,11 +689,7 @@ def _row_table_width(row: SparseMarkdownRow) -> int:
         len(
             {
                 row.anchor[1],
-                *(
-                    column
-                    for row_number, column, _ in row.codes
-                    if row_number == row.anchor[0]
-                ),
+                *(column for row_number, column, _ in row.codes if row_number == row.anchor[0]),
             }
         ),
     )
@@ -849,17 +699,7 @@ def _component_columns(
     group_rows: list[SparseMarkdownRow],
 ) -> tuple[int, ...]:
     return tuple(
-        sorted(
-            {
-                row.anchor[1]
-                for row in group_rows
-            }
-            | {
-                column
-                for row in group_rows
-                for _, column, _ in row.codes
-            }
-        )
+        sorted({row.anchor[1] for row in group_rows} | {column for row in group_rows for _, column, _ in row.codes})
     )
 
 
@@ -885,33 +725,19 @@ def _table_band_at(
     band = [groups[start]]
     band_columns = set(_component_columns(group_rows))
     _, previous_bottom = _component_row_bounds(group_rows)
-    for group in groups[start + 1:]:
+    for group in groups[start + 1 :]:
         next_rows, _, next_left_count, _ = group
         next_top, next_bottom = _component_row_bounds(next_rows)
         if next_top - previous_bottom > 1:
             break
         next_columns = set(_component_columns(next_rows))
-        if (
-            not (next_columns & band_columns)
-            and (
-                min(next_columns, default=0)
-                > max(band_columns, default=0) + 1
-                or min(band_columns, default=0)
-                > max(next_columns, default=0) + 1
-            )
+        if not (next_columns & band_columns) and (
+            min(next_columns, default=0) > max(band_columns, default=0) + 1
+            or min(band_columns, default=0) > max(next_columns, default=0) + 1
         ):
             break
-        starts_new_section = (
-            next_left_count == 0
-            and min(next_columns, default=0) == 0
-        )
-        continues_band = (
-            next_left_count > 0
-            or (
-                bool(next_columns & band_columns)
-                and min(next_columns, default=0) > 0
-            )
-        )
+        starts_new_section = next_left_count == 0 and min(next_columns, default=0) == 0
+        continues_band = next_left_count > 0 or (bool(next_columns & band_columns) and min(next_columns, default=0) > 0)
         if starts_new_section or not continues_band:
             break
         band.append(group)
@@ -930,23 +756,12 @@ def _table_band_at(
 def _band_matrix_table_signal(
     groups: list[tuple[list[SparseMarkdownRow], int, int, int]],
 ) -> bool:
-    all_rows = [
-        row
-        for group_rows, _, _, _ in groups
-        for row in group_rows
-    ]
+    all_rows = [row for group_rows, _, _, _ in groups for row in group_rows]
     if _component_matrix_table_signal(all_rows):
         return True
 
-    left_components = sum(
-        1
-        for _, _, merge_left_count, _ in groups
-        if merge_left_count > 0
-    )
-    widest_component = max(
-        _component_width(group_rows)
-        for group_rows, _, _, _ in groups
-    )
+    left_components = sum(1 for _, _, merge_left_count, _ in groups if merge_left_count > 0)
+    widest_component = max(_component_width(group_rows) for group_rows, _, _, _ in groups)
     if left_components >= 4 and widest_component >= 3:
         return True
 
@@ -957,10 +772,7 @@ def _band_matrix_table_signal(
         for _, column, code in row.codes
         if code in MERGE_LEFT_CODES
     }
-    return (
-        len(groups) >= 3
-        and _longest_consecutive_run(left_columns) >= 4
-    )
+    return len(groups) >= 3 and _longest_consecutive_run(left_columns) >= 4
 
 
 def _component_matrix_table_signal(
@@ -969,10 +781,7 @@ def _component_matrix_table_signal(
     # DERIVED_TABLE_CODE is intentionally not written back into the raw
     # sparse shadow. It is the grammar layer's "this behaves like a table"
     # signal after reading the 3/5/8 matrix.
-    return (
-        _has_row_table_run(group_rows)
-        or _has_merge_both_rectangle(group_rows)
-    )
+    return _has_row_table_run(group_rows) or _has_merge_both_rectangle(group_rows)
 
 
 def _has_row_table_run(
@@ -983,10 +792,7 @@ def _has_row_table_run(
         cells_by_row.setdefault(row.anchor[0], set()).add(row.anchor[1])
         for row_number, column, _ in row.codes:
             cells_by_row.setdefault(row_number, set()).add(column)
-    return any(
-        _longest_consecutive_run(columns) >= 4
-        for columns in cells_by_row.values()
-    )
+    return any(_longest_consecutive_run(columns) >= 4 for columns in cells_by_row.values())
 
 
 def _has_merge_both_rectangle(
@@ -1000,11 +806,8 @@ def _has_merge_both_rectangle(
 
     row_numbers = sorted(eight_columns_by_row)
     for first_index, first_row in enumerate(row_numbers):
-        for second_row in row_numbers[first_index + 1:]:
-            common_columns = (
-                eight_columns_by_row[first_row]
-                & eight_columns_by_row[second_row]
-            )
+        for second_row in row_numbers[first_index + 1 :]:
+            common_columns = eight_columns_by_row[first_row] & eight_columns_by_row[second_row]
             if _longest_consecutive_run(common_columns) >= 2:
                 return True
     return False
@@ -1046,10 +849,7 @@ def _is_list_like_component(
 ) -> bool:
     if first_content_group or merge_left_count > 0:
         return False
-    if any(
-        lines and re.match(r"^(?:[-*+]|\d+[.)])\s+\S", lines[0])
-        for lines in lines_by_row
-    ):
+    if any(lines and re.match(r"^(?:[-*+]|\d+[.)])\s+\S", lines[0]) for lines in lines_by_row):
         return True
     if any(row.list_marker for row in group_rows):
         return True
@@ -1063,11 +863,7 @@ def _is_list_like_component(
     )
     if previous_rendered_kind == "list":
         return current_column >= previous_column
-    return (
-        previous_rendered_kind == "paragraph"
-        and previous_column == 1
-        and current_column == 3
-    )
+    return previous_rendered_kind == "paragraph" and previous_column == 1 and current_column == 3
 
 
 def _first_component_tail_heading_count(
@@ -1095,34 +891,18 @@ def _is_section_heading_candidate(
     if dash_count > 0:
         return False
     group_rows = groups[index][0]
-    if (
-        len(group_rows) != 1
-        or merge_up_count != 0
-        or min((row.anchor[1] for row in group_rows), default=1) != 0
-    ):
+    if len(group_rows) != 1 or merge_up_count != 0 or min((row.anchor[1] for row in group_rows), default=1) != 0:
         return False
-    text = " ".join(
-        line
-        for row in group_rows
-        for line in _content_lines(tuple(row.parts))
-    ).strip()
+    text = " ".join(line for row in group_rows for line in _content_lines(tuple(row.parts))).strip()
     if text.endswith((".", "!", "?", ";", ":")):
         return False
-    previous_row = (
-        max(row.anchor[0] for row in groups[index - 1][0])
-        if index > 0 and groups[index - 1][0]
-        else None
-    )
+    previous_row = max(row.anchor[0] for row in groups[index - 1][0]) if index > 0 and groups[index - 1][0] else None
     current_row = min(row.anchor[0] for row in group_rows)
     next_dash_or_table = False
     if index + 1 < len(groups):
         _, _, next_left_count, next_dash_count = groups[index + 1]
         next_dash_or_table = next_left_count > 0 or next_dash_count > 0
-    return (
-        previous_row is None
-        or current_row - previous_row > 1
-        or next_dash_or_table
-    )
+    return previous_row is None or current_row - previous_row > 1 or next_dash_or_table
 
 
 def _section_heading_with_tail(
@@ -1147,19 +927,12 @@ def _section_heading_with_tail(
     current_top = min(row.anchor[0] for row in group_rows)
     if current_top - previous_bottom <= 1:
         return []
-    if any(
-        code in MERGE_UP_CODES
-        for _, _, code in group_rows[0].codes
-    ):
+    if any(code in MERGE_UP_CODES for _, _, code in group_rows[0].codes):
         return []
     heading = " ".join(lines_by_row[0]).strip()
     if not heading or heading.endswith((".", "!", "?", ";")):
         return []
-    tail = [
-        " ".join(lines).strip()
-        for lines in lines_by_row[1:]
-        if lines
-    ]
+    tail = [" ".join(lines).strip() for lines in lines_by_row[1:] if lines]
     if not tail:
         return []
     return [
@@ -1175,11 +948,7 @@ def _indented_tail_render(
     merge_left_count: int,
     previous_rendered_kind: str,
 ) -> list[tuple[str, str]]:
-    if (
-        previous_rendered_kind != "list"
-        or merge_left_count > 0
-        or len(group_rows) < 5
-    ):
+    if previous_rendered_kind != "list" or merge_left_count > 0 or len(group_rows) < 5:
         return []
     lefts = [row.content_left for row in group_rows]
     if any(left is None for left in lefts):
@@ -1188,11 +957,7 @@ def _indented_tail_render(
     baseline = min(numeric_lefts)
     indent_threshold = baseline + 12
     first_indented = next(
-        (
-            index
-            for index, left in enumerate(numeric_lefts)
-            if left >= indent_threshold
-        ),
+        (index for index, left in enumerate(numeric_lefts) if left >= indent_threshold),
         None,
     )
     if first_indented is None or first_indented < 2:
@@ -1205,20 +970,13 @@ def _indented_tail_render(
         return []
 
     result: list[tuple[str, str]] = [("heading", "## " + heading)]
-    paragraph = [
-        " ".join(lines).strip()
-        for lines in lines_by_row[1:first_indented]
-        if lines
-    ]
+    paragraph = [" ".join(lines).strip() for lines in lines_by_row[1:first_indented] if lines]
     if paragraph:
         result.append(("paragraph", " ".join(paragraph)))
 
     indented_lefts = numeric_lefts[first_indented:]
     list_start_left = min(indented_lefts)
-    ordered = not any(
-        row.list_marker
-        for row in group_rows[first_indented:]
-    )
+    ordered = not any(row.list_marker for row in group_rows[first_indented:])
     current_item: list[str] = []
     item_number = 1
     for left, lines in zip(
@@ -1231,18 +989,14 @@ def _indented_tail_render(
         starts_item = left <= list_start_left + 8
         if starts_item and current_item:
             marker = f"{item_number}." if ordered else "-"
-            result.append(
-                ("list", marker + " " + " ".join(current_item))
-            )
+            result.append(("list", marker + " " + " ".join(current_item)))
             item_number += 1
             current_item = [text]
         else:
             current_item.append(text)
     if current_item:
         marker = f"{item_number}." if ordered else "-"
-        result.append(
-            ("list", marker + " " + " ".join(current_item))
-        )
+        result.append(("list", marker + " " + " ".join(current_item)))
     return result if len(result) >= 3 else []
 
 
@@ -1254,12 +1008,7 @@ def _implicit_indented_list_render(
     first_content_group: bool,
     previous_group_rows: list[SparseMarkdownRow],
 ) -> list[tuple[str, str]]:
-    if (
-        first_content_group
-        or merge_left_count > 0
-        or len(group_rows) < 5
-        or any(row.list_marker for row in group_rows)
-    ):
+    if first_content_group or merge_left_count > 0 or len(group_rows) < 5 or any(row.list_marker for row in group_rows):
         return []
 
     current_column = min(
@@ -1280,16 +1029,8 @@ def _implicit_indented_list_render(
     baseline = min(numeric_lefts)
     item_left_max = baseline + 8
     continuation_min = baseline + 12
-    item_starts = [
-        index
-        for index, left in enumerate(numeric_lefts)
-        if left <= item_left_max
-    ]
-    continuation_count = sum(
-        1
-        for left in numeric_lefts
-        if left >= continuation_min
-    )
+    item_starts = [index for index, left in enumerate(numeric_lefts) if left <= item_left_max]
+    continuation_count = sum(1 for left in numeric_lefts if left >= continuation_min)
     if len(item_starts) < 3 or continuation_count < 2:
         return []
     if item_starts[0] != 0:
@@ -1297,16 +1038,8 @@ def _implicit_indented_list_render(
 
     result: list[tuple[str, str]] = []
     for item_number, start in enumerate(item_starts, start=1):
-        end = (
-            item_starts[item_number]
-            if item_number < len(item_starts)
-            else len(group_rows)
-        )
-        text = " ".join(
-            " ".join(lines).strip()
-            for lines in lines_by_row[start:end]
-            if lines
-        ).strip()
+        end = item_starts[item_number] if item_number < len(item_starts) else len(group_rows)
+        text = " ".join(" ".join(lines).strip() for lines in lines_by_row[start:end] if lines).strip()
         if text:
             result.append(("list", f"{item_number}. {text}"))
     return result if len(result) >= 3 else []
@@ -1339,7 +1072,7 @@ def _structured_group_ahead(
     *,
     lookahead: int,
 ) -> bool:
-    for candidate in groups[index + 1:index + 1 + lookahead]:
+    for candidate in groups[index + 1 : index + 1 + lookahead]:
         group_rows, _, merge_left_count, _ = candidate
         if merge_left_count > 0:
             return True
@@ -1380,24 +1113,15 @@ def _shadow_components(
         if first_root != second_root:
             parent[second_root] = first_root
 
-    merge_up_edges: set[
-        tuple[tuple[int, int], tuple[int, int]]
-    ] = set()
-    merge_left_edges: set[
-        tuple[tuple[int, int], tuple[int, int]]
-    ] = set()
-    strong_horizontal_rows = {
-        row.anchor[0]
-        for row in rows
-        if _row_merge_left_count(row) >= 2
-    }
+    merge_up_edges: set[tuple[tuple[int, int], tuple[int, int]]] = set()
+    merge_left_edges: set[tuple[tuple[int, int], tuple[int, int]]] = set()
+    strong_horizontal_rows = {row.anchor[0] for row in rows if _row_merge_left_count(row) >= 2}
     by_row: dict[int, list[tuple[int, int]]] = {}
     for cell in occupied:
         by_row.setdefault(cell[0], []).append(cell)
     for row in rows:
-        starts_horizontal_table = (
-            row.anchor[0] in strong_horizontal_rows
-            and row.anchor[0] == min(strong_horizontal_rows)
+        starts_horizontal_table = row.anchor[0] in strong_horizontal_rows and row.anchor[0] == min(
+            strong_horizontal_rows
         )
         for row_number, column, code in row.codes:
             cell = (row_number, column)
@@ -1407,11 +1131,7 @@ def _shadow_components(
                     union(cell, above)
                     merge_up_edges.add((above, cell))
             if code in MERGE_LEFT_CODES:
-                left_candidates = [
-                    candidate
-                    for candidate in by_row.get(row_number, [])
-                    if candidate[1] < column
-                ]
+                left_candidates = [candidate for candidate in by_row.get(row_number, []) if candidate[1] < column]
                 if not left_candidates:
                     continue
                 left = max(left_candidates, key=lambda candidate: candidate[1])
@@ -1430,23 +1150,11 @@ def _shadow_components(
         component_cells.values(),
         key=lambda value: min(value),
     ):
-        component_rows = [
-            row
-            for row in rows
-            if row.anchor in cells
-        ]
+        component_rows = [row for row in rows if row.anchor in cells]
         if not component_rows:
             continue
-        up_count = sum(
-            1
-            for first, second in merge_up_edges
-            if first in cells and second in cells
-        )
-        left_count = sum(
-            1
-            for first, second in merge_left_edges
-            if first in cells and second in cells
-        )
+        up_count = sum(1 for first, second in merge_up_edges if first in cells and second in cells)
+        left_count = sum(1 for first, second in merge_left_edges if first in cells and second in cells)
         result.append(
             (
                 component_rows,
@@ -1460,16 +1168,12 @@ def _shadow_components(
 
 def _row_shadow_cells(row: SparseMarkdownRow) -> set[tuple[int, int]]:
     cells = {row.anchor}
-    cells.update(
-        (row_number, column)
-        for row_number, column, _ in row.codes
-    )
+    cells.update((row_number, column) for row_number, column, _ in row.codes)
     return cells
 
 
 def lint_markdown_structure(markdown: str) -> tuple[str, ...]:
     errors = []
-    seen_content = False
     previous_was_list = False
     for line_number, raw_line in enumerate(markdown.splitlines(), start=1):
         line = raw_line.strip()
@@ -1496,17 +1200,11 @@ def lint_markdown_structure(markdown: str) -> tuple[str, ...]:
             previous_was_list = False
         else:
             previous_was_list = False
-        seen_content = True
     return tuple(errors)
 
 
 def _content_lines(parts: tuple[str, ...]) -> list[str]:
-    return [
-        cleaned
-        for part in parts
-        for line in part.splitlines()
-        if (cleaned := _sanitize_structural_content(line))
-    ]
+    return [cleaned for part in parts for line in part.splitlines() if (cleaned := _sanitize_structural_content(line))]
 
 
 def _sanitize_structural_content(value: str) -> str:

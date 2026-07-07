@@ -17,13 +17,7 @@ from app.recognition.languages import (
 def split_language_group(language_group: str | None) -> tuple[str, ...]:
     if not language_group:
         return ()
-    return tuple(
-        dict.fromkeys(
-            language
-            for language in language_group.split("+")
-            if language
-        )
-    )
+    return tuple(dict.fromkeys(language for language in language_group.split("+") if language))
 
 
 def _context_text(context: Iterable[str]) -> str:
@@ -131,12 +125,7 @@ class LanguageAgenda:
 
         priors = self.probabilities()
         updated = {
-            language: (
-                priors.get(language, 0.0) * 0.72
-            ) + (
-                evidence.get(language, 0.0) * 0.28
-            )
-            for language in priors
+            language: (priors.get(language, 0.0) * 0.72) + (evidence.get(language, 0.0) * 0.28) for language in priors
         }
         self._probabilities = normalize_probabilities(updated)
 
@@ -172,25 +161,15 @@ class LanguageAgenda:
     ) -> tuple[str, ...]:
         priors = self.probabilities()
         languages = list(self.single_language_candidates())
-        splay_order = {
-            language: index
-            for index, language in enumerate(self._ensure_splay_order())
-        }
-        original_order = {
-            language: index
-            for index, language in enumerate(languages)
-        }
+        splay_order = {language: index for index, language in enumerate(self._ensure_splay_order())}
+        original_order = {language: index for index, language in enumerate(languages)}
         context_scores = self.context_evidence(context)
         splay_size = max(1, len(splay_order))
 
         def candidate_score(language: str) -> float:
             splay_rank = splay_order.get(language, splay_size)
             splay_score = (splay_size - min(splay_rank, splay_size)) / splay_size
-            return (
-                (priors.get(language, 0.0) * 10.0)
-                + (context_scores.get(language, 0.0) * 8.0)
-                + (splay_score * 4.0)
-            )
+            return (priors.get(language, 0.0) * 10.0) + (context_scores.get(language, 0.0) * 8.0) + (splay_score * 4.0)
 
         ranked = sorted(
             languages,
@@ -215,9 +194,7 @@ class LanguageAgenda:
             primary,
             *self.ranked_single_language_candidates(context),
         ]
-        return tuple(
-            dict.fromkeys(candidate for candidate in candidates if candidate)
-        )
+        return tuple(dict.fromkeys(candidate for candidate in candidates if candidate))
 
     def candidate_prior_score(
         self,
@@ -230,9 +207,7 @@ class LanguageAgenda:
         priors = self.probabilities()
         context_scores = self.context_evidence(context)
         return sum(
-            priors.get(language, 0.0)
-            + (context_scores.get(language, 0.0) * 0.6)
-            for language in languages
+            priors.get(language, 0.0) + (context_scores.get(language, 0.0) * 0.6) for language in languages
         ) / len(languages)
 
     def candidate_evidence_score(

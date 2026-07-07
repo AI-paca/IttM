@@ -23,19 +23,11 @@ class _PackedCell:
 
 def _is_numeric_text(text: str) -> bool:
     value = text.strip()
-    return bool(
-        value
-        and re.search(r"\d", value)
-        and re.fullmatch(r"[\d\s.,%+:/()\-]+", value)
-    )
+    return bool(value and re.search(r"\d", value) and re.fullmatch(r"[\d\s.,%+:/()\-]+", value))
 
 
 def _seed_words_expect_numbers(seed_words: list[dict]) -> bool:
-    texts = [
-        str(word.get("text", "")).strip()
-        for word in seed_words
-        if str(word.get("text", "")).strip()
-    ]
+    texts = [str(word.get("text", "")).strip() for word in seed_words if str(word.get("text", "")).strip()]
     if not texts:
         return False
     numeric = sum(_is_numeric_text(text) for text in texts)
@@ -64,15 +56,8 @@ def _merge_numeric_cell_candidates(
             continue
         current_text = str(current.get("text", ""))
         if (
-            not _is_numeric_text(current_text)
-            and (
-                len(current_text.strip()) <= 2
-                or _word_confidence(current) < 45
-            )
-        ) or (
-            _is_numeric_text(current_text)
-            and _word_confidence(word) > _word_confidence(current)
-        ):
+            not _is_numeric_text(current_text) and (len(current_text.strip()) <= 2 or _word_confidence(current) < 45)
+        ) or (_is_numeric_text(current_text) and _word_confidence(word) > _word_confidence(current)):
             merged[bbox] = word
     return list(merged.values())
 
@@ -98,9 +83,7 @@ def recognize_missing_table_cell_batches(
         None,
     )
     numeric_retry = (
-        callable(recognize_numeric_words)
-        and table.cols >= 2
-        and _seed_words_expect_numbers(seed_words or [])
+        callable(recognize_numeric_words) and table.cols >= 2 and _seed_words_expect_numbers(seed_words or [])
     )
     target_width = min(target_width, max_batch_pixels)
     max_batch_height = max(1, max_batch_pixels // max(1, target_width))
@@ -238,21 +221,14 @@ def _map_batch_words(
                 word["bbox"][0],
             )
         )
-        text = " ".join(
-            str(word.get("text", "")).strip()
-            for word in cell_words
-            if str(word.get("text", "")).strip()
-        )
+        text = " ".join(str(word.get("text", "")).strip() for word in cell_words if str(word.get("text", "")).strip())
         if not text:
             continue
         recovered.append(
             {
                 "text": text,
                 "bbox": item.cell.bbox,
-                "conf": min(
-                    float(word.get("conf", 0))
-                    for word in cell_words
-                ),
+                "conf": min(float(word.get("conf", 0)) for word in cell_words),
             }
         )
     return recovered

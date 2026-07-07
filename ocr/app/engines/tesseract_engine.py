@@ -531,10 +531,7 @@ class TesseractEngine(OcrEngine):
             lang=language_candidates[0],
         )
         primary_words = self._words_from_data(primary_data, min_conf)
-        if (
-            self.language_retry != "t9_small"
-            or not self._should_retry_word_languages(primary_words)
-        ):
+        if self.language_retry != "t9_small" or not self._should_retry_word_languages(primary_words):
             if primary_words:
                 self._observe_language_candidate(
                     language_candidates[0],
@@ -542,9 +539,7 @@ class TesseractEngine(OcrEngine):
                 )
             return primary_words
 
-        candidates = (
-            [(language_candidates[0], primary_words)] if primary_words else []
-        )
+        candidates = [(language_candidates[0], primary_words)] if primary_words else []
         for lang in language_candidates[1:]:
             data = self.recognize_with_psm(image, psm=psm, mode="table", lang=lang)
             words = self._words_from_data(data, min_conf)
@@ -584,8 +579,7 @@ class TesseractEngine(OcrEngine):
         try:
             if mode == "text_mode":
                 text_candidates = [
-                    (lang, self.recognize_to_string(image, psm, lang=lang))
-                    for lang in self._language_candidates()
+                    (lang, self.recognize_to_string(image, psm, lang=lang)) for lang in self._language_candidates()
                 ]
                 selected_lang, text = self._select_text_candidate(text_candidates)
                 if text:
@@ -604,9 +598,7 @@ class TesseractEngine(OcrEngine):
                             )
                             for lang in self._language_candidates()
                         ]
-                        selected_lang, text = self._select_text_candidate(
-                            text_candidates
-                        )
+                        selected_lang, text = self._select_text_candidate(text_candidates)
                         if text:
                             self._observe_language_candidate(selected_lang, text)
                             return text
@@ -623,11 +615,7 @@ class TesseractEngine(OcrEngine):
                 )
                 for lang in self._language_candidates()
             ]
-            data_texts = [
-                (lang, self.build_text_from_tsv(data, min_conf=40))
-                for lang, data in data_candidates
-                if data
-            ]
+            data_texts = [(lang, self.build_text_from_tsv(data, min_conf=40)) for lang, data in data_candidates if data]
             if data_texts:
                 selected_lang, text = self._select_text_candidate(data_texts)
                 if text:

@@ -70,7 +70,8 @@ export function createBrowserOcrProfile(
       tableSlotBuilder: pipelineProfile.tableSlotBuilder,
       tableSlotMaxColumns: pipelineProfile.tableSlotMaxColumns,
       recursiveTableCellOcr: pipelineProfile.recursiveTableCellOcr,
-      recursiveTableCellOcrBatchPixels: pipelineProfile.recursiveTableCellOcrBatchPixels,
+      recursiveTableCellOcrBatchPixels:
+        pipelineProfile.recursiveTableCellOcrBatchPixels,
       layout: pipelineProfile.layout,
     };
   }
@@ -99,7 +100,8 @@ export function createBrowserOcrProfile(
       tableSlotBuilder: pipelineProfile.tableSlotBuilder,
       tableSlotMaxColumns: pipelineProfile.tableSlotMaxColumns,
       recursiveTableCellOcr: pipelineProfile.recursiveTableCellOcr,
-      recursiveTableCellOcrBatchPixels: pipelineProfile.recursiveTableCellOcrBatchPixels,
+      recursiveTableCellOcrBatchPixels:
+        pipelineProfile.recursiveTableCellOcrBatchPixels,
       layout: pipelineProfile.layout,
     };
   }
@@ -127,7 +129,8 @@ export function createBrowserOcrProfile(
     tableSlotBuilder: pipelineProfile.tableSlotBuilder,
     tableSlotMaxColumns: pipelineProfile.tableSlotMaxColumns,
     recursiveTableCellOcr: pipelineProfile.recursiveTableCellOcr,
-    recursiveTableCellOcrBatchPixels: pipelineProfile.recursiveTableCellOcrBatchPixels,
+    recursiveTableCellOcrBatchPixels:
+      pipelineProfile.recursiveTableCellOcrBatchPixels,
     layout: pipelineProfile.layout,
   };
 }

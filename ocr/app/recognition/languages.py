@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 
-
 BASE_LANGUAGES = ("rus", "eng")
 OPTIONAL_LANGUAGES = ("kaz", "kir", "chi_sim")
 REVIEWER_EXTRA_LANGUAGES = ("ell", "equ")
@@ -34,19 +33,12 @@ def ocr_language_string_for(
     installed = set(installed_languages)
     languages = [lang for lang in language_priority if lang in installed]
     if len(languages) > 1 and languages[0] not in ISOLATED_LANGUAGES:
-        languages = [
-            lang
-            for lang in languages
-            if lang not in ISOLATED_LANGUAGES
-        ]
+        languages = [lang for lang in languages if lang not in ISOLATED_LANGUAGES]
     return "+".join(languages or ["eng"])
 
 
 def script_counts(text: str) -> dict[str, int]:
-    return {
-        script: len(pattern.findall(text))
-        for script, pattern in SCRIPT_PATTERNS.items()
-    }
+    return {script: len(pattern.findall(text)) for script, pattern in SCRIPT_PATTERNS.items()}
 
 
 def language_script(language: str) -> str:
@@ -62,7 +54,4 @@ def normalize_probabilities(
             return {}
         fallback = 1.0 / len(probabilities)
         return {language: fallback for language in probabilities}
-    return {
-        language: max(0.0, probability) / total
-        for language, probability in probabilities.items()
-    }
+    return {language: max(0.0, probability) / total for language, probability in probabilities.items()}

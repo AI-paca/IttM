@@ -16,11 +16,9 @@ class JournalRef:
 
 
 class StructuralJournal(Protocol):
-    def append(self, parts: Iterable[str]) -> JournalRef:
-        ...
+    def append(self, parts: Iterable[str]) -> JournalRef: ...
 
-    def parts(self, reference: JournalRef) -> Iterable[str]:
-        ...
+    def parts(self, reference: JournalRef) -> Iterable[str]: ...
 
 
 def encode_structural_record(

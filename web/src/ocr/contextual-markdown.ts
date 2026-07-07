@@ -42,10 +42,7 @@ function courtStatsSlideMarkdown(text: string): string | null {
 
 function looksLikeCourtStatisticsDiagram(text: string): boolean {
   const value = compact(text);
-  if (
-    !value.includes("схемасборастатистической") ||
-    !value.includes("судов")
-  ) {
+  if (!value.includes("схемасборастатистической") || !value.includes("судов")) {
     return false;
   }
 

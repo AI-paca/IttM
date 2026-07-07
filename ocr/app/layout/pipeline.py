@@ -33,12 +33,14 @@ def analyze_layout(
         min_confirmed_cell_ratio=min_confirmed_cell_ratio,
     )
     regions = [
-        replace(
-            region,
-            table=mark_table_empty_slots(region.image, region.table),
+        (
+            replace(
+                region,
+                table=mark_table_empty_slots(region.image, region.table),
+            )
+            if region.kind == "table" and region.table is not None
+            else region
         )
-        if region.kind == "table" and region.table is not None
-        else region
         for region in regions
     ]
     return regions, decision

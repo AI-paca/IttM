@@ -81,7 +81,7 @@ def test_profile_limits_selector_to_explicitly_allowed_layout_stages():
     assert profile.layout_analysis == ("table_regions", "xy_cut_regions")
 
 
-def test_standard_backend_profiles_keep_spatial_layout_baseline():
+def test_standard_backend_profiles_keep_recursive_grid_layout_baseline():
     for name in (
         "backend_auto_standard",
         "backend_tesseract_standard",
@@ -94,9 +94,10 @@ def test_standard_backend_profiles_keep_spatial_layout_baseline():
             "projected_document_dewarp",
         )
         layout = OCR_PIPELINE_PROFILES[name].layout
-        assert layout.feature_extractors == ("projection_geometry",)
-        assert layout.selector == "uniform_spatial_v1"
-        assert layout.allowed_stages == ("spatial_regions",)
+        assert layout.feature_extractors == ()
+        assert layout.selector == "fixed"
+        assert layout.allowed_stages == ("recursive_grid",)
+        assert dict(layout.default_parameters)["min_separator_gap"] == 8
 
 
 def test_table_first_profiles_are_explicitly_experimental():
@@ -135,14 +136,8 @@ def test_table_first_selector_prefers_line_grid_when_available():
         height=900,
         foreground_ratio=0.12,
         separators=(
-            *(
-                SeparatorCandidate("y", index * 100, index * 100 + 2, 0, 1200, "ink", 0.9)
-                for index in range(1, 5)
-            ),
-            *(
-                SeparatorCandidate("x", index * 200, index * 200 + 2, 0, 900, "ink", 0.9)
-                for index in range(1, 4)
-            ),
+            *(SeparatorCandidate("y", index * 100, index * 100 + 2, 0, 1200, "ink", 0.9) for index in range(1, 5)),
+            *(SeparatorCandidate("x", index * 200, index * 200 + 2, 0, 900, "ink", 0.9) for index in range(1, 4)),
         ),
     )
 

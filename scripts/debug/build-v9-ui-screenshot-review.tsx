@@ -6,7 +6,7 @@ import {
   readdirSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MarkdownContent } from "../../web/src/ui/MarkdownContent";

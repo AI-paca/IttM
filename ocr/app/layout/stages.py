@@ -417,24 +417,15 @@ def _recursive_grid_image_regions(
         ),
     )
     shadow = project_sparse_shadow(ordered)
-    shadow_profile = classify_sparse_shadow(
-        sparse_shadow_signature(shadow)
-    )
-    projection_by_leaf = {
-        id(leaf): (anchor, codes)
-        for leaf, anchor, codes in shadow.leaf_projection
-    }
+    shadow_profile = classify_sparse_shadow(sparse_shadow_signature(shadow))
+    projection_by_leaf = {id(leaf): (anchor, codes) for leaf, anchor, codes in shadow.leaf_projection}
     y_lines = [0, image.height]
     for leaf in ordered:
         y_lines.extend((leaf.source_bbox[1], leaf.source_bbox[3]))
     grid_x_lines = shadow.x_tracks
-    grid_y_lines = tuple(
-        sorted(set(max(0, min(image.height, line)) for line in y_lines))
-    )
+    grid_y_lines = tuple(sorted(set(max(0, min(image.height, line)) for line in y_lines)))
 
-    table_regions: list[
-        tuple[set[int], LayoutRegion]
-    ] = []
+    table_regions: list[tuple[set[int], LayoutRegion]] = []
     claimed_leaf_ids: set[int] = set()
 
     def detect_group_table(
@@ -526,9 +517,7 @@ def _recursive_grid_image_regions(
                         metadata={
                             "layout_kind": "recursive_grid_table",
                             "sparse_segment_kind": shadow_profile.kind,
-                            "region_recursion": (
-                                table_decision.metadata(),
-                            ),
+                            "region_recursion": (table_decision.metadata(),),
                         },
                     ),
                 )
@@ -544,17 +533,12 @@ def _recursive_grid_image_regions(
         detect_group_table(
             group.leaves,
             group.bbox,
-            horizontal_coverage=0.30
-            if shadow_profile.kind == "table"
-            else 0.50,
+            horizontal_coverage=0.30 if shadow_profile.kind == "table" else 0.50,
         )
 
     if shadow_profile.kind == "table":
         rule_leaves = tuple(
-            leaf
-            for leaf in ordered
-            if len(leaf.merge_left_tracks) >= 2
-            and id(leaf) not in claimed_leaf_ids
+            leaf for leaf in ordered if len(leaf.merge_left_tracks) >= 2 and id(leaf) not in claimed_leaf_ids
         )
         if rule_leaves:
             detect_group_table(
@@ -596,10 +580,7 @@ def _recursive_grid_image_regions(
                     ),
                     "sparse_codes": sparse_codes,
                     "sparse_shape": (shadow.rows, shadow.cols),
-                    "region_recursion": tuple(
-                        decision.metadata()
-                        for decision in leaf.decisions
-                    ),
+                    "region_recursion": tuple(decision.metadata() for decision in leaf.decisions),
                 },
             )
         )
@@ -614,23 +595,12 @@ def _is_structural_only_leaf(
     left, top, right, bottom = leaf.content_bbox
     content_width = max(0, right - left)
     content_height = max(0, bottom - top)
-    near_horizontal_edge = (
-        leaf.source_bbox[1] <= 0
-        or leaf.source_bbox[3] >= page_height
-    )
-    thin_edge_ink = (
-        near_horizontal_edge
-        and content_height
-        <= max(4, round(page_height * 0.01))
-    )
+    near_horizontal_edge = leaf.source_bbox[1] <= 0 or leaf.source_bbox[3] >= page_height
+    thin_edge_ink = near_horizontal_edge and content_height <= max(4, round(page_height * 0.01))
     tiny_footer = (
         leaf.source_bbox[3] >= round(page_height * 0.90)
-        and content_width
-        <= max(12, round(page_width * 0.03))
-        and (
-            left <= round(page_width * 0.05)
-            or right >= round(page_width * 0.95)
-        )
+        and content_width <= max(12, round(page_width * 0.03))
+        and (left <= round(page_width * 0.05) or right >= round(page_width * 0.95))
     )
     return thin_edge_ink or tiny_footer
 
@@ -647,11 +617,7 @@ def _recursive_grid_config(
         4,
         int(_number(parameters, "min_separator_gap", 8)),
     )
-    preprocess_steps = (
-        ("recursive_page_dewarp",)
-        if _bool(parameters, "region_page_dewarp", True)
-        else ()
-    )
+    preprocess_steps = ("recursive_page_dewarp",) if _bool(parameters, "region_page_dewarp", True) else ()
     return RecursiveGridConfig(
         max_depth=max(
             1,
@@ -696,10 +662,7 @@ def _prefer_recursive_table_layout(
     image_width, image_height = image_size
     gradient_width = gradient.bbox[2] - gradient.bbox[0]
     gradient_height = gradient.bbox[3] - gradient.bbox[1]
-    gradient_coverage = (
-        gradient_width * gradient_height
-        / max(1, image_width * image_height)
-    )
+    gradient_coverage = gradient_width * gradient_height / max(1, image_width * image_height)
     simple_oversegments_rows = (
         simple.cols == gradient.cols
         and simple.cols >= 4
@@ -717,19 +680,12 @@ def _is_gutter_card_table(table: TableLayout) -> bool:
     width = table.bbox[2] - table.bbox[0]
     if width <= 0:
         return False
-    column_widths = [
-        right - left
-        for left, right in zip(table.x_lines, table.x_lines[1:])
-    ]
+    column_widths = [right - left for left, right in zip(table.x_lines, table.x_lines[1:])]
     if len(column_widths) != 3:
         return False
     middle = column_widths[1]
     left, right = column_widths[0], column_widths[2]
-    return (
-        middle <= max(64, round(width * 0.08))
-        and left >= width * 0.25
-        and right >= width * 0.25
-    )
+    return middle <= max(64, round(width * 0.08)) and left >= width * 0.25 and right >= width * 0.25
 
 
 def _full_page_table_lacks_early_vertical_support(
@@ -738,30 +694,25 @@ def _full_page_table_lacks_early_vertical_support(
 ) -> bool:
     image_width, image_height = image.size
     left, top, right, bottom = table.bbox
-    coverage = (
-        (right - left) * (bottom - top)
-        / max(1, image_width * image_height)
-    )
-    if (
-        coverage < 0.90
-        or table.rows < 12
-        or table.cols < 4
-        or len(table.x_lines) < 3
-    ):
+    coverage = (right - left) * (bottom - top) / max(1, image_width * image_height)
+    if coverage < 0.90 or table.rows < 12 or table.cols < 4 or len(table.x_lines) < 3:
         return False
 
     rgb = np.asarray(image.convert("RGB"), dtype=np.int16)
-    vertical_edges = np.max(
-        np.abs(rgb[:, 1:] - rgb[:, :-1]),
-        axis=2,
-    ) >= 8
+    vertical_edges = (
+        np.max(
+            np.abs(rgb[:, 1:] - rgb[:, :-1]),
+            axis=2,
+        )
+        >= 8
+    )
     early_bottom = max(1, min(vertical_edges.shape[0], int(image_height * 0.20)))
     supported = 0
     for x in table.x_lines[1:-1]:
         edge_x = max(0, min(vertical_edges.shape[1] - 1, x - 1))
         strip = vertical_edges[
             :early_bottom,
-            max(0, edge_x - 2):min(vertical_edges.shape[1], edge_x + 3),
+            max(0, edge_x - 2) : min(vertical_edges.shape[1], edge_x + 3),
         ]
         if strip.size and float(np.mean(strip)) >= 0.12:
             supported += 1
@@ -779,17 +730,20 @@ def _simple_group_table_has_spanning_rules(
     rgb = np.asarray(image.convert("RGB"), dtype=np.int16)
     if rgb.shape[0] < 8 or rgb.shape[1] < 2:
         return False
-    vertical_edges = np.max(
-        np.abs(rgb[:, 1:] - rgb[:, :-1]),
-        axis=2,
-    ) >= 8
+    vertical_edges = (
+        np.max(
+            np.abs(rgb[:, 1:] - rgb[:, :-1]),
+            axis=2,
+        )
+        >= 8
+    )
     quarter = max(1, vertical_edges.shape[0] // 4)
     supported = 0
     for x in internal_lines:
         edge_x = max(0, min(vertical_edges.shape[1] - 1, x - 1))
         strip = vertical_edges[
             :,
-            max(0, edge_x - 2):min(
+            max(0, edge_x - 2) : min(
                 vertical_edges.shape[1],
                 edge_x + 3,
             ),
@@ -809,11 +763,7 @@ def _prepare_recursive_table_image(
     config: RecursiveGridConfig,
 ) -> tuple[Image.Image, TableLayout, RegionDecision]:
     prepared, decision = prepare_recursive_region(image, config)
-    transformed = (
-        prepared.size != image.size
-        or bool(decision.preprocess_steps)
-        or abs(decision.deskew_angle) >= 0.05
-    )
+    transformed = prepared.size != image.size or bool(decision.preprocess_steps) or abs(decision.deskew_angle) >= 0.05
     if not transformed:
         prepared.close()
         return image, current_table, decision
@@ -852,10 +802,13 @@ def _split_table_region_by_vertical_rules(
     if region.table is None or region.table.rows < 20 or region.table.cols < 3:
         return (region,)
     rgb = np.asarray(region.image.convert("RGB"), dtype=np.int16)
-    vertical_mask = np.max(
-        np.abs(rgb[:, 1:] - rgb[:, :-1]),
-        axis=2,
-    ) >= 8
+    vertical_mask = (
+        np.max(
+            np.abs(rgb[:, 1:] - rgb[:, :-1]),
+            axis=2,
+        )
+        >= 8
+    )
     full_x_lines = region.table.x_lines
     midpoint_x_lines = (
         full_x_lines[0],
@@ -874,10 +827,7 @@ def _split_table_region_by_vertical_rules(
     for top, bottom in zip(region.table.y_lines, region.table.y_lines[1:]):
         bounded_top = max(0, min(vertical_mask.shape[0], top))
         bounded_bottom = max(bounded_top + 1, min(vertical_mask.shape[0], bottom))
-        full_coverages = [
-            coverage(x, bounded_top, bounded_bottom)
-            for x in full_x_lines[1:-1]
-        ]
+        full_coverages = [coverage(x, bounded_top, bounded_bottom) for x in full_x_lines[1:-1]]
         if full_coverages and min(full_coverages) >= 0.35:
             row_kinds.append(region.table.cols)
         elif coverage(midpoint_x_lines[1], bounded_top, bounded_bottom) >= 0.35:
@@ -895,9 +845,7 @@ def _split_table_region_by_vertical_rules(
     runs.append((start, len(row_kinds), row_kinds[start]))
 
     table_runs = [
-        (start, end, kind)
-        for start, end, kind in runs
-        if kind >= 2 and end - start >= 3 and (end - start) * kind >= 6
+        (start, end, kind) for start, end, kind in runs if kind >= 2 and end - start >= 3 and (end - start) * kind >= 6
     ]
     if len(table_runs) < 2:
         return (region,)
@@ -933,10 +881,7 @@ def _split_table_region_by_vertical_rules(
             )
             continue
         x_lines = full_x_lines if kind == region.table.cols else midpoint_x_lines
-        y_lines_abs = [
-            region.bbox[1] + y
-            for y in region.table.y_lines[start:end + 1]
-        ]
+        y_lines_abs = [region.bbox[1] + y for y in region.table.y_lines[start : end + 1]]
         local_y_lines = tuple(y - y_abs_top for y in y_lines_abs)
         cells = tuple(
             TableCell(
@@ -991,20 +936,20 @@ def _collapse_weak_table_region_columns(
     x_lines = list(region.table.x_lines)
     if len(x_lines) != 4:
         return region
-    widths = [
-        right - left
-        for left, right in zip(x_lines, x_lines[1:])
-    ]
+    widths = [right - left for left, right in zip(x_lines, x_lines[1:])]
     median_width = float(np.median(widths))
     if median_width <= 0:
         return region
     if max(abs(width - median_width) for width in widths) > median_width * 0.08:
         return region
     rgb = np.asarray(region.image.convert("RGB"), dtype=np.int16)
-    vertical_mask = np.max(
-        np.abs(rgb[:, 1:] - rgb[:, :-1]),
-        axis=2,
-    ) >= 8
+    vertical_mask = (
+        np.max(
+            np.abs(rgb[:, 1:] - rgb[:, :-1]),
+            axis=2,
+        )
+        >= 8
+    )
 
     def coverage(x: int) -> float:
         left = max(0, x - 2)
@@ -1063,10 +1008,7 @@ def _merge_adjacent_recursive_tables(
     index = 0
     while index < len(ordered):
         current = ordered[index]
-        if (
-            current.table is None
-            or index + 2 >= len(ordered)
-        ):
+        if current.table is None or index + 2 >= len(ordered):
             result.append(current)
             index += 1
             continue
@@ -1129,10 +1071,7 @@ def _rule_supported_table_run_at(
         candidate = regions[candidate_index]
         if candidate.table is None or candidate.table.cols < 3:
             continue
-        tracks = tuple(
-            candidate.bbox[0] + x
-            for x in candidate.table.x_lines
-        )
+        tracks = tuple(candidate.bbox[0] + x for x in candidate.table.x_lines)
         if all(
             _region_supports_vertical_tracks(
                 region,
@@ -1155,10 +1094,7 @@ def _rule_supported_table_run_at(
         end += 1
     if start == seed_index and end == seed_index + 1:
         return None
-    table_count = sum(
-        region.table is not None and region.table.cols >= 3
-        for region in regions[start:end]
-    )
+    table_count = sum(region.table is not None and region.table.cols >= 3 for region in regions[start:end])
     if table_count < 2:
         return None
 
@@ -1264,10 +1200,13 @@ def _region_supports_vertical_tracks(
     rgb = np.asarray(region.image.convert("RGB"), dtype=np.int16)
     if rgb.shape[1] < 2:
         return False
-    vertical_edges = np.max(
-        np.abs(rgb[:, 1:] - rgb[:, :-1]),
-        axis=2,
-    ) >= 8
+    vertical_edges = (
+        np.max(
+            np.abs(rgb[:, 1:] - rgb[:, :-1]),
+            axis=2,
+        )
+        >= 8
+    )
     supported = 0
     for absolute_x in internal_tracks:
         local_x = absolute_x - region.bbox[0] - 1
@@ -1275,7 +1214,7 @@ def _region_supports_vertical_tracks(
             continue
         strip = vertical_edges[
             :,
-            max(0, local_x - 2):min(
+            max(0, local_x - 2) : min(
                 vertical_edges.shape[1],
                 local_x + 3,
             ),
@@ -1305,15 +1244,8 @@ def _merge_table_pair_through_bridge(
     if bridge.bbox[3] <= first.bbox[3] or bridge.bbox[1] >= second.bbox[1]:
         return None
     gap = second.bbox[1] - first.bbox[3]
-    first_row_heights = [
-        bottom - top
-        for top, bottom in zip(first.table.y_lines, first.table.y_lines[1:])
-    ]
-    median_row_height = (
-        float(np.median(first_row_heights))
-        if first_row_heights
-        else 48.0
-    )
+    first_row_heights = [bottom - top for top, bottom in zip(first.table.y_lines, first.table.y_lines[1:])]
+    median_row_height = float(np.median(first_row_heights)) if first_row_heights else 48.0
     if gap > max(120, int(round(median_row_height * 1.8))):
         return None
     if bridge.bbox[3] - bridge.bbox[1] > max(96, int(round(median_row_height * 1.5))):
@@ -1331,10 +1263,7 @@ def _merge_table_pair_through_bridge(
     if any(abs(left - right) > tolerance for left, right in zip(first_x, second_x)):
         return None
 
-    y_abs = [
-        first.bbox[1] + y
-        for y in first.table.y_lines
-    ]
+    y_abs = [first.bbox[1] + y for y in first.table.y_lines]
     bridge_bottom = second.bbox[1]
     if bridge_bottom <= y_abs[-1]:
         return None
@@ -1483,11 +1412,7 @@ def _fake_cell_left_tracks(
             continue
         merged[-1][1] = end
 
-    wide_groups = [
-        (left + start, left + end)
-        for start, end in merged
-        if end - start >= max(2, min_gap // 2)
-    ]
+    wide_groups = [(left + start, left + end) for start, end in merged if end - start >= max(2, min_gap // 2)]
     if not wide_groups:
         return bbox, [left]
 
@@ -1506,11 +1431,7 @@ def _normalize_row_intervals(
     rows: list[tuple[int, int]],
     height: int,
 ) -> list[tuple[int, int]]:
-    ordered = sorted(
-        (max(0, min(height, top)), max(0, min(height, bottom)))
-        for top, bottom in rows
-        if bottom > top
-    )
+    ordered = sorted((max(0, min(height, top)), max(0, min(height, bottom))) for top, bottom in rows if bottom > top)
     if not ordered:
         return []
 
@@ -1582,11 +1503,7 @@ def _content_bands_from_mask(
     # OCR must not lose ascenders/descenders at artificial horizontal cuts.
     # The overlap belongs to fake cells, not to the source image itself.
     pad = max(2, min(overlap // 4, min_gap * 2, 12))
-    return [
-        (max(0, start - pad), min(height, end + pad))
-        for start, end in merged
-        if end > start
-    ]
+    return [(max(0, start - pad), min(height, end + pad)) for start, end in merged if end > start]
 
 
 def _merge_y_boxes(
@@ -1697,18 +1614,8 @@ def _gradient_table_layout(
     horizontal_mask = horizontal_edge >= contrast
     x_coverage = np.mean(vertical_mask, axis=0)
     y_coverage = np.mean(horizontal_mask, axis=1)
-    x_positions = [
-        (start + end) // 2 + 1
-        for start, end in _group_true_indexes(
-            x_coverage >= coverage
-        )
-    ]
-    y_positions = [
-        (start + end) // 2 + 1
-        for start, end in _group_true_indexes(
-            y_coverage >= horizontal_coverage
-        )
-    ]
+    x_positions = [(start + end) // 2 + 1 for start, end in _group_true_indexes(x_coverage >= coverage)]
+    y_positions = [(start + end) // 2 + 1 for start, end in _group_true_indexes(y_coverage >= horizontal_coverage)]
     x_lines = _merge_near_positions(
         x_positions,
         tolerance=max(6, width // 1000),
@@ -1745,31 +1652,17 @@ def _gradient_table_layout(
 
     min_col_width = max(8, width // 500)
     min_row_height = max(8, height // 500)
-    if min(
-        right - left
-        for left, right in zip(x_lines, x_lines[1:])
-    ) < min_col_width:
+    if min(right - left for left, right in zip(x_lines, x_lines[1:])) < min_col_width:
         return None
-    if min(
-        bottom - top
-        for top, bottom in zip(y_lines, y_lines[1:])
-    ) < min_row_height:
+    if min(bottom - top for top, bottom in zip(y_lines, y_lines[1:])) < min_row_height:
         return None
 
     left, right = x_lines[0], x_lines[-1]
     top, bottom = y_lines[0], y_lines[-1]
-    table_coverage = (
-        (right - left) * (bottom - top)
-        / max(1, width * height)
-    )
+    table_coverage = (right - left) * (bottom - top) / max(1, width * height)
     rows = len(y_lines) - 1
     cols = len(x_lines) - 1
-    if (
-        table_coverage < 0.12
-        or rows * cols < 8
-        or rows > 200
-        or cols > 80
-    ):
+    if table_coverage < 0.12 or rows * cols < 8 or rows > 200 or cols > 80:
         return None
 
     cells = tuple(
@@ -1778,12 +1671,8 @@ def _gradient_table_layout(
             col=col,
             bbox=(cell_left, cell_top, cell_right, cell_bottom),
         )
-        for row, (cell_top, cell_bottom) in enumerate(
-            zip(y_lines, y_lines[1:])
-        )
-        for col, (cell_left, cell_right) in enumerate(
-            zip(x_lines, x_lines[1:])
-        )
+        for row, (cell_top, cell_bottom) in enumerate(zip(y_lines, y_lines[1:]))
+        for col, (cell_left, cell_right) in enumerate(zip(x_lines, x_lines[1:]))
     )
     return TableLayout(
         bbox=(left, top, right, bottom),
@@ -1802,10 +1691,7 @@ def _collapse_weak_equal_three_column_lines(
 ) -> list[int]:
     if len(x_lines) != 4 or len(y_lines) < 2:
         return x_lines
-    widths = [
-        right - left
-        for left, right in zip(x_lines, x_lines[1:])
-    ]
+    widths = [right - left for left, right in zip(x_lines, x_lines[1:])]
     median_width = float(np.median(widths))
     if median_width <= 0 or max(abs(width - median_width) for width in widths) > median_width * 0.08:
         return x_lines
@@ -1832,31 +1718,17 @@ def _collapse_weak_equal_three_column_lines(
 def _split_gradient_table_layout(
     table: TableLayout,
 ) -> tuple[TableLayout, ...]:
-    row_heights = [
-        bottom - top
-        for top, bottom in zip(table.y_lines, table.y_lines[1:])
-        if bottom > top
-    ]
+    row_heights = [bottom - top for top, bottom in zip(table.y_lines, table.y_lines[1:]) if bottom > top]
     if len(row_heights) < 8:
         return (table,)
     median_height = float(np.median(row_heights))
     if median_height <= 0:
         return (table,)
 
-    tall = [
-        height > max(median_height * 2.5, median_height + 96)
-        for height in row_heights
-    ]
-    gap_runs = [
-        (start, end)
-        for start, end in _group_true_indexes(np.asarray(tall))
-        if end - start >= 2
-    ]
+    tall = [height > max(median_height * 2.5, median_height + 96) for height in row_heights]
+    gap_runs = [(start, end) for start, end in _group_true_indexes(np.asarray(tall)) if end - start >= 2]
     if not gap_runs and table.cols >= 2 and len(row_heights) >= 10:
-        single_tall = [
-            height > max(median_height * 2.25, median_height + 96)
-            for height in row_heights
-        ]
+        single_tall = [height > max(median_height * 2.25, median_height + 96) for height in row_heights]
         gap_runs = [
             (index, index + 1)
             for index, is_tall in enumerate(single_tall)
@@ -1864,11 +1736,7 @@ def _split_gradient_table_layout(
             and index >= 4
             and (
                 len(row_heights) - index - 1 >= 4
-                or (
-                    table.cols == 2
-                    and index >= 8
-                    and len(row_heights) - index - 1 >= 3
-                )
+                or (table.cols == 2 and index >= 8 and len(row_heights) - index - 1 >= 3)
             )
         ]
     if not gap_runs:
@@ -1891,7 +1759,7 @@ def _split_gradient_table_layout(
         cols = table.cols
         if rows < 3 or cols < 2 or rows * cols < 6:
             continue
-        y_lines = table.y_lines[row_start:row_end + 1]
+        y_lines = table.y_lines[row_start : row_end + 1]
         bbox = (
             table.x_lines[0],
             y_lines[0],
@@ -1948,10 +1816,7 @@ def _refine_gradient_table_lines(
     else:
         local = edge_mask[span_start:span_end, :]
         projection = np.mean(local, axis=0)
-    positions = [
-        (start + end) // 2 + 1
-        for start, end in _group_true_indexes(projection >= 0.40)
-    ]
+    positions = [(start + end) // 2 + 1 for start, end in _group_true_indexes(projection >= 0.40)]
     candidates = _merge_near_positions(
         positions,
         tolerance=tolerance,
@@ -1968,28 +1833,15 @@ def _refine_gradient_table_lines(
         )
     ]
     if constrain_to_seed:
-        candidates = [
-            position
-            for position in candidates
-            if seed_lines[0] <= position <= seed_lines[-1]
-        ]
+        candidates = [position for position in candidates if seed_lines[0] <= position <= seed_lines[-1]]
 
     refined = sorted(
-        set(seed_lines)
-        | {
-            position
-            for position in candidates
-            if seed_lines[0] <= position <= seed_lines[-1]
-        }
+        set(seed_lines) | {position for position in candidates if seed_lines[0] <= position <= seed_lines[-1]}
     )
     if constrain_to_seed:
         return _merge_near_positions(refined, tolerance=tolerance)
 
-    gaps = [
-        right - left
-        for left, right in zip(seed_lines, seed_lines[1:])
-        if right > left
-    ]
+    gaps = [right - left for left, right in zip(seed_lines, seed_lines[1:]) if right > left]
     maximum_step = max(
         tolerance * 3,
         int(round(float(np.median(gaps)) * 3.0)),
@@ -2017,14 +1869,14 @@ def _has_long_gradient_run(
     index = position - 1
     if line_axis == 1:
         band = edge_mask[
-            max(0, index - 2):min(edge_mask.shape[0], index + 3),
+            max(0, index - 2) : min(edge_mask.shape[0], index + 3),
             span_start:span_end,
         ]
         run_mask = np.any(band, axis=0)
     else:
         band = edge_mask[
             span_start:span_end,
-            max(0, index - 2):min(edge_mask.shape[1], index + 3),
+            max(0, index - 2) : min(edge_mask.shape[1], index + 3),
         ]
         run_mask = np.any(band, axis=1)
     groups = _group_true_indexes(run_mask)
@@ -2048,20 +1900,13 @@ def _simple_table_x_lines(image: Image.Image) -> list[int]:
         float(np.quantile(projection, 0.98)),
         float(np.mean(projection) + np.std(projection) * 2.25),
     )
-    positions = [
-        int(index + 1)
-        for index in np.flatnonzero(projection >= threshold)
-        if 4 <= index + 1 <= width - 4
-    ]
+    positions = [int(index + 1) for index in np.flatnonzero(projection >= threshold) if 4 <= index + 1 <= width - 4]
     positions = _merge_near_positions(positions, tolerance=max(3, width // 80))
     edge_threshold = max(12.0, min(40.0, threshold * 0.45))
     high_coverage_positions = [
         (start + end) // 2 + 1
-        for start, end in _group_true_indexes(
-            np.mean(edge >= edge_threshold, axis=0) >= 0.55
-        )
-        if end - start <= max(12, width // 60)
-        and 4 <= (start + end) // 2 + 1 <= width - 4
+        for start, end in _group_true_indexes(np.mean(edge >= edge_threshold, axis=0) >= 0.55)
+        if end - start <= max(12, width // 60) and 4 <= (start + end) // 2 + 1 <= width - 4
     ]
     positions = _merge_near_positions(
         [*positions, *high_coverage_positions],
@@ -2241,20 +2086,21 @@ def _recursive_grid_regions(
             if prepared_table is not table_crop:
                 table_crop.close()
                 table_crop = prepared_table
-            return _normalize_recursive_output_regions([
-                LayoutRegion(
-                    kind="table",
-                    image=table_crop,
-                    bbox=source_table_bbox,
-                    table=prepared_layout,
-                    metadata={
-                        "layout_kind": "recursive_grid_table",
-                        "region_recursion": (
-                            table_decision.metadata(),
-                        ),
-                    },
-                )
-            ], image)
+            return _normalize_recursive_output_regions(
+                [
+                    LayoutRegion(
+                        kind="table",
+                        image=table_crop,
+                        bbox=source_table_bbox,
+                        table=prepared_layout,
+                        metadata={
+                            "layout_kind": "recursive_grid_table",
+                            "region_recursion": (table_decision.metadata(),),
+                        },
+                    )
+                ],
+                image,
+            )
 
     table_regions = _partition_around_tables(
         image,
@@ -2288,9 +2134,7 @@ def _recursive_grid_regions(
                             metadata=_shift_region_metadata(
                                 {
                                     **(child.metadata or {}),
-                                    "layout_table_rejected": (
-                                        "weak_partition_vertical_support"
-                                    ),
+                                    "layout_table_rejected": ("weak_partition_vertical_support"),
                                 },
                                 offset_x,
                                 offset_y,
@@ -2321,9 +2165,7 @@ def _recursive_grid_regions(
                 metadata={
                     **(region.metadata or {}),
                     "layout_kind": "recursive_grid_table",
-                    "region_recursion": (
-                        table_decision.metadata(),
-                    ),
+                    "region_recursion": (table_decision.metadata(),),
                 },
             )
             regions.append(region)
@@ -2358,10 +2200,13 @@ def _is_unreliable_partition_table(region: LayoutRegion) -> bool:
     rgb = np.asarray(region.image.convert("RGB"), dtype=np.int16)
     if rgb.size == 0:
         return False
-    vertical_mask = np.max(
-        np.abs(rgb[:, 1:] - rgb[:, :-1]),
-        axis=2,
-    ) >= 8
+    vertical_mask = (
+        np.max(
+            np.abs(rgb[:, 1:] - rgb[:, :-1]),
+            axis=2,
+        )
+        >= 8
+    )
     internal_lines = table.x_lines[1:-1]
     if not internal_lines:
         return False
@@ -2481,7 +2326,7 @@ def _is_full_page_coarse_table(region: LayoutRegion, image: Image.Image) -> bool
     image_width, image_height = image.size
     left, top, right, bottom = region.bbox
     coverage = ((right - left) * (bottom - top)) / max(1, image_width * image_height)
-    return coverage >= 0.85 and region.table.rows <= 12 and region.table.cols <= 6
+    return coverage >= 0.85 and region.table.rows <= 12 and region.table.cols <= 12
 
 
 def _separator_center(separator: SeparatorCandidate) -> int:
@@ -2718,11 +2563,7 @@ def _vertical_cuts_for_band(
         if coverage < min_coverage:
             return None
         center = int(round(sum(_separator_center(separator) for separator in cluster) / len(cluster)))
-        whitespace_widths = [
-            separator.end - separator.start
-            for separator in cluster
-            if separator.kind == "whitespace"
-        ]
+        whitespace_widths = [separator.end - separator.start for separator in cluster if separator.kind == "whitespace"]
         ink_count = sum(1 for separator in cluster if separator.kind == "ink")
         gap_width = float(
             np.median(whitespace_widths)
@@ -2791,11 +2632,7 @@ def _vertical_cuts_for_band(
         and separator.span_start < features.width
         and separator.span_end - separator.span_start >= features.width * 0.5
     )
-    table_row_evidence = (
-        bottom - top >= 160
-        and features.foreground_ratio >= 0.08
-        and horizontal_rule_count >= 1
-    )
+    table_row_evidence = bottom - top >= 160 and features.foreground_ratio >= 0.08 and horizontal_rule_count >= 1
     whitespace_summary_count = sum(1 for _, _, _, backed_by_line_pair, _ in summaries if not backed_by_line_pair)
     structural_cut_count = sum(1 for _, _, _, backed_by_line_pair, _ in summaries if backed_by_line_pair)
 
@@ -2964,8 +2801,9 @@ def execute_layout_decision(
             image,
             min_confirmed_cell_ratio=min_confirmed_cell_ratio,
         )
-        if table_regions and not all(
-            _is_full_page_coarse_table(region, image) for region in table_regions
+        table_only_regions = [region for region in table_regions if region.kind == "table"]
+        if table_regions and not (
+            table_only_regions and all(_is_full_page_coarse_table(region, image) for region in table_only_regions)
         ):
             return _reading_order(table_regions)
         regions = _spatial_image_regions(image, features, stage)

@@ -204,12 +204,7 @@ def test_markdown_formatter_keeps_loose_pipe_rows_without_art_signal():
 
 
 def test_markdown_formatter_keeps_table_body_with_empty_fake_cells():
-    formatted = MarkdownFormatter.format_text(
-        "| A | B | C |\n"
-        "| --- | --- | --- |\n"
-        "| 1 |  |  |\n"
-        "| 2 |  |  |"
-    )
+    formatted = MarkdownFormatter.format_text("| A | B | C |\n" "| --- | --- | --- |\n" "| 1 |  |  |\n" "| 2 |  |  |")
 
     assert "```" not in formatted
     assert "| 2 |  |  |" in formatted
@@ -309,9 +304,7 @@ def test_curriculum_summary_repair_joins_wide_table_and_competency_text():
         ]
     )
 
-    repaired, count = convert_service._repair_curriculum_summary_tables(
-        apply_lexical_correction(markdown, "t9_small")
-    )
+    repaired, count = convert_service._repair_curriculum_summary_tables(apply_lexical_correction(markdown, "t9_small"))
 
     assert count == 1
     assert "| Индекс | Наименование | Формирование компетенции |" in repaired
@@ -350,10 +343,118 @@ def test_curriculum_index_normalization_handles_superheader_rows():
 def test_curriculum_logical_table_preserves_empty_service_columns():
     markdown = table_rows_to_markdown(
         [
-            ["", "", "Форма контроля", "", "", "", "", "зе.", "", "Итого акад.часов", "", "", "", "", "", "", "Семест", "Семест", "Семест", "Семест", "Семест", "Семест", "Семест", "Семест", "Код", "Наименование"],
-            ["Индекс", "Наименование", "Экзамен", "Зачет", "Зачет с оц.", "КП", "КР", "Факт", "Часов в з.е.", "По плану", "Конт. раб.", "Лек", "Лаб", "Пр", "СР", "Контроль", "з.е.", "з.е.", "з.е.", "з.е.", "з.е.", "з.е.", "з.е.", "з.е.", "Код", "Наименование"],
-            ["Б1.О.01", "Математика", "11223 4455", "", "", "", "", "36", "36", "1296", "568", "284", "36", "248", "404", "324", "7", "8", "6", "6", "9", "", "", "", "", ""],
-            ["Б1.О.01.01", "Математический анализ", "12", "", "", "", "", "7", "36", "252", "112", "56", "", "56", "68", "72", "4", "3", "", "", "", "", "", "", "12", "Прикладная математика"],
+            [
+                "",
+                "",
+                "Форма контроля",
+                "",
+                "",
+                "",
+                "",
+                "зе.",
+                "",
+                "Итого акад.часов",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "Семест",
+                "Семест",
+                "Семест",
+                "Семест",
+                "Семест",
+                "Семест",
+                "Семест",
+                "Семест",
+                "Код",
+                "Наименование",
+            ],
+            [
+                "Индекс",
+                "Наименование",
+                "Экзамен",
+                "Зачет",
+                "Зачет с оц.",
+                "КП",
+                "КР",
+                "Факт",
+                "Часов в з.е.",
+                "По плану",
+                "Конт. раб.",
+                "Лек",
+                "Лаб",
+                "Пр",
+                "СР",
+                "Контроль",
+                "з.е.",
+                "з.е.",
+                "з.е.",
+                "з.е.",
+                "з.е.",
+                "з.е.",
+                "з.е.",
+                "з.е.",
+                "Код",
+                "Наименование",
+            ],
+            [
+                "Б1.О.01",
+                "Математика",
+                "11223 4455",
+                "",
+                "",
+                "",
+                "",
+                "36",
+                "36",
+                "1296",
+                "568",
+                "284",
+                "36",
+                "248",
+                "404",
+                "324",
+                "7",
+                "8",
+                "6",
+                "6",
+                "9",
+                "",
+                "",
+                "",
+                "",
+                "",
+            ],
+            [
+                "Б1.О.01.01",
+                "Математический анализ",
+                "12",
+                "",
+                "",
+                "",
+                "",
+                "7",
+                "36",
+                "252",
+                "112",
+                "56",
+                "",
+                "56",
+                "68",
+                "72",
+                "4",
+                "3",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "12",
+                "Прикладная математика",
+            ],
         ]
     )
     lines = [line for line in markdown.splitlines() if line.startswith("|")]
@@ -369,11 +470,136 @@ def test_curriculum_logical_table_preserves_empty_service_columns():
 def test_curriculum_logical_table_keeps_empty_project_columns_with_ocr_noise():
     markdown = table_rows_to_markdown(
         [
-            ["Индекс", "Наименование", "Экзамен", "Зачет", "Зачет с оц.", "КП", "КР", "Факт з.е.", "По плану", "Конт. раб.", "Лек", "Лаб", "Пр", "СР", "Контроль", "Сем. 1", "Сем. 2", "Сем. 3", "Сем. 4", "Сем. 5", "Сем. 6", "Сем. 7", "Сем. 8", "Кафедра"],
-            ["Блок 1", "Дисциплины (модули)", "", "", "", "‹", "", "211", "7924", "3416", "1522", "676", "1218", "3239", "1269", "29", "29", "29", "25", "29", "27", "24", "19", ""],
-            ["Б1.О", "Обязательная часть", "", "", "", "", "--.", "131", "4716", "2072", "958", "328", "786", "1807", "837", "27", "29", "27", "16", "19", "6", "7", "", ""],
-            ["Б1.О.01.03", "Дифференциальные уравнения и ряды", "3", "", "", "", "一 一", "3", "108", "40", "20", "", "20", "32", "36", "", "", "3", "", "", "", "", "", "Прикладная математика"],
-            ["Б1.О.07", "Электротехника", "", "3", "", "一", "--. 一", "3", "108", "56", "28", "20", "8", "52", "", "", "", "3", "", "", "", "", "", "Промышленная электроника"],
+            [
+                "Индекс",
+                "Наименование",
+                "Экзамен",
+                "Зачет",
+                "Зачет с оц.",
+                "КП",
+                "КР",
+                "Факт з.е.",
+                "По плану",
+                "Конт. раб.",
+                "Лек",
+                "Лаб",
+                "Пр",
+                "СР",
+                "Контроль",
+                "Сем. 1",
+                "Сем. 2",
+                "Сем. 3",
+                "Сем. 4",
+                "Сем. 5",
+                "Сем. 6",
+                "Сем. 7",
+                "Сем. 8",
+                "Кафедра",
+            ],
+            [
+                "Блок 1",
+                "Дисциплины (модули)",
+                "",
+                "",
+                "",
+                "‹",
+                "",
+                "211",
+                "7924",
+                "3416",
+                "1522",
+                "676",
+                "1218",
+                "3239",
+                "1269",
+                "29",
+                "29",
+                "29",
+                "25",
+                "29",
+                "27",
+                "24",
+                "19",
+                "",
+            ],
+            [
+                "Б1.О",
+                "Обязательная часть",
+                "",
+                "",
+                "",
+                "",
+                "--.",
+                "131",
+                "4716",
+                "2072",
+                "958",
+                "328",
+                "786",
+                "1807",
+                "837",
+                "27",
+                "29",
+                "27",
+                "16",
+                "19",
+                "6",
+                "7",
+                "",
+                "",
+            ],
+            [
+                "Б1.О.01.03",
+                "Дифференциальные уравнения и ряды",
+                "3",
+                "",
+                "",
+                "",
+                "一 一",
+                "3",
+                "108",
+                "40",
+                "20",
+                "",
+                "20",
+                "32",
+                "36",
+                "",
+                "",
+                "3",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "Прикладная математика",
+            ],
+            [
+                "Б1.О.07",
+                "Электротехника",
+                "",
+                "3",
+                "",
+                "一",
+                "--. 一",
+                "3",
+                "108",
+                "56",
+                "28",
+                "20",
+                "8",
+                "52",
+                "",
+                "",
+                "",
+                "3",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "Промышленная электроника",
+            ],
         ]
     )
     lines = [line for line in markdown.splitlines() if line.startswith("|")]
@@ -388,8 +614,62 @@ def test_curriculum_logical_table_keeps_empty_project_columns_with_ocr_noise():
 def test_curriculum_logical_table_keeps_non_empty_kp_kr_columns():
     markdown = table_rows_to_markdown(
         [
-            ["Индекс", "Наименование", "Экзамен", "Зачет", "Зачет с оц.", "КП", "КР", "Факт", "Часов в з.е.", "По плану", "Конт. раб.", "Лек", "Лаб", "Пр", "СР", "Контроль", "з.е.", "з.е.", "з.е.", "з.е.", "з.е.", "з.е.", "з.е.", "з.е.", "Код", "Наименование"],
-            ["Б1.В.01", "Инженерное проектирование", "", "", "", "78", "67", "4", "36", "144", "40", "", "", "40", "104", "", "", "", "", "", "1", "", "2", "1", "", ""],
+            [
+                "Индекс",
+                "Наименование",
+                "Экзамен",
+                "Зачет",
+                "Зачет с оц.",
+                "КП",
+                "КР",
+                "Факт",
+                "Часов в з.е.",
+                "По плану",
+                "Конт. раб.",
+                "Лек",
+                "Лаб",
+                "Пр",
+                "СР",
+                "Контроль",
+                "з.е.",
+                "з.е.",
+                "з.е.",
+                "з.е.",
+                "з.е.",
+                "з.е.",
+                "з.е.",
+                "з.е.",
+                "Код",
+                "Наименование",
+            ],
+            [
+                "Б1.В.01",
+                "Инженерное проектирование",
+                "",
+                "",
+                "",
+                "78",
+                "67",
+                "4",
+                "36",
+                "144",
+                "40",
+                "",
+                "",
+                "40",
+                "104",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "1",
+                "",
+                "2",
+                "1",
+                "",
+                "",
+            ],
         ]
     )
     lines = [line for line in markdown.splitlines() if line.startswith("|")]
@@ -404,8 +684,62 @@ def test_curriculum_logical_table_keeps_non_empty_kp_kr_columns():
 def test_curriculum_logical_table_keeps_empty_kp_kr_after_required_section():
     markdown = table_rows_to_markdown(
         [
-            ["Индекс", "Наименование", "Экзамен", "Зачет", "Зачет с оц.", "КП", "КР", "Факт", "Часов в з.е.", "По плану", "Конт. раб.", "Лек", "Лаб", "Пр", "СР", "Контроль", "з.е.", "з.е.", "з.е.", "з.е.", "з.е.", "з.е.", "з.е.", "з.е.", "Код", "Наименование"],
-            ["Б1.В.ДВ.03.01", "Основы Web-приложений", "", "6", "", "", "", "3", "36", "108", "48", "20", "16", "12", "60", "", "", "", "", "", "", "3", "", "", "", "Информационные системы"],
+            [
+                "Индекс",
+                "Наименование",
+                "Экзамен",
+                "Зачет",
+                "Зачет с оц.",
+                "КП",
+                "КР",
+                "Факт",
+                "Часов в з.е.",
+                "По плану",
+                "Конт. раб.",
+                "Лек",
+                "Лаб",
+                "Пр",
+                "СР",
+                "Контроль",
+                "з.е.",
+                "з.е.",
+                "з.е.",
+                "з.е.",
+                "з.е.",
+                "з.е.",
+                "з.е.",
+                "з.е.",
+                "Код",
+                "Наименование",
+            ],
+            [
+                "Б1.В.ДВ.03.01",
+                "Основы Web-приложений",
+                "",
+                "6",
+                "",
+                "",
+                "",
+                "3",
+                "36",
+                "108",
+                "48",
+                "20",
+                "16",
+                "12",
+                "60",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "3",
+                "",
+                "",
+                "",
+                "Информационные системы",
+            ],
         ]
     )
     lines = [line for line in markdown.splitlines() if line.startswith("|")]
@@ -419,27 +753,106 @@ def test_table_slot_markdown_splits_curriculum_summary_grid():
     rows = [
         ["СВОДНЫЕ ДАННЫЕ Учебный план", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
         ["", "Итого", "", "", "", "Курс 1", "", "", "Курс 2", "", "", "Курс 3", "", "", "", "Курс 4"],
-        ["", "Баз.%", "Вар.%", "ДВ(от Вар.)% Мин. макс", "Факт", "Всего", "Сем. 1", "Сем. 2", "Всего", "Сем. 3", "Сем. 4", "Всего", "Сем. 5", "Сем. 6", "Всего", "Сем. 7"],
-        ["Итого (с факультативами)", "", "", "189 269", "269", "60", "30", "30", "62", "30", "32", "84", "41", "43", "63", "32"],
+        [
+            "",
+            "Баз.%",
+            "Вар.%",
+            "ДВ(от Вар.)% Мин. макс",
+            "Факт",
+            "Всего",
+            "Сем. 1",
+            "Сем. 2",
+            "Всего",
+            "Сем. 3",
+            "Сем. 4",
+            "Всего",
+            "Сем. 5",
+            "Сем. 6",
+            "Всего",
+            "Сем. 7",
+        ],
+        [
+            "Итого (с факультативами)",
+            "",
+            "",
+            "189 269",
+            "269",
+            "60",
+            "30",
+            "30",
+            "62",
+            "30",
+            "32",
+            "84",
+            "41",
+            "43",
+            "63",
+            "32",
+        ],
         ["Факультативы", "", "", "29", "29", "", "1", "1", "2", "", "", "22", "12", "10", "", ""],
-        ["", "ОП,", "факультативы", "(в период ТО)", "60.7", "", "55.6", "56.2", "", "56.2", "49.8", "", "79.5", "73.3", "", "59.3"],
+        [
+            "",
+            "ОП,",
+            "факультативы",
+            "(в период ТО)",
+            "60.7",
+            "",
+            "55.6",
+            "56.2",
+            "",
+            "56.2",
+            "49.8",
+            "",
+            "79.5",
+            "73.3",
+            "",
+            "59.3",
+        ],
         ["", "в период", "гос. экзаменов", "", "", "", "", "", "", "", "", "", "", "", "", ""],
-        ["Контактная работа", "без элект.", "дисциплин", "по физ.к,", "25.2", "", "26.9", "27.3", "", "26.9", "23.6", "", "26.9", "24.6", "", "20"],
+        [
+            "Контактная работа",
+            "без элект.",
+            "дисциплин",
+            "по физ.к,",
+            "25.2",
+            "",
+            "26.9",
+            "27.3",
+            "",
+            "26.9",
+            "23.6",
+            "",
+            "26.9",
+            "24.6",
+            "",
+            "20",
+        ],
         ["", "ЭКЗАМЕН (Эк)", "", "", "", "10", "5", "5", "", "5", "4", "", "5", "4", "7", "4"],
         ["", "ЗАЧЕТ С ОЦЕНКОЙ (За0)", "", "", "", "1", "1", "", "", "1", "3", "", "1", "4", "3", "2"],
         ["", "КУРСОВОЙ ПРDFКТ (КП)", "", "", "", "", "", "", "", "", "", "", "", "", "2", "1"],
-        ["Процент лекционных занятий от аудиторных (%)", "", "", "", "46.52%", "", "", "", "", "", "", "", "", "", "", ""],
+        [
+            "Процент лекционных занятий от аудиторных (%)",
+            "",
+            "",
+            "",
+            "46.52%",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],
     ]
 
     markdown = _slot_rows_to_markdown(rows)
-    blocks = [
-        [line for line in block.splitlines() if line.startswith("|")]
-        for block in markdown.split("\n\n")
-    ]
-    shapes = [
-        (len(block), len(block[0].strip()[1:-1].split("|")))
-        for block in blocks
-    ]
+    blocks = [[line for line in block.splitlines() if line.startswith("|")] for block in markdown.split("\n\n")]
+    shapes = [(len(block), len(block[0].strip()[1:-1].split("|"))) for block in blocks]
 
     assert shapes == [(4, 19), (5, 11), (5, 13), (3, 2)]
     assert "| Показатель | Баз.% | Вар.% | ДВ(от Вар.)% | Мин. з.е. |" in markdown
@@ -455,12 +868,80 @@ def test_table_slot_markdown_splits_curriculum_summary_grid():
 def test_table_slot_markdown_cleans_curriculum_summary_numeric_noise():
     rows = [
         ["СВОДНЫЕ ДАННЫЕ Учебный план", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
-        ["Итого (с факультативами)", "i", "", "189 269", "269", "60", "30", "30", "62", "30", "32", "84", "41", "43", "63", "32"],
+        [
+            "Итого (с факультативами)",
+            "i",
+            "",
+            "189 269",
+            "269",
+            "60",
+            "30",
+            "30",
+            "62",
+            "30",
+            "32",
+            "84",
+            "41",
+            "43",
+            "63",
+            "32",
+        ],
         ["Факультативы", "", "", "29", "29", "", "1", "1", "2", "", "", "22", "12", "10", "ШЕШ", ""],
-        ["", "ОП,", "факультативы", "(в период ТО)", "60.7", "", "55.6", "56.2", "", "56.2", "49.8", "", "79.5", "73.3", "", "59.3"],
-        ["Контактная работа", "без элект.", "дисциплин", "по физ.к,", "25.2", "", "26.9", "27.3", "", "Иш", "23.6", "", "26.9", "24.6", "", "20"],
+        [
+            "",
+            "ОП,",
+            "факультативы",
+            "(в период ТО)",
+            "60.7",
+            "",
+            "55.6",
+            "56.2",
+            "",
+            "56.2",
+            "49.8",
+            "",
+            "79.5",
+            "73.3",
+            "",
+            "59.3",
+        ],
+        [
+            "Контактная работа",
+            "без элект.",
+            "дисциплин",
+            "по физ.к,",
+            "25.2",
+            "",
+            "26.9",
+            "27.3",
+            "",
+            "Иш",
+            "23.6",
+            "",
+            "26.9",
+            "24.6",
+            "",
+            "20",
+        ],
         ["", "ЭКЗАМЕН (Эк)", "", "", "", "10", "5", "5", "", "5", "4", "", "5", "4", "7", "4"],
-        ["Процент лекционных занятий от аудиторных (%)", "", "", "", "46.52%", "", "", "", "", "", "", "", "", "", "", ""],
+        [
+            "Процент лекционных занятий от аудиторных (%)",
+            "",
+            "",
+            "",
+            "46.52%",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+        ],
     ]
 
     markdown = _slot_rows_to_markdown(rows)
@@ -479,8 +960,8 @@ def test_table_slot_markdown_does_not_invent_curriculum_title_page_values():
         [
             "МИНИСТЕРСТВО НАУКИ И ВЫСШЕГО ОБРАЗОВАНИЯ РОССИЙСКОЙ ФЕДЕРАЦИИ "
             "УЧЕБНЫЙ ПЛАН 09.03.03 Программа бакалавриата: "
-            "\"Прикладная информатика\" Направленность (профиль) программы: "
-            "\"Математическое и компьютерное модели ование процессов и систем\" "
+            '"Прикладная информатика" Направленность (профиль) программы: '
+            '"Математическое и компьютерное модели ование процессов и систем" '
             "Кафедра: Прикладная математика Квалификация: бакалавр "
             "Форма обучения: Очная Образовательный стандарт (ФГОС) № 922 от 19.09.2047",
             "",
@@ -502,7 +983,7 @@ def test_convert_service_leaves_observed_curriculum_title_page_values_intact():
         [
             "| noise |  |",
             "| --- | --- |",
-            "| МИНИСТЕРСТВО УЧЕБНЫЙ ПЛАН 09.03.03 Квалификация: бакалавр Форма обучения: Очная Образовательный стандарт (ФГОС) № 922 от 19.09.2047 Программа бакалавриата: \"Прикладная информатика\" Кафедра: Прикладная математика |  |",
+            '| МИНИСТЕРСТВО УЧЕБНЫЙ ПЛАН 09.03.03 Квалификация: бакалавр Форма обучения: Очная Образовательный стандарт (ФГОС) № 922 от 19.09.2047 Программа бакалавриата: "Прикладная информатика" Кафедра: Прикладная математика |  |',
         ]
     )
 
@@ -655,11 +1136,111 @@ def test_curriculum_logical_table_repairs_noisy_practice_section_and_drops_noise
     markdown = table_rows_to_markdown(
         [
             header,
-            ["Блок 2", "Практика", "", "", "", "", "", "20", "720", "", "", "", "", "720", "", "", "", "", "6", "", "6", "5", "3", ""],
-            ["ч [Юбязательная", "часть", "", "", "", "", "", "", "216", "", "", "", "", "216", "", "", "", "", "", "", "", "", "", ""],
-            ["Б2.О.01(У)", "Учебная практика (ознакомительная)", "", "", "4", "", "", "6", "216", "", "", "", "", "216", "", "", "", "", "6", "", "", "", "", "Технологическое проектирование"],
+            [
+                "Блок 2",
+                "Практика",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "20",
+                "720",
+                "",
+                "",
+                "",
+                "",
+                "720",
+                "",
+                "",
+                "",
+                "",
+                "6",
+                "",
+                "6",
+                "5",
+                "3",
+                "",
+            ],
+            [
+                "ч [Юбязательная",
+                "часть",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "216",
+                "",
+                "",
+                "",
+                "",
+                "216",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+            ],
+            [
+                "Б2.О.01(У)",
+                "Учебная практика (ознакомительная)",
+                "",
+                "",
+                "4",
+                "",
+                "",
+                "6",
+                "216",
+                "",
+                "",
+                "",
+                "",
+                "216",
+                "",
+                "",
+                "",
+                "",
+                "6",
+                "",
+                "",
+                "",
+                "",
+                "Технологическое проектирование",
+            ],
             ["", "", "", "9 0", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
-            ["", "- 一 \"一 一 -一 一 一", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+            [
+                "",
+                '- 一 "一 一 -一 一 一',
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+            ],
         ]
     )
 
@@ -700,8 +1281,58 @@ def test_curriculum_logical_table_relabels_required_section_after_practice_block
     markdown = table_rows_to_markdown(
         [
             header,
-            ["Блок 2", "Практика", "", "", "", "", "", "20", "720", "", "", "", "", "720", "", "", "", "", "6", "", "6", "5", "3", ""],
-            ["Б1.О", "Обязательная часть", "", "", "", "", "", "6", "216", "", "", "", "", "216", "", "", "", "", "6", "", "", "", "", ""],
+            [
+                "Блок 2",
+                "Практика",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "20",
+                "720",
+                "",
+                "",
+                "",
+                "",
+                "720",
+                "",
+                "",
+                "",
+                "",
+                "6",
+                "",
+                "6",
+                "5",
+                "3",
+                "",
+            ],
+            [
+                "Б1.О",
+                "Обязательная часть",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "6",
+                "216",
+                "",
+                "",
+                "",
+                "",
+                "216",
+                "",
+                "",
+                "",
+                "",
+                "6",
+                "",
+                "",
+                "",
+                "",
+                "",
+            ],
         ]
     )
 
@@ -824,14 +1455,8 @@ def test_convert_service_cleans_repeated_noisy_curriculum_plan_headings():
 
 
 def test_curriculum_summary_index_keeps_nested_course_codes():
-    assert (
-        convert_service._normalize_curriculum_summary_index("151.0.1.07")
-        == "Б1.О.01.07"
-    )
-    assert (
-        convert_service._normalize_curriculum_summary_index("51.91.06")
-        == "Б1.О.01.06"
-    )
+    assert convert_service._normalize_curriculum_summary_index("151.0.1.07") == "Б1.О.01.07"
+    assert convert_service._normalize_curriculum_summary_index("51.91.06") == "Б1.О.01.06"
 
 
 def test_curriculum_index_normalization_handles_noisy_block_codes():
@@ -849,24 +1474,36 @@ def test_curriculum_index_normalization_handles_noisy_block_codes():
     }
 
     for raw, expected in samples.items():
-        assert table_rows_to_markdown(
+        assert (
+            table_rows_to_markdown(
+                [
+                    ["Индекс", "Наименование"],
+                    [raw, "Произвольная дисциплина"],
+                ]
+            )
+            .splitlines()[2]
+            .startswith(f"| {expected} |")
+        )
+    assert (
+        table_rows_to_markdown(
             [
                 ["Индекс", "Наименование"],
-                [raw, "Произвольная дисциплина"],
+                ["КН", "Производственная практика (научно-исследовательская работа)"],
             ]
-        ).splitlines()[2].startswith(f"| {expected} |")
-    assert table_rows_to_markdown(
-        [
-            ["Индекс", "Наименование"],
-            ["КН", "Производственная практика (научно-исследовательская работа)"],
-        ]
-    ).splitlines()[2].startswith("| Б2.В.01(Н) |")
-    assert table_rows_to_markdown(
-        [
-            ["Индекс", "Наименование"],
-            ["Б2.В.01(П)", "Производственная практика (научно-исследовательская работа)"],
-        ]
-    ).splitlines()[2].startswith("| Б2.В.01(Н) |")
+        )
+        .splitlines()[2]
+        .startswith("| Б2.В.01(Н) |")
+    )
+    assert (
+        table_rows_to_markdown(
+            [
+                ["Индекс", "Наименование"],
+                ["Б2.В.01(П)", "Производственная практика (научно-исследовательская работа)"],
+            ]
+        )
+        .splitlines()[2]
+        .startswith("| Б2.В.01(Н) |")
+    )
 
 
 def test_curriculum_index_sequence_repairs_noisy_neighbor_prefixes():
@@ -1235,11 +1872,7 @@ def test_long_screenshot_segment_iterator_releases_each_crop():
             try:
                 segment_count += 1
                 colors = _image_colors(segment.convert("RGB"))
-                seen_markers.update(
-                    marker
-                    for marker in marker_colors
-                    if marker in colors
-                )
+                seen_markers.update(marker for marker in marker_colors if marker in colors)
             finally:
                 if segment is not image:
                     segment.close()
@@ -1526,14 +2159,8 @@ def test_oversized_sparse_table_recovers_even_after_lint_pass(
 
     assert "recovered curriculum text" in markdown
     assert meta["chunks"] == 11
-    assert (
-        "dense_grid_recovery:oversized_sparse_table"
-        in meta["runtime_flags"]
-    )
-    assert (
-        "dense_grid_strategy:bounded_bands_v2"
-        in meta["runtime_flags"]
-    )
+    assert "dense_grid_recovery:oversized_sparse_table" in meta["runtime_flags"]
+    assert "dense_grid_strategy:bounded_bands_v2" in meta["runtime_flags"]
 
 
 def test_convert_page_appends_sparse_cover_fallback(monkeypatch):
@@ -1822,10 +2449,7 @@ def test_spatial_layout_skips_full_page_fallback_after_large_table(monkeypatch):
             ),
         )
 
-    table_md = "\n".join(
-        "| " + " | ".join(f"c{col}" for col in range(6)) + " |"
-        for _row in range(8)
-    )
+    table_md = "\n".join("| " + " | ".join(f"c{col}" for col in range(6)) + " |" for _row in range(8))
 
     def fake_convert_region(region, _engine, _profile, _layout_parameters=()):
         if region.kind == "table":
@@ -1884,10 +2508,7 @@ def test_spatial_layout_skips_full_page_fallback_after_large_table(monkeypatch):
 
 def test_dense_grid_fallback_skips_after_large_table_markdown(monkeypatch):
     image = Image.new("RGB", (900, 500), "white")
-    table_md = "\n".join(
-        "| " + " | ".join(f"c{col}" for col in range(6)) + " |"
-        for _row in range(8)
-    )
+    table_md = "\n".join("| " + " | ".join(f"c{col}" for col in range(6)) + " |" for _row in range(8))
 
     monkeypatch.setattr(
         convert_service,
@@ -2085,10 +2706,7 @@ def test_curriculum_header_repair_does_not_invent_fixture_rows():
     rows = [
         ["Индекс", "Наименование", "Контроль/часы", "План", "Кафедра", "Компетенции"],
         ["Б1", "Блок 1. Дисциплины (модули). Обязательная часть", "", "", "", ""],
-        *[
-            [f"Б1.О.{index:02d}", f"ocr noise {index}", "", "", "", ""]
-            for index in range(1, 25)
-        ],
+        *[[f"Б1.О.{index:02d}", f"ocr noise {index}", "", "", "", ""] for index in range(1, 25)],
         ["Б1.В", "Часть, формируемая участниками образовательных отношений", "", "", "", ""],
         ["Б1.В.01", "", "", "", "", ""],
         ["Б1.В.02", "ae Мыл. абый Практикум на SEN", "", "", "", ""],
@@ -2100,9 +2718,7 @@ def test_curriculum_header_repair_does_not_invent_fixture_rows():
         ["Б1.В.07", "Компькерная графика", "", "", "", ""],
     ]
 
-    repaired, count = convert_service._repair_curriculum_header_excerpt_tables(
-        convert_service._markdown_table(rows)
-    )
+    repaired, count = convert_service._repair_curriculum_header_excerpt_tables(convert_service._markdown_table(rows))
 
     assert count == 0
     assert "УЧЕБНЫЙ ПЛАН 020302-2022-О-ПП-4г00м-02.plx" not in repaired
@@ -2202,12 +2818,7 @@ def test_search_result_columns_from_words_builds_result_grid_columns():
 
 
 def test_search_results_screen_recovery_rejects_normal_table():
-    table = (
-        "| Name | Value |\n"
-        "| --- | --- |\n"
-        "| Alpha | 1 |\n"
-        "| Beta | 2 |"
-    )
+    table = "| Name | Value |\n" "| --- | --- |\n" "| Alpha | 1 |\n" "| Beta | 2 |"
 
     assert convert_service._recover_search_results_screen([table]) is None
 
@@ -2235,9 +2846,7 @@ def _large_table_with_overflow_and_noise() -> str:
 
 
 def test_large_markdown_table_repair_merges_overflow_and_drops_noise():
-    repaired, count = convert_service._repair_large_markdown_tables(
-        _large_table_with_overflow_and_noise()
-    )
+    repaired, count = convert_service._repair_large_markdown_tables(_large_table_with_overflow_and_noise())
 
     assert count == 1
     table = convert_service._markdown_table_part(repaired)
@@ -2252,34 +2861,20 @@ def test_large_markdown_table_repair_merges_overflow_and_drops_noise():
 
 
 def test_large_markdown_table_repair_restores_mixed_merge_left_rows():
-    repaired, count = convert_service._repair_large_markdown_tables(
-        _large_table_with_overflow_and_noise()
-    )
+    repaired, count = convert_service._repair_large_markdown_tables(_large_table_with_overflow_and_noise())
 
     assert count == 1
     table = convert_service._markdown_table_part(repaired)
     assert table is not None
     _, _, body = table
-    alpha_line = next(
-        line
-        for line in body
-        if "РАЗДЕЛ A" in line
-    )
-    beta_line = next(
-        line
-        for line in body
-        if "РАЗДЕЛ B" in line
-    )
+    alpha_line = next(line for line in body if "РАЗДЕЛ A" in line)
+    beta_line = next(line for line in body if "РАЗДЕЛ B" in line)
     alpha_cells = convert_service._split_markdown_table_cells(alpha_line)
     beta_cells = convert_service._split_markdown_table_cells(beta_line)
 
-    assert alpha_cells[0] == (
-        "РАЗДЕЛ A SECTION ALPHA 部分 甲 merged subsection й-ALPHA-2026"
-    )
+    assert alpha_cells[0] == ("РАЗДЕЛ A SECTION ALPHA 部分 甲 merged subsection й-ALPHA-2026")
     assert alpha_cells[1:] == ["::merge-left::"] * 9
-    assert beta_cells[0] == (
-        "РАЗДЕЛ B SECTION BETA 部分 乙 merged subsection й-BETA-3030"
-    )
+    assert beta_cells[0] == ("РАЗДЕЛ B SECTION BETA 部分 乙 merged subsection й-BETA-3030")
     assert beta_cells[1:] == ["::merge-left::"] * 9
 
 
@@ -2310,13 +2905,8 @@ def test_convert_page_repairs_large_markdown_table_shape(monkeypatch):
         image.close()
 
     assert markdown.startswith("# Mixed OCR table")
-    assert (
-        "Image-only PDF merged subsection rows Markdown placeholder cells"
-        in markdown
-    )
-    table = convert_service._markdown_table_part(
-        markdown.rsplit("\n\n", maxsplit=1)[-1]
-    )
+    assert "Image-only PDF merged subsection rows Markdown placeholder cells" in markdown
+    table = convert_service._markdown_table_part(markdown.rsplit("\n\n", maxsplit=1)[-1])
     assert table is not None
     assert len(table[0]) == 10
     assert len(table[2]) == 13
@@ -2326,11 +2916,7 @@ def test_convert_page_repairs_large_markdown_table_shape(monkeypatch):
 
 
 def _doc_page_with_plain_section_labels() -> str:
-    table = (
-        "| A | B | C |\n"
-        "| --- | --- | --- |\n"
-        "| 1 | 2 | 3 |"
-    )
+    table = "| A | B | C |\n" "| --- | --- | --- |\n" "| 1 | 2 | 3 |"
     return "\n\n".join(
         [
             "# Единый пайплайн",
@@ -2353,9 +2939,7 @@ def _doc_page_with_plain_section_labels() -> str:
 
 
 def test_doc_section_heading_repair_promotes_plain_labels():
-    repaired, count = convert_service._repair_doc_section_headings(
-        _doc_page_with_plain_section_labels()
-    )
+    repaired, count = convert_service._repair_doc_section_headings(_doc_page_with_plain_section_labels())
 
     assert count == 5
     assert "## Архитектура Текущая реализация" not in repaired
@@ -2403,10 +2987,7 @@ def test_convert_page_recovers_fragmented_search_results_screen(monkeypatch):
     class FakeEngine:
         def recognize(self, page, mode="text_mode", psm=6):
             calls.append((page.size, mode, psm))
-            return (
-                "Best Sellers 450 - 600 € 15 to 15.9 in "
-                "Samsung Acer Dell"
-            )
+            return "Best Sellers 450 - 600 € 15 to 15.9 in " "Samsung Acer Dell"
 
     monkeypatch.setattr(
         convert_service,
@@ -2485,9 +3066,7 @@ def test_convert_layout_region_reports_recursive_ocr_selection():
             "region_recursion": (
                 {
                     "depth": 3,
-                    "preprocess_steps": (
-                        "recursive_page_dewarp",
-                    ),
+                    "preprocess_steps": ("recursive_page_dewarp",),
                     "mask_mode": "local_dark",
                     "contrast_delta": 18,
                     "deskew_angle": 0.4,
@@ -2880,10 +3459,7 @@ def test_unconfirmed_sparse_grid_falls_back_to_plain_full_page_ocr(
         image.close()
 
     assert markdown == "first line\nsecond line"
-    assert (
-        "structural_grammar:bypass_unconfirmed_grid"
-        in meta["runtime_flags"]
-    )
+    assert "structural_grammar:bypass_unconfirmed_grid" in meta["runtime_flags"]
     assert "structural_plain_fallback:used" in meta["runtime_flags"]
     assert calls == [(600, 120), (600, 120), (600, 240)]
 
@@ -2984,10 +3560,7 @@ def test_four_consecutive_merge_left_cells_confirm_sparse_table():
         SparseMarkdownRow(
             parts=("wide row",),
             anchor=(0, 0),
-            codes=tuple(
-                (0, column, 5)
-                for column in range(1, 5)
-            ),
+            codes=tuple((0, column, 5) for column in range(1, 5)),
         )
     ]
 
@@ -2995,27 +3568,13 @@ def test_four_consecutive_merge_left_cells_confirm_sparse_table():
 
 
 def test_adjacent_tables_with_same_schema_merge_as_continuation():
-    parts, merged = (
-        convert_service._merge_adjacent_compatible_table_parts(
-            [
-                "intro",
-                (
-                    "| Index | Name |\n"
-                    "| --- | --- |\n"
-                    "| A | Alpha |"
-                ),
-                (
-                    "| Index | Name |\n"
-                    "| --- | --- |\n"
-                    "| B | Beta |"
-                ),
-                (
-                    "| Key | Value |\n"
-                    "| --- | --- |\n"
-                    "| C | Gamma |"
-                ),
-            ]
-        )
+    parts, merged = convert_service._merge_adjacent_compatible_table_parts(
+        [
+            "intro",
+            ("| Index | Name |\n" "| --- | --- |\n" "| A | Alpha |"),
+            ("| Index | Name |\n" "| --- | --- |\n" "| B | Beta |"),
+            ("| Key | Value |\n" "| --- | --- |\n" "| C | Gamma |"),
+        ]
     )
 
     assert merged == 1
@@ -3040,10 +3599,7 @@ def _synthetic_fragmented_long_card_parts() -> list[str]:
             rows.append(row)
         header = "| " + " | ".join(rows[0]) + " |"
         separator = "| " + " | ".join("---" for _ in rows[0]) + " |"
-        body = [
-            "| " + " | ".join(row) + " |"
-            for row in rows[1:]
-        ]
+        body = ["| " + " | ".join(row) + " |" for row in rows[1:]]
         return "\n".join((header, separator, *body))
 
     return [
@@ -3057,9 +3613,7 @@ def _synthetic_fragmented_long_card_parts() -> list[str]:
 
 
 def test_fragmented_long_card_grid_recovers_single_table():
-    recovered = convert_service._recover_long_card_grid_table(
-        _synthetic_fragmented_long_card_parts()
-    )
+    recovered = convert_service._recover_long_card_grid_table(_synthetic_fragmented_long_card_parts())
 
     assert recovered is not None
     assert recovered.startswith("# spf 50")
@@ -3077,20 +3631,11 @@ def test_fragmented_long_card_grid_recovers_single_table():
 def test_long_card_grid_recovery_keeps_existing_large_table():
     rows = [
         [f"H{column}" for column in range(7)],
-        *[
-            [
-                f"Товар {row}-{column} 1000 р"
-                for column in range(7)
-            ]
-            for row in range(16)
-        ],
+        *[[f"Товар {row}-{column} 1000 р" for column in range(7)] for row in range(16)],
     ]
     table = "| " + " | ".join(rows[0]) + " |\n"
     table += "| " + " | ".join("---" for _ in rows[0]) + " |\n"
-    table += "\n".join(
-        "| " + " | ".join(row) + " |"
-        for row in rows[1:]
-    )
+    table += "\n".join("| " + " | ".join(row) + " |" for row in rows[1:])
 
     assert convert_service._recover_long_card_grid_table([table]) is None
 
@@ -3182,12 +3727,7 @@ def test_long_screenshot_merges_table_continuations_between_segments(monkeypatch
     responses = iter(
         [
             (
-                (
-                    "intro\n\n"
-                    "| Index | Name |\n"
-                    "| --- | --- |\n"
-                    "| A | Alpha |"
-                ),
+                ("intro\n\n" "| Index | Name |\n" "| --- | --- |\n" "| A | Alpha |"),
                 {
                     "chunks": 1,
                     "cards_found": 0,
@@ -3200,12 +3740,7 @@ def test_long_screenshot_merges_table_continuations_between_segments(monkeypatch
                 },
             ),
             (
-                (
-                    "| Index | Name |\n"
-                    "| --- | --- |\n"
-                    "| B | Beta |\n\n"
-                    "tail"
-                ),
+                ("| Index | Name |\n" "| --- | --- |\n" "| B | Beta |\n\n" "tail"),
                 {
                     "chunks": 1,
                     "cards_found": 0,
@@ -3741,14 +4276,9 @@ def test_mixed_10x14_table_keeps_placeholder_cells_and_raw_fallback():
     section_line = next(line for line in table_lines if "РАЗДЕЛ A SECTION ALPHA" in line)
 
     assert len(section_line.strip()[1:-1].split("|")) == 10
-    assert section_line.startswith(
-        "| РАЗДЕЛ A SECTION ALPHA merged subsection й-ALPHA-2026 |"
-    )
+    assert section_line.startswith("| РАЗДЕЛ A SECTION ALPHA merged subsection й-ALPHA-2026 |")
     assert "::merge-left::" not in section_line
-    assert (
-        "table_slot_builder:auto_line_merge_v1"
-        in meta["runtime_flags"]
-    )
+    assert "table_slot_builder:auto_line_merge_v1" in meta["runtime_flags"]
     assert "raw mixed fallback 中文 Fake blocks 909" in markdown
     assert meta["tables_found"] == 1
     assert meta["table_cells"] == 140
@@ -3774,18 +4304,12 @@ def test_table_slot_builder_does_not_append_duplicate_raw_fallback():
 
 def test_sparse_table_raw_fallback_skips_high_overlap_ocr_copy():
     page_parts = [
-        "| Индекс | Наименование | Часы |\n"
-        "| --- | --- | --- |\n"
-        "| Б1.О.01 | Математический анализ | 252 |"
+        "| Индекс | Наименование | Часы |\n" "| --- | --- | --- |\n" "| Б1.О.01 | Математический анализ | 252 |"
     ]
 
     class FakeEngine:
         def recognize(self, image, mode="text_mode", psm=6):
-            return (
-                "Индекс Наименование Часы\n"
-                "Б1.О.01 Математический анализ 252\n"
-                "Незначительный шум"
-            )
+            return "Индекс Наименование Часы\n" "Б1.О.01 Математический анализ 252\n" "Незначительный шум"
 
     calls = convert_service._append_sparse_table_raw_fallback(
         page_parts,

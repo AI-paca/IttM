@@ -32,11 +32,7 @@ class TableCellRecognitionCandidate:
 
 def _is_numeric_cell_text(text: str) -> bool:
     value = text.strip()
-    return bool(
-        value
-        and re.search(r"\d", value)
-        and re.fullmatch(r"[\d\s.,%+:/()\-]+", value)
-    )
+    return bool(value and re.search(r"\d", value) and re.fullmatch(r"[\d\s.,%+:/()\-]+", value))
 
 
 def table_cell_candidate_numeric_ratio(
@@ -44,10 +40,7 @@ def table_cell_candidate_numeric_ratio(
 ) -> float:
     if not candidate.recovered_words:
         return 0.0
-    numeric_cells = sum(
-        _is_numeric_cell_text(str(word.get("text", "")))
-        for word in candidate.recovered_words
-    )
+    numeric_cells = sum(_is_numeric_cell_text(str(word.get("text", ""))) for word in candidate.recovered_words)
     return numeric_cells / len(candidate.recovered_words)
 
 
@@ -64,8 +57,7 @@ def should_select_augmented_table_candidate(
     if (
         table.cols >= WIDE_NUMERIC_TABLE_MIN_COLS
         and candidate.added_cells >= WIDE_NUMERIC_TABLE_MIN_ADDED_CELLS
-        and table_cell_candidate_numeric_ratio(candidate)
-        < WIDE_NUMERIC_TABLE_MIN_RATIO
+        and table_cell_candidate_numeric_ratio(candidate) < WIDE_NUMERIC_TABLE_MIN_RATIO
     ):
         return False, "wide_non_numeric"
 

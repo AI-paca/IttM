@@ -3,6 +3,7 @@ import test from "node:test";
 import { BROWSER_PIPELINE_PROFILES } from "./pipeline-config";
 import type {
   ResizeWorkerCommand,
+  ResizeWorkerRequest,
   ResizeWorkerResponse,
 } from "./image-resize-protocol";
 import {
@@ -25,10 +26,19 @@ function profile(): BrowserOcrProfile {
     imagePreprocessing: ["browser_resize", "ocr_border"],
     textRegionPsm: "6",
     denseGridFallback: true,
+    spatialFullPageFallback: true,
+    darkUiTextFallback: true,
+    contextualMarkdownGrammar: true,
     denseGridTargetWidth: 3300,
     ocrBorderPixels: 10,
     edgeWordFallbackPsm: "7",
     edgeWordFallbackMinTokens: 1,
+    lexicalCorrection: "off",
+    ocrLanguageRetry: "off",
+    tableSlotBuilder: "off",
+    tableSlotMaxColumns: 4,
+    recursiveTableCellOcr: "auto",
+    recursiveTableCellOcrBatchPixels: 8_000_000,
     layout: BROWSER_PIPELINE_PROFILES.browser_tesseract_standard.layout,
   };
 }
@@ -48,6 +58,7 @@ test("projector slide dewarp targets projector photo dimensions only", () => {
 test("resize worker tiles are yielded before the complete message", async () => {
   let terminated = false;
   let created = false;
+  let startRequest: ResizeWorkerRequest | undefined;
   const commands: string[] = [];
   const observed: string[] = [];
   const responses: ResizeWorkerResponse[] = [
@@ -56,12 +67,16 @@ test("resize worker tiles are yielded before the complete message", async () => 
       index: 0,
       total: 2,
       blob: new Blob(["first"]),
+      width: 100,
+      height: 80,
     },
     {
       type: "tile",
       index: 1,
       total: 2,
       blob: new Blob(["second"]),
+      width: 100,
+      height: 80,
     },
     { type: "complete", total: 2 },
   ];
@@ -70,6 +85,7 @@ test("resize worker tiles are yielded before the complete message", async () => 
     onerror: null,
     postMessage(command: ResizeWorkerCommand) {
       commands.push(command.type);
+      if (command.type === "start") startRequest = command.request;
       queueMicrotask(() => {
         const emit = (data: ResizeWorkerResponse) =>
           fakeWorker.onmessage?.({
@@ -102,6 +118,8 @@ test("resize worker tiles are yielded before the complete message", async () => 
 
   assert.deepEqual(observed, ["1/2:first", "2/2:second"]);
   assert.equal(created, true);
+  assert.equal(startRequest?.spatialFullPageFallback, true);
+  assert.equal(startRequest?.darkUiTextFallback, true);
   assert.deepEqual(commands, ["start", "next", "next"]);
   assert.equal(terminated, true);
 });

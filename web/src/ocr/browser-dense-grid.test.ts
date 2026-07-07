@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  denseGridContentBoxPixels,
   looksLikeDenseGridPixels,
   looksLikeSparseCoverPixels,
   overlappingStarts,
@@ -43,4 +44,31 @@ test("dense grid detector distinguishes long table rules from plain pixels", () 
   assert.equal(looksLikeDenseGridPixels(grid, width, height), true);
   assert.equal(looksLikeDenseGridPixels(plain, width, height), false);
   assert.equal(looksLikeSparseCoverPixels(plain, width, height), true);
+});
+
+test("dense grid content box trims blank page margins before crop planning", () => {
+  const width = 1000;
+  const height = 600;
+  const pixels = new Uint8ClampedArray(width * height * 4).fill(255);
+  for (let index = 3; index < pixels.length; index += 4) pixels[index] = 255;
+
+  for (let y = 420; y < 560; y += 35) {
+    for (let x = 100; x < 900; x += 1) {
+      const offset = (y * width + x) * 4;
+      pixels[offset] = pixels[offset + 1] = pixels[offset + 2] = 0;
+    }
+  }
+  for (let x = 100; x < 900; x += 80) {
+    for (let y = 420; y < 560; y += 1) {
+      const offset = (y * width + x) * 4;
+      pixels[offset] = pixels[offset + 1] = pixels[offset + 2] = 0;
+    }
+  }
+
+  assert.deepEqual(denseGridContentBoxPixels(pixels, width, height, 10), {
+    sourceX: 90,
+    sourceY: 410,
+    sourceWidth: 820,
+    sourceHeight: 160,
+  });
 });

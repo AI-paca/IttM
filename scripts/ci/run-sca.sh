@@ -100,13 +100,13 @@ if [[ "${SCA_SKIP_BUILD:-0}" != "1" ]]; then
   docker build --pull --network "$network" \
     -f "$repo_root/docker/ocr.Dockerfile" \
     -t "$ocr_image" \
-    "$repo_root/ocr"
+    "$repo_root"
   docker build --pull --network "$network" \
     --target test \
     --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt \
     -f "$repo_root/docker/ocr.Dockerfile" \
     -t "$ocr_ci_image" \
-    "$repo_root/ocr"
+    "$repo_root"
 fi
 
 gate_status=0

@@ -19,7 +19,6 @@ Options:
   --pipeline-profile PROFILE     Use one backend profile for every backend engine.
   --engine-profile ENGINE=PROFILE
                                  Override backend profile for one engine.
-  --engine-flags ENGINE=FLAGS    Override API flags for one backend engine.
   --browser-profile PROFILE      Browser profile; default browser_tesseract_dewarp.
   --gpu auto|on|off              Backend Docker GPU mode; default auto.
   --pages PAGES                  Backend PDF pages, e.g. 1,3,5-7.
@@ -27,8 +26,7 @@ Options:
   --max-pages N                  Backend first N PDF pages.
   --fixture-max-pages GLOB=N     Backend first N PDF pages for one fixture glob.
   --no-pdf-raster                Do not add PDF raster PNG/JPEG rows.
-  --pdf-raster-only              Replace selected PDFs with raster PNG/JPEG rows.
-  --pdf-raster-formats CSV       Raster formats for selected PDFs; default png.
+  --pdf-raster-formats CSV       Raster formats for selected PDFs; default png,jpg.
   --pdf-raster-max-pages N       First N PDF pages for raster rows; default 5.
   --pdf-raster-dpi N             PDF raster DPI; default 300.
   --timeout SECONDS              Per-file timeout; default 900.
@@ -53,16 +51,13 @@ output_root="debug"
 engines_csv="${OCR_DEBUG_ENGINES:-tesseract,easyocr,browser-tesseract}"
 browser_profile="${BROWSER_OCR_PROFILE:-browser_tesseract_dewarp}"
 gpu_mode="${OCR_BENCHMARK_GPU:-auto}"
-timeout_seconds=1200
+timeout_seconds=900
 fixture_patterns=()
 backend_profile_args=()
-backend_flag_args=()
 backend_page_args=(--fixture-max-pages 'Adobe Scan Oct 26, 2022 (1).pdf=5')
 resume_arg=()
 pdf_raster=1
-no_pdf_raster=0
-pdf_raster_only=0
-pdf_raster_formats="png"
+pdf_raster_formats="png,jpg"
 pdf_raster_max_pages=5
 pdf_raster_dpi=300
 
@@ -111,10 +106,6 @@ while [[ $# -gt 0 ]]; do
       backend_profile_args+=(--engine-profile "$2")
       shift 2
       ;;
-    --engine-flags)
-      backend_flag_args+=(--engine-flags "$2")
-      shift 2
-      ;;
     --browser-profile)
       browser_profile="$2"
       shift 2
@@ -140,11 +131,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --no-pdf-raster)
-      no_pdf_raster=1
-      shift
-      ;;
-    --pdf-raster-only)
-      pdf_raster_only=1
+      pdf_raster=0
       shift
       ;;
     --pdf-raster-formats)
@@ -178,14 +165,6 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
-
-if [[ "$no_pdf_raster" -eq 1 && "$pdf_raster_only" -eq 1 ]]; then
-  echo "--no-pdf-raster and --pdf-raster-only are mutually exclusive" >&2
-  exit 2
-fi
-if [[ "$no_pdf_raster" -eq 1 ]]; then
-  pdf_raster=0
-fi
 
 mkdir -p \
   "$tmp_root" \
@@ -236,14 +215,10 @@ fi
 IFS=',' read -r -a requested_engines <<< "$engines_csv"
 backend_engines=()
 run_browser=0
-include_auto=0
 for engine in "${requested_engines[@]}"; do
   case "$engine" in
     tesseract|easyocr|auto)
       backend_engines+=("$engine")
-      if [[ "$engine" == "auto" ]]; then
-        include_auto=1
-      fi
       ;;
     browser-tesseract)
       run_browser=1
@@ -331,7 +306,31 @@ if [[ "$pdf_raster" -eq 1 && ${#selected_fixtures[@]} -gt 0 ]]; then
   fi
 fi
 
-if [[ ${#raster_outputs[@]} -gt 0 || "$pdf_raster_only" -eq 1 ]]; then
+# A raster page is comparable only when the PDF reference has an exact page
+# boundary.  Keeping an image without its matching page reference would create
+# an unavoidable N/A row and, worse, invite comparing one page with the whole
+# document.  Preserve an explicit skip ledger for manual debug instead.
+raster_skip_ledger="$tmp_root/unscored-raster-fixtures.txt"
+: > "$raster_skip_ledger"
+if [[ ${#raster_outputs[@]} -gt 0 ]]; then
+  comparable_raster_outputs=()
+  for fixture in "${raster_outputs[@]}"; do
+    file_name="$(basename "$fixture")"
+    raster_reference="$tmp_root/pdf-image-reference/$file_name.md"
+    if [[ -f "$raster_reference" ]]; then
+      comparable_raster_outputs+=("$fixture")
+    else
+      printf '%s\t%s\n' \
+        "$fixture" \
+        "skipped: exact per-page reference is unavailable" \
+        >> "$raster_skip_ledger"
+      echo "Skipping unscored PDF raster: $file_name" >&2
+    fi
+  done
+  raster_outputs=("${comparable_raster_outputs[@]}")
+fi
+
+if [[ ${#raster_outputs[@]} -gt 0 ]]; then
   combined_fixtures_root="$tmp_root/fixtures"
   combined_reference_root="$tmp_root/combined-reference"
   rm -rf "$combined_fixtures_root" "$combined_reference_root"
@@ -339,9 +338,6 @@ if [[ ${#raster_outputs[@]} -gt 0 || "$pdf_raster_only" -eq 1 ]]; then
 
   for fixture in "${selected_fixtures[@]}"; do
     file_name="$(basename "$fixture")"
-    if [[ "$pdf_raster_only" -eq 1 && "${file_name,,}" == *.pdf ]]; then
-      continue
-    fi
     stage_debug_file "$fixture" "$combined_fixtures_root/$file_name"
     if [[ -f "$expected_root/$file_name.md" ]]; then
       stage_debug_file "$expected_root/$file_name.md" "$combined_reference_root/$file_name.md"
@@ -404,7 +400,6 @@ if [[ ${#backend_engines[@]} -gt 0 ]]; then
     "${backend_page_args[@]}" \
     "${fixture_args[@]}" \
     "${backend_profile_args[@]}" \
-    "${backend_flag_args[@]}" \
     "${resume_arg[@]}"
 fi
 
@@ -432,9 +427,6 @@ matrix_args=(
 )
 if [[ -n "$browser_root" ]]; then
   matrix_args+=(--browser-root "$browser_root")
-fi
-if [[ "$include_auto" -eq 1 ]]; then
-  matrix_args+=(--include-auto)
 fi
 python3 scripts/debug/debug_matrix_report.py "${matrix_args[@]}"
 python3 scripts/debug/debug_quality_gate.py --result "$output_root/result.csv"

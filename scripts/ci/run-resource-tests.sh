@@ -42,7 +42,7 @@ docker build \
   --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt \
   "${docker_build_args[@]}" \
   -t "$image" \
-  ./ocr
+  .
 
 for iteration in $(seq 1 "$iterations"); do
   echo "${tier^} test iteration ${iteration}/${iterations}"

@@ -6,6 +6,7 @@ const expectedBase = normalizeBase(process.argv[3] || "/IttM/");
 const retries = Number(process.env.PAGES_SMOKE_RETRIES || 12);
 const retryDelayMs = Number(process.env.PAGES_SMOKE_DELAY_MS || 5_000);
 const requiredAssets = [
+  "wasm/ittm_pipeline_core.wasm",
   "vendor/tesseract/worker.min.js",
   "vendor/tesseract/tesseract-core-lstm.wasm.js",
   "vendor/tesseract/tesseract-core-simd-lstm.wasm.js",

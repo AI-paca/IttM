@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import {
   createCanvas,
@@ -16,6 +16,7 @@ import {
   createBrowserOcrProfile,
 } from "../../web/src/ocr/browser-profile";
 import { resolveBrowserBenchmarkProfile } from "./browser-benchmark-profile";
+import { configureBrowserPipelineCoreUrl } from "../../web/src/ocr/pipeline-core";
 
 const globalRecord = globalThis as unknown as Record<string, unknown>;
 globalRecord.document = {
@@ -110,12 +111,30 @@ if (!source) {
 }
 
 const bytes = await readFile(source);
+const pipelineCoreBytes = await readFile(
+  resolve("web/public/wasm/ittm_pipeline_core.wasm"),
+);
+configureBrowserPipelineCoreUrl(
+  `data:application/wasm;base64,${pipelineCoreBytes.toString("base64")}`,
+);
 const file = new File([bytes], basename(source), {
   type: contentType(source),
 });
 const langPath = resolve(
   process.env.BROWSER_OCR_LANG_PATH || ".cache/tessdata",
 );
+async function availableLanguages(path: string): Promise<string[] | undefined> {
+  try {
+    const files = await readdir(path);
+    return files
+      .filter((file) => file.endsWith(".traineddata"))
+      .map((file) => file.slice(0, -".traineddata".length))
+      .sort();
+  } catch {
+    return undefined;
+  }
+}
+
 const pipelineProfile = resolveBrowserBenchmarkProfile(profileName);
 const profile = {
   ...createBrowserOcrProfile(null, pipelineProfile),
@@ -123,6 +142,7 @@ const profile = {
   langPath,
   cachePath: resolve(".cache/tesseract-js"),
   gzip: false,
+  availableLanguages: await availableLanguages(langPath),
 };
 const rssBefore = process.memoryUsage().rss;
 const startedAt = performance.now();

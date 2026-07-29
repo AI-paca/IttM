@@ -363,24 +363,69 @@ if [[ -n "$page_selection" || ${#fixture_page_selection_rules[@]} -gt 0 ]]; then
     exit 2
   fi
   page_limited_dir="$(mktemp -d)"
+  page_limited_expected_root="$page_limited_dir/expected"
+  mkdir -p "$page_limited_expected_root"
   limited_fixtures=()
   for fixture in "${fixtures[@]}"; do
+    file_name="$(basename "$fixture")"
+    reference_file="$expected_root/$file_name.md"
+    limited_reference="$page_limited_expected_root/$file_name.md"
     if [[ "${fixture,,}" != *.pdf ]]; then
       limited_fixtures+=("$fixture")
+      if [[ -f "$reference_file" ]]; then
+        cp "$reference_file" "$limited_reference"
+      fi
       continue
     fi
-    file_name="$(basename "$fixture")"
     selected_pages="$(page_selection_for_fixture "$file_name")"
     if [[ -z "$selected_pages" ]]; then
       limited_fixtures+=("$fixture")
+      if [[ -f "$reference_file" ]]; then
+        cp "$reference_file" "$limited_reference"
+      fi
       continue
     fi
     selected_pages="$(normalize_page_selection_for_pdf "$fixture" "$selected_pages")"
     limited_fixture="$page_limited_dir/$file_name"
     qpdf --empty --pages "$fixture" "$selected_pages" -- "$limited_fixture"
     limited_fixtures+=("$limited_fixture")
+    if [[ -f "$reference_file" ]]; then
+      read -r -a selected_page_tokens <<<"$selected_pages"
+      python3 - "$reference_file" "$limited_reference" "${selected_page_tokens[@]}" <<'PY'
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1])
+target = pathlib.Path(sys.argv[2])
+tokens = sys.argv[3:]
+text = source.read_text(encoding="utf-8", errors="replace")
+separator = "\f" if "\f" in text else "\n\n---\n\n" if "\n\n---\n\n" in text else ""
+if not separator:
+    target.write_text(text, encoding="utf-8")
+    raise SystemExit(0)
+
+pages = text.split(separator)
+if pages and not pages[-1].strip():
+    pages.pop()
+
+selected: list[int] = []
+for token in tokens:
+    for part in token.split(","):
+        if not part:
+            continue
+        if "-" in part:
+            start, end = (int(value) for value in part.split("-", 1))
+            selected.extend(range(start, end + 1))
+        else:
+            selected.append(int(part))
+
+limited_pages = [pages[index - 1] for index in selected if 1 <= index <= len(pages)]
+target.write_text(separator.join(limited_pages).rstrip() + "\n", encoding="utf-8")
+PY
+    fi
   done
   fixtures=("${limited_fixtures[@]}")
+  expected_root="$page_limited_expected_root"
 fi
 
 : >"$server_log"
@@ -392,7 +437,7 @@ start_container() {
     -e PORT=8000 \
     -e PYTHONDONTWRITEBYTECODE=1 \
     -e PYTHONUNBUFFERED=1 \
-    -e PYTHONPATH=/opt/ittm-python-packages \
+    -e PYTHONPATH=/app:/opt/ittm-python-packages \
     -e EASY_INSTALL_TARGET=/opt/ittm-python-packages \
     -e EASYOCR_MODULE_PATH=/models/easyocr
   )

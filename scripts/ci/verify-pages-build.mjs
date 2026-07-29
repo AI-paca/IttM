@@ -8,6 +8,7 @@ const distRoot = path.resolve(process.argv[2] || "dist");
 const expectedBase = normalizeBase(process.argv[3] || "/IttM/");
 const tesseractVendorRoot = path.join(distRoot, "vendor", "tesseract");
 const pdfJsWasmVendorRoot = path.join(distRoot, "vendor", "pdfjs", "wasm");
+const pipelineCorePath = path.join(distRoot, "wasm", "ittm_pipeline_core.wasm");
 const textReviewerModelId = "HuggingFaceTB/SmolLM2-135M-Instruct";
 const textReviewerModelRoot = path.join(
   distRoot,
@@ -143,6 +144,10 @@ for (const asset of requiredTesseractAssets) {
 for (const asset of requiredPdfJsWasmAssets) {
   await assertNonEmpty(path.join(pdfJsWasmVendorRoot, asset));
 }
+await assertNonEmpty(pipelineCorePath);
+const pipelineCoreBytes = await readFile(pipelineCorePath);
+const pipelineCore = await WebAssembly.instantiate(pipelineCoreBytes, {});
+assert.equal(pipelineCore.instance.exports.ittm_pipeline_abi_version(), 3);
 await assertNonEmpty(path.join(textReviewerModelRoot, "config.json"));
 await assertFileSize(
   path.join(textReviewerModelRoot, "onnx", "model_quantized.onnx"),
@@ -192,9 +197,10 @@ await verifyServedPagesAssets([
   ...requiredPdfJsWasmAssets.map(
     (asset) => `${expectedBase}vendor/pdfjs/wasm/${asset}`,
   ),
+  `${expectedBase}wasm/ittm_pipeline_core.wasm`,
   `${expectedBase}vendor/models/${textReviewerModelId}/config.json`,
 ]);
 
 console.log(
-  `Pages build verified over HTTP: ${requiredTesseractAssets.length} Tesseract assets, ${requiredPdfJsWasmAssets.length} PDF.js decoder assets, and ${textReviewerModelId}`,
+  `Pages build verified over HTTP: shared pipeline core, ${requiredTesseractAssets.length} Tesseract assets, ${requiredPdfJsWasmAssets.length} PDF.js decoder assets, and ${textReviewerModelId}`,
 );

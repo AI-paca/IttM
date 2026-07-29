@@ -4,27 +4,69 @@ updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: cron
+      cronjob: "46 18 3 * *"
+      timezone: Europe/Moscow
     open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore(deps)
+      prefix-development: chore(deps-dev)
+    groups:
+      npm-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: pip
     directory: /ocr
     schedule:
-      interval: weekly
-      day: monday
+      interval: cron
+      cronjob: "46 18 3 * *"
+      timezone: Europe/Moscow
     open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore(deps)
+      prefix-development: chore(deps-dev)
+    groups:
+      pip-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: docker
     directory: /docker
     schedule:
-      interval: weekly
-      day: monday
+      interval: cron
+      cronjob: "46 18 3 * *"
+      timezone: Europe/Moscow
     open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      docker-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: cron
+      cronjob: "46 18 3 * *"
+      timezone: Europe/Moscow
     open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      actions-minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch

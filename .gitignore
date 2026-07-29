@@ -171,3 +171,10 @@ PR_SAMPLE.md
 # Local one-off debug launchers
 scripts/debug/run-v*-full.sh
 scripts/debug/monitor-restart-v*-if-empty.sh
+pipeline-core/target/
+web/public/wasm/*.wasm
+
+# Local generated OCR evidence and Rust build output
+debug/reference/
+debug/reports/
+target/

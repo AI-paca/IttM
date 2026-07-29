@@ -5,8 +5,9 @@ This directory is a local OCR debugging workspace.
 Tracked files:
 
 - `fixtures/` - two tracked SAMPLE inputs plus ignored local real fixtures.
-- `reference/SAMPLE*.md` - manual reference text for tracked SAMPLE inputs.
+- `reference/*.md` - manual reference text paired by filename.
 - `fixtures/.gitkeep` and `reference/.gitkeep` - empty directory anchors.
+- `private-report.md` - local investigation report.
 - `.env.sample` - API-engine placeholders.
 
 Ignored files:
@@ -19,6 +20,105 @@ Ignored files:
   `scripts/debug/debug-all.sh` recreates it, including engine subdirectories, when
   it does not exist.
 - Local `debug/.env`.
+
+## Clean-room sparse stages
+
+The rewritten pipeline keeps each stage independently replayable. Stage 6
+consumes only the immutable geometry result from stage 1; it does not invoke an
+OCR engine and writes text-only object evidence below `06-objects/`.
+
+Run a queued process-parallel replay over the known PNG corpus:
+
+```bash
+python scripts/debug/debug_object_reconstruction.py \
+  --input debug/generated/stage1-line-owner-full1232-20260719 \
+  --output debug/tmp/object-corpus \
+  --run-id stage6-full1232 \
+  --workers 4 \
+  --executor process \
+  --fail-on-degraded
+```
+
+The fresh run directory contains `summary.json`, `summary.tsv`, `summary.md`
+and one atomic `items/<source-id>/06-objects/` directory per image. A successful
+run proves exact segment ownership. `UNKNOWN` is intentional when image-free
+geometry cannot distinguish a paragraph from a list; later recognition and
+grammar stages may refine it without inventing evidence.
+
+Stage 7 has an integrated bounded runner for the exact rewrite order
+`3 -> 1 -> 6 -> 4 -> 5 -> 2 -> 7`:
+
+```bash
+python3 scripts/debug/debug_document_assembly.py \
+  --input debug/generated/stage1-known-strict-20260719-v2 \
+  --run-id stage7-known-24 \
+  --limit 24 \
+  --engines tesseract \
+  --prepare-workers 4 \
+  --ocr-page-workers 2
+```
+
+Page preparation uses a bounded process pool while several persistent OCR
+sessions consume prepared pages concurrently. Every item gets an atomic
+`07-document/` evidence tree; corpus summaries are JSON, TSV and Markdown.
+Known text is loaded only after artifact publication and is scored with exact
+Levenshtein loss after removing Unicode whitespace only. See
+[`docs/ru/sparse-rewrite-stage7.md`](../docs/ru/sparse-rewrite-stage7.md).
+
+The v20 unit + real failure-corpus gate checks every command and sends a desktop
+notification on both success and failure. Run `debug-all` first so the ignored
+real raster fixtures exist, then use one immutable run ID:
+
+```bash
+scripts/debug/debug-all.sh
+RUN_ID=v20-full-$(date +%Y%m%d-%H%M%S) \
+scripts/debug/run-sparse-v20.sh
+```
+
+The default acceptance set must include `000041…raster.png`,
+`09.03.03…raster.png`, and `Adobe Scan Jun 20…raster.png`; it cannot silently
+fall back to SAMPLE. `V20_TUTORIAL_SET=all` writes the same object-local debug
+tree for every `debug/fixtures/*.raster.png`. SAMPLE is available only through
+the explicit `V20_TUTORIAL_SET=sample` smoke mode and does not certify v20.
+`V20_EVIDENCE_ONLY_SOURCES` is a colon-separated list of exact input-relative
+labels or basenames; the final gate replays that actual list against every
+summary item instead of assuming a hard-coded filename. Set it to an empty
+value to disable exclusions. Recursive inputs with
+equal basenames remain distinct because tutorial item IDs hash their normalized
+paths. `V20_ARTIFACT_OUTPUT` and `V20_ROOT_REPORT` may point outside the repo;
+external artifact paths are stored as absolute paths and report links stay
+relative to the report that contains them.
+
+The known-text corpus is the page-level baseline and uses
+`V20_SINGLE_CONTEXT_PSM` (default `6`). The tutorial uses that same value for a
+single block and switches multi-block/table objects to
+`V20_DOCUMENT_CONTEXT_PSM` (default `4`). Both effective profiles are recorded
+in provenance; this context routing is intentional, so comparisons must not
+present the two gates as one identical Tesseract configuration.
+
+Every page below `debug/artifacts/v20/<run-id>/items/` contains:
+
+- exact sparse matrix JSON/TSV/text plus a logical matrix PNG and literal Stage
+  1 ownership PNG;
+- `objects/<object-id>/object.md`, `object.txt`, `object.json` and `debag.md`;
+- object-local `segments/` with literal raw/ownership PNG, OCR text and metadata;
+- object-local `blocks/<block-id>/` with literal raw/enhanced PNG, membership,
+  OR/XOR provenance, OCR text and OCR metadata;
+- seven stage logs, final `document.md`/`document.txt`, and `provenance.json`
+  containing commit, argv/config and input SHA-256.
+
+Failed Stage 7 quality gates still preserve these artifacts before the wrapper
+returns non-zero. Earlier unit-stage failures remain fail-fast.
+
+Use the explicit full run when all generated references are required:
+
+```bash
+RUN_ID=v20-full1232-$(date +%Y%m%d-%H%M%S) \
+V20_INPUT=debug/generated/stage1-line-owner-full1232-20260719 \
+V20_LIMIT=1232 \
+V20_TUTORIAL_SET=all \
+scripts/debug/run-sparse-v20.sh
+```
 
 ## Run Everything
 
@@ -137,38 +237,6 @@ Browser only is supported for image fixtures:
 scripts/debug/debug-all.sh --engines browser-tesseract --fixture '*.png'
 ```
 
-Run all implemented image engines in parallel for a block of new or repaired
-references. The default block is three image fixtures:
-
-```bash
-scripts/debug/debug-image-engines-parallel.sh
-```
-
-This writes a visible artifact bundle instead of only the shared `debug/tmp/`
-workspace:
-
-```text
-debug/artifacts/parallel-reference-block/manifest.md
-debug/artifacts/parallel-reference-block/result.csv
-debug/artifacts/parallel-reference-block/time.csv
-debug/tmp/parallel-reference-block/<engine>/run.log
-debug/tmp/parallel-reference-block/<engine>/<fixture>.md
-```
-
-The parallel runner launches independent `tesseract`, `easyocr`, `auto`, and
-`browser-tesseract` jobs for the same fixture block, then merges their summaries.
-API engines are still rejected because they do not have local runners yet.
-
-Pass `--fixture` multiple times to test exactly the block that just received
-new references:
-
-```bash
-scripts/debug/debug-image-engines-parallel.sh \
-  --fixture 'photo_2026-06-20_15-38-09.jpg' \
-  --fixture 'photo_2026-06-26_19-56-47.jpg' \
-  --fixture 'image.png'
-```
-
 ## Select Flags
 
 By default every backend engine uses its automatic profile.
@@ -244,44 +312,6 @@ scripts/debug/run-debug.sh \
 
 Generated files stay under `debug/tmp/`. The probe limits copied expected text
 to the same first pages that were rendered.
-
-For reviewable long screenshots paired with Markdown references, generate a
-separate artifact bundle:
-
-```bash
-scripts/debug/build-reference-screenshots.sh
-```
-
-This renders one tall image per PDF fixture and writes matching references:
-
-```text
-debug/artifacts/reference-screenshots/manifest.md
-debug/artifacts/reference-screenshots/images/<file>.pdf.raster.png
-debug/artifacts/reference-screenshots/reference/<file>.pdf.raster.png.md
-```
-
-The default bundle renders the first five pages at 220 DPI. Use `--fixture`,
-`--max-pages`, `--dpi`, and `--format png,jpg` when a narrower or heavier visual
-check is needed.
-
-When a debug image was made from project documentation, build the reference from
-the documentation source and keep a browser screenshot beside it:
-
-```bash
-python3 scripts/debug/build-doc-reference-fixture.py \
-  --source '49162f3:docs/ru/course/course_tasks.md' \
-  --fixture 'photo_2026-06-20_15-38-09.jpg' \
-  --write-reference
-```
-
-This writes:
-
-```text
-debug/artifacts/doc-reference/<fixture>/render.html
-debug/artifacts/doc-reference/<fixture>/screenshot.png
-debug/artifacts/doc-reference/<fixture>/reference.md
-debug/reference/<fixture>.md
-```
 
 ## API Environment
 

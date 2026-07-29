@@ -9,6 +9,6 @@ cd "$PROJECT_ROOT"
 
 echo "[BUILD-LITE] Sobirayem LITE statiku cherez Vite..."
 npm ci --no-audit --progress=false --prefer-offline
-npm run build:web
+npm run build:web:lite
 
 echo "[BUILD-LITE] Gotovo. Statika lezhit v 'dist'."

@@ -25,8 +25,14 @@ GW_PORT="${PORT:-3000}"
 
 PYTHON_PID=""
 GATEWAY_PID=""
+CLEANED_UP=0
 
 cleanup() {
+    if [ "$CLEANED_UP" -eq 1 ]; then
+        return
+    fi
+    CLEANED_UP=1
+
     if [ -z "$GATEWAY_PID$PYTHON_PID" ]; then
         return
     fi
@@ -111,6 +117,42 @@ wait_for_python_service() {
     done
     echo "[RUNNER] Python OCR Service did not start."
     return 1
+}
+
+wait_for_gateway_service() {
+    echo "[RUNNER] Waiting for Gateway at http://127.0.0.1:$GW_PORT/..."
+    for _ in $(seq 1 30); do
+        if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then
+            local status=0
+            wait "$GATEWAY_PID" || status=$?
+            GATEWAY_PID=""
+            echo "[RUNNER] Gateway exited during startup (status $status)." >&2
+            return 1
+        fi
+
+        if curl -s -f "http://127.0.0.1:$GW_PORT/" > /dev/null; then
+            return 0
+        fi
+        sleep 1
+    done
+    echo "[RUNNER] Gateway did not become ready." >&2
+    return 1
+}
+
+wait_for_services() {
+    local status=0
+
+    if [ -n "$PYTHON_PID" ]; then
+        wait -n "$GATEWAY_PID" "$PYTHON_PID" || status=$?
+    else
+        wait "$GATEWAY_PID" || status=$?
+    fi
+
+    if [ "$status" -eq 0 ]; then
+        echo "[RUNNER] A service stopped unexpectedly." >&2
+        return 1
+    fi
+    return "$status"
 }
 
 ensure_python_env() {
@@ -210,6 +252,7 @@ export OCR_URL="http://127.0.0.1:$PY_PORT"
 echo "[RUNNER] Using Bun"
 bun server.ts &
 GATEWAY_PID=$!
+wait_for_gateway_service
 
 echo "======================================"
 echo "STABLE SERVICES ARE RUNNING LOCALLY:"
@@ -222,4 +265,4 @@ else
 fi
 echo "======================================"
 
-wait
+wait_for_services

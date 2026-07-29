@@ -24,7 +24,6 @@ from app.chunking.vertical import (
 )
 from app.formatting.contextual_markdown import apply_contextual_markdown_grammar
 from app.formatting.lexical_correction import apply_lexical_correction
-from app.formatting.ocr_corrections import recover_known_ocr_phrases
 from app.formatting.markdown_formatter import MarkdownFormatter
 from app.formatting.structural_grammar import SparseMarkdownRow
 from app.layout.contracts import LayoutDecision, LayoutStageSpec
@@ -224,10 +223,10 @@ def test_t9_small_cleans_common_ui_ocr_noise_without_table_linting():
     assert apply_lexical_correction(text, "t9_small") == "\n".join(
         [
             "Created 94 commits in 1 repository",
-            "AI-paca/IttM 7 merged",
-            "Hw7 (SCA) Jun 26",
-            "Hw5 (OCR engine, streaming, tests, debug area) Jun 19",
-            "AI-paca/IttM 94 commits",
+            "Al-paca/IttM @ merged",
+            "Нм (SCA) Jun 26",
+            "Нм (OCR engine, streaming, tests, debug area) Jun 19",
+            "AI-pacallttM 94 commits",
         ]
     )
 
@@ -245,9 +244,68 @@ def test_t9_small_cleans_coupon_screen_confusables():
         [
             "Лавка",
             "300 ₽ скидки на заказ от 2000 ₽",
-            "dlv320unroxzjsve26p8",
+            "div320unroxzjsve26p8",
         ]
     )
+
+
+def test_t9_small_cleans_technical_commerce_ocr_confusables():
+    text = "\n".join(
+        [
+            "| Product | FHO Display RAM 868 SSD 128GB DRS 19201080 |",
+            "| Price | £474 | €259.99 |",
+        ]
+    )
+
+    assert apply_lexical_correction(text, "t9_small") == "\n".join(
+        [
+            "| Product | FHD Display RAM 8GB SSD 128GB DDR5 1920x1080 |",
+            "| Price | €474 | €259.99 |",
+        ]
+    )
+
+
+def test_t9_small_splits_compact_display_resolutions_without_product_ids():
+    assert (
+        apply_lexical_correction(
+            "HP Laptop 15440021s FHD Display 19201080 and panel 1024768",
+            "t9_small",
+        )
+        == "HP Laptop 15440021s FHD Display 1920x1080 and panel 1024x768"
+    )
+
+
+def test_search_results_recovery_uses_final_lexical_correction(monkeypatch):
+    image = Image.new("RGB", (120, 80), "white")
+    profile = OcrPipelineProfile(
+        name="test",
+        structural_output="markdown",
+        lexical_correction="t9_small",
+    )
+
+    monkeypatch.setattr(
+        convert_service,
+        "_convert_page_segment",
+        lambda _image, _engine, _profile: (
+            "stub",
+            {
+                "chunks": 0,
+                "cards_found": 0,
+                "tables_found": 0,
+                "table_cells": 0,
+                "runtime_flags": [],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "_recover_search_results_screen",
+        lambda _blocks, **_kwargs: "| Product | IPS RAM 868 |\n| --- | --- |",
+    )
+
+    markdown, _totals = convert_service._convert_page(image, object(), profile)
+
+    assert "RAM 8GB" in markdown
 
 
 def test_curriculum_summary_repair_joins_wide_table_and_competency_text():
@@ -319,6 +377,70 @@ def test_curriculum_summary_repair_joins_wide_table_and_competency_text():
     assert "### Блок 2. Практики" in repaired
     assert "| Б2.О.03(У) | Научно-исследовательская работа | ОПК-1; ОПК-1.1 |" in repaired
     assert "Контроль/часы" not in repaired
+
+
+def test_pdf_text_layer_competence_rows_merge_safe_wrapped_names():
+    rows = [
+        [
+            convert_service._PdfFixedWidthCell("Б1.О.01", 8, 15),
+            convert_service._PdfFixedWidthCell("Иностранный язык", 30, 46),
+            convert_service._PdfFixedWidthCell("УК-4; УК-5", 89, 105),
+        ],
+        [
+            convert_service._PdfFixedWidthCell("Б1.О.02", 8, 15),
+            convert_service._PdfFixedWidthCell("История", 30, 46),
+            convert_service._PdfFixedWidthCell("УК-1; УК-5", 89, 105),
+        ],
+        [convert_service._PdfFixedWidthCell("Инновационная экономика и технологическое", 30, 71)],
+        [
+            convert_service._PdfFixedWidthCell("Б1.О.03", 8, 15),
+            convert_service._PdfFixedWidthCell("УК-2; УК-9", 89, 105),
+        ],
+        [convert_service._PdfFixedWidthCell("предпринимательство", 30, 49)],
+        [
+            convert_service._PdfFixedWidthCell("Б1.О.04", 8, 15),
+            convert_service._PdfFixedWidthCell("Деловая этика", 30, 46),
+            convert_service._PdfFixedWidthCell("УК-4; УК-5", 89, 105),
+        ],
+    ]
+
+    merged = convert_service._merge_pdf_competence_table_rows(rows)
+
+    assert merged is not None
+    assert merged[2] == [
+        "Б1.О.03",
+        "Инновационная экономика и технологическое предпринимательство",
+        "УК-2; УК-9",
+    ]
+    assert merged[3] == ["Б1.О.04", "Деловая этика", "УК-4; УК-5"]
+
+
+def test_pdf_text_layer_competence_rows_reject_risky_reordering():
+    rows = [
+        [convert_service._PdfFixedWidthCell("ДОП 10. Правовое сопровождение", 30, 60)],
+        [
+            convert_service._PdfFixedWidthCell("Б1.В.ДВ.02.10", 8, 22),
+            convert_service._PdfFixedWidthCell("ПК-3; ПК-3.5; УК-4; УК-4.1", 95, 130),
+        ],
+        [
+            convert_service._PdfFixedWidthCell(
+                "научно-исследовательских, опытно-конструкторских и технологических работ",
+                30,
+                100,
+            )
+        ],
+        [
+            convert_service._PdfFixedWidthCell("Б1.В.ДВ.02.11", 8, 22),
+            convert_service._PdfFixedWidthCell(
+                "ДОП 11. Цифровая безопасность: коммуникации в цифровой среде",
+                30,
+                88,
+            ),
+            convert_service._PdfFixedWidthCell("ПК-3; ПК-3.5; УК-4; УК-4.1", 95, 130),
+        ],
+    ]
+
+    assert convert_service._merge_pdf_competence_table_rows(rows) is None
 
 
 def test_curriculum_index_normalization_handles_superheader_rows():
@@ -1567,7 +1689,7 @@ def test_curriculum_summary_repair_ignores_non_curriculum_tables():
     assert repaired == markdown
 
 
-def test_t9_small_cleans_mixed_table_confusables():
+def test_t9_small_does_not_invent_mixed_table_fixture_literals():
     text = (
         "| Ng | Код Й | нх | Mix A |\n"
         "| й-Al-EN-OOl | RU-7Z | #р4}' F | EMi =т |\n"
@@ -1576,15 +1698,14 @@ def test_t9_small_cleans_mixed_table_confusables():
 
     corrected = apply_lexical_correction(text, "t9_small")
 
-    assert "| № | Код й | 中文 | Mix A |" in corrected
-    assert "й-A1-EN-001" in corrected
-    assert "RU-77" in corrected
-    assert "部分 甲" in corrected
-    assert "占位 单元" in corrected
-    assert "й-C3-MIX-303" in corrected
-    assert "F6-EN" in corrected
-    assert "G7-RU" in corrected
-    assert "J10-END-010" in corrected
+    assert "| Ng | Код Й | нх | Mix A |" in corrected
+    assert "#р4}' F" in corrected
+    assert "EMi =т" in corrected
+    assert "й-CЗ-MIX-ЗOЗ" in corrected
+
+
+def test_t9_small_only_collapses_spacing_between_observed_cjk_characters():
+    assert apply_lexical_correction("中 文 占 位", "t9_small") == "中文占位"
 
 
 def test_t9_small_repairs_pipeline_doc_identifiers():
@@ -1625,7 +1746,7 @@ def test_t9_small_repairs_mixed_latin_cyrillic_text_confusables():
 
     assert "README, но описание формальное/очень слабое" in corrected
     assert "й-ALPHA" in corrected
-    assert "EN-й" in corrected
+    assert "EM-Й" in corrected
 
 
 def test_t9_small_repairs_russian_academic_codes_without_latinizing_them():
@@ -1736,7 +1857,7 @@ def test_screen_text_noise_repair_cleans_github_activity():
     repaired, flags = convert_service._repair_screen_text_noise(text)
 
     assert "Created 94 commits in 1 repository" in repaired
-    assert "AI-paca/IttM 7 merged" in repaired
+    assert "Al-paca/IttM @ merged" in repaired
     assert "Web UI Jun 21" in repaired
     assert flags == ("text_repair:ui_t9",)
 
@@ -1760,15 +1881,14 @@ def test_screen_text_noise_repair_drops_coupon_banner_noise():
 
     assert repaired.splitlines()[0] == "Лавка"
     assert "300 ₽ скидки на заказ от 2000 ₽" in repaired
-    assert "dlv320unroxzjsve26p8" in repaired
+    assert "div320unroxzjsve26p8" in repaired
     assert flags == (
         "text_repair:coupon_banner_noise",
         "text_repair:ui_t9",
-        "text_repair:coupon_canonical",
     )
 
 
-def test_screen_text_noise_repair_canonicalizes_taxi_coupon():
+def test_screen_text_noise_repair_does_not_invent_taxi_coupon_copy():
     text = "\n".join(
         [
             "₽",
@@ -1786,21 +1906,8 @@ def test_screen_text_noise_repair_canonicalizes_taxi_coupon():
 
     repaired, flags = convert_service._repair_screen_text_noise(text)
 
-    assert repaired == "\n\n".join(
-        [
-            "Такси",
-            "10% скидки, но не более 100 ₽,\nв тарифе «Комфорт» или выше",
-            "dth11oprdaekgjwed6eg",
-            "Используйте до 1 января 02:00",
-            (
-                "Введите его перед заказом поездки — и скидка учтётся в итоговой стоимости.\n"
-                "Промокод действует в тарифе «Комфорт» или выше."
-            ),
-            "Использовать скидку можете только вы.\nПодробнее: yandex.ru/legal/plus_daily/ru/",
-            "Перейти",
-        ]
-    )
-    assert flags == ("text_repair:coupon_canonical",)
+    assert repaired == text
+    assert flags == ()
 
 
 def test_split_vertical_returns_at_least_one_chunk_for_small_image():
@@ -2244,6 +2351,270 @@ def test_convert_page_appends_projector_slide_language_fallback(monkeypatch):
     assert meta["chunks"] == 2
 
 
+def test_convert_page_replaces_tiny_primary_with_projector_fallback(monkeypatch):
+    image = Image.new("RGB", (2000, 1200), "white")
+    totals = {
+        "chunks": 1,
+        "cards_found": 0,
+        "tables_found": 0,
+        "table_cells": 0,
+    }
+    fallback_text = (
+        "Система сбора первичных данных и форм отчетности о судимости "
+        "Гарнизонные военные суды Судебные участки мировых судов"
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "_convert_page_segment",
+        lambda _image, _engine, _profile: ("rd", totals.copy()),
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "_recognize_projector_slide_fallback",
+        lambda _engine, _image, _profile: fallback_text,
+    )
+
+    class ReplacementCore:
+        def should_replace_primary(self, *metrics):
+            assert metrics == (2, convert_service._ocr_compact_char_count(fallback_text), 1, 0)
+            return True
+
+        def should_drop_text_block(self, *_metrics):
+            return False
+
+    monkeypatch.setattr(convert_service, "native_pipeline_core", lambda: ReplacementCore())
+
+    try:
+        markdown, meta = convert_service._convert_page(
+            image,
+            object(),
+            OcrPipelineProfile(name="test", dense_grid_fallback=True),
+        )
+    finally:
+        image.close()
+
+    assert markdown == fallback_text
+    assert "dense_grid_recovery:replace_tiny_primary" in meta["runtime_flags"]
+
+
+def test_convert_page_recovers_short_linted_projector_slide(monkeypatch):
+    image = Image.new("RGB", (2000, 1200), "white")
+    totals = {
+        "chunks": 1,
+        "cards_found": 0,
+        "tables_found": 0,
+        "table_cells": 0,
+        "runtime_flags": [
+            "structural_grammar:finite_merge_v1",
+            "markdown_lint:pass",
+        ],
+    }
+    fallback_text = (
+        "Схема сбора статистической отчетности о работе судов "
+        "Федеральное хранилище судебной статистики Областные суды "
+        "Районные суды Мировые судьи Судебный департамент "
+        "Управления судебного департамента гарнизонные военные суды "
+        "судебные участки мировых судов"
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "_convert_page_segment",
+        lambda _image, _engine, _profile: (
+            "Схема сбора статистической отчетности о работе судов",
+            totals.copy(),
+        ),
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "_recognize_projector_slide_fallback",
+        lambda _engine, _image, _profile: fallback_text,
+    )
+
+    class ReplacementCore:
+        def should_replace_primary(
+            self,
+            _primary_chars,
+            _fallback_chars,
+            primary_tokens,
+            retained_primary_tokens,
+        ):
+            assert retained_primary_tokens == primary_tokens
+            return True
+
+        def should_drop_text_block(self, *_metrics):
+            return False
+
+    monkeypatch.setattr(convert_service, "native_pipeline_core", lambda: ReplacementCore())
+
+    try:
+        markdown, meta = convert_service._convert_page(
+            image,
+            object(),
+            OcrPipelineProfile(name="test", dense_grid_fallback=True),
+        )
+    finally:
+        image.close()
+
+    assert markdown == fallback_text
+    assert "dense_grid_recovery:short_projector_slide" in meta["runtime_flags"]
+
+
+def test_convert_page_keeps_primary_when_fallback_loses_its_evidence(monkeypatch):
+    image = Image.new("RGB", (2000, 1200), "white")
+    primary_text = "Amazon Basics USB C charger cable black two meter pack"
+    fallback_text = " ".join(f"несвязанный{index}" for index in range(30))
+    totals = {
+        "chunks": 1,
+        "cards_found": 0,
+        "tables_found": 0,
+        "table_cells": 0,
+    }
+    monkeypatch.setattr(
+        convert_service,
+        "_convert_page_segment",
+        lambda _image, _engine, _profile: (primary_text, totals.copy()),
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "_recognize_projector_slide_fallback",
+        lambda _engine, _image, _profile: fallback_text,
+    )
+
+    class EvidenceCore:
+        def should_replace_primary(
+            self,
+            _primary_chars,
+            _fallback_chars,
+            primary_tokens,
+            retained_primary_tokens,
+        ):
+            assert primary_tokens == 7
+            assert retained_primary_tokens == 0
+            return False
+
+        def should_drop_text_block(self, *_metrics):
+            return False
+
+    monkeypatch.setattr(convert_service, "native_pipeline_core", lambda: EvidenceCore())
+
+    try:
+        markdown, meta = convert_service._convert_page(
+            image,
+            object(),
+            OcrPipelineProfile(name="test", dense_grid_fallback=True),
+        )
+    finally:
+        image.close()
+
+    assert primary_text in markdown
+    assert fallback_text in markdown
+    assert "dense_grid_recovery:replace_tiny_primary" not in meta.get("runtime_flags", [])
+
+
+def test_primary_replacement_fails_closed_without_shared_core(monkeypatch):
+    monkeypatch.setattr(convert_service, "native_pipeline_core", lambda: None)
+
+    assert not convert_service._should_replace_primary_with_fallback(
+        "valuable primary evidence tokens",
+        " ".join(["valuable", "primary", "evidence", "tokens", *[f"extra{index}" for index in range(50)]]),
+    )
+
+
+def test_projector_slide_fallback_prefers_russian_dense_candidate(monkeypatch):
+    image = Image.new("RGB", (2000, 1200), "white")
+    calls = []
+    extra_pass_kwargs = {}
+
+    class RecognitionEngine:
+        def recognize(self, _image, mode="text_mode", psm=3):
+            calls.append((mode, psm))
+            return {
+                3: "rd",
+                11: (
+                    "Схема сбора статистической отчетности о работе судов\n"
+                    "Федеральное хранилище судебной статистики\n"
+                    "Мировые судьи"
+                ),
+                6: "Cxema sbopa ctathctuyeckou otuetHoctu",
+                4: "",
+                12: "коротко",
+            }[psm]
+
+    def fake_extra_pass_engine(_engine, _profile, **kwargs):
+        extra_pass_kwargs.update(kwargs)
+        return RecognitionEngine()
+
+    monkeypatch.setattr(
+        convert_service,
+        "_extra_pass_engine",
+        fake_extra_pass_engine,
+    )
+
+    try:
+        text = convert_service._recognize_projector_slide_fallback(
+            object(),
+            image,
+            OcrPipelineProfile(name="test"),
+        )
+    finally:
+        image.close()
+
+    assert "Мировые судьи" in text
+    assert extra_pass_kwargs["language_priority"] == ("rus", "eng")
+    assert extra_pass_kwargs["ocr_border_pixels"] == 0
+    assert calls == [
+        ("text_mode", 11),
+        ("text_mode", 3),
+        ("text_mode", 6),
+        ("text_mode", 12),
+        ("text_mode", 4),
+    ]
+
+
+def test_projector_slide_fallback_scores_explicit_tesseract_language_candidates(monkeypatch):
+    image = Image.new("RGB", (2000, 1200), "white")
+    calls = []
+
+    class RecognitionEngine:
+        ocr_border_pixels = 0
+
+        def info(self):
+            return {"engine": "tesseract"}
+
+        def installed_languages(self):
+            return ["eng", "rus"]
+
+        def configured_ocr_language_string(self):
+            return "rus+eng"
+
+        def recognize_to_string(self, _image, psm=3, lang=None):
+            calls.append((psm, lang))
+            if lang == "rus" and psm == 11:
+                return "Система сбора первичных данных и форм отчетности о судимости"
+            if lang == "eng" and psm == 11:
+                return "Cucrema copa nepBUHHbIX AaHHbIX hOpM OTHETHOCTU"
+            return "rd"
+
+    monkeypatch.setattr(
+        convert_service,
+        "_extra_pass_engine",
+        lambda *_args, **_kwargs: RecognitionEngine(),
+    )
+
+    try:
+        text = convert_service._recognize_projector_slide_fallback(
+            object(),
+            image,
+            OcrPipelineProfile(name="test"),
+        )
+    finally:
+        image.close()
+
+    assert text == "Система сбора первичных данных и форм отчетности о судимости"
+    assert (11, "rus") in calls
+    assert (11, "eng") in calls
+
+
 def test_convert_page_bounds_long_screenshot_before_spatial_layout(
     monkeypatch,
 ):
@@ -2603,42 +2974,6 @@ def test_contextual_markdown_grammar_does_not_invent_web_or_rubric_scaffolds():
     assert "| Site | amazon.it |" not in disabled
 
 
-def test_known_ocr_phrase_recovery_accepts_noisy_court_diagram():
-    recovered = recover_known_ocr_phrases(
-        "\n".join(
-            [
-                "Схема сбора статистической отчетности",
-                "о работе судов (децентрализованная сводка)",
-                "р a Федеральное хранилище",
-                "судебной статистики",
-            ]
-        )
-    )
-
-    assert "Судебный департамент" in recovered
-    assert "Размещение статистики" in recovered
-    assert "АСОЮ" in recovered
-    assert "Мировые судьи" in recovered
-
-
-def test_known_ocr_phrase_recovery_accepts_noisy_unified_pipeline_doc():
-    recovered = recover_known_ocr_phrases(
-        "\n".join(
-            [
-                "# Единый пайплайн: целевая модель",
-                "OcrPipelineProfile живёт в ocr/app/pipeline config ру",
-                "GET Ivl/pipeline/flags и browser backend effective flags",
-                "PDF-контракт pdf modezauto raster для gateway API",
-            ]
-        )
-    )
-
-    assert "[Архитектура](./architecture.md)" in recovered
-    assert "`pipeline_flags`" in recovered
-    assert "`GET /v1/pipeline/flags`" in recovered
-    assert "`pdf_mode=auto|raster`" in recovered
-
-
 def test_aligned_numeric_full_page_recovery_prefers_more_complete_ranked_table():
     class FakeEngine:
         def recognize(self, _image, mode="text_mode", psm=3):
@@ -2676,7 +3011,7 @@ def test_aligned_numeric_full_page_recovery_prefers_more_complete_ranked_table()
     assert "| 8 | Theta Phone | Snapdragon 7+ Gen 3 | 8GB+256GB | 100000 |" in recovered
 
 
-def test_short_name_score_table_repair_normalizes_ocr_confusions():
+def test_short_name_score_table_repair_preserves_observed_names():
     repaired, count = convert_service._repair_short_name_score_tables(
         "\n".join(
             [
@@ -2696,10 +3031,12 @@ def test_short_name_score_table_repair_normalizes_ocr_confusions():
     assert count == 1
     assert "| Кавтаев | - |" in repaired
     assert "| Кононюк | 6 |" in repaired
-    assert "| Тощевиков | 9 |" in repaired
-    assert "| Чапурин | 5 |" in repaired
-    assert "| Шубин | 8 |" in repaired
+    assert "| Тошевиков | 9 |" in repaired
+    assert "| Залурин | 5 |" in repaired
+    assert "| Шlубин | 8 |" in repaired
     assert "| Малафеева | 6 |" in repaired
+    assert "Тощевиков" not in repaired
+    assert "Чапурин" not in repaired
 
 
 def test_curriculum_header_repair_does_not_invent_fixture_rows():
@@ -2817,6 +3154,27 @@ def test_search_result_columns_from_words_builds_result_grid_columns():
     assert ["Badge", "Best Seller"] in columns[2]
 
 
+def test_search_result_rating_accepts_ocr_confusable_star_rows():
+    assert convert_service._search_result_rating("S50 keke kk (4)") == "5.0 (4)"
+    assert convert_service._search_result_rating("35 kkktky (4)") == "3.5 (4)"
+    assert convert_service._search_result_rating("42kekktkky (11)") == "4.2 (11)"
+
+
+def test_search_result_deal_accepts_ocr_confusable_prime_day_rows():
+    assert convert_service._search_result_deal_value("Prime Dy eat") == "Prime Day Deal"
+    assert convert_service._search_result_deal_value("Prime Day Dead") == "Prime Day Deal"
+    assert convert_service._search_result_deal_value("PriweDayDeat") == "Prime Day Deal"
+
+
+def test_search_result_product_text_stops_before_bought_price_noise():
+    product = convert_service._search_result_product_text(
+        "ASUS Vivobook Go 15 Notebook IPS Display RAM 16GB SSD SomtekeY 00 ohtin past onth a *474 pep: esse."
+    )
+
+    assert product == "ASUS Vivobook Go 15 Notebook IPS Display RAM 16GB SSD SomtekeY 00 ohtin"
+    assert "474" not in product
+
+
 def test_search_results_screen_recovery_rejects_normal_table():
     table = "| Name | Value |\n" "| --- | --- |\n" "| Alpha | 1 |\n" "| Beta | 2 |"
 
@@ -2856,11 +3214,11 @@ def test_large_markdown_table_repair_merges_overflow_and_drops_noise():
     assert len(body) == 13
     assert "SECTION ALPHA" in repaired
     assert "merged subsection" in repaired
-    assert "::merge-left::" in repaired
+    assert "::merge-left::" not in repaired
     assert "FTY jfzr" not in repaired
 
 
-def test_large_markdown_table_repair_restores_mixed_merge_left_rows():
+def test_large_markdown_table_repair_does_not_invent_merge_markers_or_text():
     repaired, count = convert_service._repair_large_markdown_tables(_large_table_with_overflow_and_noise())
 
     assert count == 1
@@ -2872,10 +3230,10 @@ def test_large_markdown_table_repair_restores_mixed_merge_left_rows():
     alpha_cells = convert_service._split_markdown_table_cells(alpha_line)
     beta_cells = convert_service._split_markdown_table_cells(beta_line)
 
-    assert alpha_cells[0] == ("РАЗДЕЛ A SECTION ALPHA 部分 甲 merged subsection й-ALPHA-2026")
-    assert alpha_cells[1:] == ["::merge-left::"] * 9
-    assert beta_cells[0] == ("РАЗДЕЛ B SECTION BETA 部分 乙 merged subsection й-BETA-3030")
-    assert beta_cells[1:] == ["::merge-left::"] * 9
+    assert alpha_cells[0] == "РАЗДЕЛ A / SECTION ALPHA  merged subsection / й-ALPHA-2026"
+    assert alpha_cells[1:] == [""] * 9
+    assert beta_cells[0] == "РАЗДЕЛ B / SECTION BETA / merged subsection / й BETA-3OЗO"
+    assert beta_cells[1:] == [""] * 9
 
 
 def test_convert_page_repairs_large_markdown_table_shape(monkeypatch):
@@ -2904,14 +3262,15 @@ def test_convert_page_repairs_large_markdown_table_shape(monkeypatch):
     finally:
         image.close()
 
-    assert markdown.startswith("# Mixed OCR table")
-    assert "Image-only PDF merged subsection rows Markdown placeholder cells" in markdown
-    table = convert_service._markdown_table_part(markdown.rsplit("\n\n", maxsplit=1)[-1])
+    assert markdown.startswith("| № | Код | Русский | English")
+    assert "# Mixed OCR table" not in markdown
+    assert "Image-only PDF merged subsection rows Markdown placeholder cells" not in markdown
+    table = convert_service._markdown_table_part(markdown)
     assert table is not None
     assert len(table[0]) == 10
     assert len(table[2]) == 13
-    assert "table_repair:mixed_table_heading" in meta["runtime_flags"]
-    assert "table_repair:mixed_table_t9" in meta["runtime_flags"]
+    assert "table_repair:mixed_table_heading" not in meta["runtime_flags"]
+    assert "table_repair:mixed_table_t9" not in meta["runtime_flags"]
     assert "table_repair:large_markdown_shape" in meta["runtime_flags"]
 
 
@@ -3464,6 +3823,164 @@ def test_unconfirmed_sparse_grid_falls_back_to_plain_full_page_ocr(
     assert calls == [(600, 120), (600, 120), (600, 240)]
 
 
+def test_single_column_text_flow_uses_plain_fallback(
+    monkeypatch,
+):
+    calls = []
+    responses = iter(
+        [
+            "Заголовок",
+            "первая строка абзаца",
+            "вторая строка абзаца",
+            "третья строка абзаца",
+            "Заголовок\nпервая строка абзаца\nвторая строка абзаца\nтретья строка абзаца",
+        ]
+    )
+
+    class FakeEngine:
+        def recognize(self, image, mode="text_mode", psm=6):
+            del mode, psm
+            calls.append(image.size)
+            return next(responses)
+
+    image = Image.new("RGB", (600, 480), "white")
+    regions = []
+    for row in range(4):
+        regions.append(
+            LayoutRegion(
+                kind="image",
+                image=image.crop((0, row * 120, 600, (row + 1) * 120)),
+                bbox=(0, row * 120, 600, (row + 1) * 120),
+                metadata={
+                    "layout_kind": "recursive_grid_cell",
+                    "grid_row": row,
+                    "grid_col": 0,
+                    "sparse_codes": () if row == 0 else ((row, 0, 3),),
+                },
+            )
+        )
+    monkeypatch.setattr(
+        convert_service,
+        "_looks_like_edge_to_edge_word",
+        lambda image: False,
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "analyze_layout",
+        lambda *_args, **_kwargs: (
+            regions,
+            LayoutDecision(
+                label="fixed",
+                stages=(
+                    LayoutStageSpec(
+                        name="recursive_grid",
+                        parameters=(),
+                    ),
+                ),
+                confidence=1.0,
+            ),
+        ),
+    )
+    profile = OcrPipelineProfile(
+        name="single-column-text",
+        layout=LayoutPipelineConfig(
+            allowed_stages=("recursive_grid",),
+        ),
+    )
+    try:
+        markdown, meta = convert_service._convert_page_segment(
+            image,
+            FakeEngine(),
+            profile,
+        )
+    finally:
+        image.close()
+
+    assert markdown == "Заголовок\nпервая строка абзаца\nвторая строка абзаца\nтретья строка абзаца"
+    assert "structural_grammar:finite_merge_v1" not in meta["runtime_flags"]
+    assert "structural_grammar:bypass_unconfirmed_grid" in meta["runtime_flags"]
+    assert "structural_plain_fallback:used" in meta["runtime_flags"]
+    assert calls == [(600, 120)] * 4 + [(600, 480)]
+
+
+def test_rich_single_column_text_keeps_cell_parts_without_full_page_fallback(
+    monkeypatch,
+):
+    calls = []
+    responses = iter(
+        [
+            " ".join([f"строка {row}"] * 20)
+            for row in range(4)
+        ]
+    )
+
+    class FakeEngine:
+        def recognize(self, image, mode="text_mode", psm=6):
+            del mode, psm
+            calls.append(image.size)
+            return next(responses)
+
+    image = Image.new("RGB", (900, 720), "white")
+    regions = []
+    for row in range(4):
+        regions.append(
+            LayoutRegion(
+                kind="image",
+                image=image.crop((0, row * 180, 900, (row + 1) * 180)),
+                bbox=(0, row * 180, 900, (row + 1) * 180),
+                metadata={
+                    "layout_kind": "recursive_grid_cell",
+                    "grid_row": row,
+                    "grid_col": 0,
+                    "sparse_codes": () if row == 0 else ((row, 0, 3),),
+                },
+            )
+        )
+    monkeypatch.setattr(
+        convert_service,
+        "_looks_like_edge_to_edge_word",
+        lambda image: False,
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "analyze_layout",
+        lambda *_args, **_kwargs: (
+            regions,
+            LayoutDecision(
+                label="fixed",
+                stages=(
+                    LayoutStageSpec(
+                        name="recursive_grid",
+                        parameters=(),
+                    ),
+                ),
+                confidence=1.0,
+            ),
+        ),
+    )
+    profile = OcrPipelineProfile(
+        name="rich-single-column-text",
+        layout=LayoutPipelineConfig(
+            allowed_stages=("recursive_grid",),
+        ),
+    )
+    try:
+        markdown, meta = convert_service._convert_page_segment(
+            image,
+            FakeEngine(),
+            profile,
+        )
+    finally:
+        image.close()
+
+    assert "строка 0" in markdown
+    assert "строка 3" in markdown
+    assert "structural_grammar:bypass_unconfirmed_grid" in meta["runtime_flags"]
+    assert "structural_plain_fallback:skipped_rich_text" in meta["runtime_flags"]
+    assert "structural_plain_fallback:used" not in meta["runtime_flags"]
+    assert calls == [(900, 180)] * 4
+
+
 def test_confirmed_structural_markdown_blocks_plain_replacement(
     monkeypatch,
 ):
@@ -3565,6 +4082,97 @@ def test_four_consecutive_merge_left_cells_confirm_sparse_table():
     ]
 
     assert convert_service._sparse_rows_have_confirmed_structure(rows)
+
+
+def test_sparse_markdown_lost_content_rejects_short_render():
+    plain_parts = [
+        " ".join(f"word{index}" for index in range(40)),
+    ]
+
+    assert convert_service._sparse_markdown_lost_content("# word0", plain_parts)
+    assert not convert_service._sparse_markdown_lost_content(plain_parts[0], plain_parts)
+
+
+def test_dedupe_repeated_text_blocks_keeps_tables(monkeypatch):
+    text = (
+        "Основной текст документа\n\n"
+        "Повторяемый длинный абзац с одинаковым смыслом и словами\n\n"
+        "Повторяемый длинный абзац с одинаковым смыслом и словами\n\n"
+        "| A | B |\n| --- | --- |\n| 1 | 2 |\n\n"
+        "| A | B |\n| --- | --- |\n| 1 | 2 |"
+    )
+
+    class SimilarityCore:
+        def should_drop_text_block(
+            self,
+            _candidate_chars,
+            _existing_chars,
+            _shared_tokens,
+            _candidate_tokens,
+            _existing_tokens,
+            similarity_milli,
+        ):
+            return similarity_milli >= 880
+
+    monkeypatch.setattr(convert_service, "native_pipeline_core", lambda: SimilarityCore())
+
+    deduped = convert_service._dedupe_repeated_text_blocks(text)
+
+    assert deduped.count("Повторяемый длинный абзац") == 1
+    assert deduped.count("| A | B |") == 2
+
+
+def test_dedupe_repeated_text_blocks_drops_overlapping_full_page_noise(monkeypatch):
+    clean = (
+        "Amazon Basics USB C charger cable black two meter pack with fast delivery"
+    )
+    noisy_full_page = clean + " xzq"
+    calls = []
+
+    class OverlapCore:
+        def should_drop_text_block(self, *metrics):
+            calls.append(metrics)
+            return True
+
+    monkeypatch.setattr(convert_service, "native_pipeline_core", lambda: OverlapCore())
+
+    deduped = convert_service._dedupe_repeated_text_blocks(
+        f"{clean}\n\n{noisy_full_page}"
+    )
+
+    assert deduped == clean
+    assert calls == [
+        (
+            convert_service._ocr_compact_char_count(noisy_full_page),
+            convert_service._ocr_compact_char_count(clean),
+            13,
+            14,
+            13,
+            calls[0][-1],
+        )
+    ]
+    assert calls[0][-1] >= 880
+
+
+def test_dedupe_repeated_text_blocks_keeps_distinct_product_rows(monkeypatch):
+    first = "Amazon Basics USB C charger black two meter pack AB-100"
+    second = "Amazon Basics wireless keyboard white compact model KB-900"
+    calls = []
+
+    class PreserveCore:
+        def should_drop_text_block(self, *metrics):
+            calls.append(metrics)
+            return False
+
+    monkeypatch.setattr(convert_service, "native_pipeline_core", lambda: PreserveCore())
+
+    deduped = convert_service._dedupe_repeated_text_blocks(f"{first}\n\n{second}")
+
+    assert deduped == f"{first}\n\n{second}"
+    assert len(calls) == 1
+    _candidate_chars, _existing_chars, shared, candidate_count, existing_count, similarity = calls[0]
+    assert shared < min(candidate_count, existing_count)
+    assert similarity < 880
 
 
 def test_adjacent_tables_with_same_schema_merge_as_continuation():

@@ -13,7 +13,7 @@ from PIL import Image
 
 from app import upload_limits
 from app.main import app, create_app
-from app.routers import convert, install
+from app.routers import convert, health, install
 from app.services import convert_service
 
 client = TestClient(app)
@@ -138,7 +138,21 @@ def test_readiness():
         "pytesseract",
         "pdf2image",
         "opencv",
+        "pipeline_core_abi3",
     }
+
+
+def test_readiness_rejects_missing_or_incompatible_pipeline_core(monkeypatch):
+    def fail_core():
+        raise RuntimeError("Unsupported pipeline core ABI")
+
+    monkeypatch.setattr(health, "native_pipeline_core", fail_core)
+
+    response = client.get("/readiness")
+
+    assert response.status_code == 200
+    assert response.json()["checks"]["pipeline_core_abi3"] is False
+    assert response.json()["ready"] is False
 
 
 def test_diagnostics_v1_alias():

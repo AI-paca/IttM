@@ -4,6 +4,7 @@ import {
   BROWSER_PIPELINE_PROFILES,
   backendPipelineParams,
   browserPipelineProfileForSource,
+  normalizeBrowserPipelineProfile,
 } from "./pipeline-config";
 
 test("browser source enables projected document dewarp before OCR", () => {
@@ -22,10 +23,10 @@ test("browser source enables projected document dewarp before OCR", () => {
   assert.equal(profile.contextualMarkdownGrammar, true);
   assert.equal(profile.denseGridTargetWidth, 3300);
   assert.equal(profile.edgeWordFallbackPsm, "7");
-  assert.equal(profile.lexicalCorrection, "off");
-  assert.equal(profile.ocrLanguageRetry, "off");
-  assert.equal(profile.tableSlotBuilder, "off");
-  assert.equal(profile.tableSlotMaxColumns, 4);
+  assert.equal(profile.lexicalCorrection, "t9_small");
+  assert.equal(profile.ocrLanguageRetry, "t9_small");
+  assert.equal(profile.tableSlotBuilder, "recursive_gaps_v1");
+  assert.equal(profile.tableSlotMaxColumns, 14);
   assert.equal(profile.recursiveTableCellOcr, "auto");
   assert.equal(profile.recursiveTableCellOcrBatchPixels, 8_000_000);
   assert.deepEqual(profile.layout.featureExtractors, ["projection_geometry"]);
@@ -87,10 +88,28 @@ test("table-slot small-reviewer browser profile is explicit opt-in", () => {
   assert.equal(profile.layout.selector, "table_first_heuristic_v1");
 });
 
+test("tiny reviewer mode enables matching ocr language retry without table slots", () => {
+  const profile = normalizeBrowserPipelineProfile({
+    ...BROWSER_PIPELINE_PROFILES.browser_tesseract_table_first,
+    name: "normalized-table-slot-test",
+    lexicalCorrection: "t9_small",
+    ocrLanguageRetry: "off",
+    tableSlotBuilder: "off",
+  });
+
+  assert.equal(profile.lexicalCorrection, "t9_small");
+  assert.equal(profile.ocrLanguageRetry, "t9_small");
+  assert.equal(profile.tableSlotBuilder, "off");
+});
+
 test("greek math browser profile is explicit opt-in", () => {
   const profile = BROWSER_PIPELINE_PROFILES.browser_tesseract_greek_math;
 
   assert.equal(profile.languages, "rus+eng+ell+equ");
+  assert.equal(profile.lexicalCorrection, "t9_small");
+  assert.equal(profile.ocrLanguageRetry, "t9_small");
+  assert.equal(profile.tableSlotBuilder, "recursive_gaps_v1");
+  assert.equal(profile.tableSlotMaxColumns, 14);
   assert.equal(profile.layout.selector, "uniform_spatial_v1");
   assert.deepEqual(profile.layout.allowedStages, ["spatial_regions"]);
 });

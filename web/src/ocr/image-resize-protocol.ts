@@ -11,8 +11,7 @@ export interface ResizeWorkerRequest {
 }
 
 export type ResizeWorkerCommand =
-  | { type: "start"; request: ResizeWorkerRequest }
-  | { type: "next" };
+  { type: "start"; request: ResizeWorkerRequest } | { type: "next" };
 
 export type ResizeWorkerResponse =
   | { type: "plan"; total: number }

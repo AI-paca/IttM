@@ -3,9 +3,33 @@ import type {
   TextReviewerRequest,
   TextReviewerResponse,
 } from "./text-reviewer-protocol";
+import { scoreMathLanguage } from "./math-language";
 
 interface PendingReview {
   resolve: (isText: boolean) => void;
+}
+
+const SHORT_REVIEWER_TOKEN_LIMIT = 10;
+
+function isCompactNumericOrFormulaOrGreek(text: string): boolean {
+  const normalized = text.trim();
+  if (!normalized || normalized.length > SHORT_REVIEWER_TOKEN_LIMIT)
+    return false;
+  if (/\s/.test(normalized)) return false;
+
+  if (/^\p{N}+(?:[.,:/-]?\d+%?|\.\d+)?$/u.test(normalized)) {
+    return true;
+  }
+
+  if (
+    /[+\-*/=<>^_√∫ΣΠπ∞≈≠≤≥]/u.test(normalized) ||
+    /[\u0370-\u03ff]/u.test(normalized)
+  ) {
+    return true;
+  }
+
+  const mathScore = scoreMathLanguage(normalized);
+  return mathScore.equ > 0 || mathScore.ell > 0;
 }
 
 let worker: Worker | null = null;
@@ -15,6 +39,7 @@ const pending = new Map<number, PendingReview>();
 function shouldUseModel(candidate: BrowserTextCandidate): boolean {
   const text = candidate.text.trim();
   if (!text) return false;
+  if (isCompactNumericOrFormulaOrGreek(text)) return false;
   if (/^[\p{N}+\-*/=<>^_√∫ΣΠπ∞≈≠≤≥.,:%()№]+$/u.test(text)) {
     return false;
   }

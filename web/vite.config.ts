@@ -240,6 +240,9 @@ export default defineConfig(({ mode }) => {
         "@": path.resolve(webRoot, "src"),
       },
     },
+    optimizeDeps: {
+      include: ["@huggingface/transformers"],
+    },
     server: {
       hmr: process.env.DISABLE_HMR !== "true",
       proxy: {

@@ -21,18 +21,21 @@ export interface SourceImageRegion {
 
 const LONG_IMAGE_ASPECT_RATIO = 4;
 const TILE_OVERLAP_PIXELS = 128;
+const SMALL_IMAGE_TARGET_LONG_EDGE = 2500;
+const MAX_OCR_UPSCALE = 4;
 
 function boundedTargetSize(width: number, height: number, limits: ImageLimits) {
   const pixels = width * height;
-  const dimensionScale = Math.min(
-    1,
-    limits.maxDimension / Math.max(width, height),
+  const longEdge = Math.max(width, height);
+  const qualityScale = Math.min(
+    MAX_OCR_UPSCALE,
+    Math.max(1, SMALL_IMAGE_TARGET_LONG_EDGE / longEdge),
   );
-  const pixelScale = Math.min(
-    1,
-    Math.sqrt(limits.maxImagePixels / Math.max(pixels, 1)),
+  const dimensionScale = limits.maxDimension / longEdge;
+  const pixelScale = Math.sqrt(
+    limits.maxImagePixels / Math.max(pixels, 1),
   );
-  const scale = Math.min(dimensionScale, pixelScale);
+  const scale = Math.min(qualityScale, dimensionScale, pixelScale);
 
   return {
     width: Math.max(1, Math.floor(width * scale)),

@@ -2,7 +2,6 @@ import { useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { processPdfIntelligently } from "../lib/pdf-parser";
 import { effectivePdfCropMode, readCropMode } from "../lib/crop-preference";
-import { debugMarkdownForFile } from "./debug-sample-markdown";
 import {
   buildApiUrl,
   buildBackendGatewayCandidates,
@@ -33,6 +32,7 @@ import type {
   SourceType,
 } from "./types";
 import type { AppState } from "../types/app.types";
+import { IS_LITE_RUNTIME } from "../runtime-mode";
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
@@ -305,6 +305,11 @@ export function useOcrExtraction({
         };
 
         const runBrowserFallback = async () => {
+          if (!IS_LITE_RUNTIME) {
+            throw new Error(
+              "Browser OCR is available only in the Lite build; use the Python backend for this runtime.",
+            );
+          }
           activateSource("browser");
           if (file.type === "application/pdf") {
             const md = await processPdfIntelligently(
@@ -358,16 +363,6 @@ export function useOcrExtraction({
           );
         };
 
-        const debugMarkdown = debugMarkdownForFile(file);
-        if (debugMarkdown) {
-          activateSource("browser");
-          setProgress("Показываем debug Markdown sample...");
-          result = {
-            markdown: debugMarkdown,
-            meta: { debugFixture: true },
-          };
-        }
-
         if (!result) {
           let effectiveSource = selectedSource;
           const localBackendAvailable = hasAvailableLocalBackend(diagnostics);
@@ -378,7 +373,8 @@ export function useOcrExtraction({
 
           if (
             effectiveSource === "auto" &&
-            autoBackendCandidates.length === 0
+            autoBackendCandidates.length === 0 &&
+            IS_LITE_RUNTIME
           ) {
             console.log(
               "[OCR] No backend candidates are available, auto-switching to browser source",
@@ -471,7 +467,10 @@ export function useOcrExtraction({
             } catch (backendError) {
               const normalizedBackendError =
                 normalizePlatformError(backendError);
-              if (normalizedBackendError.code === "OCR_STREAM_STALLED") {
+              if (
+                normalizedBackendError.code === "OCR_STREAM_STALLED" &&
+                IS_LITE_RUNTIME
+              ) {
                 progressiveText = "";
                 setExtractedText("");
                 setLastExtractedPage(1);
@@ -509,6 +508,7 @@ export function useOcrExtraction({
               }
 
               if (!result) {
+                if (!IS_LITE_RUNTIME) throw backendError;
                 if (active.current)
                   setProgress(
                     "Cloud/локальный gateway недоступен, выполняем в браузере (WASM)...",

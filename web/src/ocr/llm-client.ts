@@ -10,12 +10,20 @@ import {
   prepareImageForLlm,
 } from "./document-encoding";
 import { assertExternalLlmConsent, runExternalLlmRequest } from "./llm-consent";
+import {
+  runTextPipeline,
+  trustedMarkdownArtifact,
+} from "./pipeline-orchestrator";
 import type {
   LlmProvider,
   OcrResult,
   ProgressDetail,
   ProgressSink,
 } from "./types";
+
+async function trustedMarkdownResult(markdown: string): Promise<OcrResult> {
+  return await runTextPipeline(trustedMarkdownArtifact(markdown));
+}
 
 const OCR_PROMPT =
   "Extract all text from this image/document. Preserve tables as Markdown tables. Output only the extracted content, no markdown fences.";
@@ -102,6 +110,7 @@ export async function executeLlmOcrForImage(
         `Gemini: сеть недоступна или ключ ограничен политиками браузера (${
           normalizePlatformError(error).message
         })`,
+        { cause: error },
       );
     }
 
@@ -116,7 +125,7 @@ export async function executeLlmOcrForImage(
 
     const data = await response.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (text) return { markdown: text };
+    if (text) return await trustedMarkdownResult(text);
 
     const finishReason = data?.candidates?.[0]?.finishReason;
     if (finishReason)
@@ -157,6 +166,7 @@ export async function executeLlmOcrForImage(
   } catch (error) {
     throw new Error(
       `OpenRouter: сеть недоступна или запрос заблокирован (${normalizePlatformError(error).message})`,
+      { cause: error },
     );
   }
 
@@ -164,7 +174,7 @@ export async function executeLlmOcrForImage(
 
   const data = await response.json();
   const text = data?.choices?.[0]?.message?.content;
-  if (text) return { markdown: text };
+  if (text) return await trustedMarkdownResult(text);
   throw new Error("Пустой ответ от OpenRouter или неизвестный формат ответа.");
 }
 
@@ -193,6 +203,7 @@ export async function executeOllamaOcrForImage(
   } catch (error) {
     throw new Error(
       `Ollama: сеть недоступна или CORS заблокировал запрос (${normalizePlatformError(error).message})`,
+      { cause: error },
     );
   }
 
@@ -200,7 +211,8 @@ export async function executeOllamaOcrForImage(
 
   const data = await response.json();
   const text = data?.response;
-  if (typeof text === "string" && text.trim()) return { markdown: text };
+  if (typeof text === "string" && text.trim())
+    return await trustedMarkdownResult(text);
   throw new Error("Пустой ответ от Ollama или неизвестный формат ответа.");
 }
 
@@ -254,7 +266,7 @@ export async function executeOllamaOcr(
         shouldContinue: () => activeContent.current,
       },
     );
-    return { markdown: md };
+    return await trustedMarkdownResult(md);
   }
 
   const prepared = await prepareImageForLlm(targetFile);
@@ -319,7 +331,7 @@ export async function executeLlmOcr(
         shouldContinue: () => activeContent.current,
       },
     );
-    return { markdown: md };
+    return await trustedMarkdownResult(md);
   }
 
   const prepared = await prepareImageForLlm(targetFile);

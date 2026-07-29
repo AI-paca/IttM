@@ -1,6 +1,7 @@
 import React from "react";
 import { Cloud, Cpu, HardDrive, Sparkles, Wand2 } from "lucide-react";
 import type { SourceType } from "../ocr/types";
+import { IS_LITE_RUNTIME } from "../runtime-mode";
 
 export interface SourceOption {
   id: SourceType;
@@ -9,7 +10,7 @@ export interface SourceOption {
   icon: React.ReactNode;
 }
 
-export const SOURCES: SourceOption[] = [
+const ALL_SOURCES: SourceOption[] = [
   {
     id: "auto",
     label: "Auto (Fallback)",
@@ -47,3 +48,7 @@ export const SOURCES: SourceOption[] = [
     icon: <Sparkles className="w-4 h-4" />,
   },
 ];
+
+export const SOURCES = ALL_SOURCES.filter(
+  (source) => IS_LITE_RUNTIME || source.id !== "browser",
+);

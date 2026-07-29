@@ -84,6 +84,50 @@ test("browser table slots leave ordinary prose alone", () => {
   assert.equal(browserWordsToTableMarkdown(result), "");
 });
 
+test("browser table slots reject long prose wrapped as a narrow grid", () => {
+  const words = Array.from({ length: 45 }, (_, rowIndex) => {
+    const columns = rowIndex % 3 === 0 ? [0, 1, 2] : [0, 1];
+    if (rowIndex === 0) columns.pop();
+    return columns.map((col) =>
+      word(
+        `text${rowIndex}-${col}`,
+        10 + col * 170,
+        10 + rowIndex * 24,
+        85 + col * 170,
+        24 + rowIndex * 24,
+      ),
+    );
+  }).flat();
+  const result: BrowserOcrDetailedResult = {
+    text: "long prose document",
+    words,
+  };
+
+  assert.equal(browserWordsToTableMarkdown(result, { maxColumns: 4 }), "");
+});
+
+test("browser table slots reject long sparse wide prose grids", () => {
+  const words = Array.from({ length: 48 }, (_, rowIndex) => {
+    const columns =
+      rowIndex < 10 ? Array.from({ length: 9 }, (_, col) => col) : [0, 4, 8];
+    return columns.map((col) =>
+      word(
+        `text${rowIndex}-${col}`,
+        10 + col * 105,
+        10 + rowIndex * 24,
+        45 + col * 105,
+        24 + rowIndex * 24,
+      ),
+    );
+  }).flat();
+  const result: BrowserOcrDetailedResult = {
+    text: "long sparse prose document",
+    words,
+  };
+
+  assert.equal(browserWordsToTableMarkdown(result, { maxColumns: 14 }), "");
+});
+
 test("browser table slots allow wide tables only when profile raises the column cap", () => {
   const words = Array.from({ length: 10 }, (_, rowIndex) =>
     Array.from({ length: 10 }, (_, col) =>
@@ -106,6 +150,125 @@ test("browser table slots allow wide tables only when profile raises the column 
     browserWordsToTableMarkdown(result, { maxColumns: 14 }),
     /^\| H1 \| H2 \| H3 \| H4 \| H5 \| H6 \| H7 \| H8 \| H9 \| H10 \|/m,
   );
+});
+
+test("browser table slots recover coarse columns from oversegmented word gaps", () => {
+  const tableWords = Array.from({ length: 10 }, (_, rowIndex) =>
+    Array.from({ length: 6 }, (_, col) => {
+      const left = 10 + col * 150;
+      const top = 100 + rowIndex * 30;
+      const prefix = rowIndex === 0 ? `H${col + 1}` : `R${rowIndex}C${col + 1}`;
+      return [
+        word(prefix, left, top, left + 35, top + 14),
+        word("part", left + 55, top, left + 90, top + 14),
+      ];
+    }),
+  ).flat(2);
+  const result: BrowserOcrDetailedResult = {
+    text: "six column dense table",
+    words: [
+      word("nav", 10, 10, 35, 24),
+      word("search", 380, 10, 430, 24),
+      word("promo", 760, 40, 810, 54),
+      ...tableWords,
+      word("footer", 10, 430, 60, 444),
+    ],
+  };
+
+  const markdown = browserWordsToTableMarkdown(result, { maxColumns: 6 });
+
+  assert.match(
+    markdown,
+    /^\| H1 part \| H2 part \| H3 part \| H4 part \| H5 part \| H6 part \|/m,
+  );
+  assert.match(
+    markdown,
+    /^\| R1C1 part \| R1C2 part \| R1C3 part \| R1C4 part \| R1C5 part \| R1C6 part \|/m,
+  );
+  assert.doesNotMatch(markdown, /nav|promo|footer/);
+});
+
+test("browser table slots normalize repeated product-card grids", async () => {
+  const rows = [
+    [
+      "Price",
+      "HP laptop",
+      "ASUS Vivobook",
+      "Lenovo IdeaPad",
+      "HP Laptop",
+      "Laptop PC",
+    ],
+    [
+      "Brands",
+      "FHD Display",
+      "Windows Notebook",
+      "IPS 512GB",
+      "FHD 16GB",
+      "Core Celeron",
+    ],
+    ["", "Windows 11", "Fast Processor", "Office SSD", "Windows 11", "USB C"],
+    ["", "4.1 (12)", "4.2 (2)", "3.9 (10)", "4.4 (20)", "4.0 (1)"],
+    ["", "Bought 100", "Bought 50", "Bought 10", "Bought 200", "Bought 20"],
+    [
+      "",
+      "Prime Day Deal",
+      "Limited deal",
+      "Prime exclusive",
+      "Deal",
+      "Prime Day Deal",
+    ],
+    ["", "€259.99", "£474.00", "£499.00", "£379.00", "£189.00"],
+    ["", "Exclusive Prime price", "", "60% off Microsoft", "rrp £500", ""],
+    [
+      "",
+      "Add to basket",
+      "See options",
+      "Add to basket",
+      "See options",
+      "Add to basket",
+    ],
+  ];
+  const words = rows.flatMap((row, rowIndex) =>
+    row.flatMap((cell, col) => {
+      if (!cell) return [];
+      const left = 10 + col * 190;
+      const top = 100 + rowIndex * 30;
+      const parts = cell.split(/\s+/);
+      return parts.map((part, partIndex) =>
+        word(
+          part,
+          left + partIndex * 55,
+          top,
+          left + partIndex * 55 + 35,
+          top + 14,
+        ),
+      );
+    }),
+  );
+  const result: BrowserOcrDetailedResult = {
+    text: "product card grid",
+    words,
+  };
+
+  const markdown = browserWordsToTableMarkdown(result, { maxColumns: 6 });
+
+  assert.match(
+    markdown,
+    /^\| Field \| Result 1 \| Result 2 \| Result 3 \| Result 4 \| Result 5 \|/m,
+  );
+  assert.match(markdown, /^\| Product \| HP laptop FHD Display Windows 11/m);
+  assert.match(markdown, /^\| Price \| €259\.99 \| £474\.00/m);
+  assert.match(markdown, /^\| Action \| Add to basket \| See options/m);
+  assert.match(markdown, /^Price$/m);
+  assert.match(markdown, /^Brands$/m);
+
+  const reviewed = await browserWordsToReviewedTableMarkdown(
+    result,
+    { maxColumns: 6 },
+    async () => true,
+  );
+  assert.match(reviewed, /^Price$/m);
+  assert.match(reviewed, /^Brands$/m);
 });
 
 test("browser table slots reject narrow pseudo-tables even with a wide cap", () => {

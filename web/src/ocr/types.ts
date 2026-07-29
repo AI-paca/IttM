@@ -1,11 +1,6 @@
 export type { AppState } from "../types/app.types";
 export type SourceType =
-  | "auto"
-  | "gateway"
-  | "browser"
-  | "local_tess"
-  | "local_easy"
-  | "llm";
+  "auto" | "gateway" | "browser" | "local_tess" | "local_easy" | "llm";
 export type LlmProvider = "gemini" | "openrouter";
 
 export interface OcrResult {

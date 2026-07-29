@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Iterable, Protocol
+from typing import Callable, Iterable, Protocol
 
 from app.pipeline_config import (
     OCR_PIPELINE_PROFILES,
@@ -20,6 +20,35 @@ OCR_LANGUAGE_RETRY_MODES = frozenset({"off", "t9_small"})
 RECURSIVE_TABLE_CELL_OCR_MODES = frozenset({"off", "auto", "always"})
 TABLE_SLOT_BUILDER_MODES = frozenset({"off", "line_merge_v1", "recursive_gaps_v1"})
 STRUCTURAL_OUTPUT_MODES = frozenset({"markdown", "records"})
+
+
+@dataclass(frozen=True)
+class PipelineOverrideSpec:
+    key: str
+    modes: frozenset[str]
+    apply: Callable[[OcrPipelineProfile, str], OcrPipelineProfile]
+    status: str = "active"
+
+
+PIPELINE_OVERRIDE_SPECS = {
+    spec.key: spec
+    for spec in (
+        PipelineOverrideSpec(
+            "lexical_correction",
+            LEXICAL_CORRECTION_MODES,
+            with_lexical_correction,
+            status="legacy_coupled_language_retry",
+        ),
+        PipelineOverrideSpec("ocr_language_retry", OCR_LANGUAGE_RETRY_MODES, with_ocr_language_retry),
+        PipelineOverrideSpec(
+            "recursive_table_cell_ocr",
+            RECURSIVE_TABLE_CELL_OCR_MODES,
+            with_recursive_table_cell_ocr,
+        ),
+        PipelineOverrideSpec("table_slot_builder", TABLE_SLOT_BUILDER_MODES, with_table_slot_builder),
+        PipelineOverrideSpec("structural_output", STRUCTURAL_OUTPUT_MODES, with_structural_output),
+    )
+}
 
 
 @dataclass(frozen=True)
@@ -72,35 +101,18 @@ def parse_pipeline_flag_overrides(raw_flags: str | None) -> dict[str, str]:
             raise ValueError(f"Invalid pipeline flag override '{part}'. Use key:value or key=value.")
         key = key.strip()
         value = value.strip()
-        if key not in {
-            "lexical_correction",
-            "ocr_language_retry",
-            "recursive_table_cell_ocr",
-            "structural_output",
-            "table_slot_builder",
-        }:
+        spec = PIPELINE_OVERRIDE_SPECS.get(key)
+        if spec is None:
             if flag_overrides_enabled():
                 raise ValueError(f"Pipeline flag override '{key}' is not implemented yet.")
             raise ValueError(
                 "Pipeline flag overrides are exposed in the API contract but disabled except "
-                "for lexical_correction, ocr_language_retry, recursive_table_cell_ocr, and table_slot_builder. "
+                "for " + ", ".join(sorted(PIPELINE_OVERRIDE_SPECS)) + ". "
                 f"Set {PIPELINE_FLAG_OVERRIDES_ENV}=1 only after a broader override resolver is implemented."
             )
-        if key == "lexical_correction" and value not in LEXICAL_CORRECTION_MODES:
-            known = ", ".join(sorted(LEXICAL_CORRECTION_MODES))
-            raise ValueError(f"Unknown lexical_correction mode '{value}'. Known modes: {known}")
-        if key == "ocr_language_retry" and value not in OCR_LANGUAGE_RETRY_MODES:
-            known = ", ".join(sorted(OCR_LANGUAGE_RETRY_MODES))
-            raise ValueError(f"Unknown ocr_language_retry mode '{value}'. Known modes: {known}")
-        if key == "recursive_table_cell_ocr" and value not in RECURSIVE_TABLE_CELL_OCR_MODES:
-            known = ", ".join(sorted(RECURSIVE_TABLE_CELL_OCR_MODES))
-            raise ValueError(f"Unknown recursive_table_cell_ocr mode '{value}'. Known modes: {known}")
-        if key == "table_slot_builder" and value not in TABLE_SLOT_BUILDER_MODES:
-            known = ", ".join(sorted(TABLE_SLOT_BUILDER_MODES))
-            raise ValueError(f"Unknown table_slot_builder mode '{value}'. Known modes: {known}")
-        if key == "structural_output" and value not in STRUCTURAL_OUTPUT_MODES:
-            known = ", ".join(sorted(STRUCTURAL_OUTPUT_MODES))
-            raise ValueError(f"Unknown structural_output mode '{value}'. Known modes: {known}")
+        if value not in spec.modes:
+            known = ", ".join(sorted(spec.modes))
+            raise ValueError(f"Unknown {key} mode '{value}'. Known modes: {known}")
         overrides[key] = value
     return overrides
 
@@ -110,27 +122,10 @@ def apply_pipeline_flag_overrides(
     raw_flags: str | None,
 ) -> OcrPipelineProfile:
     overrides = parse_pipeline_flag_overrides(raw_flags)
-    lexical_correction = overrides.get("lexical_correction")
-    if lexical_correction is not None:
-        profile = with_lexical_correction(profile, lexical_correction)
-    ocr_language_retry = overrides.get("ocr_language_retry")
-    if ocr_language_retry is not None:
-        profile = with_ocr_language_retry(profile, ocr_language_retry)
-    recursive_table_cell_ocr = overrides.get("recursive_table_cell_ocr")
-    if recursive_table_cell_ocr is not None:
-        profile = with_recursive_table_cell_ocr(
-            profile,
-            recursive_table_cell_ocr,
-        )
-    table_slot_builder = overrides.get("table_slot_builder")
-    if table_slot_builder is not None:
-        profile = with_table_slot_builder(profile, table_slot_builder)
-    structural_output = overrides.get("structural_output")
-    if structural_output is not None:
-        profile = with_structural_output(
-            profile,
-            structural_output,
-        )
+    for key, spec in PIPELINE_OVERRIDE_SPECS.items():
+        value = overrides.get(key)
+        if value is not None:
+            profile = spec.apply(profile, value)
     return profile
 
 
@@ -422,6 +417,14 @@ def pipeline_flag_catalog() -> list[dict[str, str]]:
 def pipeline_flags_payload() -> dict:
     return {
         "overrides_enabled": flag_overrides_enabled(),
+        "supported_overrides": [
+            {
+                "key": spec.key,
+                "modes": sorted(spec.modes),
+                "status": spec.status,
+            }
+            for spec in PIPELINE_OVERRIDE_SPECS.values()
+        ],
         "override_parameter": "pipeline_flags",
         "available_flags": pipeline_flag_catalog(),
         "profiles": {name: sorted(profile_flags(profile)) for name, profile in sorted(OCR_PIPELINE_PROFILES.items())},

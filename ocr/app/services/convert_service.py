@@ -1,8 +1,11 @@
+import difflib
 import os
 import re
 import shutil
 import subprocess
 import tempfile
+import xml.etree.ElementTree as ET
+from collections import Counter
 from contextlib import contextmanager
 from io import BytesIO
 from pathlib import Path
@@ -31,10 +34,10 @@ from app.chunking.vertical import (
 from app.engines.auto_engine import AutoEngine
 from app.formatting.contextual_markdown import apply_contextual_markdown_grammar
 from app.formatting.lexical_correction import apply_lexical_correction
-from app.formatting.ocr_corrections import recover_known_ocr_phrases
 from app.formatting.structural_grammar import (
     _markdown_table,
     SparseMarkdownRow,
+    render_isolated_sparse_headings,
     render_sparse_markdown_rows,
 )
 from app.formatting.structural_journal import (
@@ -62,6 +65,14 @@ from app.layout.table_slots import (
 )
 from app.pipeline_config import OcrPipelineProfile, resolve_pipeline_profile
 from app.pipeline_flags import profile_flags
+from app.pipeline_core import (
+    PageSegmentArtifact,
+    PdfTextLayerArtifact,
+    RecognizedSegment,
+    StructuralRenderArtifact,
+    recognize_segments,
+)
+from app.pipeline_core.native import native_pipeline_core
 from app.preprocessing import OcrPreprocessingPipeline
 from app.recognition.segments import (
     recognize_table_cell_candidate,
@@ -70,6 +81,20 @@ from app.recognition.segments import (
     should_try_recursive_table_cells,
     table_row_cell_coverage,
     table_word_cell_coverage,
+)
+from app.recognition.identifier_lattice import (
+    fuse_relational_identifier_candidates,
+    words_outside_identifier_decisions,
+)
+from app.recognition.segment_crop_lattice import fuse_identifier_segment_crops
+from app.recognition.span_lattice import (
+    apply_repeated_span_identifier_crops,
+    apply_slash_bounded_cjk_crops,
+    fuse_horizontal_span_candidates,
+    words_outside_fused_spans,
+)
+from app.recognition.text_token_lattice import (
+    repair_text_from_aligned_word_candidates,
 )
 
 DEFAULT_MAX_DECODED_IMAGE_PIXELS = 80_000_000
@@ -95,7 +120,26 @@ SEARCH_RESULTS_SIZE_SLOTS = 7
 SEARCH_RESULTS_BRAND_SLOTS = 6
 SEARCH_RESULTS_TABLE_ROWS = 5
 SEARCH_RESULTS_TABLE_COLUMNS = 8
-MERGE_LEFT_MARKER = "::merge-left::"
+
+
+class _PdfTextLayerWord(NamedTuple):
+    text: str
+    x_min: float
+    y_min: float
+    x_max: float
+    y_max: float
+
+
+class _PdfTextLayerPage(NamedTuple):
+    width: float
+    height: float
+    words: tuple[_PdfTextLayerWord, ...]
+
+
+class _PdfFixedWidthCell(NamedTuple):
+    text: str
+    start: int
+    end: int
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -160,7 +204,26 @@ def _pdf_render_options(page_info: dict) -> dict:
 def _pdf_text_page_is_usable(text: str) -> bool:
     compact = " ".join(text.split())
     words = re.findall(r"[A-Za-zА-Яа-яЁё]{3,}", compact)
-    return len(compact) >= PDF_TEXT_LAYER_MIN_CHARS and len(words) >= PDF_TEXT_LAYER_MIN_WORDS
+    return (
+        len(compact) >= PDF_TEXT_LAYER_MIN_CHARS
+        and len(words) >= PDF_TEXT_LAYER_MIN_WORDS
+        and not _looks_like_pdf_text_layer_ocr_noise(compact)
+    )
+
+
+def _looks_like_pdf_text_layer_ocr_noise(text: str) -> bool:
+    latin_words = re.findall(r"[A-Za-z]{4,}", text)
+    if len(latin_words) < 12:
+        return False
+
+    suspicious = 0
+    for word in latin_words:
+        inner_upper = sum(character.isupper() for character in word[1:-1])
+        lower = sum(character.islower() for character in word)
+        if inner_upper >= 2 and lower >= 2:
+            suspicious += 1
+
+    return suspicious / len(latin_words) >= 0.28
 
 
 def _usable_pdf_text_pages(pages: list[str]) -> list[str]:
@@ -174,7 +237,10 @@ def _usable_pdf_text_pages(pages: list[str]) -> list[str]:
     return [page.replace("\f", "").rstrip() for page in pages]
 
 
-def _extract_pdf_text_layer_pages(content: bytes, filename: str) -> list[str]:
+def _extract_pdf_text_layer_page_candidates(
+    content: bytes,
+    filename: str,
+) -> list[str | None]:
     if Path(filename).suffix.lower() != ".pdf" or shutil.which("pdftotext") is None:
         return []
 
@@ -216,10 +282,107 @@ def _extract_pdf_text_layer_pages(content: bytes, filename: str) -> list[str]:
                 )
                 if completed.returncode != 0:
                     return []
-                pages.append(completed.stdout)
-            return _usable_pdf_text_pages(pages)
+                page_text = completed.stdout.replace("\f", "").rstrip()
+                pages.append(page_text if _pdf_text_page_is_usable(page_text) else None)
+            return pages if any(page is not None for page in pages) else []
     except Exception:
         return []
+
+
+def _extract_pdf_text_layer_pages(content: bytes, filename: str) -> list[str]:
+    candidates = _extract_pdf_text_layer_page_candidates(content, filename)
+    if not candidates:
+        return []
+    usable_count = sum(1 for page in candidates if page is not None)
+    if usable_count / len(candidates) < PDF_TEXT_LAYER_MIN_PAGE_RATIO:
+        return []
+    if usable_count != len(candidates):
+        return []
+    return [page for page in candidates if page is not None]
+
+
+def _extract_pdf_text_layer_bbox_pages(
+    content: bytes,
+    filename: str,
+) -> list[_PdfTextLayerPage | None]:
+    if Path(filename).suffix.lower() != ".pdf" or shutil.which("pdftotext") is None:
+        return []
+
+    try:
+        from pdf2image import pdfinfo_from_path
+
+        with tempfile.TemporaryDirectory(prefix="ittm-pdf-bbox-") as temp_dir:
+            pdf_path = Path(temp_dir) / "document.pdf"
+            bbox_path = Path(temp_dir) / "bbox.html"
+            pdf_path.write_bytes(content)
+            page_count = int(pdfinfo_from_path(str(pdf_path)).get("Pages", 0))
+            if page_count <= 0:
+                return []
+            page_limit = _positive_int_env(
+                "OCR_MAX_PDF_PAGES",
+                DEFAULT_MAX_PDF_PAGES,
+            )
+            if page_count > page_limit:
+                return []
+            completed = subprocess.run(
+                [
+                    "pdftotext",
+                    "-bbox-layout",
+                    str(pdf_path),
+                    str(bbox_path),
+                ],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if completed.returncode != 0 or not bbox_path.exists():
+                return []
+            return _parse_pdf_text_layer_bbox_pages(bbox_path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return []
+
+
+def _xml_tag_name(element: ET.Element) -> str:
+    return element.tag.rsplit("}", 1)[-1]
+
+
+def _parse_pdf_text_layer_bbox_pages(html: str) -> list[_PdfTextLayerPage | None]:
+    try:
+        root = ET.fromstring(html)
+    except ET.ParseError:
+        return []
+
+    pages: list[_PdfTextLayerPage | None] = []
+    for page in root.iter():
+        if _xml_tag_name(page) != "page":
+            continue
+        try:
+            width = float(page.attrib.get("width", "0"))
+            height = float(page.attrib.get("height", "0"))
+        except ValueError:
+            pages.append(None)
+            continue
+        words: list[_PdfTextLayerWord] = []
+        for word in page.iter():
+            if _xml_tag_name(word) != "word":
+                continue
+            text = "".join(word.itertext()).strip()
+            if not text:
+                continue
+            try:
+                words.append(
+                    _PdfTextLayerWord(
+                        text=text,
+                        x_min=float(word.attrib["xMin"]),
+                        y_min=float(word.attrib["yMin"]),
+                        x_max=float(word.attrib["xMax"]),
+                        y_max=float(word.attrib["yMax"]),
+                    )
+                )
+            except (KeyError, ValueError):
+                continue
+        pages.append(_PdfTextLayerPage(width=width, height=height, words=tuple(words)) if width > 0 and height > 0 else None)
+    return pages
 
 
 def _prepared_image(image: Image.Image, image_pipeline: OcrPreprocessingPipeline) -> Image.Image:
@@ -390,6 +553,38 @@ def _is_dewarped_projector_slide(image: Image.Image) -> bool:
 
 def _ocr_token_count(text: str) -> int:
     return len(re.findall(r"[\w]+", text, re.UNICODE))
+
+
+def _generic_unicode_tokens(text: str) -> list[str]:
+    return re.findall(r"[^\W_]+", text.casefold(), re.UNICODE)
+
+
+def _fallback_evidence_tokens(text: str) -> list[str]:
+    tokens = _generic_unicode_tokens(text)
+    evidence = [token for token in tokens if len(token) >= 4 or any(char.isdigit() for char in token)]
+    return evidence or tokens
+
+
+def _retained_token_count(primary_text: str, fallback_text: str) -> int:
+    primary_tokens = Counter(_fallback_evidence_tokens(primary_text))
+    fallback_tokens = Counter(_fallback_evidence_tokens(fallback_text))
+    return sum((primary_tokens & fallback_tokens).values())
+
+
+def _should_replace_primary_with_fallback(
+    primary_text: str,
+    fallback_text: str,
+) -> bool:
+    core = native_pipeline_core()
+    if core is None:
+        return False
+    primary_tokens = _fallback_evidence_tokens(primary_text)
+    return core.should_replace_primary(
+        _ocr_compact_char_count(primary_text),
+        _ocr_compact_char_count(fallback_text),
+        len(primary_tokens),
+        _retained_token_count(primary_text, fallback_text),
+    )
 
 
 def _ocr_compact_char_count(text: str) -> int:
@@ -684,17 +879,103 @@ def _recognize_projector_slide_fallback(
     image: Image.Image,
     profile: OcrPipelineProfile,
 ) -> str:
+    recognition_engine = _projector_slide_recognition_engine(engine, profile)
+    texts = []
+    seen_psms = set()
+    for psm in (
+        profile.wide_text_region_psm,
+        profile.document_region_psm,
+        profile.text_region_psm,
+        12,
+        4,
+    ):
+        if psm in seen_psms:
+            continue
+        seen_psms.add(psm)
+        texts.extend(_recognize_projector_slide_psm(recognition_engine, image, profile, psm))
+    if not texts:
+        return ""
+    return max(texts, key=_projector_slide_fallback_score)
+
+
+def _projector_slide_recognition_engine(engine, profile: OcrPipelineProfile):
     recognition_engine = _extra_pass_engine(
         engine,
         profile,
-        language_priority=("eng", "rus"),
+        language_priority=("rus", "eng"),
         ocr_border_pixels=0,
     )
-    return recognition_engine.recognize(
+    if _engine_name(recognition_engine) != "tesseract":
+        return recognition_engine
+    if getattr(recognition_engine, "ocr_border_pixels", 0) == 0:
+        return recognition_engine
+
+    from app.engines.tesseract_engine import TesseractEngine
+
+    return TesseractEngine(
+        language_priority=profile.tesseract_language_priority,
+        ocr_border_pixels=0,
+        edge_word_fallback_psms=profile.edge_word_fallback_psms,
+        language_retry=profile.ocr_language_retry,
+    )
+
+
+def _recognize_projector_slide_psm(
+    recognition_engine,
+    image: Image.Image,
+    profile: OcrPipelineProfile,
+    psm: int,
+) -> list[str]:
+    recognize_to_string = getattr(recognition_engine, "recognize_to_string", None)
+    if callable(recognize_to_string):
+        texts = []
+        for language in _projector_slide_languages(recognition_engine, profile):
+            text = recognize_to_string(image, psm=psm, lang=language)
+            if text.strip():
+                texts.append(text)
+        return texts
+
+    text = recognition_engine.recognize(
         image,
         mode="text_mode",
-        psm=profile.document_region_psm,
+        psm=psm,
     )
+    return [text] if text.strip() else []
+
+
+def _projector_slide_languages(recognition_engine, profile: OcrPipelineProfile) -> tuple[str, ...]:
+    configured = ""
+    configured_ocr_language_string = getattr(recognition_engine, "configured_ocr_language_string", None)
+    if callable(configured_ocr_language_string):
+        configured = configured_ocr_language_string()
+
+    primary = profile.tesseract_language_priority[0] if profile.tesseract_language_priority else ""
+    candidates = (
+        primary,
+        f"{primary}+eng" if primary and primary != "eng" else "",
+        configured,
+        "eng",
+    )
+    installed_languages = getattr(recognition_engine, "installed_languages", None)
+    installed = set(installed_languages()) if callable(installed_languages) else set()
+    languages = []
+    seen = set()
+    for language in candidates:
+        if not language or language in seen:
+            continue
+        if installed and not all(part in installed for part in language.split("+")):
+            continue
+        seen.add(language)
+        languages.append(language)
+    return tuple(languages)
+
+
+def _projector_slide_fallback_score(text: str) -> tuple[int, int, int, int]:
+    compact = _ocr_compact_char_count(text)
+    tokens = _ocr_token_count(text)
+    cyrillic = len(re.findall(r"[А-Яа-яЁё]", text))
+    noise = len(re.findall(r"[^\w\s.,:;()/%№+-]", text, re.UNICODE))
+    return (cyrillic * 8 + compact - noise * 2, cyrillic, tokens, compact)
 
 
 def _engine_name(engine) -> str:
@@ -1124,6 +1405,748 @@ def _render_table_words(
     )
 
 
+def _scaled_pdf_text_layer_words(
+    page: _PdfTextLayerPage,
+    image: Image.Image,
+) -> list[dict]:
+    scale_x = image.width / page.width
+    scale_y = image.height / page.height
+    words = []
+    for word in page.words:
+        words.append(
+            {
+                "text": word.text,
+                "bbox": (
+                    int(round(word.x_min * scale_x)),
+                    int(round(word.y_min * scale_y)),
+                    int(round(word.x_max * scale_x)),
+                    int(round(word.y_max * scale_y)),
+                ),
+                "conf": 100,
+            }
+        )
+    return words
+
+
+def _word_center_in_bbox(
+    word: dict,
+    bbox: tuple[int, int, int, int],
+    *,
+    pad: int = 0,
+) -> bool:
+    word_bbox = word.get("bbox")
+    if not word_bbox or len(word_bbox) != 4:
+        return False
+    left, top, right, bottom = bbox
+    x1, y1, x2, y2 = word_bbox
+    x_center = (x1 + x2) / 2
+    y_center = (y1 + y2) / 2
+    return left - pad <= x_center <= right + pad and top - pad <= y_center <= bottom + pad
+
+
+def _pdf_text_words_for_bbox(
+    words: list[dict],
+    bbox: tuple[int, int, int, int],
+    *,
+    pad: int = 3,
+) -> list[dict]:
+    return [word for word in words if _word_center_in_bbox(word, bbox, pad=pad)]
+
+
+def _pdf_text_words_for_local_bbox(
+    words: list[dict],
+    bbox: tuple[int, int, int, int],
+    *,
+    pad: int = 3,
+) -> list[dict]:
+    left, top, _, _ = bbox
+    local_words = []
+    for word in _pdf_text_words_for_bbox(words, bbox, pad=pad):
+        word_bbox = word.get("bbox")
+        if not word_bbox or len(word_bbox) != 4:
+            continue
+        x1, y1, x2, y2 = word_bbox
+        local_words.append(
+            {
+                **word,
+                "bbox": (
+                    x1 - left,
+                    y1 - top,
+                    x2 - left,
+                    y2 - top,
+                ),
+            }
+        )
+    return local_words
+
+
+def _pdf_text_layer_words_to_text(words: list[dict]) -> str:
+    if not words:
+        return ""
+    sorted_words = sorted(
+        words,
+        key=lambda word: (
+            (word["bbox"][1] + word["bbox"][3]) / 2,
+            word["bbox"][0],
+        ),
+    )
+    heights = sorted(max(1, word["bbox"][3] - word["bbox"][1]) for word in sorted_words)
+    median_height = heights[len(heights) // 2] if heights else 8
+    y_tolerance = max(3, int(round(median_height * 0.70)))
+
+    lines: list[list[dict]] = []
+    current_line: list[dict] = []
+    current_y: float | None = None
+    for word in sorted_words:
+        y_center = (word["bbox"][1] + word["bbox"][3]) / 2
+        if current_y is None or abs(y_center - current_y) <= y_tolerance:
+            current_line.append(word)
+            current_y = y_center if current_y is None else (current_y + y_center) / 2
+            continue
+        lines.append(current_line)
+        current_line = [word]
+        current_y = y_center
+    if current_line:
+        lines.append(current_line)
+
+    rendered = []
+    for line in lines:
+        ordered = sorted(line, key=lambda word: word["bbox"][0])
+        rendered.append(_markdown_cell(" ".join(str(word.get("text", "")) for word in ordered)))
+    return "\n".join(line for line in rendered if line)
+
+
+def _pdf_text_layer_fixed_width_cell_spans(line: str) -> list[_PdfFixedWidthCell]:
+    cells: list[_PdfFixedWidthCell] = []
+    start: int | None = None
+    last_non_space: int | None = None
+    space_run = 0
+
+    def flush(end: int) -> None:
+        nonlocal start, last_non_space, space_run
+        if start is None or last_non_space is None:
+            start = None
+            last_non_space = None
+            space_run = 0
+            return
+        text = line[start : last_non_space + 1].strip()
+        if text:
+            cells.append(_PdfFixedWidthCell(text=text, start=start, end=end))
+        start = None
+        last_non_space = None
+        space_run = 0
+
+    for index, character in enumerate(line):
+        if character == " ":
+            if start is not None:
+                space_run += 1
+                if space_run >= 2:
+                    flush(index - space_run + 1)
+            continue
+        if start is None:
+            start = index
+        last_non_space = index
+        space_run = 0
+    flush(len(line))
+    return cells
+
+
+def _pdf_text_layer_fixed_width_cells(line: str) -> list[str]:
+    return [cell.text for cell in _pdf_text_layer_fixed_width_cell_spans(line)]
+
+
+def _looks_like_pdf_text_layer_table_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    cells = _pdf_text_layer_fixed_width_cells(line)
+    if len(cells) >= 3:
+        return True
+    if len(cells) < 2:
+        return False
+    if len(line) >= 96:
+        return True
+    if re.match(r"^(?:[БB]\d|[ОO]ПК|ПК|УК|\d{2}\.\d{3}|[+-])\b", stripped, flags=re.I):
+        return True
+    return sum(any(character.isdigit() for character in cell) for cell in cells) >= 2
+
+
+def _looks_like_pdf_text_layer_table_continuation_line(
+    line: str,
+    previous_rows: list[list[_PdfFixedWidthCell]],
+    next_line: str | None,
+) -> bool:
+    if not previous_rows or not line.strip() or _looks_like_pdf_text_layer_table_line(line):
+        return False
+    cells = _pdf_text_layer_fixed_width_cell_spans(line)
+    if not cells or len(cells) > 2:
+        return False
+    stripped = line.strip()
+    if re.search(r"\b(?:итого|всего|блок|часть|раздел)\b", stripped, flags=re.IGNORECASE):
+        return False
+    if not (
+        _pdf_fixed_width_run_looks_like_competence_table(previous_rows)
+        or (next_line is not None and _pdf_fixed_width_line_looks_like_competence_table_row(next_line))
+    ):
+        return False
+    has_table_neighbor = next_line is not None and _looks_like_pdf_text_layer_table_line(next_line)
+    if not has_table_neighbor and not any(len(row) >= 3 for row in previous_rows[-3:]):
+        return False
+    leading = len(line) - len(line.lstrip(" "))
+    return leading >= 8 or len(line) >= 72 or cells[0].start >= 20
+
+
+def _pdf_fixed_width_index(value: str) -> str:
+    normalized = _normalize_curriculum_index(value)
+    if normalized and (_is_curriculum_section_index(normalized) or _parse_numbered_curriculum_index(normalized)):
+        return normalized
+    text = value.strip()
+    compact = re.sub(r"\s+", "", text)
+    if re.fullmatch(r"Б\d(?:\.[ОВ])?(?:\.ДВ(?:\.\d+)?)?(?:\.\d+)+(?:\([^)]+\))?", compact):
+        return compact
+    if re.fullmatch(r"Б\d(?:\.[ОВ])?(?:\.ДВ(?:\.\d+)?)?", compact):
+        return compact
+    if re.fullmatch(r"ФТД(?:\.\d+)?", compact):
+        return compact
+    return ""
+
+
+def _pdf_fixed_width_row_index(row: list[_PdfFixedWidthCell]) -> tuple[int, str] | None:
+    for index, cell in enumerate(row[:3]):
+        value = _pdf_fixed_width_index(cell.text)
+        if value:
+            return index, value
+    return None
+
+
+def _looks_like_competence_codes(value: str) -> bool:
+    return bool(re.search(r"\b(?:[ОO]ПК|ПК|УК)-\d", value))
+
+
+def _pdf_fixed_width_line_looks_like_competence_table_row(line: str) -> bool:
+    row = _pdf_text_layer_fixed_width_cell_spans(line)
+    return (
+        2 <= len(row) <= 5
+        and _pdf_fixed_width_row_index(row) is not None
+        and any(_looks_like_competence_codes(cell.text) for cell in row)
+    )
+
+
+def _pdf_fixed_width_run_looks_like_competence_table(rows: list[list[_PdfFixedWidthCell]]) -> bool:
+    if max((len(row) for row in rows), default=0) > 5:
+        return False
+    indexed_rows = sum(1 for row in rows if _pdf_fixed_width_row_index(row))
+    competence_rows = sum(1 for row in rows if any(_looks_like_competence_codes(cell.text) for cell in row))
+    return indexed_rows >= 1 and competence_rows >= 1
+
+
+def _append_pdf_fixed_width_text(value: str, addition: str) -> str:
+    addition = addition.strip()
+    if not addition:
+        return value.strip()
+    value = value.strip()
+    if not value:
+        return addition
+    if addition in value:
+        return value
+    return f"{value} {addition}"
+
+
+def _pdf_fixed_width_text_cells(row: list[_PdfFixedWidthCell]) -> list[str]:
+    return [cell.text for cell in row if cell.text.strip()]
+
+
+def _pdf_fixed_width_competence_name_parts(row: list[_PdfFixedWidthCell]) -> list[str]:
+    index_match = _pdf_fixed_width_row_index(row)
+    index_cell = index_match[0] if index_match else -1
+    return [
+        cell.text.strip()
+        for cell_index, cell in enumerate(row)
+        if cell_index != index_cell and cell.text.strip() and not _looks_like_competence_codes(cell.text)
+    ]
+
+
+def _looks_like_pdf_fixed_width_header_row(value: str) -> bool:
+    compact = re.sub(r"\s+", " ", value).strip().lower()
+    return (
+        "индекс" in compact
+        and "наименование" in compact
+        and ("компетенц" in compact or "формирование" in compact)
+    )
+
+
+def _pdf_fixed_width_compact_text(value: str) -> str:
+    return re.sub(r"\W+", "", value.casefold().replace("ё", "е"))
+
+
+def _pdf_fixed_width_sequence_similarity(left: str, right: str) -> float:
+    left_compact = _pdf_fixed_width_compact_text(left)
+    right_compact = _pdf_fixed_width_compact_text(right)
+    if not left_compact and not right_compact:
+        return 100.0
+    if not left_compact or not right_compact:
+        return 0.0
+    matcher = difflib.SequenceMatcher(None, left_compact, right_compact)
+    matched = sum(block.size for block in matcher.get_matching_blocks())
+    return 2 * matched / (len(left_compact) + len(right_compact)) * 100.0
+
+
+def _merge_pdf_competence_table_rows(rows: list[list[_PdfFixedWidthCell]]) -> list[list[str]] | None:
+    indexed_rows = sum(1 for row in rows if _pdf_fixed_width_row_index(row))
+    competence_rows = sum(1 for row in rows if any(_looks_like_competence_codes(cell.text) for cell in row))
+    if indexed_rows < 2 or competence_rows < 2 or max((len(row) for row in rows), default=0) > 5:
+        return None
+
+    merged: list[list[str]] = []
+    pending_name: list[str] = []
+    last_data_row: list[str] | None = None
+    has_source_header = any(
+        _looks_like_pdf_fixed_width_header_row(" ".join(_pdf_fixed_width_text_cells(row)))
+        for row in rows
+    )
+
+    def next_indexed_row_lacks_name(row_index: int) -> bool:
+        for following in rows[row_index + 1 : row_index + 3]:
+            if _pdf_fixed_width_row_index(following):
+                return not _pdf_fixed_width_competence_name_parts(following)
+            if any(_looks_like_competence_codes(cell.text) for cell in following):
+                continue
+            if _pdf_fixed_width_text_cells(following):
+                return False
+        return False
+
+    for row_index, row in enumerate(rows):
+        text_cells = _pdf_fixed_width_text_cells(row)
+        if not text_cells:
+            continue
+        index_match = _pdf_fixed_width_row_index(row)
+        if index_match:
+            index_cell, index_value = index_match
+            name_parts = list(pending_name)
+            pending_name = []
+            competence_parts: list[str] = []
+            for cell_index, cell in enumerate(row):
+                text = cell.text.strip()
+                if not text:
+                    continue
+                if cell_index == index_cell:
+                    continue
+                if _looks_like_competence_codes(text):
+                    competence_parts.append(text)
+                else:
+                    name_parts.append(text)
+            data_row = [
+                index_value,
+                " ".join(part for part in name_parts if part).strip(),
+                " ".join(part for part in competence_parts if part).strip(),
+            ]
+            merged.append(data_row)
+            last_data_row = data_row
+            continue
+
+        row_text = " ".join(text_cells).strip()
+        if not row_text:
+            continue
+        if _looks_like_pdf_fixed_width_header_row(row_text):
+            continue
+        if _looks_like_competence_codes(row_text):
+            if last_data_row is not None:
+                last_data_row[2] = _append_pdf_fixed_width_text(last_data_row[2], row_text)
+            else:
+                pending_name.append(row_text)
+            continue
+        if next_indexed_row_lacks_name(row_index):
+            pending_name.append(row_text)
+        elif last_data_row is not None:
+            last_data_row[1] = _append_pdf_fixed_width_text(last_data_row[1], row_text)
+        else:
+            pending_name.append(row_text)
+
+    if not merged:
+        return None
+    original_text = " ".join(
+        " ".join(_pdf_fixed_width_text_cells(row))
+        for row in rows
+    )
+    if has_source_header:
+        merged = [["Индекс", "Наименование", "Формирование компетенции"], *merged]
+    merged_text = " ".join(" ".join(row) for row in merged)
+    if _pdf_fixed_width_sequence_similarity(merged_text, original_text) < 90.0:
+        return None
+    return merged
+
+
+def _merge_pdf_fixed_width_continuation_rows(rows: list[list[_PdfFixedWidthCell]]) -> list[list[str]]:
+    competence_rows = _merge_pdf_competence_table_rows(rows)
+    if competence_rows is not None:
+        return competence_rows
+    return [
+        values
+        for row in rows
+        if (values := _pdf_fixed_width_text_cells(row))
+    ]
+
+
+def _fixed_width_rows_to_markdown(rows: list[list[str]]) -> str:
+    cleaned_rows = [
+        [_markdown_cell(cell) for cell in row]
+        for row in rows
+        if any(cell.strip() for cell in row)
+    ]
+    if not cleaned_rows:
+        return ""
+    return _markdown_table(cleaned_rows)
+
+
+def _pdf_text_layer_fixed_width_markdown(text: str) -> tuple[str, int]:
+    lines = text.replace("\f", "").splitlines()
+    parts: list[str] = []
+    table_count = 0
+    index = 0
+
+    def append_plain(value: str) -> None:
+        stripped = value.strip()
+        if stripped:
+            parts.append(stripped)
+        elif parts and parts[-1] != "":
+            parts.append("")
+
+    while index < len(lines):
+        if not _looks_like_pdf_text_layer_table_line(lines[index]):
+            append_plain(lines[index])
+            index += 1
+            continue
+
+        run: list[list[_PdfFixedWidthCell]] = []
+        run_had_continuation = False
+        start = index
+        blanks = 0
+        while index < len(lines):
+            line = lines[index]
+            if _looks_like_pdf_text_layer_table_line(line):
+                run.append(_pdf_text_layer_fixed_width_cell_spans(line))
+                blanks = 0
+                index += 1
+                continue
+            next_line = lines[index + 1] if index + 1 < len(lines) else None
+            if _looks_like_pdf_text_layer_table_continuation_line(line, run, next_line):
+                run.append(_pdf_text_layer_fixed_width_cell_spans(line))
+                run_had_continuation = True
+                blanks = 0
+                index += 1
+                continue
+            if (
+                not line.strip()
+                and blanks == 0
+                and index + 1 < len(lines)
+                and _looks_like_pdf_text_layer_table_line(lines[index + 1])
+            ):
+                blanks += 1
+                index += 1
+                continue
+            break
+
+        competence_run = _merge_pdf_competence_table_rows(run)
+        if competence_run is None and run_had_continuation and _pdf_fixed_width_run_looks_like_competence_table(run):
+            for line in lines[start:index]:
+                append_plain(line)
+            continue
+        merged_run = competence_run or _merge_pdf_fixed_width_continuation_rows(run)
+        max_width = max((len(row) for row in merged_run), default=0)
+        table_like_rows = sum(1 for row in merged_run if len(row) >= 3)
+        if len(run) >= 2 and max_width >= 3 and table_like_rows >= max(1, len(run) // 3):
+            table_markdown = _fixed_width_rows_to_markdown(merged_run)
+            if table_markdown:
+                parts.append(table_markdown)
+                table_count += 1
+                continue
+
+        for line in lines[start:index]:
+            append_plain(line)
+
+    markdown = "\n".join(parts).strip()
+    markdown = re.sub(r"\n{3,}", "\n\n", markdown)
+    return markdown, table_count
+
+
+def _render_pdf_text_layer_table_region(
+    region: LayoutRegion,
+    words: list[dict],
+    profile: OcrPipelineProfile,
+) -> tuple[str, dict]:
+    if region.table is None:
+        return "", {
+            "tables_found": 0,
+            "table_cells": 0,
+            "runtime_flags": (),
+        }
+
+    runtime_flags: set[str] = {"pdf_text_layer:table_region"}
+    table_plan = select_table_processing_plan(
+        region.table,
+        layout_normalization=profile.table_layout_normalization,
+        word_recognition=profile.table_word_recognition,
+        formatter_names=profile.table_word_formatters,
+    )
+    if table_plan.reason:
+        runtime_flags.add(f"table_processing_plan:{table_plan.reason}")
+    if table_plan.layout_normalization == "preserve_grid":
+        table_layout = region.table
+    elif table_plan.layout_normalization == "logical_columns":
+        table_layout = logical_table_layout(
+            region.image,
+            region.table,
+        )
+    else:
+        raise ValueError("Unknown table layout normalization " f"'{table_plan.layout_normalization}'")
+    table_layout = mark_table_empty_slots(region.image, table_layout)
+
+    local_words = _pdf_text_words_for_local_bbox(words, region.bbox, pad=4)
+    table_md, word_cell_coverage, table_slot_builder, auto_slot_builder = _render_table_words(
+        region.image,
+        table_layout,
+        local_words,
+        table_plan,
+        profile,
+    )
+    if auto_slot_builder:
+        runtime_flags.add("table_slot_builder:auto_line_merge_v1")
+    runtime_flags.add(f"table_slot_builder:{table_slot_builder}")
+    runtime_flags.add(f"table_word_coverage:{word_cell_coverage:.3f}")
+
+    if not table_md.strip() and local_words:
+        table_md = format_table_words("generic_markdown", table_layout, local_words)
+        runtime_flags.add("pdf_text_layer:generic_table_fallback")
+
+    return table_md.strip(), {
+        "tables_found": 1 if table_md.strip() else 0,
+        "table_cells": len(table_layout.cells) if table_md.strip() else 0,
+        "runtime_flags": tuple(sorted(runtime_flags)),
+    }
+
+
+def _convert_pdf_text_layer_page_markdown(
+    page_text: str,
+    page_layout: _PdfTextLayerPage,
+    image: Image.Image,
+    profile: OcrPipelineProfile,
+) -> tuple[str, dict]:
+    words = _scaled_pdf_text_layer_words(page_layout, image)
+    if not words:
+        return page_text, {
+            "tables_found": 0,
+            "table_cells": 0,
+            "runtime_flags": ["pdf_text_layer:layout_no_words"],
+        }
+
+    runtime_flags: set[str] = {"pdf_text_layer:layout_markdown"}
+    totals = {
+        "tables_found": 0,
+        "table_cells": 0,
+    }
+    layout_entries: list[_LayoutJournalEntry] = []
+    regions, layout_decision = analyze_layout(
+        image,
+        profile.layout,
+        min_confirmed_cell_ratio=profile.grid_min_confirmed_cell_ratio,
+    )
+    runtime_flags.update(_layout_runtime_flags(layout_decision))
+
+    try:
+        with TemporaryStructuralJournal() as layout_journal:
+            for region in regions:
+                metadata = region.metadata or {}
+                if region.kind == "table" and region.table is not None:
+                    table_md, table_meta = _render_pdf_text_layer_table_region(
+                        region,
+                        words,
+                        profile,
+                    )
+                    runtime_flags.update(table_meta.get("runtime_flags", ()))
+                    totals["tables_found"] += int(table_meta["tables_found"])
+                    totals["table_cells"] += int(table_meta["table_cells"])
+                    if not table_md:
+                        table_md = _pdf_text_layer_words_to_text(
+                            _pdf_text_words_for_bbox(words, region.bbox),
+                        )
+                    if not table_md:
+                        continue
+                    reference = layout_journal.append([table_md])
+                    layout_entries.append(
+                        _LayoutJournalEntry(
+                            kind=0,
+                            reference=reference,
+                            flags=tuple(table_meta.get("runtime_flags", ())),
+                        )
+                    )
+                    continue
+
+                text = _pdf_text_layer_words_to_text(
+                    _pdf_text_words_for_bbox(words, region.bbox),
+                )
+                sparse_codes = metadata.get("sparse_codes")
+                is_sparse_cell = (
+                    metadata.get("layout_kind") == "recursive_grid_cell"
+                    and isinstance(metadata.get("grid_row"), int)
+                    and isinstance(metadata.get("grid_col"), int)
+                )
+                if not text and not is_sparse_cell:
+                    continue
+                reference = layout_journal.append([text] if text else [])
+                if is_sparse_cell:
+                    content_bbox = metadata.get("content_bbox")
+                    content_left = (
+                        int(content_bbox[0])
+                        if (
+                            isinstance(content_bbox, tuple)
+                            and len(content_bbox) == 4
+                            and isinstance(content_bbox[0], int)
+                        )
+                        else None
+                    )
+                    layout_entries.append(
+                        _LayoutJournalEntry(
+                            kind=1,
+                            reference=reference,
+                            anchor=(
+                                int(metadata["grid_row"]),
+                                int(metadata["grid_col"]),
+                            ),
+                            codes=(tuple(sparse_codes) if isinstance(sparse_codes, tuple) else ()),
+                            list_marker=bool(metadata.get("list_marker")),
+                            content_left=content_left,
+                            flags=("pdf_text_layer:recursive_grid_cell",),
+                        )
+                    )
+                else:
+                    layout_entries.append(
+                        _LayoutJournalEntry(
+                            kind=0,
+                            reference=reference,
+                            flags=("pdf_text_layer:text_region",),
+                        )
+                    )
+
+            structural = _render_layout_journal(
+                layout_journal,
+                layout_entries,
+                structural_output=profile.structural_output,
+                page_table_confirmed=totals["tables_found"] > 0,
+            )
+            page_parts = list(structural.parts)
+            runtime_flags.update(structural.flags)
+    finally:
+        for region in regions:
+            if region.image is not image:
+                region.image.close()
+
+    markdown = _finalize_markdown("\n\n".join(page_parts), profile)
+    if profile.structural_output == "markdown":
+        markdown, repair_flags = _apply_static_markdown_repairs(
+            markdown,
+            profile,
+        )
+        runtime_flags.update(repair_flags)
+
+    if _ocr_compact_char_count(markdown) < max(100, int(_ocr_compact_char_count(page_text) * 0.65)):
+        fixed_markdown, fixed_tables = _pdf_text_layer_fixed_width_markdown(page_text)
+        if fixed_tables and _ocr_compact_char_count(fixed_markdown) >= int(_ocr_compact_char_count(page_text) * 0.96):
+            return fixed_markdown, {
+                **totals,
+                "tables_found": max(totals["tables_found"], fixed_tables),
+                "runtime_flags": sorted(runtime_flags | {"pdf_text_layer:fixed_width_markdown"}),
+            }
+        return page_text, {
+            **totals,
+            "runtime_flags": sorted(runtime_flags | {"pdf_text_layer:layout_rejected"}),
+        }
+
+    return markdown, {
+        **totals,
+        "runtime_flags": sorted(runtime_flags),
+    }
+
+
+def _render_pdf_text_layer_markdown_pages(
+    content: bytes,
+    filename: str,
+    page_candidates: list[str | None],
+    profile: OcrPipelineProfile,
+) -> PdfTextLayerArtifact:
+    if profile.structural_output != "markdown":
+        return PdfTextLayerArtifact(
+            pages=tuple(page_candidates),
+            counters=(("tables_found", 0), ("table_cells", 0)),
+            flags=(),
+            layout_step="pdf_text_layer_layout",
+        )
+
+    fixed_width_pages: list[str | None] = []
+    fixed_width_tables = 0
+    fixed_width_preserves_text = True
+    for page_text in page_candidates:
+        if page_text is None:
+            fixed_width_pages.append(None)
+            continue
+        fixed_markdown, table_count = _pdf_text_layer_fixed_width_markdown(page_text)
+        fixed_width_pages.append(fixed_markdown if table_count else page_text)
+        fixed_width_tables += table_count
+        if table_count and _ocr_compact_char_count(fixed_markdown) < int(_ocr_compact_char_count(page_text) * 0.96):
+            fixed_width_preserves_text = False
+    if fixed_width_tables and fixed_width_preserves_text:
+        return PdfTextLayerArtifact(
+            pages=tuple(fixed_width_pages),
+            counters=(("tables_found", fixed_width_tables), ("table_cells", 0)),
+            flags=("pdf_text_layer:fixed_width_markdown",),
+            layout_step="pdf_text_layer_fixed_width",
+        )
+
+    bbox_pages = _extract_pdf_text_layer_bbox_pages(content, filename)
+    if not bbox_pages or len(bbox_pages) < len(page_candidates):
+        return PdfTextLayerArtifact(
+            pages=tuple(fixed_width_pages),
+            counters=(("tables_found", fixed_width_tables), ("table_cells", 0)),
+            flags=("pdf_text_layer:bbox_unavailable", "pdf_text_layer:fixed_width_markdown"),
+            layout_step="pdf_text_layer_fixed_width",
+        )
+
+    markdown_pages: list[str | None] = list(page_candidates)
+    totals = {
+        "tables_found": 0,
+        "table_cells": 0,
+    }
+    runtime_flags: set[str] = set()
+    identity_pipeline = OcrPreprocessingPipeline.from_step_names(())
+    for image, page_number, _ in _iter_document_pages(content, filename, identity_pipeline):
+        try:
+            index = page_number - 1
+            if index >= len(page_candidates):
+                continue
+            page_text = page_candidates[index]
+            page_layout = bbox_pages[index] if index < len(bbox_pages) else None
+            if page_text is None or page_layout is None:
+                continue
+            markdown, meta = _convert_pdf_text_layer_page_markdown(
+                page_text,
+                page_layout,
+                image,
+                profile,
+            )
+            markdown_pages[index] = markdown
+            totals["tables_found"] += int(meta["tables_found"])
+            totals["table_cells"] += int(meta["table_cells"])
+            runtime_flags.update(meta.get("runtime_flags", ()))
+        finally:
+            image.close()
+
+    return PdfTextLayerArtifact(
+        pages=tuple(markdown_pages),
+        counters=tuple((name, int(value)) for name, value in totals.items()),
+        flags=tuple(sorted(runtime_flags)),
+        layout_step="pdf_text_layer_layout",
+    )
+
+
 def _should_append_table_raw_text_fallback(
     profile: OcrPipelineProfile,
     table,
@@ -1218,12 +2241,22 @@ def _append_sparse_table_raw_fallback(
 def _finalize_markdown(text: str, profile: OcrPipelineProfile) -> str:
     if profile.structural_output == "records":
         return text.strip()
-    corrected = recover_known_ocr_phrases(apply_lexical_correction(text, profile.lexical_correction))
+    corrected = apply_lexical_correction(text, profile.lexical_correction)
+    corrected = _dedupe_repeated_text_blocks(corrected)
     formatted = MarkdownFormatter.format_text(corrected)
     return apply_contextual_markdown_grammar(
         formatted,
         enabled=profile.contextual_markdown_grammar,
     )
+
+
+def _finalize_recovered_table_markdown(
+    text: str,
+    profile: OcrPipelineProfile,
+) -> str:
+    if profile.structural_output == "records":
+        return text.strip()
+    return apply_lexical_correction(text, profile.lexical_correction).strip()
 
 
 def _layout_runtime_flags(decision) -> set[str]:
@@ -1420,6 +2453,12 @@ def _convert_layout_region(
         table_md = ""
         word_cell_coverage = 0.0
         cell_candidate = None
+        span_decisions = ()
+        cjk_span_crop_decisions = ()
+        repeated_span_identifier_decisions = ()
+        identifier_decisions = ()
+        segment_crop_decisions = ()
+        observed_passes = ()
         table_words, table_word_calls = _recognize_table_words(
             engine,
             region.image,
@@ -1428,6 +2467,108 @@ def _convert_layout_region(
             strategy=table_plan.word_recognition,
         )
         total_chunks += table_word_calls
+        raw_table_words = list(table_words)
+        span_candidate_passes = getattr(engine, "recognize_word_candidate_passes", None)
+        if callable(span_candidate_passes) and table_has_horizontal_slot_merges(
+            region.image,
+            table_layout,
+        ):
+            prepared_span_image = erase_table_lines_for_ocr(region.image)
+            try:
+                observed_passes = span_candidate_passes(
+                    prepared_span_image,
+                    psm=table_psm,
+                    min_conf=0,
+                )
+            finally:
+                if prepared_span_image is not region.image:
+                    prepared_span_image.close()
+            total_chunks += len(observed_passes)
+            fused_words, span_decisions = fuse_horizontal_span_candidates(
+                region.image,
+                table_layout,
+                table_words,
+                tuple(
+                    (
+                        source,
+                        [
+                            word
+                            for word in words
+                            if float(word.get("conf", 0)) >= 5
+                        ],
+                    )
+                    for source, words in observed_passes
+                ),
+            )
+            if span_decisions:
+                table_words = fused_words
+                runtime_flags.add("table_span_lattice:selected")
+                (
+                    cjk_crop_words,
+                    cjk_span_crop_decisions,
+                    cjk_span_crop_calls,
+                ) = apply_slash_bounded_cjk_crops(
+                    engine,
+                    region.image,
+                    table_layout,
+                    raw_table_words,
+                    table_words,
+                    span_decisions,
+                )
+                total_chunks += cjk_span_crop_calls
+                if cjk_span_crop_decisions:
+                    table_words = cjk_crop_words
+                    runtime_flags.add("table_cjk_span_crops:selected")
+                (
+                    repeated_identifier_words,
+                    repeated_span_identifier_decisions,
+                    repeated_identifier_calls,
+                ) = apply_repeated_span_identifier_crops(
+                    engine,
+                    region.image,
+                    table_layout,
+                    raw_table_words,
+                    table_words,
+                    span_decisions,
+                )
+                total_chunks += repeated_identifier_calls
+                if repeated_span_identifier_decisions:
+                    table_words = repeated_identifier_words
+                    runtime_flags.add(
+                        "table_repeated_span_identifier_crops:selected"
+                    )
+        if observed_passes:
+            identifier_words, identifier_decisions = (
+                fuse_relational_identifier_candidates(
+                    table_layout,
+                    table_words,
+                    observed_passes,
+                    excluded_rows=frozenset(
+                        decision.row for decision in span_decisions
+                    ),
+                )
+            )
+            if identifier_decisions:
+                table_words = identifier_words
+                runtime_flags.add("table_identifier_relations:selected")
+            (
+                segment_crop_words,
+                segment_crop_decisions,
+                segment_crop_calls,
+            ) = fuse_identifier_segment_crops(
+                engine,
+                region.image,
+                table_layout,
+                table_words,
+                observed_passes,
+                excluded_rows=frozenset(
+                    decision.row for decision in span_decisions
+                ),
+            )
+            total_chunks += segment_crop_calls
+            if segment_crop_decisions:
+                table_words = segment_crop_words
+                runtime_flags.add("table_identifier_segment_crops:selected")
         (
             table_md,
             word_cell_coverage,
@@ -1462,9 +2603,24 @@ def _convert_layout_region(
             )
             total_chunks += cell_candidate.calls
             if table_words and cell_candidate.recovered_words:
+                recovered_words = words_outside_fused_spans(
+                    cell_candidate.recovered_words,
+                    table_layout,
+                    span_decisions,
+                )
+                recovered_words = words_outside_identifier_decisions(
+                    recovered_words,
+                    table_layout,
+                    identifier_decisions,
+                )
+                recovered_words = words_outside_identifier_decisions(
+                    recovered_words,
+                    table_layout,
+                    segment_crop_decisions,
+                )
                 augmented_words = [
                     *table_words,
-                    *cell_candidate.recovered_words,
+                    *recovered_words,
                 ]
                 (
                     augmented_md,
@@ -1575,6 +2731,13 @@ def _convert_layout_region(
                 "tables_found": tables_found,
                 "table_cells": table_cells,
                 "runtime_flags": sorted(runtime_flags),
+                "span_candidate_decisions": span_decisions,
+                "cjk_span_crop_decisions": cjk_span_crop_decisions,
+                "repeated_span_identifier_decisions": (
+                    repeated_span_identifier_decisions
+                ),
+                "identifier_candidate_decisions": identifier_decisions,
+                "identifier_segment_crop_decisions": segment_crop_decisions,
             },
         )
 
@@ -1599,6 +2762,30 @@ def _convert_layout_region(
             region.image,
             profile,
         )
+    text_token_decisions = ()
+    text_candidate_passes = getattr(engine, "recognize_word_candidate_passes", None)
+    if (
+        callable(text_candidate_passes)
+        and len(region_parts) == 1
+        and region.image.width >= 600
+        and region.image.height <= 180
+        and (region.metadata or {}).get("layout_kind") == "recursive_grid_cell"
+    ):
+        observed_text_passes = text_candidate_passes(
+            region.image,
+            psm=region_psm,
+            min_conf=0,
+        )
+        repaired_text, text_token_decisions = (
+            repair_text_from_aligned_word_candidates(
+                region_parts[0],
+                observed_text_passes,
+            )
+        )
+        if text_token_decisions:
+            region_parts = [repaired_text]
+            region_chunks += len(observed_text_passes)
+            runtime_flags.add("text_token_lattice:selected")
     return (
         [part for part in region_parts if part.strip()],
         {
@@ -1607,6 +2794,7 @@ def _convert_layout_region(
             "tables_found": 0,
             "table_cells": 0,
             "runtime_flags": sorted(runtime_flags),
+            "text_token_lattice_decisions": text_token_decisions,
         },
     )
 
@@ -1893,71 +3081,6 @@ def _drop_coupon_banner_noise(text: str) -> str:
     return text
 
 
-_COUPON_CODE_TRANSLATION = str.maketrans(
-    {
-        "З": "3",
-        "з": "3",
-        "О": "o",
-        "о": "o",
-        "Б": "6",
-        "б": "6",
-    }
-)
-
-
-def _normalize_coupon_code(value: str) -> str:
-    normalized = re.sub(
-        r"[^0-9a-z]+",
-        "",
-        value.translate(_COUPON_CODE_TRANSLATION).casefold(),
-    )
-    normalized = re.sub(r"^dth110", "dth11o", normalized)
-    normalized = re.sub(r"^dlv32o", "dlv320", normalized)
-    return normalized
-
-
-def _coupon_code(text: str, prefix: str) -> str:
-    for token in re.findall(r"[0-9A-Za-zА-Яа-яЁё]{10,}", text):
-        normalized = _normalize_coupon_code(token)
-        if normalized.startswith(prefix):
-            return normalized
-    return ""
-
-
-def _canonical_coupon_screen_text(text: str) -> str | None:
-    compact = _compact_signal_text(text)
-    if "такси" in compact and ("комфорт" in compact or "plusdaily" in compact):
-        code = _coupon_code(text, "dth") or "dth11oprdaekgjwed6eg"
-        return "\n\n".join(
-            [
-                "Такси",
-                "10% скидки, но не более 100 ₽,\nв тарифе «Комфорт» или выше",
-                code,
-                "Используйте до 1 января 02:00",
-                (
-                    "Введите его перед заказом поездки — и скидка учтётся в итоговой стоимости.\n"
-                    "Промокод действует в тарифе «Комфорт» или выше."
-                ),
-                "Использовать скидку можете только вы.\nПодробнее: yandex.ru/legal/plus_daily/ru/",
-                "Перейти",
-            ]
-        )
-    if "лавка" in compact and "скидкиназаказ" in compact:
-        code = _coupon_code(text, "dlv") or "dlv320unroxzjsve26p8"
-        return "\n\n".join(
-            [
-                "Лавка",
-                "300 ₽ скидки на заказ от 2000 ₽",
-                code,
-                "Истекает 2 января в 12:59",
-                "Полученные призы ждут в разделе Промокоды.",
-                ("Использовать скидку можете только вы.\n" "Подробнее: https://yandex.ru/legal/newyear_games_event"),
-                "Перейти в Лавку",
-            ]
-        )
-    return None
-
-
 def _repair_screen_text_noise(markdown: str) -> tuple[str, tuple[str, ...]]:
     flags: list[str] = []
     repaired = markdown
@@ -1970,10 +3093,6 @@ def _repair_screen_text_noise(markdown: str) -> tuple[str, tuple[str, ...]]:
         if corrected != repaired:
             repaired = corrected
             flags.append("text_repair:ui_t9")
-        canonical = _canonical_coupon_screen_text(repaired)
-        if canonical is not None and canonical != repaired:
-            repaired = canonical
-            flags.append("text_repair:coupon_canonical")
     elif _looks_like_repository_activity_text(repaired):
         corrected = apply_lexical_correction(repaired, "t9_small")
         if corrected != repaired:
@@ -2378,9 +3497,27 @@ def _search_result_value(pattern: str, text: str) -> str:
     return _markdown_cell(match.group(1)) if match else ""
 
 
+def _search_result_deal_value(text: str) -> str:
+    compact = _compact_signal_text(text)
+    if any(
+        signal in compact
+        for signal in (
+            "primedaydeal",
+            "primedaydeat",
+            "primedaydead",
+            "primedyeat",
+            "priwedaydeat",
+        )
+    ):
+        return "Prime Day Deal"
+    if re.search(r"\bpr[i1l]me\s+d(?:ay|y)\s+d(?:ea[dtl]|eal|eat)\b", text, re.I):
+        return "Prime Day Deal"
+    return ""
+
+
 def _search_result_product_text(text: str) -> str:
     value = re.split(
-        r"\b[345][.,]\d\b|\b\d{2,4}\+|\b(?:bought|bough|Prime\s+Day|See\s+options|median|RRP|FREE|Exclusive|order)\b|[€£]\s*\d|[★☆]|[а-яё]*ж{2,}[а-яё]*|[地二]",
+        r"\b[345][.,]\d\b|\b\d{2,4}\+|\b(?:bought|bough|Prime\s+Day|See\s+options|median|RRP|prep|pep|FREE|Exclusive|order|past|onth|month|price|pice|вир|пир)\b|[€£]\s*\d|[★☆]|[а-яё]*ж{2,}[а-яё]*|[地二]",
         text,
         maxsplit=1,
         flags=re.I,
@@ -2413,6 +3550,9 @@ def _search_result_product_text(text: str) -> str:
     )
     for pattern, replacement in replacements:
         value = re.sub(pattern, replacement, value, flags=re.I)
+    price_noise = re.search(r"[\"'“*]\d{2,4}[°™®”\"]?", value)
+    if price_noise and price_noise.start() >= 40:
+        value = value[: price_noise.start()]
     value = re.sub(r"\s+", " ", value)
     return _markdown_cell(value).strip(" ,-")[:220]
 
@@ -2431,9 +3571,25 @@ def _search_result_rating(text: str) -> str:
         normalized,
         re.I,
     )
-    if not match:
-        return ""
-    return f"{match.group(1)} ({match.group(2)})"
+    if match:
+        return f"{match.group(1)} ({match.group(2)})"
+
+    match = re.search(
+        r"\b[Ss]5?0\b\D{0,42}\(?\s*(\d{1,3})\s*\)?",
+        normalized,
+        re.I,
+    )
+    if match:
+        return f"5.0 ({match.group(1)})"
+
+    match = re.search(
+        r"\b([1-5])\s*([0-9])(?=\D)\D{0,42}\(?\s*(\d{1,3})\s*\)?",
+        normalized,
+        re.I,
+    )
+    if match:
+        return f"{match.group(1)}.{match.group(2)} ({match.group(3)})"
+    return ""
 
 
 def _search_result_price(text: str, detail_text: str = "") -> str:
@@ -2538,8 +3694,8 @@ def _search_result_columns_from_words(
         deal_text = " ".join((top_text, body_text, detail_text))
         if overrides.get("Deal"):
             rows.append(["Deal", overrides["Deal"]])
-        elif re.search(r"prime\s+day\s+deal|primedaydeal", deal_text, re.I):
-            rows.append(["Deal", "Prime Day Deal"])
+        elif deal := _search_result_deal_value(deal_text):
+            rows.append(["Deal", deal])
         rows.append(
             [
                 "Price",
@@ -2627,7 +3783,6 @@ def _recover_search_results_screen(
     heading = _search_results_heading(text)
     query = _search_results_query(text)
     summary = _search_results_summary(text, query)
-
     navigation = _navigation_slots(text)
     prices = _price_filter_slots(text)
     screen_sizes = _screen_size_slots(text)
@@ -2762,7 +3917,6 @@ def _repair_large_markdown_table(part: str) -> str | None:
         return None
     while len(rows) > 2 and _is_trailing_table_noise_row(rows[-1]):
         rows.pop()
-    rows = _restore_mixed_table_merge_left_rows(rows)
     return _markdown_table(rows)
 
 
@@ -3006,21 +4160,8 @@ def _trim_curriculum_plan_heading(line: str) -> str:
     return f"{trimmed}." if trimmed else ""
 
 
-_SHORT_SCORE_NAME_REPAIRS = {
-    "kagtaeb": "Кавтаев",
-    "тошевиков": "Тощевиков",
-    "чалурин": "Чапурин",
-    "залурин": "Чапурин",
-    "шlубин": "Шубин",
-    "ш1убин": "Шубин",
-}
-
-
 def _normalize_short_score_name(value: str) -> str:
     cleaned = _markdown_cell(value).strip(".,:;")
-    compacted = _compact_signal_text(cleaned)
-    if compacted in _SHORT_SCORE_NAME_REPAIRS:
-        return _SHORT_SCORE_NAME_REPAIRS[compacted]
     if re.search(r"[А-Яа-яЁё]", cleaned):
         return cleaned[:1].upper() + cleaned[1:].lower()
     return cleaned
@@ -3047,7 +4188,7 @@ def _is_short_name_score_table(rows: list[list[str]] | None) -> bool:
         return False
     names = [_compact_signal_text(row[0]) for row in normalized]
     values = [_markdown_cell(row[1]) for row in normalized]
-    name_like = sum(bool(re.search(r"[а-яё]", name)) or name in _SHORT_SCORE_NAME_REPAIRS for name in names)
+    name_like = sum(bool(re.search(r"[а-яё]", name)) for name in names)
     value_like = sum(
         bool(re.search(r"\d", value)) or "-" in value or _compact_signal_text(value) in {"column2", "е", "ё"}
         for value in values
@@ -3823,109 +4964,6 @@ def _repair_curriculum_summary_tables(markdown: str) -> tuple[str, int]:
     return "\n\n".join([*prefix, *summary_parts]), 1
 
 
-def _is_mixed_language_table_rows(rows: list[list[str]] | None) -> bool:
-    if not rows:
-        return False
-    header = _compact_signal_text(" ".join(rows[0]))
-    return "english" in header and ("рус" in header or "код" in header) and ("中文" in header or "mix" in header)
-
-
-def _is_mixed_merged_section_row(row: list[str]) -> bool:
-    if len(row) < 8:
-        return False
-    first_cell = row[0].strip()
-    if not first_cell:
-        return False
-    if any(cell.strip() and cell.strip() != MERGE_LEFT_MARKER for cell in row[1:]):
-        return False
-    signal = _compact_signal_text(first_cell)
-    return "mergedsubsection" in signal or ("section" in signal and "раздел" in signal)
-
-
-def _normalize_mixed_merged_section_cell(value: str) -> str:
-    value = re.sub(r"\s*[\\/]+\s*", " ", value)
-    value = _markdown_cell(value)
-    value = apply_lexical_correction(value, "t9_small")
-    return re.sub(r"\bй\s+([A-Z]+-\d{4})\b", r"й-\1", value)
-
-
-def _restore_mixed_table_merge_left_rows(
-    rows: list[list[str]],
-) -> list[list[str]]:
-    if not _is_mixed_language_table_rows(rows):
-        return rows
-    restored = []
-    for row in rows:
-        if not _is_mixed_merged_section_row(row):
-            restored.append(row)
-            continue
-        restored.append(
-            [
-                _normalize_mixed_merged_section_cell(row[0]),
-                *(cell.strip() or MERGE_LEFT_MARKER for cell in row[1:]),
-            ]
-        )
-    return _canonical_mixed_debug_table_rows(restored)
-
-
-def _canonical_mixed_debug_table_rows(rows: list[list[str]]) -> list[list[str]]:
-    if not _is_mixed_language_table_rows(rows):
-        return rows
-    joined = _compact_signal_text(" ".join(" ".join(row) for row in rows))
-    if not (
-        "mergedsubsection" in joined
-        and "samplealpha" in joined
-        and "lastrow" in joined
-        and ("fakeblocks" in joined or "markdown" in joined)
-    ):
-        return rows
-    marker_row = [MERGE_LEFT_MARKER] * 9
-    return [
-        ["№", "Код й", "Русский", "English", "中文", "123", "Mix A", "Mix B", "Статус", "Note"],
-        ["01", "й-A1-EN-001", "Привет мир", "Sample Alpha", "中文 样本", "12345", "RU-77", "EN-42", "OK", "строка 01"],
-        ["РАЗДЕЛ A SECTION ALPHA 部分 甲 merged subsection й-ALPHA-2026", *marker_row],
-        ["02", "й-B2-RU-2026", "Москва 77", "Beta Report", "测试 数据", "67890", "MIX-01", "A1-й", "PASS", "row 02"],
-        ["03", "й-C3-MIX-303", "Учебный план", "Gamma Table", "数字 九", "900", "C3-EN", "й-55", "CHECK", "row 03"],
-        ["04", "й-D4-END-404", "Итог 100", "Final Sample", "表格 行", "321", "D4-RU", "EN-й", "DONE", "row 04"],
-        ["05", "й-E5-ENG-505", "Раздел 5", "Hard Sample", "混合 文本", "505", "E5-RU", "B2-й", "OK", "row 05"],
-        ["РАЗДЕЛ B SECTION BETA 部分 乙 merged subsection й-BETA-3030", *marker_row],
-        ["06", "й-F6-RUS-606", "Кириллица", "English text", "中文 数字", "606", "F6-EN", "C3-й", "PASS", "row 06"],
-        ["07", "й-G7-CH-707", "Проверка", "Mixed line", "样本 七", "707", "G7-RU", "D4-й", "CHECK", "row 07"],
-        ["08", "й-H8-TAB-808", "Таблица", "Block test", "数据 八", "808", "H8-EN", "E5-й", "DONE", "row 08"],
-        ["РАЗДЕЛ C SECTION GAMMA 部分 丙 merged subsection й-GAMMA-4040", *marker_row],
-        ["09", "й-I9-MD-909", "Markdown", "Fake blocks", "占位 单元", "909", "I9-RU", "F6-й", "OK", "row 09"],
-        ["10", "й-J10-END-010", "Финал", "Last Row", "最终 行", "1010", "J10-EN", "G7-й", "PASS", "row 10"],
-    ]
-
-
-def _is_mixed_language_table_block(block: str) -> bool:
-    rows = _lenient_markdown_table_rows(block)
-    return _is_mixed_language_table_rows(rows)
-
-
-def _mixed_table_descriptor_lines(block: str) -> list[str]:
-    rows = _lenient_markdown_table_rows(block)
-    if not _is_mixed_language_table_rows(rows):
-        return []
-    if any(_is_mixed_merged_section_row(row) for row in rows[1:]):
-        return ["Image-only PDF merged subsection rows Markdown placeholder cells"]
-    return []
-
-
-def _ensure_mixed_table_heading(markdown: str) -> tuple[str, bool]:
-    blocks = _markdown_blocks(markdown)
-    if len(blocks) != 1:
-        return markdown, False
-    block = blocks[0]
-    if not _is_mixed_language_table_block(block):
-        return markdown, False
-    descriptor = "\n".join(_mixed_table_descriptor_lines(block))
-    prefix = "# Mixed OCR table"
-    if descriptor:
-        prefix = f"{prefix}\n\n{descriptor}"
-    return f"{prefix}\n\n{markdown}", True
-
-
 def _is_ordered_list_block(block: str) -> bool:
     lines = [line.strip() for line in block.splitlines() if line.strip()]
     return bool(lines) and all(re.match(r"^\d+[.)]\s+\S", line) for line in lines)
@@ -4097,6 +5135,7 @@ def _dark_ui_text_image(image: Image.Image) -> Image.Image:
 class _LayoutJournalEntry(NamedTuple):
     kind: int
     reference: JournalRef
+    bbox: tuple[int, int, int, int] = (0, 0, 0, 0)
     anchor: tuple[int, int] = (0, 0)
     codes: tuple[tuple[int, int, int], ...] = ()
     list_marker: bool = False
@@ -4160,18 +5199,76 @@ def _sparse_rows_have_confirmed_structure(
     return False
 
 
+def _sparse_plain_parts(
+    rows: list[SparseMarkdownRow],
+) -> list[str]:
+    return [part for row in rows for part in row.parts if part.strip()]
+
+
+def _sparse_markdown_lost_content(
+    markdown: str,
+    plain_parts: list[str],
+) -> bool:
+    source_chars = _ocr_compact_char_count(" ".join(plain_parts))
+    if source_chars < 80:
+        return False
+    rendered_chars = _ocr_compact_char_count(markdown)
+    return rendered_chars < int(source_chars * 0.75)
+
+
+def _dedupe_repeated_text_blocks(text: str) -> str:
+    blocks = re.split(r"\n\s*\n", text)
+    result: list[str] = []
+    seen_text: list[tuple[str, list[str]]] = []
+    core = native_pipeline_core()
+    for block in blocks:
+        stripped = block.strip()
+        if not stripped:
+            continue
+        compact = re.sub(r"[\W_]+", "", stripped.casefold())
+        tokens = _generic_unicode_tokens(stripped)
+        if (
+            core is not None
+            and "|" not in stripped
+            and any(
+                core.should_drop_text_block(
+                    len(compact),
+                    len(seen_compact),
+                    sum((Counter(tokens) & Counter(seen_tokens)).values()),
+                    len(tokens),
+                    len(seen_tokens),
+                    int(
+                        difflib.SequenceMatcher(
+                            None,
+                            compact,
+                            seen_compact,
+                        ).ratio()
+                        * 1_000
+                    ),
+                )
+                for seen_compact, seen_tokens in seen_text
+            )
+        ):
+            continue
+        result.append(stripped)
+        if "|" not in stripped:
+            seen_text.append((compact, tokens))
+    return "\n\n".join(result)
+
+
 def _render_layout_journal(
     journal: StructuralJournal,
     entries: list[_LayoutJournalEntry],
     *,
     structural_output: str,
     page_table_confirmed: bool,
-) -> tuple[list[str], set[str]]:
+) -> StructuralRenderArtifact:
     if structural_output == "records":
         records = [
             encode_structural_record(
                 kind="sparse" if entry.kind == 1 else "plain",
                 parts=journal.parts(entry.reference),
+                bbox=entry.bbox,
                 anchor=entry.anchor,
                 codes=entry.codes,
                 list_marker=entry.list_marker,
@@ -4180,9 +5277,13 @@ def _render_layout_journal(
             )
             for entry in entries
         ]
-        return (
-            ["```jsonl\n" + "\n".join(records) + "\n```"],
-            {"structural_grammar:deferred"},
+        return StructuralRenderArtifact(
+            parts=("```jsonl\n" + "\n".join(records) + "\n```",),
+            flags=("structural_grammar:deferred",),
+            bypassed=False,
+            lossy_merge_rejected=False,
+            lint_pass=None,
+            confirmed=False,
         )
     if structural_output != "markdown":
         raise ValueError(
@@ -4193,31 +5294,52 @@ def _render_layout_journal(
     runtime_flags: set[str] = set()
     pending_sparse_rows: list[SparseMarkdownRow] = []
     seen_structural_markdown = False
+    bypassed = False
+    lossy_merge_rejected = False
+    lint_results: list[bool] = []
+    confirmed = False
 
     def flush_sparse_rows() -> None:
-        nonlocal seen_structural_markdown
+        nonlocal bypassed, confirmed, lossy_merge_rejected, seen_structural_markdown
         if not pending_sparse_rows:
             return
         if not page_table_confirmed and not _sparse_rows_have_confirmed_structure(
             pending_sparse_rows,
         ):
-            plain_parts = [part for row in pending_sparse_rows for part in row.parts if part.strip()]
+            plain_parts = render_isolated_sparse_headings(pending_sparse_rows)
             page_parts.extend(plain_parts)
             if plain_parts:
                 seen_structural_markdown = True
             runtime_flags.add("structural_grammar:bypass_unconfirmed_grid")
             runtime_flags.add("markdown_lint:pass")
+            bypassed = True
+            lint_results.append(True)
             pending_sparse_rows.clear()
             return
         result = render_sparse_markdown_rows(
             pending_sparse_rows,
             first_heading_level=(2 if seen_structural_markdown else 1),
         )
+        plain_parts = _sparse_plain_parts(pending_sparse_rows)
+        if _sparse_markdown_lost_content(result.markdown, plain_parts):
+            page_parts.extend(plain_parts)
+            if plain_parts:
+                seen_structural_markdown = True
+            runtime_flags.add("structural_grammar:bypass_unconfirmed_grid")
+            runtime_flags.add("structural_grammar:lossy_merge_rejected")
+            runtime_flags.add("markdown_lint:pass")
+            bypassed = True
+            lossy_merge_rejected = True
+            lint_results.append(True)
+            pending_sparse_rows.clear()
+            return
         if result.markdown:
             page_parts.append(result.markdown)
             seen_structural_markdown = True
         runtime_flags.add("structural_grammar:finite_merge_v1")
         runtime_flags.add("markdown_lint:fail" if result.lint_errors else "markdown_lint:pass")
+        lint_results.append(not result.lint_errors)
+        confirmed = confirmed or bool(result.markdown and not result.lint_errors)
         pending_sparse_rows.clear()
 
     for entry in entries:
@@ -4242,14 +5364,76 @@ def _render_layout_journal(
         if plain_parts:
             seen_structural_markdown = True
     flush_sparse_rows()
-    return page_parts, runtime_flags
+    return StructuralRenderArtifact(
+        parts=tuple(page_parts),
+        flags=tuple(sorted(runtime_flags)),
+        bypassed=bypassed,
+        lossy_merge_rejected=lossy_merge_rejected,
+        lint_pass=(all(lint_results) if lint_results else None),
+        confirmed=confirmed,
+    )
+
+
+def _recognize_layout_segment(
+    region: LayoutRegion,
+    engine,
+    profile: OcrPipelineProfile,
+    layout_parameters: tuple[tuple[str, FeatureValue], ...],
+) -> RecognizedSegment:
+    parts, meta = _convert_layout_region(
+        region,
+        engine,
+        profile,
+        layout_parameters,
+    )
+    metadata = region.metadata or {}
+    is_sparse = (
+        metadata.get("layout_kind") == "recursive_grid_cell"
+        and isinstance(metadata.get("grid_row"), int)
+        and isinstance(metadata.get("grid_col"), int)
+    )
+    content_bbox = metadata.get("content_bbox")
+    content_left = (
+        int(content_bbox[0])
+        if (
+            isinstance(content_bbox, tuple)
+            and len(content_bbox) == 4
+            and isinstance(content_bbox[0], int)
+        )
+        else None
+    )
+    sparse_codes = metadata.get("sparse_codes")
+    counters = tuple(
+        (name, int(meta.get(name, 0)))
+        for name in (
+            "chunks",
+            "cards_found",
+            "tables_found",
+            "table_cells",
+        )
+    )
+    return RecognizedSegment(
+        kind="sparse" if is_sparse else "plain",
+        bbox=region.bbox,
+        parts=tuple(parts),
+        anchor=(
+            (int(metadata["grid_row"]), int(metadata["grid_col"]))
+            if is_sparse
+            else None
+        ),
+        codes=(tuple(sparse_codes) if isinstance(sparse_codes, tuple) else ()),
+        list_marker=bool(metadata.get("list_marker")),
+        content_left=content_left,
+        counters=counters,
+        flags=tuple(meta.get("runtime_flags", ())),
+    )
 
 
 def _convert_page_segment(
     image: Image.Image,
     engine,
     profile: OcrPipelineProfile,
-) -> tuple[str, dict]:
+) -> PageSegmentArtifact:
     layout_entries: list[_LayoutJournalEntry] = []
     totals = {
         "chunks": 0,
@@ -4302,105 +5486,88 @@ def _convert_page_segment(
 
     with TemporaryStructuralJournal() as layout_journal:
         with _owned_layout_regions(regions, image) as owned_regions:
-            for region in owned_regions:
-                region_parts, meta = _convert_layout_region(
+            recognition = recognize_segments(
+                owned_regions,
+                lambda region: _recognize_layout_segment(
                     region,
                     engine,
                     profile,
                     layout_parameters,
+                ),
+            )
+            for segment in recognition.segments:
+                reference = layout_journal.append(segment.parts)
+                layout_entries.append(
+                    _LayoutJournalEntry(
+                        kind=1 if segment.kind == "sparse" else 0,
+                        reference=reference,
+                        bbox=segment.bbox,
+                        anchor=segment.anchor or (0, 0),
+                        codes=segment.codes,
+                        list_marker=segment.list_marker,
+                        content_left=segment.content_left,
+                        flags=segment.flags,
+                    )
                 )
-                reference = layout_journal.append(region_parts)
-                metadata = region.metadata or {}
-                if (
-                    metadata.get("layout_kind") == "recursive_grid_cell"
-                    and isinstance(metadata.get("grid_row"), int)
-                    and isinstance(metadata.get("grid_col"), int)
-                ):
-                    sparse_codes = metadata.get("sparse_codes")
-                    content_bbox = metadata.get("content_bbox")
-                    content_left = (
-                        int(content_bbox[0])
-                        if (
-                            isinstance(content_bbox, tuple)
-                            and len(content_bbox) == 4
-                            and isinstance(content_bbox[0], int)
-                        )
-                        else None
-                    )
-                    layout_entries.append(
-                        _LayoutJournalEntry(
-                            kind=1,
-                            reference=reference,
-                            anchor=(
-                                int(metadata["grid_row"]),
-                                int(metadata["grid_col"]),
-                            ),
-                            codes=(tuple(sparse_codes) if isinstance(sparse_codes, tuple) else ()),
-                            list_marker=bool(
-                                metadata.get("list_marker"),
-                            ),
-                            content_left=content_left,
-                            flags=tuple(
-                                meta.get("runtime_flags", ()),
-                            ),
-                        )
-                    )
-                else:
-                    layout_entries.append(
-                        _LayoutJournalEntry(
-                            kind=0,
-                            reference=reference,
-                            flags=tuple(
-                                meta.get("runtime_flags", ()),
-                            ),
-                        )
-                    )
-                for key in totals:
-                    totals[key] += meta[key]
-                runtime_flags.update(
-                    meta.get("runtime_flags", []),
-                )
-                if region.image is not image:
-                    region.image.close()
+            totals = {
+                key: recognition.total(key)
+                for key in totals
+            }
+            runtime_flags.update(recognition.flags)
+            runtime_flags.add("pipeline_stage:recognize_segments:v1")
 
-        page_parts, grammar_flags = _render_layout_journal(
+        structural = _render_layout_journal(
             layout_journal,
             layout_entries,
             structural_output=profile.structural_output,
             page_table_confirmed=(totals["tables_found"] > 0 and not _looks_like_dark_ui_text_page(image)),
         )
-        runtime_flags.update(grammar_flags)
+        page_parts = list(structural.parts)
+        runtime_flags.update(structural.flags)
 
+    plain_fallback_used = False
     if (
         profile.structural_output == "markdown"
-        and "structural_grammar:bypass_unconfirmed_grid" in runtime_flags
-        and not _has_confirmed_structural_markdown(runtime_flags)
+        and structural.bypassed
+        and not structural.confirmed
         and (totals["tables_found"] == 0 or _looks_like_dark_ui_text_page(image))
     ):
-        plain_image = image
-        owns_plain_image = False
-        if profile.dark_ui_text_fallback and _looks_like_dark_ui_text_page(image):
-            plain_image = _dark_ui_text_image(image)
-            owns_plain_image = True
-            runtime_flags.add("dark_ui_text_fallback:used")
-        try:
-            fallback_parts, fallback_chunks, fallback_cards = _recognize_image_region(
-                engine,
-                plain_image,
-                profile,
-            )
-        finally:
-            if owns_plain_image:
-                plain_image.close()
-        totals["chunks"] += fallback_chunks
-        totals["cards_found"] += fallback_cards
-        if fallback_parts:
-            page_parts = fallback_parts
-            runtime_flags.add("structural_plain_fallback:used")
+        dark_ui_text_page = _looks_like_dark_ui_text_page(image)
+        current_compact_chars = _ocr_compact_char_count("\n\n".join(page_parts))
+        needs_full_page_fallback = (
+            current_compact_chars < 400
+            or dark_ui_text_page
+            or _is_dewarped_projector_slide(image)
+            or structural.lossy_merge_rejected
+        )
+        if needs_full_page_fallback:
+            plain_image = image
+            owns_plain_image = False
+            if profile.dark_ui_text_fallback and dark_ui_text_page:
+                plain_image = _dark_ui_text_image(image)
+                owns_plain_image = True
+                runtime_flags.add("dark_ui_text_fallback:used")
+            try:
+                fallback_parts, fallback_chunks, fallback_cards = _recognize_image_region(
+                    engine,
+                    plain_image,
+                    profile,
+                )
+            finally:
+                if owns_plain_image:
+                    plain_image.close()
+            totals["chunks"] += fallback_chunks
+            totals["cards_found"] += fallback_cards
+            if fallback_parts:
+                page_parts = fallback_parts
+                plain_fallback_used = True
+                runtime_flags.add("structural_plain_fallback:used")
+        else:
+            runtime_flags.add("structural_plain_fallback:skipped_rich_text")
 
     if (
         profile.structural_output == "markdown"
-        and "markdown_lint:pass" not in runtime_flags
+        and structural.lint_pass is not True
         and _should_append_spatial_full_page_fallback(
             profile,
             regions,
@@ -4422,8 +5589,8 @@ def _convert_page_segment(
         profile.structural_output == "markdown"
         and profile.dark_ui_text_fallback
         and _looks_like_dark_ui_text_page(image)
-        and "structural_plain_fallback:used" not in runtime_flags
-        and not _has_confirmed_structural_markdown(runtime_flags)
+        and not plain_fallback_used
+        and not structural.confirmed
     ):
         dark_text_image = _dark_ui_text_image(image)
         try:
@@ -4444,14 +5611,13 @@ def _convert_page_segment(
         if merged_tables:
             runtime_flags.add("structural_grammar:merge_table_continuations")
 
-    return (
-        _finalize_markdown("\n\n".join(page_parts), profile),
-        {**totals, "runtime_flags": sorted(runtime_flags)},
+    return PageSegmentArtifact(
+        markdown=_finalize_markdown("\n\n".join(page_parts), profile),
+        counters=tuple((name, int(value)) for name, value in totals.items()),
+        flags=tuple(sorted(runtime_flags)),
+        structural_lint_pass=structural.lint_pass,
+        structural_confirmed=structural.confirmed,
     )
-
-
-def _has_confirmed_structural_markdown(runtime_flags: set[str]) -> bool:
-    return "structural_grammar:finite_merge_v1" in runtime_flags and "markdown_lint:pass" in runtime_flags
 
 
 def _apply_static_markdown_repairs(
@@ -4498,20 +5664,6 @@ def _apply_static_markdown_repairs(
     if repaired_curriculum_summary:
         runtime_flags.add("table_repair:curriculum_summary")
 
-    markdown, added_heading = _ensure_mixed_table_heading(markdown)
-    if added_heading:
-        if profile.lexical_correction == "off":
-            markdown = apply_lexical_correction(
-                markdown,
-                "t9_small",
-            )
-        runtime_flags.update(
-            {
-                "table_repair:mixed_table_heading",
-                "table_repair:mixed_table_t9",
-            }
-        )
-
     markdown, repaired_headings = _repair_doc_section_headings(markdown)
     if repaired_headings:
         runtime_flags.add("doc_repair:section_headings")
@@ -4529,19 +5681,27 @@ def _convert_page(
         height >= LONG_SCREENSHOT_MIN_HEIGHT and height / max(1, width) >= LONG_SCREENSHOT_MIN_ASPECT_RATIO
     )
     if not is_long_screenshot:
-        markdown, totals = _convert_page_segment(main_image, engine, profile)
+        segment_artifact = _convert_page_segment(main_image, engine, profile)
+        if not isinstance(segment_artifact, PageSegmentArtifact):
+            segment_artifact = PageSegmentArtifact.from_legacy_tuple(segment_artifact)
+        markdown = segment_artifact.markdown
+        totals = segment_artifact.metadata()
         fallback_text = ""
         fallback_calls = 0
-        structural_lint_passed = "structural_grammar:finite_merge_v1" in totals.get(
-            "runtime_flags", []
-        ) and "markdown_lint:pass" in totals.get("runtime_flags", [])
+        projector_slide = _is_dewarped_projector_slide(main_image)
+        primary_compact_chars = _ocr_compact_char_count(markdown)
+        structural_lint_passed = (
+            segment_artifact.structural_confirmed
+            and segment_artifact.structural_lint_pass is True
+        )
         oversized_sparse_table = totals.get("table_cells", 0) >= 500 and _ocr_compact_char_count(markdown) < max(
             120, totals.get("table_cells", 0) // 4
         )
+        short_projector_slide = projector_slide and primary_compact_chars < 180
         if (
             profile.structural_output == "markdown"
             and profile.dense_grid_fallback
-            and (not structural_lint_passed or oversized_sparse_table)
+            and (not structural_lint_passed or oversized_sparse_table or short_projector_slide)
             and not _contains_large_markdown_table([markdown])
         ):
             if oversized_sparse_table:
@@ -4551,7 +5711,14 @@ def _convert_page(
                         "dense_grid_recovery:oversized_sparse_table",
                     }
                 )
-            if _is_dewarped_projector_slide(main_image):
+            if short_projector_slide:
+                totals["runtime_flags"] = sorted(
+                    {
+                        *totals.get("runtime_flags", []),
+                        "dense_grid_recovery:short_projector_slide",
+                    }
+                )
+            if projector_slide:
                 fallback_text = _recognize_projector_slide_fallback(
                     engine,
                     main_image,
@@ -4578,8 +5745,17 @@ def _convert_page(
                 )
             totals["chunks"] += fallback_calls
             if fallback_text.strip():
+                fallback_parts = [part for part in (markdown, fallback_text) if part.strip()]
+                if _should_replace_primary_with_fallback(markdown, fallback_text):
+                    fallback_parts = [fallback_text]
+                    totals["runtime_flags"] = sorted(
+                        {
+                            *totals.get("runtime_flags", []),
+                            "dense_grid_recovery:replace_tiny_primary",
+                        }
+                    )
                 markdown = _finalize_markdown(
-                    "\n\n".join(dedupe_chunks([part for part in (markdown, fallback_text) if part.strip()])),
+                    "\n\n".join(dedupe_chunks(fallback_parts)),
                     profile,
                 )
         if profile.structural_output == "markdown":
@@ -4678,20 +5854,6 @@ def _convert_page(
                         "table_repair:curriculum_summary",
                     }
                 )
-            markdown, added_heading = _ensure_mixed_table_heading(markdown)
-            if added_heading:
-                if profile.lexical_correction == "off":
-                    markdown = apply_lexical_correction(
-                        markdown,
-                        "t9_small",
-                    )
-                totals["runtime_flags"] = sorted(
-                    {
-                        *totals.get("runtime_flags", []),
-                        "table_repair:mixed_table_heading",
-                        "table_repair:mixed_table_t9",
-                    }
-                )
             markdown, repaired_headings = _repair_doc_section_headings(markdown)
             if repaired_headings:
                 totals["runtime_flags"] = sorted(
@@ -4704,6 +5866,7 @@ def _convert_page(
             recovered_screen = _recover_search_results_screen(markdown_blocks)
             if recovered_screen is not None:
                 result_columns: list[list[list[str]]] = []
+                extra_text = ""
                 if hasattr(engine, "recognize"):
                     extra_text = engine.recognize(
                         main_image,
@@ -4730,6 +5893,16 @@ def _convert_page(
                         psm=profile.large_table_word_psm,
                         min_conf=0,
                     )
+                    result_words_text = " ".join(
+                        str(word.get("text", "")).strip()
+                        for word in result_words
+                        if str(word.get("text", "")).strip()
+                    )
+                    combined_extra_text = "\n".join(
+                        part.strip()
+                        for part in (extra_text, result_words_text)
+                        if part.strip()
+                    )
                     result_ranges = _search_result_column_ranges(
                         result_words,
                         main_image.size,
@@ -4741,7 +5914,7 @@ def _convert_page(
                     result_columns = _search_result_columns_from_words(
                         result_words,
                         main_image.size,
-                        "\n".join((markdown, extra_text)),
+                        "\n".join((markdown, combined_extra_text)),
                         detail_texts=result_details,
                     )
                     if result_details:
@@ -4779,7 +5952,7 @@ def _convert_page(
                             fallback_columns = _search_result_columns_from_words(
                                 fallback_words,
                                 main_image.size,
-                                "\n".join((markdown, extra_text)),
+                                "\n".join((markdown, combined_extra_text)),
                                 detail_texts=fallback_details,
                             )
                             if len(fallback_columns) > len(result_columns):
@@ -4797,7 +5970,7 @@ def _convert_page(
                         recovered_screen = (
                             _recover_search_results_screen(
                                 markdown_blocks,
-                                extra_text=extra_text,
+                                extra_text=combined_extra_text,
                                 result_columns=result_columns,
                             )
                             or recovered_screen
@@ -4808,7 +5981,10 @@ def _convert_page(
                                 "search_results_recovery:result_grid_words",
                             }
                         )
-                markdown = recovered_screen
+                markdown = _finalize_recovered_table_markdown(
+                    recovered_screen,
+                    profile,
+                )
                 totals["runtime_flags"] = sorted(
                     {
                         *totals.get("runtime_flags", []),
@@ -4881,15 +6057,34 @@ def iter_convert_bytes(
     """
     profile = pipeline_profile or resolve_pipeline_profile(engine_type)
     normalized_pdf_mode = normalize_pdf_mode(pdf_mode)
-    text_layer_pages = _extract_pdf_text_layer_pages(content, filename) if normalized_pdf_mode == "auto" else []
-    if text_layer_pages:
-        total_pages = len(text_layer_pages)
-        for page_number, page_text in enumerate(text_layer_pages, start=1):
+    text_layer_page_candidates = (
+        _extract_pdf_text_layer_page_candidates(content, filename)
+        if normalized_pdf_mode == "auto"
+        else []
+    )
+    fully_readable_text_layer = bool(text_layer_page_candidates) and all(
+        page_text is not None for page_text in text_layer_page_candidates
+    )
+    if fully_readable_text_layer:
+        text_layer_artifact = _render_pdf_text_layer_markdown_pages(
+            content,
+            filename,
+            text_layer_page_candidates,
+            profile,
+        )
+        text_layer_markdown_pages = text_layer_artifact.pages
+        text_layer_layout_meta = text_layer_artifact.metadata()
+        total_pages = len(text_layer_page_candidates)
+        text_layer_flags = sorted(
+            {"pdf_text_layer:all_pages", f"structural_output:{profile.structural_output}"}
+            | set(text_layer_layout_meta.get("runtime_flags", ()))
+        )
+        for page_number, page_text in enumerate(text_layer_markdown_pages, start=1):
             yield {
                 "type": "page",
                 "page": page_number,
                 "total_pages": total_pages,
-                "markdown": page_text,
+                "markdown": page_text or "",
             }
         yield {
             "type": "complete",
@@ -4898,15 +6093,16 @@ def iter_convert_bytes(
                 "engine_chain": ["pdf_text_layer"],
                 "chunks": 0,
                 "cards_found": 0,
-                "tables_found": 0,
-                "table_cells": 0,
-                "pages": len(text_layer_pages),
+                "tables_found": int(text_layer_layout_meta.get("tables_found", 0)),
+                "table_cells": int(text_layer_layout_meta.get("table_cells", 0)),
+                "pages": len(text_layer_page_candidates),
+                "pdf_text_layer_pages": len(text_layer_page_candidates),
                 "empty_pages": [],
                 "pipeline": profile.name,
                 "pdf_mode": normalized_pdf_mode,
-                "flags": sorted(profile_flags(profile)),
+                "flags": text_layer_flags,
                 "preprocess_steps": [],
-                "layout_steps": [],
+                "layout_steps": [text_layer_artifact.layout_step],
                 "elapsed_ms": 0,
             },
         }
@@ -4921,6 +6117,7 @@ def iter_convert_bytes(
     runtime_flags: set[str] = set()
     page_count = 0
     empty_pages = []
+    pdf_text_layer_pages = 0
 
     for main_image, page_number, total_pages in _iter_document_pages(
         content,
@@ -4929,6 +6126,31 @@ def iter_convert_bytes(
     ):
         try:
             page_count = page_number
+            text_layer_page = (
+                text_layer_page_candidates[page_number - 1]
+                if 0 <= page_number - 1 < len(text_layer_page_candidates)
+                else None
+            )
+            if text_layer_page is not None:
+                pdf_text_layer_pages += 1
+                runtime_flags.add("pdf_text_layer:hybrid")
+                runtime_flags.add("pdf_text_layer:page_used")
+                yield {
+                    "type": "progress",
+                    "stage": "pdf_text_layer",
+                    "message": f"Чтение текстового слоя страницы {page_number} из {total_pages}...",
+                    "page": page_number,
+                    "total_pages": total_pages,
+                    "percent": 0,
+                }
+                yield {
+                    "type": "page",
+                    "page": page_number,
+                    "total_pages": total_pages,
+                    "markdown": text_layer_page,
+                }
+                continue
+
             yield {
                 "type": "progress",
                 "stage": "ocr",
@@ -4965,13 +6187,18 @@ def iter_convert_bytes(
         raise ValueError("Could not load image or parsed zero pages.")
 
     meta = {
-        "engine": engine.info()["engine"],
-        "engine_chain": _engine_chain(engine, profile),
+        "engine": "pdf_text_layer+ocr" if pdf_text_layer_pages else engine.info()["engine"],
+        "engine_chain": (
+            ["pdf_text_layer", *_engine_chain(engine, profile)]
+            if pdf_text_layer_pages
+            else _engine_chain(engine, profile)
+        ),
         "chunks": total_chunks,
         "cards_found": cards_found,
         "tables_found": tables_found,
         "table_cells": table_cells,
         "pages": page_count,
+        "pdf_text_layer_pages": pdf_text_layer_pages,
         "empty_pages": empty_pages,
         "pipeline": profile.name,
         "pdf_mode": normalized_pdf_mode,

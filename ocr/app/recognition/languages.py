@@ -5,6 +5,8 @@ import re
 BASE_LANGUAGES = ("rus", "eng")
 OPTIONAL_LANGUAGES = ("kaz", "kir", "chi_sim")
 REVIEWER_EXTRA_LANGUAGES = ("ell", "equ")
+REVIEWER_EMPTY_STATE = "empty"
+REVIEWER_STATE_TYPES = (REVIEWER_EMPTY_STATE,)
 T9_RETRY_LANGUAGES = REVIEWER_EXTRA_LANGUAGES
 ISOLATED_LANGUAGES = ("kaz",)
 LANGUAGE_SCRIPTS = {
@@ -16,6 +18,7 @@ LANGUAGE_SCRIPTS = {
     "chi_tra": "cjk",
     "ell": "greek",
     "equ": "math",
+    REVIEWER_EMPTY_STATE: "empty",
 }
 SCRIPT_PATTERNS = {
     "latin": re.compile(r"[A-Za-z]"),

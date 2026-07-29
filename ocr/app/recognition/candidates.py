@@ -4,6 +4,12 @@ from collections.abc import Callable
 import re
 
 from app.recognition.language_agenda import LanguageAgenda, split_language_group
+from app.recognition.languages import REVIEWER_EMPTY_STATE
+from app.recognition.quality import (
+    code_path_quality_score,
+    looks_like_cyrillic_tech_ocr_noise,
+    looks_like_mixed_script_ocr_noise,
+)
 from app.recognition.reviewer import (
     HeuristicCandidateReviewer,
     RecognitionCandidateReviewer,
@@ -105,19 +111,53 @@ class LanguageCandidateSelector:
             return 45.0
         return 0.0
 
+    def empty_candidate_score(
+        self,
+        context: tuple[str, ...] = (),
+    ) -> float:
+        return (
+            2.5
+            + (self.candidate_prior_score(REVIEWER_EMPTY_STATE, context) * 10.0)
+        )
+
+    def _with_empty_text_candidate(
+        self,
+        candidates: list[tuple[str, str]],
+    ) -> list[tuple[str, str]]:
+        if self.language_retry != "t9_small":
+            return candidates
+        if any(lang == REVIEWER_EMPTY_STATE for lang, _ in candidates):
+            return candidates
+        return [*candidates, (REVIEWER_EMPTY_STATE, "")]
+
+    def _with_empty_word_candidate(
+        self,
+        candidates: list[tuple[str, list[dict]]],
+    ) -> list[tuple[str, list[dict]]]:
+        if self.language_retry != "t9_small":
+            return candidates
+        if any(lang == REVIEWER_EMPTY_STATE for lang, _ in candidates):
+            return candidates
+        return [*candidates, (REVIEWER_EMPTY_STATE, [])]
+
     def text_candidate_score(
         self,
         text: str,
         lang: str | None,
         context: tuple[str, ...] = (),
     ) -> float:
+        if lang == REVIEWER_EMPTY_STATE:
+            return self.empty_candidate_score(context) if not text.strip() else -1.0
         if not text.strip():
             return -1.0
         return (
             self.reviewer.text_score(text)
+            + code_path_quality_score(text)
             + (self.candidate_prior_score(lang, context) * 1.5)
             + (self.candidate_evidence_score(lang, text) * 2.0)
             - self.script_candidate_penalty(lang, text)
+            - (12.0 if looks_like_mixed_script_ocr_noise(text) else 0.0)
+            - (10.0 if looks_like_cyrillic_tech_ocr_noise(text) else 0.0)
         )
 
     def select_text_candidate(
@@ -128,6 +168,7 @@ class LanguageCandidateSelector:
         if not candidates:
             return "", ""
 
+        candidates = self._with_empty_text_candidate(candidates)
         primary_lang, primary_text = candidates[0]
         scored = [(lang, text, self.text_candidate_score(text, lang, context)) for lang, text in candidates]
         best_lang, best_text, best_score = max(
@@ -137,9 +178,19 @@ class LanguageCandidateSelector:
         primary_score = scored[0][2]
         primary_noise = self.reviewer.text_noise_ratio(primary_text)
         primary_margin = max(6.0, primary_score * 0.12)
-        if primary_noise >= 0.18 or primary_score < 18.0:
+        if (
+            primary_noise >= 0.18
+            or primary_score < 18.0
+            or looks_like_mixed_script_ocr_noise(primary_text)
+            or looks_like_cyrillic_tech_ocr_noise(primary_text)
+        ):
             primary_margin = 0.0
-        if best_lang != primary_lang and primary_text.strip() and best_score < primary_score + primary_margin:
+        if (
+            best_lang != REVIEWER_EMPTY_STATE
+            and best_lang != primary_lang
+            and primary_text.strip()
+            and best_score < primary_score + primary_margin
+        ):
             return primary_lang, primary_text
         return best_lang, best_text
 
@@ -158,6 +209,7 @@ class LanguageCandidateSelector:
         if not candidates:
             return "", []
 
+        candidates = self._with_empty_word_candidate(candidates)
         primary_lang, primary_words = candidates[0]
         primary_text = self.reviewer.words_to_text(primary_words)
         scored = []
@@ -177,7 +229,7 @@ class LanguageCandidateSelector:
         primary_score = scored[0][3]
         primary_noise = self.reviewer.text_noise_ratio(primary_text)
         primary_margin = max(8.0, primary_score * 0.15)
-        if primary_noise >= 0.18 or primary_score < 18.0:
+        if primary_noise >= 0.18 or primary_score < 18.0 or looks_like_mixed_script_ocr_noise(primary_text):
             primary_margin = 0.0
         if best_lang != primary_lang and primary_words and best_score < primary_score + primary_margin:
             return primary_lang, primary_words

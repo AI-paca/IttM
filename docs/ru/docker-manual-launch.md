@@ -5,7 +5,7 @@
 Основной и рекомендуемый путь для полного приложения остается `docker compose up -d`: Compose сам собирает и связывает nginx, gateway и OCR. Если в задании или при отладке нужны явные команды `docker build` и `docker run`, можно запустить те же сервисы вручную:
 
 ```bash
-docker build -f docker/ocr.Dockerfile -t ittm-ocr ./ocr
+docker build -f docker/ocr.Dockerfile -t ittm-ocr .
 docker build -f docker/gateway.Dockerfile -t ittm-gateway .
 docker build -f docker/nginx.Dockerfile -t ittm-nginx .
 ```
@@ -48,5 +48,5 @@ CI/test OCR-образ собирается отдельным target'ом, чт
 docker build -f docker/ocr.Dockerfile --target test \
   --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt \
   --build-arg OCR_INSTALL_CJK_FONTS=1 \
-  -t ittm-ocr-ci ./ocr
+  -t ittm-ocr-ci .
 ```

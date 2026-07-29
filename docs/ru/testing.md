@@ -84,7 +84,7 @@ nightly/scheduled jobs.
 docker build -f docker/ocr.Dockerfile --target test \
   --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt \
   --build-arg OCR_INSTALL_CJK_FONTS=1 \
-  -t ittm-ocr-ci ./ocr
+  -t ittm-ocr-ci .
 
 docker run --rm ittm-ocr-ci python -m flake8 .
 docker run --rm ittm-ocr-ci python -m black --check .

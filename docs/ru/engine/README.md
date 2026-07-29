@@ -133,24 +133,24 @@ profiles без междвижкового recovery.
 
 ## Layout-флаги
 
-| Поле                       | Текущие значения                                             |
+| Поле | Текущие значения |
 | -------------------------- | ------------------------------------------------------------ | ---------------------------------------------------------------- |
-| `feature_extractors`       | `projection_geometry` или пусто                              |
-| `selector`                 | `table_first_heuristic_v1`, `uniform_spatial_v1` или `fixed` |
-| `allowed_stages`           | `spatial_regions`, `table_regions` или пусто                 |
-| `default_parameters`       | пары параметр/значение                                       |
-| `max_region_height`        | `1400` или `2800`                                            |
-| `min_region_height`        | `300`                                                        |
-| `min_cell_height`          | `24`                                                         |
-| `min_region_width`         | `80`                                                         |
-| `min_separator_coverage`   | `0.55`                                                       |
-| `min_separator_gap`        | `8`                                                          |
-| `chunk_overlap`            | `16`                                                         |
-| `max_depth`                | `32`                                                         |
-| `region_page_dewarp`       | `True`                                                       |
-| `region_deskew`            | `True`                                                       |
-| `direct_region_ocr`        | `True` только в spatial EasyOCR profile                      |
-| `medium_page_segmentation` | `True` в `table_first_heuristic_v1` runtime stage            | режет средние multi-section страницы по сильным whitespace bands |
+| `feature_extractors` | `projection_geometry` или пусто |
+| `selector` | `table_first_heuristic_v1`, `uniform_spatial_v1` или `fixed` |
+| `allowed_stages` | `spatial_regions`, `table_regions` или пусто |
+| `default_parameters` | пары параметр/значение |
+| `max_region_height` | `1400` или `2800` |
+| `min_region_height` | `300` |
+| `min_cell_height` | `24` |
+| `min_region_width` | `80` |
+| `min_separator_coverage` | `0.55` |
+| `min_separator_gap` | `8` |
+| `chunk_overlap` | `16` |
+| `max_depth` | `32` |
+| `region_page_dewarp` | `True` |
+| `region_deskew` | `True` |
+| `direct_region_ocr` | `True` только в spatial EasyOCR profile |
+| `medium_page_segmentation` | `True` в `table_first_heuristic_v1` runtime stage | режет средние multi-section страницы по сильным whitespace bands |
 
 ## Effective flag keys
 

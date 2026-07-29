@@ -163,10 +163,24 @@ class ProjectorSlideDewarpStep(ImagePreprocessingStep):
         if center.resize((1, 1)).getpixel((0, 0)) < 120:
             return image
 
-        source = _detected_projector_quad(image)
-        if source is None:
-            source = tuple((int(width * x), int(height * y)) for x, y in _projector_slide_source_ratios(gray))
-        target_width, target_height = 2000, 1200
+        detected_source = _detected_projector_quad(image)
+        if detected_source is None:
+            source = tuple(
+                (int(width * x), int(height * y))
+                for x, y in _projector_slide_source_ratios(gray)
+            )
+            target_width, target_height = 2000, 1200
+        else:
+            source = detected_source
+            top_width = math.dist(source[0], source[1])
+            bottom_width = math.dist(source[3], source[2])
+            left_height = math.dist(source[0], source[3])
+            right_height = math.dist(source[1], source[2])
+            target_width = max(250, round((top_width + bottom_width) / 2))
+            target_height = max(
+                180,
+                round((left_height + right_height) / 2),
+            )
         destination = (
             (0, 0),
             (target_width, 0),
@@ -184,6 +198,8 @@ class ProjectorSlideDewarpStep(ImagePreprocessingStep):
 
 
 class RecursivePageDewarpStep(ImagePreprocessingStep):
+    """The region-local dewarp used by the frozen v16 recursive grid."""
+
     name = "recursive_page_dewarp"
 
     def apply(self, image: Image.Image) -> Image.Image:
@@ -317,6 +333,8 @@ def _projector_slide_source_ratios(
 def _detected_projector_quad(
     image: Image.Image,
 ) -> tuple[tuple[int, int], ...] | None:
+    """Detect the finite blue/green projector field before dewarping."""
+
     import numpy as np
 
     rgb = np.asarray(image.convert("RGB"), dtype=np.int16)

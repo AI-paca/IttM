@@ -4,8 +4,8 @@ services:
   ocr:
     image: ittm-ocr
     build:
-      context: ./ocr
-      dockerfile: ../docker/ocr.Dockerfile
+      context: .
+      dockerfile: docker/ocr.Dockerfile
       network: ${DOCKER_BUILD_NETWORK:-default}
       target: ${OCR_BUILD_TARGET:-runtime}
       args:

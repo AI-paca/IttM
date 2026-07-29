@@ -25,6 +25,12 @@ logs
 docs/
 edge
 ocr
+!ocr/
+!ocr/**
+ocr/.venv
+ocr/.pytest_cache
+ocr/.ruff_cache
+ocr/tests/fixtures
 scripts
 !scripts/
 !scripts/ci/

@@ -11,6 +11,7 @@ from app.recognition.languages import (
     ISOLATED_LANGUAGES,
     LANGUAGE_SCRIPTS,
     OPTIONAL_LANGUAGES,
+    REVIEWER_EMPTY_STATE,
     SCRIPT_PATTERNS,
     T9_RETRY_LANGUAGES,
     normalize_probabilities,
@@ -546,6 +547,7 @@ class TesseractEngine(OcrEngine):
             if words:
                 candidates.append((lang, words))
         if not candidates:
+            self._observe_language_candidate(REVIEWER_EMPTY_STATE, "")
             return []
         if len(candidates) == 1:
             selected_lang, words = candidates[0]
@@ -570,6 +572,113 @@ class TesseractEngine(OcrEngine):
             lang=language,
         )
         return self._words_from_data(data, min_conf)
+
+    def recognize_word_candidate_passes(
+        self,
+        image,
+        psm: int = 6,
+        min_conf: int = 20,
+    ) -> tuple[tuple[str, list[dict]], ...]:
+        """Expose observed word passes without selecting or rewriting them."""
+
+        passes = []
+        for language in self._language_candidates():
+            words = self.recognize_words_for_language(
+                image,
+                language,
+                psm=psm,
+                min_conf=min_conf,
+            )
+            if words:
+                passes.append((language, words))
+        return tuple(passes)
+
+    def recognize_identifier_segment(
+        self,
+        image,
+    ) -> tuple[str, float]:
+        """Read one code segment with an ASCII-only OCR configuration."""
+
+        try:
+            import pytesseract
+
+            scaled = image.resize(
+                (max(1, image.width * 4), max(1, image.height * 4))
+            )
+            try:
+                data = pytesseract.image_to_data(
+                    scaled,
+                    lang="eng",
+                    config=(
+                        "--oem 1 --psm 8 "
+                        "-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+                    ),
+                    output_type=pytesseract.Output.DICT,
+                )
+            finally:
+                scaled.close()
+        except Exception:
+            return "", 0.0
+        candidates = [
+            (str(text).strip(), self._parse_confidence(confidence))
+            for text, confidence in zip(
+                data.get("text", ()),
+                data.get("conf", ()),
+            )
+            if str(text).strip()
+        ]
+        candidates = [
+            (text, confidence)
+            for text, confidence in candidates
+            if confidence >= 0
+        ]
+        return max(candidates, key=lambda item: item[1], default=("", 0.0))
+
+    def recognize_cjk_phrase(
+        self,
+        image,
+    ) -> tuple[str, float]:
+        """Read a short CJK phrase and return its weakest glyph confidence."""
+
+        if "chi_sim" not in self.installed_languages():
+            return "", 0.0
+        try:
+            import pytesseract
+
+            scaled = image.resize(
+                (max(1, image.width * 4), max(1, image.height * 4))
+            )
+            try:
+                data = pytesseract.image_to_data(
+                    scaled,
+                    lang="chi_sim",
+                    config="--oem 1 --psm 7",
+                    output_type=pytesseract.Output.DICT,
+                )
+            finally:
+                scaled.close()
+        except Exception:
+            return "", 0.0
+        candidates = [
+            (str(text).strip(), self._parse_confidence(confidence))
+            for text, confidence in zip(
+                data.get("text", ()),
+                data.get("conf", ()),
+            )
+            if str(text).strip()
+        ]
+        candidates = [
+            (text, confidence)
+            for text, confidence in candidates
+            if confidence >= 0
+            and script_counts(text).get("cjk", 0) == len(text)
+        ]
+        if not candidates:
+            return "", 0.0
+        return (
+            "".join(text for text, _confidence in candidates),
+            min(confidence for _text, confidence in candidates),
+        )
 
     def recognize(self, image, mode: str = "text_mode", psm: int = 6) -> str:
         """
@@ -622,6 +731,7 @@ class TesseractEngine(OcrEngine):
                     self._observe_language_candidate(selected_lang, text)
                     return text
 
+            self._observe_language_candidate(REVIEWER_EMPTY_STATE, "")
             return ""
 
         except Exception as e:

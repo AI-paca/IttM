@@ -44,6 +44,11 @@ def has_sparse_signal(code: int, signal: int) -> bool:
 
 
 def add_sparse_signal(code: int, signal: int) -> int:
+    from app.pipeline_core.native import native_pipeline_core
+
+    native = native_pipeline_core()
+    if native is not None:
+        return native.add_sparse_signal(code, signal)
     if signal not in SPARSE_SIGNALS:
         raise ValueError(f"Unknown sparse signal: {signal}")
     components = set(sparse_code_components(code))

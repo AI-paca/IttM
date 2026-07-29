@@ -25,6 +25,7 @@ def encode_structural_record(
     *,
     kind: str,
     parts: Iterable[str],
+    bbox: tuple[int, int, int, int] = (0, 0, 0, 0),
     anchor: tuple[int, int] = (0, 0),
     codes: tuple[tuple[int, int, int], ...] = (),
     list_marker: bool = False,
@@ -35,6 +36,7 @@ def encode_structural_record(
         {
             "v": STRUCTURAL_JOURNAL_VERSION,
             "kind": kind,
+            "bbox": bbox,
             "anchor": anchor,
             "codes": codes,
             "list_marker": list_marker,

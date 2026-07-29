@@ -244,6 +244,33 @@ def table_has_horizontal_slot_merges(
     return saw_split_row and saw_merged_row
 
 
+def table_horizontal_spans(
+    image: Image.Image,
+    table: TableLayout,
+) -> tuple[tuple[int, int, int], ...]:
+    """Return geometry-proven horizontal spans as (row, start_col, end_col)."""
+
+    if table.cols <= 1:
+        return ()
+    line_map = _LineMap.from_image(image)
+    spans = []
+    for row_index in range(table.rows):
+        top = table.y_lines[row_index]
+        bottom = table.y_lines[row_index + 1]
+        spans.extend(
+            (row_index, start, end)
+            for start, end in _row_segments_without_vertical_lines(
+                table,
+                line_map,
+                row_index,
+                top,
+                bottom,
+            )
+            if end > start
+        )
+    return tuple(spans)
+
+
 def _vertical_boundary_threshold(table: TableLayout, row_index: int) -> float:
     # Header and section rows often have shorter visible strokes after scans.
     # Keep the threshold permissive, but require a real line for a hard split.

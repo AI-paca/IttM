@@ -1,53 +1,49 @@
-# Security Policy
+# Security policy
 
 [Русский](../ru/security.md) | [Documentation](./README.md)
 
-## Trust Boundaries
+## Trust boundaries
 
-| Mode                      | Document destination                        | Trust level           |
-| ------------------------- | ------------------------------------------- | --------------------- |
-| Browser OCR               | Tab memory and browser workers only         | Local device          |
-| Local Tesseract / EasyOCR | Local nginx, gateway, and Python OCR        | Trusted local runtime |
-| External LLM              | Gemini, OpenRouter, or another selected API | Third-party provider  |
+| Mode                      | Document destination                 |
+| ------------------------- | ------------------------------------ |
+| Browser OCR               | Tab memory and browser workers       |
+| Local Tesseract / EasyOCR | Local nginx, gateway, and Python OCR |
+| Gemini / OpenRouter       | The selected third-party API         |
+| Ollama                    | A user-configured local endpoint     |
+| Edge proxy                | Configured origin or Gemini          |
 
-## Local Processing
+Compose publishes nginx on `127.0.0.1` by default. Gateway and Python OCR stay
+inside the Compose network. The local API has no authentication and must not be
+exposed to an untrusted network without a separate authentication layer.
 
-- Docker publishes only nginx. The gateway and OCR service remain inside the
-  Compose network.
-- Local modes send the original `File` as multipart. The frontend does not
-  convert it to Base64 or call `arrayBuffer()` before upload.
-- The gateway streams the request body and does not store documents in a
-  database.
-- Python reads the upload in chunks but assembles it into a complete `bytes`
-  object before OCR.
-- Images are processed from memory. PDFs are temporarily written under
-  `tempfile` because Poppler requires a path; the directory is removed after
-  the request.
+Local uploads are sent without browser-side Base64. The gateway does not write
+Task API uploads to a database or object store, but it does buffer them as a
+`File` and retains that `File` in the in-memory task record, including after a
+terminal state. Python then assembles the accepted upload into one `bytes`
+object. Images are processed in memory; PDFs use a temporary file for Poppler.
+Swap, crash dumps, proxy logs, and host logs remain deployment concerns.
 
-The project does not claim absolute operating-system zero retention. Temporary
-PDF files, swap, crash dumps, and host logs depend on deployment settings.
+Browser OCR does not send the source file to the backend. A PDF is still held
+in a worker `ArrayBuffer` and is subject to browser memory limits.
 
-## Browser OCR
+Gemini/OpenRouter requests require explicit UI consent. A directly supplied API
+key remains in frontend state. An optional Edge worker may instead keep a
+Gemini key in an environment secret. Provider retention policies apply after
+upload.
 
-Browser mode does not send the source document to the backend. Tesseract.js,
-PDF.js, and preprocessing use browser workers where supported. A complete PDF
-still enters a worker `ArrayBuffer`, which remains a memory risk for very large
-files.
+Known limits include an unauthenticated local API, an in-memory non-durable task
+queue without terminal-record eviction, unbounded direct-gateway buffering
+before Python's upload limit, a complete Python upload copy, incomplete
+decompression-bomb coverage, and streaming errors represented inside an
+already-started HTTP 200 response.
 
-## External LLMs
+Run first-party and dependency security checks with:
 
-- Gemini/OpenRouter require explicit consent for the current session.
-- The document may be resized, Base64-encoded, and sent to the provider.
-- Provider retention and processing policies apply after upload.
-- Provider API keys stay in frontend state and are not sent to local OCR.
+```bash
+npm run test:sast
+npm run test:sca
+```
 
-## Open Risks
-
-- The local API has no authentication and relies on loopback/network binding.
-- The in-memory task queue (`maxWorkers: 1`, `maxQueued: 32`) provides a task ID
-  and server-side cancel (`POST /api/tasks/:id/cancel`), but does not survive a
-  restart: durable queue, retry, and retention are absent.
-- The complete upload exists in Python memory.
-- Not every decompression/image bomb pattern is rejected.
-- Streaming failures after headers are represented as NDJSON `error` events
-  inside HTTP 200.
+Start with the terminal finding or generated report. A known rule id, package,
+and image are sufficient for triage; loading the complete Semgrep ruleset,
+workflow, or report is unnecessary.

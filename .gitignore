@@ -42,6 +42,7 @@ ocr/.tesseract_cache/
 *.traineddata
 *.pdf
 *.png
+!docs/assets/*.png
 *.jpg
 *.jpeg
 *.webp
@@ -108,6 +109,7 @@ logs/
 /.sca/*
 !/.sca/
 !/.sca/accepted-risk.json
+!/.sca/AGENTS.md
 
 # Test artifacts
 .coverage
@@ -118,18 +120,15 @@ testtables/
 debug/*
 !debug/.gitkeep
 !debug/.env.sample
-!debug/README.md
+!debug/EXAMPLE.md
 !debug/fixtures/
 debug/fixtures/*
 !debug/fixtures/.gitkeep
 !debug/fixtures/SAMPLE_4k.png
 !debug/fixtures/SAMPLE_mixed_ru_en_zh_table_image.pdf
-!debug/reference/
-debug/reference/*
-!debug/reference/.gitkeep
-!debug/reference/SAMPLE_4k.png.md
-!debug/reference/SAMPLE_mixed_ru_en_zh_table_image.pdf.md
-!debug/reference/SAMPLE_mixed_ru_en_zh_table_image.pdf.raster.png.md
+!debug/pipeline-example/
+debug/pipeline-example/*
+!debug/pipeline-example/*.png
 
 # LLM review drafts
 docs/ревью от LLM/
@@ -175,6 +174,5 @@ pipeline-core/target/
 web/public/wasm/*.wasm
 
 # Local generated OCR evidence and Rust build output
-debug/reference/
 debug/reports/
 target/

@@ -85,3 +85,7 @@ if (process.env.GITHUB_STEP_SUMMARY) {
   });
   fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
 }
+
+if (errors.length) {
+  process.exitCode = 2;
+}

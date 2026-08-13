@@ -1,53 +1,51 @@
 # Ограничения архитектуры
 
-[Документация](./README.md) | [Движок](./engine/README.md) | [Debug](./debug.md)
+[Документация](./README.md) | [Архитектура](./architecture.md) |
+[Безопасность](./security.md)
 
-Здесь перечислены фактические границы кода в формате причина -> следствие.
+Значения ниже являются текущими defaults. Переменные окружения могут сужать или
+расширять часть backend-лимитов, но внешний proxy всегда может установить более
+строгую границу.
 
-## Лимиты
+| Область              | Текущая граница                                 | Следствие                                             |
+| -------------------- | ----------------------------------------------- | ----------------------------------------------------- |
+| Compose upload       | nginx `client_max_body_size 32m`                | Запрос больше 32 MiB не попадёт в gateway             |
+| Edge upload          | `MAX_UPLOAD_BYTES`, default 32 MiB              | Проверка работает при наличии `Content-Length`        |
+| Python upload        | `OCR_MAX_UPLOAD_BYTES`, default 128 MiB         | Upload выше лимита отклоняется                        |
+| Gateway task upload  | `formData()` или `arrayBuffer()` без своего cap | Direct gateway может занять память до Python reject   |
+| Gateway task memory  | `File` остаётся в in-memory task record         | Terminal task удерживает upload до рестарта gateway   |
+| Python upload memory | чанки объединяются в `bytes`                    | Принятый файл целиком существует в RAM                |
+| Decoded image        | `OCR_MAX_DECODED_IMAGE_PIXELS`, default 80 MP   | Больший bitmap отклоняется до OCR                     |
+| PDF pages            | `OCR_MAX_PDF_PAGES`, default 100                | Более длинный PDF отклоняется                         |
+| PDF render           | `OCR_MAX_PDF_RENDER_DIMENSION`, default 6000 px | DPI уменьшается для больших страниц                   |
+| PDF temporary files  | Poppler требует путь                            | PDF кратковременно находится в `tempfile`             |
+| Dewarp               | `OCR_MAX_DEWARP_PIXELS`, default 16 MP          | Dewarp пропускается при превышении бюджета            |
+| Browser PDF          | 128 MiB preflight                               | Принятый PDF целиком читается в worker `ArrayBuffer`  |
+| Browser OCR          | 4–14 MP и 2200–4200 px по профилю устройства    | Downscale может потерять мелкие символы               |
+| Browser concurrency  | Один worker pool на JS realm вкладки            | Две вкладки независимо конкурируют за CPU/RAM         |
+| Web backend stream   | Один Python thread на request, без общего cap   | Две вкладки могут параллельно перегрузить OCR backend |
+| Gateway tasks        | 1 worker, до 32 queued                          | Task API сериализует работу внутри процесса           |
+| Ollama/provider      | Прямой browser fetch, без очереди IttM          | Параллельность и пределы принадлежат provider         |
+| Task persistence     | память процесса                                 | Рестарт удаляет records, events, results и uploads    |
+| Streaming error      | headers уже отправлены                          | Поздняя ошибка приходит event-ом внутри HTTP 200      |
+| Nginx read timeout   | 300 секунд                                      | Более долгий proxied stream может оборваться          |
+| External LLM         | Base64/data URL в браузере                      | Дополнительная память и передача провайдеру           |
 
-| Область              | Где задано                                     | Причина                                           | Следствие                                              |
-| -------------------- | ---------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------ |
-| Browser OCR profile  | `web/src/ocr/browser-profile.ts`               | профиль ограничивает pixels/dimension             | resize может ухудшить мелкие цифры                     |
-| Browser layout       | `web/src/ocr/image-resize.worker.ts`           | анализ выполняется на уменьшенной копии           | тонкие separators могут исчезнуть                      |
-| Browser PDF size     | `web/src/lib/pdf-limits.ts`                    | preflight limit `128 MiB`                         | oversized PDF отклоняется до `arrayBuffer()`           |
-| Browser PDF memory   | `web/src/lib/pdf-page.worker.ts`               | принятый PDF читается в `ArrayBuffer`             | файл до 128 MiB целиком находится в памяти worker      |
-| External LLM         | `document-encoding.worker.ts`, `llm-client.ts` | API принимает Base64/data URL                     | payload занимает память и уходит выбранному провайдеру |
-| Gateway tasks        | `gateway/src/tasks/http-api.ts`                | in-memory queue, `maxWorkers: 1`, `maxQueued: 32` | задачи теряются после рестарта; durable retry нет      |
-| Python upload size   | `ocr/app/upload_limits.py`                     | default `OCR_MAX_UPLOAD_BYTES=134217728`          | encoded upload больше 128 MiB отклоняется              |
-| Python upload memory | `ocr/app/upload_limits.py`                     | чанки объединяются в `bytes`                      | принятый файл до лимита целиком существует в RAM       |
-| Decoded image        | `ocr/app/services/convert_service.py`          | limit `80_000_000` pixels                         | больший bitmap отклоняется до OCR                      |
-| PDF pages            | `ocr/app/services/convert_service.py`          | limit `100` pages                                 | более длинный PDF отклоняется                          |
-| PDF render           | `ocr/app/services/convert_service.py`          | max dimension `6000`                              | oversized page рендерится с меньшим DPI                |
-| Dewarp               | `ocr/app/preprocessing.py`                     | budget `16_000_000` pixels                        | dewarp пропускается на огромном изображении            |
-| Table OCR            | `ocr/app/pipeline_config.py`                   | bounded coverage/call flags                       | дорогая или слабая сетка уходит в raw fallback         |
-| Long screenshots     | `ocr/app/services/convert_service.py`          | layout получает bounded segments                  | границы сегментов могут влиять на качество             |
-| NDJSON errors        | `ocr/app/routers/convert.py`                   | HTTP headers уже отправлены                       | поздняя ошибка приходит event-ом внутри HTTP 200       |
+## Не предоставляется
 
-## Что уже закрыто в текущем цикле
+- durable queue, retry, retention или восстановление задачи после рестарта;
+- object storage для исходных документов или eviction terminal task records;
+- аутентификация локального API;
+- tile decoder для изображений выше backend decode-limit;
+- гарантия отсутствия данных в swap, crash dumps и инфраструктурных логах;
+- единый OCR implementation для Python и браузера.
 
-- raw `curl` безопасно определяет PDF/PNG/JPEG/WebP по сигнатуре;
-- PDF default `auto` использует пригодный text layer, а явный
-  `pdf_mode=raster` принудительно проверяет постраничный image path;
-- неизвестные engine/profile values отклоняются;
-- client disconnect отменяет gateway reader и останавливает producer;
-- heartbeat удерживает длинный OCR stream;
-- page production имеет backpressure;
-- пустые страницы отмечаются `EMPTY_PAGE` и делают результат partial;
-- PDF.js decoder assets проверяются Pages gate;
-- encoded backend upload и browser PDF имеют default 128 MiB guard.
+Sparse runtime в `ocr/app/sparse_pipeline` является opt-in библиотечным
+контуром и не включён в публичный convert route. Его bounded limits не следует
+выдавать за ограничения основного API, пока routing явно не подключён.
 
-## Что не решается несколькими строками
-
-- durable queue, object storage, retention и восстановление после рестарта;
-- spool входного backend upload без полной копии в Python `bytes`;
-- tile-capable decoder для изображений больше 80 MP;
-- автоматический oracle между downscale, tiles и quality profile;
-- длительный GPU/CPU repeated-request soak;
-- новый HTTP status после начала NDJSON response.
-
-## Debug
-
-`debug/` нужен для воспроизведения, а не для заявления о покрытии.
-Результат становится regression coverage только после переноса в generated
-fixture с ожидаемыми tokens/pairs и порогами.
+`OCR_MAX_UPLOAD_BYTES=128 MiB` ограничивает чтение в Python, а не выделение
+памяти gateway Task API. Через Compose раньше срабатывает nginx `32m`; при
+прямом доступе к gateway запрос уже может быть полностью прочитан до ответа
+Python `413`. Класс `BoundedInputStorage` существует и тестируется отдельно,
+но текущий `http-api.ts` его не использует.

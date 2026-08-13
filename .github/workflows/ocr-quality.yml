@@ -32,6 +32,16 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Install browser OCR languages and fixture fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            fonts-noto-cjk \
+            tesseract-ocr \
+            tesseract-ocr-chi-sim \
+            tesseract-ocr-eng \
+            tesseract-ocr-rus
+
       - name: Browser OCR strict multilingual test
         run: |
           set -euo pipefail

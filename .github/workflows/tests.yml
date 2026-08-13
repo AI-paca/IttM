@@ -50,8 +50,8 @@ jobs:
       - name: TypeScript typecheck
         run: npm run typecheck
 
-      - name: Engine profile documentation contract
-        run: npm run test:engine-docs
+      - name: Pipeline documentation contract
+        run: npm run test:pipeline-docs
 
       - name: Unit tests
         run: npm test

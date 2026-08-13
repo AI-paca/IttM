@@ -1,51 +1,41 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import re
 import sys
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OCR_ROOT = REPO_ROOT / "ocr"
+DOC_PATH = REPO_ROOT / "docs/en/backend-pipeline.md"
+
 if str(OCR_ROOT) not in sys.path:
     sys.path.insert(0, str(OCR_ROOT))
 
-from app.pipeline_flags import pipeline_flag_catalog  # noqa: E402
-
-DOC_PATHS = (
-    REPO_ROOT / "docs/ru/engine/README.md",
-    REPO_ROOT / "debug/README.md",
-)
-SOURCE_FLAG_PATHS = (REPO_ROOT / "scripts/benchmark/benchmark-browser-ocr.ts",)
-SOURCE_FLAG_RE = re.compile(r"['\"`]([a-z][a-z0-9_]*(?::[a-z][a-z0-9_]+)?)(?=[:=])")
-
-
-def documented_key(documented: str, key: str) -> bool:
-    if f"`{key}`" in documented:
-        return True
-    return f"`{key}:" in documented
-
-
-def source_flag_keys() -> set[str]:
-    keys: set[str] = set()
-    for path in SOURCE_FLAG_PATHS:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if "flag" not in line:
-                continue
-            for match in SOURCE_FLAG_RE.finditer(line):
-                keys.add(match.group(1))
-    return keys
+from app.pipeline_flags import PIPELINE_OVERRIDE_SPECS  # noqa: E402
 
 
 def main() -> int:
-    documented = "\n".join(path.read_text(encoding="utf-8") for path in DOC_PATHS)
-    catalog_keys = {entry["key"] for entry in pipeline_flag_catalog()}
-    required = catalog_keys | source_flag_keys()
-    missing = [key for key in sorted(required) if not documented_key(documented, key)]
+    documented = DOC_PATH.read_text(encoding="utf-8")
+    missing: list[str] = []
+
+    for key, spec in PIPELINE_OVERRIDE_SPECS.items():
+        if f"`{key}`" not in documented:
+            missing.append(key)
+        missing.extend(
+            f"{key}={mode}"
+            for mode in sorted(spec.modes)
+            if f"`{mode}`" not in documented
+        )
+
     if missing:
-        print("Undocumented pipeline flag keys:")
-        for key in missing:
-            print(f"- {key}")
+        print("Undocumented public pipeline override or mode:")
+        for token in missing:
+            print(f"- {token}")
         return 1
-    print(f"Pipeline flag documentation covers {len(pipeline_flag_catalog())} keys.")
+
+    mode_count = sum(len(spec.modes) for spec in PIPELINE_OVERRIDE_SPECS.values())
+    print(
+        "Pipeline documentation covers "
+        f"{len(PIPELINE_OVERRIDE_SPECS)} override keys and {mode_count} modes."
+    )
     return 0
 
 

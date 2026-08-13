@@ -1,106 +1,77 @@
-# Testing
+# Test responsibilities
 
-[Русский](../ru/testing.md) | [Documentation](./README.md)
+[Documentation](./README.md) | [Pipeline diagnostics](../ru/pipeline/README.md)
 
-## Before Docker-heavy Checks
+Use the smallest gate that owns the changed boundary, then run the complete PR
+job for that runtime. The workflow source is `.github/workflows/tests.yml`.
 
-Docker builds need working DNS inside the daemon. Compose smoke, the Python OCR
-image, and SCA run `apt-get update`, `apt-get upgrade`, or `apk upgrade`; if a
-corporate network, VPN, or proxy causes `Temporary failure resolving
-deb.debian.org`, restart the Docker daemon and rerun the command. In WSL that
-usually means restarting the service, for example `sudo systemctl restart docker`
-inside a systemd-enabled distribution, not just restarting the Docker client.
+## Pull-request gates
 
-## JavaScript / TypeScript
+| Gate or command                                                               | Responsibility                                                             |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| `npm run format:check`                                                        | Repository formatting only                                                 |
+| `npx eslint .`                                                                | JavaScript/TypeScript static checks                                        |
+| `npm run typecheck`                                                           | Web, gateway and edge TypeScript contracts                                 |
+| `npm run test:pipeline-docs`                                                  | Backend profile names and five public override keys/modes in documentation |
+| `npm test`                                                                    | Web, gateway and edge unit/contract tests matching `*.test.ts`             |
+| `npm run build`                                                               | Production web and bundled gateway                                         |
+| `npm run model:browser-reviewer && npm run build:pages && npm run test:pages` | Lite Pages base path, workers, pinned model and WASM assets                |
+| `npm run test:contract`                                                       | Task worker/input plus web/Python layout and upload boundary               |
+| `npm run test:smoke`                                                          | Gateway routes/static files and FastAPI route smoke                        |
+| Python fast suites                                                            | API, engines, layout, shared pipeline and debug-script regressions         |
+| `docker compose config --quiet`                                               | Compose syntax and service wiring                                          |
+| `npm run test:sast`                                                           | First-party security patterns in the configured source targets             |
 
-```bash
-npm run format:check
-npm run lint
-npm test
-npm run build
-```
-
-The test suite covers API errors and URLs, NDJSON parsing, gateway proxying,
-PDF workers, Base64 streaming, external LLM consent, and Tesseract asset paths.
-
-A dedicated local-mode regression requires the frontend to place the original
-`File` into `FormData` without browser-side `arrayBuffer()`, while the gateway
-must forward the original `Request.body`.
-
-## GitHub Pages
+The Python fast command used by CI is:
 
 ```bash
-npm run build:pages
-npm run test:pages
+docker run --rm \
+  -v "$PWD/scripts:/scripts:ro" \
+  -v "$PWD/debug:/debug:ro" \
+  -v "$PWD/LLM-OCR:/LLM-OCR:ro" \
+  ittm-ocr-ci \
+  python -m pytest \
+    tests/api tests/engines tests/layout tests/pipeline tests/debug -q
 ```
 
-The verifier checks `/IttM/`, the local Tesseract worker, and four worker/core
-assets. Do not run the normal and Pages builds concurrently because both write
-to `dist`.
+It intentionally does not include `tests/quality`, `tests/recognition` or
+`tests/sparse_pipeline`; choose those explicitly when their code changes.
 
-## Python OCR
+## Python suites
+
+| Suite                   | Responsibility                                                       |
+| ----------------------- | -------------------------------------------------------------------- |
+| `tests/api`             | FastAPI routes, bounded uploads, PDF modes and progress              |
+| `tests/engines`         | Engine selection, preprocessing and backend profile flags            |
+| `tests/layout`          | Current public layout, tables, sparse codes and Markdown formatting  |
+| `tests/pipeline`        | Shared `pipeline-core` adapters, flags and stage contracts           |
+| `tests/debug`           | Public debug runners and report generation                           |
+| `tests/recognition`     | Candidate, language, identifier, span and token lattices             |
+| `tests/sparse_pipeline` | Diagnostic sparse stages, invariants, limits and artifact contracts  |
+| `tests/quality`         | Generated corpus, mutation, resource and real OCR quality thresholds |
+| `tests/support`         | Fixture generators and metric helpers; not an independent gate       |
+
+Focused example:
 
 ```bash
-docker build -f docker/ocr.Dockerfile --target test \
-  --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt \
-  --build-arg OCR_INSTALL_CJK_FONTS=1 \
-  -t ittm-ocr-ci .
-
-docker run --rm ittm-ocr-ci python -m flake8 .
-docker run --rm ittm-ocr-ci python -m black --check .
-docker run --rm ittm-ocr-ci python -m ruff check .
-docker run --rm ittm-ocr-ci python -m pytest tests -q
+cd ocr
+python -m pytest tests/sparse_pipeline tests/recognition -q
 ```
 
-Strict multilingual quality tests generate their own fixtures and verify
-`eng`, `rus`, and `chi_sim` with browser Tesseract.js. Backend Tesseract also
-ships `kaz` and `kir` traineddata for scanned Cyrillic PDF fixtures.
+## Scheduled and resource gates
 
-## Docker
+| Command or workflow        | Responsibility                                                        |
+| -------------------------- | --------------------------------------------------------------------- |
+| `npm run test:ocr:browser` | Real Tesseract.js multilingual browser OCR                            |
+| `npm run test:ocr:quality` | Backend generated quality matrix in the OCR CI image                  |
+| `npm run test:resources`   | Generated fuzz under Docker memory/CPU/PID limits                     |
+| `npm run test:compose`     | Built Compose ingress → gateway → OCR smoke                           |
+| `npm run test:sca`         | npm audit, Trivy source/images, SBOM and accepted-risk reconciliation |
 
-```bash
-docker compose config --quiet
-docker compose up -d --build
-docker compose ps
-curl -fsS "http://$(docker compose port nginx 80)/api/health"
-```
+Generated binary fixtures live under ignored `ocr/tests/fixtures`. Debug PNGs
+are evidence, not an oracle. A quality claim requires a matching reference and
+the quality metric named by the test.
 
-Image builds require working Docker DNS; see the note at the top of this page.
-
-## Manual Debug
-
-`debug/` is the tracked manual debug corpus. Inputs live under
-`debug/fixtures/name.ext`, while hand-checked Markdown oracles live
-under `debug/reference/name.ext.md`. Only the two SAMPLE inputs are tracked;
-real local fixtures stay ignored. Runtime A/B output stays
-under ignored `debug/tmp/`, while final matrices are written to
-`debug/result.csv` and `debug/time.csv`. Legacy `testtables/` inputs are only a
-fallback for old local worktrees.
-`ocr/tests/debug/test_sample_corpus.py` runs the tracked SAMPLE fixtures through
-backend Tesseract: the 4K edge-to-edge word sample and the hard image-only
-10x14 mixed-script table PDF must both stay above the debug gate.
-
-Reusable runners:
-
-- `scripts/debug/debug-all.sh`
-- `scripts/debug/run-debug.sh`
-- `scripts/debug/run-browser-debug.sh`
-- `scripts/benchmark/benchmark-browser-testtables.sh`
-- `scripts/benchmark/benchmark-browser-pdf-memory.mjs`
-
-The browser image benchmark executes the UI preprocessing path through a Node
-Canvas shim. Dense-grid curriculum pages are intentionally slow multi-pass
-quality probes, not PR-safe unit tests.
-
-Backend debug runs can limit PDF pages with `--pages '1,3,5-7'` or with
-per-file rules such as `--fixture-pages 'Adobe*.pdf=1-5'`. The older
-`--max-pages N` form remains a shorthand for `--pages '1-N'`.
-
-When a result contains Markdown tables, the backend runner writes one
-`<fixture>.tables.md` snapshot under `debug/tmp/tables/<method>/`. All detected
-table blocks are combined in that file instead of creating hundreds of tiny
-files. Cells are separated with `|`; missing cells stay as empty placeholders.
-If a method does not emit a Markdown table but manual `expected` contains one,
-the runner writes a diagnostic expected-shaped Markdown table with only
-OCR-confirmed cells filled. For table fixtures, treat 87% `match_percent` per
-method as the minimum passing signal, 93% as good, and 97% as the target.
+`npm run test:ocr:browser` requires local `eng`, `rus` and `chi_sim`
+traineddata. Set `BROWSER_OCR_LANG_PATH` when the files are not installed in a
+standard Tesseract directory.

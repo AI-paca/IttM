@@ -18,11 +18,6 @@ export async function assessBrowserGrammar(
   initPromise ??= initOcrCore();
   await initPromise;
   return JSON.parse(
-    assess_grammar_json(
-      text,
-      languages,
-      Float64Array.from(wordConfidences),
-    ),
+    assess_grammar_json(text, languages, Float64Array.from(wordConfidences)),
   ) as BrowserGrammarAssessment;
 }
-

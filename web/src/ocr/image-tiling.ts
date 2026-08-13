@@ -32,9 +32,7 @@ function boundedTargetSize(width: number, height: number, limits: ImageLimits) {
     Math.max(1, SMALL_IMAGE_TARGET_LONG_EDGE / longEdge),
   );
   const dimensionScale = limits.maxDimension / longEdge;
-  const pixelScale = Math.sqrt(
-    limits.maxImagePixels / Math.max(pixels, 1),
-  );
+  const pixelScale = Math.sqrt(limits.maxImagePixels / Math.max(pixels, 1));
   const scale = Math.min(qualityScale, dimensionScale, pixelScale);
 
   return {

@@ -1,34 +1,27 @@
-# SBOM and Dependencies
+# SCA and SBOM
 
-[Русский](../ru/sbom-report.md) | [Documentation](./README.md)
+[Security](./security.md) | [Russian operator page](../ru/sbom-report.md)
 
-Analysis date: June 26, 2026.
-
-Local SCA builds Docker images and runs `apt-get update`, `apt-get upgrade`,
-and `apk upgrade` during image builds. If a corporate network, VPN, or proxy
-breaks Docker DNS and you see `Temporary failure resolving deb.debian.org`,
-restart the Docker daemon, wait for it to become ready, and rerun
-`npm run test:sca`; in WSL this usually means restarting the service, for example
-`sudo systemctl restart docker` inside a systemd-enabled distribution. That is a
-build-network issue, not a code finding.
-
-The project now has a reproducible SCA/SBOM flow:
+Run:
 
 ```bash
 npm run test:sca
 ```
 
-The command runs `npm audit`, scans the source tree with Trivy, builds the
-gateway, nginx, OCR runtime, and OCR CI images, then emits vulnerability reports
-and CycloneDX SBOM files under `.sca/`. The GitHub workflow
-`SCA and SBOM` runs weekly and on manual dispatch, uploading `.sca/*.json` and
-`.sca/*.txt` as a 30-day artifact.
+The current script builds and scans `gateway`, `nginx`, `ocr`, and `ocr-ci`;
+runs `npm audit`; scans source including development dependencies; emits
+vulnerability JSON and CycloneDX; gates source `HIGH/CRITICAL` and fixable
+image `MEDIUM/HIGH/CRITICAL`; and reconciles unfixed image package families
+with `.sca/accepted-risk.json`.
 
-The current SCA gate has no fixable source or image findings. Fixable OS
-findings discovered during the run were closed with build-time package upgrades:
-Alpine `libexpat` in the nginx image and Debian `libssh2-1t64` in the OCR
-images.
+Generated `.sca/*.json` and `.sca/*.txt` files are per-run evidence and remain
+untracked. CI uploads them for 30 days. This page intentionally does not freeze
+a CVE list that would become stale.
 
-Tracked policy lives in `.sca/accepted-risk.json`; generated reports are ignored
-locally. See the Russian report for the full course-facing analysis, accepted
-risk rationale, and runtime EasyOCR limitation.
+Packages and models installed into the EasyOCR named volumes after container
+startup are outside the immutable OCR image SBOM. Review that runtime inventory
+separately.
+
+For a failure, open only the report named by the failing scope. AI-agent
+triage and companion-test ownership are kept in
+[`.sca/AGENTS.md`](../../.sca/AGENTS.md) beside the generated data.

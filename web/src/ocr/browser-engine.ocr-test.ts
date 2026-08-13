@@ -8,6 +8,7 @@ import {
   runBrowserOcrLowMemory,
 } from "./browser-engine";
 import { BROWSER_PIPELINE_PROFILES } from "./pipeline-config";
+import { configureBrowserPipelineCoreUrl } from "./pipeline-core";
 
 const fixtureRoot = resolve("ocr/tests/fixtures");
 const expectedTokens = [
@@ -92,6 +93,12 @@ test(
       }
     }
     const data = readFileSync(fixture);
+    const pipelineCore = readFileSync(
+      resolve("web/public/wasm/ittm_pipeline_core.wasm"),
+    );
+    configureBrowserPipelineCoreUrl(
+      `data:application/wasm;base64,${pipelineCore.toString("base64")}`,
+    );
     const file = new File([data], "multilingual.png", { type: "image/png" });
     const messages: string[] = [];
 

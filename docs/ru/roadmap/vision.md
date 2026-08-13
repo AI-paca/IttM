@@ -1,108 +1,58 @@
-# Видение развития проекта
+# Видение развития IttM
 
-[Roadmap history](./history.md) | [Development branches](./development-branches.md)
+[История по commit anchors](./history.md) |
+[Текущее развитие](./development-branches.md) |
+[Архитектура](../architecture.md)
 
-Фиксация направлений, в которых проект должен расти. Это не план релизов
-и не список задач, а карта того, что мы хотим поддерживать и что **не** хотим
-поддерживать. Каждое направление привязано к конкретной боли пользователя или
-аудитории.
+Этот документ сохраняет направления после текущего маркера roadmap. Это не
+обещание релиза: направление становится текущей возможностью только после
+production wiring, resource limits, diagnostics и tests.
 
-## Сценарии
+## Будущее
 
-| Сценарий                           | Что требуется                                                              |
-| ---------------------------------- | -------------------------------------------------------------------------- |
-| **Hyprland / tiling WM**           | Скриншот выделенной области → текст в `wl-copy` без браузера               |
-| **Browser extension / Side Panel** | Кнопка в панели, локальный Gateway API, явный доступ к внешним провайдерам |
-| **Локальная интеграция API**       | Читаемый OpenAPI/curl-контракт, логи, понятные лимиты                      |
-| **Интеграция в чужой pipeline**    | Жёсткие лимиты, причины segfault/OOM, явные границы доверенной зоны        |
+### Browser extension
 
-## Направления
+В коде есть тестируемые библиотеки `web/src/extension-core`, но нет manifest,
+permissions, package и browser E2E. Готовая версия должна:
 
-### 1. Низкоуровневый длинный скриншот в Linux (native pipeline)
+- явно запрашивать минимальные permissions;
+- передавать документ только выбранному local/provider path;
+- ограничивать capture и размер сохраняемого состояния;
+- иметь собираемый artifact и E2E на поддерживаемом браузере.
 
-Сейчас длинные скриншоты сшиваются только в браузерном расширении
-(`chrome.tabs.captureVisibleTab` + Canvas). На голом Hyprland/Sway этого нет.
+### Новые источники
 
-Цель: дать нативный pipeline без браузера.
+HTML canvas и файлы Google AI Studio требуют отдельных source adapters,
+ограничений размера и regression fixtures. Наличие DOM helper или file input
+не означает поддержку такого источника.
 
-- `grim` + `slurp` для области, постраничный скролл через `swaymsg` / `hyprctl` / DBus.
-- Сшивка кусков на GPU через `wlroots` DMA-BUF или fallback на CPU `Pillow` (Python).
-- Pipe в Gateway API как обычный `multipart` (`Content-Type: image/png`, фрагменты конкатенируются).
-- Hyprland config snippet публикуется в README как основной use case.
+### Public sparse profile
 
-### 2. Browser extension (Side Panel + Content Scripts)
+`SparsePipelineRuntime` уже создаёт matrix, objects, blocks и assembled result
+в debug runner, но публичные FastAPI routes используют `convert_service`.
+Подключение требует версионированной artifact schema, resource bounds и
+API/contract/quality tests.
 
-Side Panel = `http://localhost:<port>` внутри iframe, общается с Gateway по
-тому же API. Content Scripts в whitelist-доменах добавляют кнопки.
+## Далёкое будущее
 
-| Домен                 | Что делает content script                            | Граница                      |
-| --------------------- | ---------------------------------------------------- | ---------------------------- |
-| `chatgpt.com`         | Кнопка «Скопировать ветку» → `innerText` в clipboard | DOM-only, без отправки в API |
-| `claude.ai`           | То же                                                | То же                        |
-| `gemini.google.com`   | То же                                                | То же                        |
-| `aistudio.google.com` | Кнопка «Сохранить в Drive» через `chrome.identity`   | Только по явному действию    |
+### Hyprland capture/clipboard
 
-Что **не** делает content script: парсит корзины маркетплейсов, читает
-скрытые DOM-узлы, делает auto-click.
+Ручной `grim/slurp → curl → wl-copy` pipe работает как композиция внешних
+команд. Репозиторий пока не предоставляет capture UI, scroll stitching,
+Hyprland package или desktop lifecycle. Это отдельный продуктовый контур.
 
-### 3. Marketplace cart scrape (ассортимент) с явным allow-list
+### Non-local deployment
 
-- Чёрный список по умолчанию: `amazon.*`, `ozon.*`, `wildberries.*`,
-  `aliexpress.*`, любой сайт, требующий ввода платёжных данных.
-- Whitelist: пользователь добавляет сайт вручную, и расширение начинает
-  собирать выбранную таблицу как Markdown. По умолчанию whitelist пуст.
-- В whitelist-режиме работает встроенный DLP-фильтр: 16-значные номера
-  проходят Luhn-check и заменяются на `[CARD REDACTED]`, email — на
-  `[EMAIL REDACTED]`, длинные цифровые строки без Luhn — оставляются.
-- Полный blacklist и regex DLP публикуются в
-  [docs/ru/security.md](../security.md).
+Локальный API не имеет authentication, tenant isolation, rate limiting,
+retention и object lifecycle. Публикация его в недоверенную сеть требует новой
+security boundary.
 
-### 4. Расширение движков
+## За пределами текущего scope
 
-- **Сейчас:** Browser OCR (Tesseract.js), Local Tesseract, Local EasyOCR,
-  External LLM (Gemini / OpenRouter / Ollama).
-- **Цель:** общий флаг `engine_type` принимает любое имя, для которого
-  зарегистрирован модуль; baseline через
-  [`architecture-unified-pipeline.md`](../architecture-unified-pipeline.md).
-- **Кандидаты:** PaddleOCR (китайский/японский), Surya (мультиязычный),
-  GOT-OCR2 (для тяжёлых таблиц), Gemma-3 multimodal (для игрового шрифта).
+- durable queue/retry/retention и object storage;
+- unattended scraping скрытых DOM-узлов;
+- ввод или хранение платёжных/персональных данных;
+- remote executable selector configuration.
 
-### 5. Diagnostics и Observability
-
-- `/api/diagnostics` уже существует; расширение должно собирать последние
-  50 ошибок в `chrome.storage.local` и предлагать «Скачать логи» для issue.
-- Circuit breaker вокруг External LLM: 5 ошибок подряд → пауза 30 секунд →
-  fallback на Browser OCR.
-
-### 6. «В чём виноват железо, в чём — код»
-
-Каждое известное падение должно иметь публичный runbook в
-[`architecture-limitations.md`](../architecture-limitations.md): сценарий,
-причина, способ отличить OOM от segfault, способ отличить «документ
-слишком большой» от «EasyOCR не нашёл моделей».
-
-## Что не планируется
-
-| Идея                                     | Почему отказ                                                                      |
-| ---------------------------------------- | --------------------------------------------------------------------------------- |
-| Durable async-таски с retry и retention  | Требует Redis / RabbitMQ; не входит в текущий local-first scope                   |
-| Object storage / S3 / MinIO              | То же                                                                             |
-| Native Wayland-композер для авто-скролла | Слишком хрупко между Hyprland / Sway / KWin (см. «Сеньор сбежал после Rust»)      |
-| Парсинг DOM корзин Amazon / Ozon         | Юридический риск (PII / сессионные токены), DLP не покрывает все скрытые поля     |
-| Manifest V3 remote-config для селекторов | Chrome Web Store запрещает remote code execution                                  |
-| 100% unit-test покрытие                  | Не окупается для CV-кода; нужен golden corpus и метрики CER/WER (см. team_lead 1) |
-
-## Где это обсуждается
-
-- [GitHub Issues](https://github.com/AI-paca/IttM/issues) — конкретные фичи
-  и баги.
-- [GitHub Discussions](https://github.com/AI-paca/IttM/discussions) —
-  направления развития, RFC.
-- Решения, затрагивающие профиль движка или конфигурацию pipeline, идут
-  через [docs/ru/engine/README.md](../engine/README.md) и его
-  CI-верификатор.
-
-## Связь с рабочими заметками
-
-Этот документ фиксирует направления, а не задачи. Черновики задач и agent-аудит
-остаются локальными рабочими материалами и не входят в репозиторий.
+Такие направления нельзя добавлять только документацией: сначала меняется
+product scope и threat model.

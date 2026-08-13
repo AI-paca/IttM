@@ -1,40 +1,42 @@
 # Документация IttM
 
-<p align="right">
-  <a href="../../README.md"><img alt="Русский" src="https://img.shields.io/badge/%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-%F0%9F%87%B7%F0%9F%87%BA-blue"></a>
-  <a href="../en/README.md"><img alt="English" src="https://img.shields.io/badge/English-%F0%9F%87%AC%F0%9F%87%A7-lightgrey"></a>
-</p>
-
 [Корневой README](../../README.md) | [English](../en/README.md)
 
-## Карта документации
+Документация предназначена для сопровождения действующего сервиса:
 
-| Документ | О чём |
-| --- | --- |
-| [Архитектура проекта](./architecture.md) | Runtime-топология, shared pipeline core и extraction API |
-| [Движок и pipeline](./engine/README.md) | Stage recipe, профили, OCR adapters, fallback и таблицы |
-| [Markdown-контракт таблиц](./engine/table-markdown-contract.md) | Merge-маркеры и формат табличного результата |
-| [Тестирование](./testing.md) | Tiers, regression gates и команды |
-| [Debug](./debug.md) | Воспроизводимые OCR-прогоны и артефакты |
-| [Sparse OCR, этап 2](./sparse-rewrite-stage2.md) | Параллельные OCR lane, fusion, метрика и debug corpus |
-| [Sparse-блоки, этап 5](./sparse-rewrite-stage5.md) | Пересекающиеся контекстные блоки и OR/XOR |
-| [Sparse-документ, этап 7](./sparse-rewrite-stage7.md) | Evidence assembly, точная loss-метрика и единый v20 gate |
-| [Security](./security.md) | Границы доверия и незакрытые риски |
-| [SAST](./sast.md) | Semgrep scope, правила и CI |
-| [SBOM](./sbom-report.md) | SCA workflow и зависимости |
-| [Ручной запуск Docker](./docker-manual-launch.md) | Запуск без Compose |
-| [Границы ответственности](./course/boundaries.md) | Точки входа и владельцы файлов |
-| [Критерии курса](./course/course_tasks.md) | Соответствие заданий и реализации |
+| Документ                                             | Когда нужен                                         |
+| ---------------------------------------------------- | --------------------------------------------------- |
+| [Сопровождение pipeline](./pipeline/README.md)       | Проверить сервис, прочитать запрос и результат      |
+| [Архитектура](./architecture.md)                     | Найти компонент и публичный интерфейс               |
+| [Этапы pipeline](./architecture-unified-pipeline.md) | Раскрыть pipeline black box и найти runtime handler |
+| [Ограничения](./architecture-limitations.md)         | Проверить upload, память, PDF и очередь             |
+| [Полный пример](../../debug/EXAMPLE.md)              | Проследить matrix, objects, blocks и результат      |
+| [Безопасность](./security.md)                        | Проверить trust boundary, SAST и SCA                |
+| [Развитие](./roadmap/development-branches.md)        | Увидеть текущую работу и критерии готовности        |
+| [История по commits](./roadmap/history.md)           | Проверяемая историческая ось проекта                |
+| [Видение](./roadmap/vision.md)                       | Будущие и далёкие направления                       |
+| [Тестирование](./testing.md)                         | Выбрать тест по его ответственности                 |
+| [SAST](./sast.md)                                    | Разобрать first-party security finding              |
+| [SCA/SBOM](./sbom-report.md)                         | Разобрать dependency/image finding                  |
 
-## Движки
+Технические справочники:
 
-| Движок | Runtime | Передача исходного файла |
-| --- | --- | --- |
-| Browser Tesseract | Tesseract.js worker | Файл остаётся во вкладке |
-| Browser PP-OCRv5 | Offline CTC worker | Файл остаётся во вкладке |
-| Local Tesseract | Python OCR backend | Multipart через gateway |
-| Local EasyOCR | Python OCR backend | Multipart через gateway |
-| External LLM | Provider API | Только после явного consent |
+- [Task API](../en/task-api.md);
+- [backend pipeline](../en/backend-pipeline.md);
+- [opt-in sparse pipeline](../en/sparse-pipeline.md);
+- [runtime scripts](../en/runtime-scripts.md);
+- [debug scripts](../en/scripts.md);
+- [локальные OCR/VLM deployments](../en/ollama-deploy.md);
+- [полная English-карта тестов](../en/testing.md);
+- [`pipeline-core/README.md`](../../pipeline-core/README.md) — Rust ABI.
 
-Все OCR adapters возвращают наблюдаемый текст и геометрию. Stage recipe,
-fallback и merge принадлежат shared `pipeline-core`.
+Архитектура, pipeline и SAST имеют редактируемые Draw.io-исходники и
+экспортированные SVG/PNG в [`docs/assets`](../assets/). Roadmap редактируется
+непосредственно как SVG.
+
+Инструкции для AI-агентов:
+
+- [`.semgrep/AGENTS.md`](../../.semgrep/AGENTS.md) — какой тест отвечает за
+  SAST finding и какую часть ruleset читать;
+- [`.sca/AGENTS.md`](../../.sca/AGENTS.md) — как разбирать SCA без полного
+  чтения больших JSON/SBOM и когда допустимо менять accepted risk.

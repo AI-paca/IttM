@@ -1,45 +1,60 @@
 # IttM pipeline core
 
-This crate is the language-neutral deterministic core shared by the Python
-backend and the browser-lite pipeline. Platform adapters own PDF decoding,
-Pillow/Canvas images, native Tesseract, Tesseract.js, and remote OCR/VLM calls.
+`pipeline-core` is the single Rust source for the logical stage recipe and
+bounded deterministic decisions shared by the Python backend and browser. The
+same crate is compiled to `libittm_pipeline_core.so` for Python and
+`ittm_pipeline_core.wasm` for the browser; there is no second copy of those
+Rust decisions.
 
-ABI v3 defines:
+This does not mean that all OCR code is one Rust implementation. Image/PDF
+decoding, Tesseract/EasyOCR/Tesseract.js, workers, and stage handlers remain
+platform-specific executors behind the shared contract.
 
-```text
-ImagePlane
-  -> Segment[]
-  -> SparseProjection
-  -> RecognizedSegment[]
-  -> StructuralRecord[]
-  -> StructuralRenderArtifact
-```
+## ABI v3
 
-Stage traces never contain pixel buffers or platform handles. `ImagePlane`
-crosses only the adapter/core boundary. Capability recipes decide which stages
-are executed; a trusted API result cannot accidentally enable local T9 or
-lexical correction.
+The C/WASM ABI exports:
 
-The raw ABI also exposes deterministic structural predicates. The first one,
-`ittm_is_isolated_heading`, classifies a short sparse-row run from geometry and
-content length only; it does not inspect OCR casing or fixture vocabulary.
+- `ittm_pipeline_abi_version`;
+- `ittm_pipeline_recipe_mask`;
+- `ittm_sparse_add_signal`;
+- `ittm_is_isolated_heading`;
+- `ittm_span_evidence_score`;
+- `ittm_should_replace_primary`;
+- `ittm_should_drop_text_block`.
 
-`ittm_span_evidence_score` ranks numeric evidence for an already observed OCR
-span. Text, language identifiers and document-specific schemas never cross
-this scalar ABI, so the shared core cannot synthesize replacement content.
+The functions operate on capabilities, bounded numeric evidence, and sparse
+codes. Text and platform handles do not cross the raw ABI.
 
-`ittm_should_replace_primary` and `ittm_should_drop_text_block` own the
-fallback evidence thresholds used by both runtime adapters. Python loads the
-native library, while the Lite build loads the same crate as WebAssembly.
+Python loads the native library through `ocr/app/pipeline_core/native.py`.
+Browser code loads the WASM module through
+`web/src/ocr/pipeline-core.ts`. The files under `web/src/wasm/ocr-core` belong
+to a separate generated grammar module; its wrapper exists, but the current
+production browser path does not call it.
 
-Build and verify native and browser artifacts with one command:
+## Build and verification
 
 ```bash
 npm run build:pipeline-core
 ```
 
-The command runs Rust tests and Python/Rust native parity, builds
-`wasm32-unknown-unknown`, then instantiates the raw module in Node and checks
-its exported ABI. Native-only and Lite-only builds are available as
-`build:pipeline-core:native` and `build:pipeline-core:wasm`. The generated
-`.wasm` is a build artifact and is not tracked.
+This runs Rust tests, builds the native release library, checks Python/Rust
+parity, builds `wasm32-unknown-unknown`, and verifies the exported ABI in Node.
+
+Individual builds:
+
+```bash
+npm run build:pipeline-core:native
+npm run build:pipeline-core:wasm
+```
+
+Generated native files under `pipeline-core/target` and
+`web/public/wasm/ittm_pipeline_core.wasm` are ignored. Docker OCR builds compile
+and copy the native library into the runtime image; Lite builds generate the
+WASM module.
+
+Python `/readiness` reports `pipeline_core_abi3`. A missing or incompatible
+native library makes readiness fail even though some Python helpers retain
+fallback implementations for development and tests.
+
+When changing ABI behavior, update the Rust tests, native wrapper, browser
+wrapper, parity verifier, WASM verifier, and this document together.

@@ -1,103 +1,90 @@
-# Единый пайплайн: целевая модель
+# Единый pipeline contract и runtime adapters
 
-[Архитектура](./architecture.md) | [Текущая реализация флагов](./architecture-current-flags.md) | [Движок](./engine/README.md)
+[Архитектура](./architecture.md) | [Pipeline runbook](./pipeline/README.md) |
+[Debug sample](../../debug/EXAMPLE.md) |
+[Текущие flags](./architecture-current-flags.md)
 
-Этот документ описывает **целевую** архитектуру IttM. Цель — единый extraction-пайплайн, общий для Web UI, CLI и `curl`, одинаково работающий в Docker и bare-metal, в browser-режиме и в backend-режиме. Сравнение с тем, что уже реализовано, — в [текущей реализации флагов](./architecture-current-flags.md).
+Один логический pipeline задаёт порядок:
 
-## Принципы
-
-1. **Один контракт.** Web UI, CLI и `curl` — равноправные клиенты одного gateway-контракта. Они не имеют собственных «режимов обработки».
-2. **Один резолвер флагов.** `pipeline_flags` — это публичный параметр, и одно и то же значение приводит к одному и тому же effective flags во всех runtime (browser, backend, external LLM).
-3. **Один источник правды для профиля.** `OcrPipelineProfile` живёт в `ocr/app/pipeline_config.py`, а его mirror-описание (effective flag keys, defaults) публикуется в `GET /v1/pipeline/flags` и в браузерной debug-сессии.
-4. **Один PDF-контракт.** `pdf_mode=auto|raster` — общий для API, task API, CLI, а решение «текстовый слой vs raster» принимает backend по правилу, известному и документированному для клиента.
-5. **Один launcher abstraction.** Docker Compose, bare-metal `run-local.sh` и Lite-сборка различаются только способом доставки бинарников, а не API-контрактом.
-
-## Целевой поток
-
-```
-┌───────────────┐    ┌──────────────────┐    ┌──────────────────────┐
-│  Web UI / CLI │ -> │   Gateway API    │ -> │ Unified flag resolver│
-│  curl         │    │  /api/extract/*  │    │  (effective flags)   │
-└───────────────┘    └──────────────────┘    └──────────┬───────────┘
-                                                       │
-                       ┌───────────────────────────────┼─────────────────────────┐
-                       │                               │                         │
-                ┌──────▼──────┐                ┌───────▼──────┐         ┌───────▼────────┐
-                │ Backend OCR │                │ Browser OCR  │         │ External LLM   │
-                │ (Tesseract, │                │ (Tesseract.js│         │ (Gemini,       │
-                │  EasyOCR)   │                │  /WASM)      │         │  OpenRouter,   │
-                └─────────────┘                └──────────────┘         │  Ollama)       │
-                                                                       └────────────────┘
+```text
+align → segment → project_sparse → recognize_segments
+      → select_language_candidate → lexical_correction
+      → group_structures → render_markdown
 ```
 
-В целевой модели:
+Capabilities входного artifact выбирают нужное подмножество этапов. Например,
+trusted Markdown не проходит layout, retry, correction и повторный render.
 
-- `pipeline_flags` принимается одинаково во всех endpoint'ах и runtime.
-- Effective flags (сериализованные `key:value`/`key=value`) одинаково сериализуются для отчёта.
-- PDF-контракт `pdf_mode` — единый; backend решает text layer vs raster и **возвращает клиенту фактический режим в `meta.pdf_mode`**, чтобы клиент не гадал.
+![Внутренние этапы единого pipeline](../assets/ocr-pipeline.svg)
 
-## Целевой контракт
+Редактируемый источник:
+[`ocr-pipeline.drawio`](../assets/ocr-pipeline.drawio). Это раскрытие блока
+`PIPELINE ENGINE` из [общей архитектурной схемы](../assets/project-architecture.svg);
+entry routes, очереди и output adapters здесь намеренно не повторяются.
 
-| Маршрут                            | Метод | Назначение                                                                                                                                          |
-| ---------------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /api/extract/text`           | POST  | Синхронное извлечение. `Accept` управляет форматом: `text/plain`, `text/markdown`, `application/json`, `text/event-stream`, `application/x-ndjson`. |
-| `POST /api/tasks`                  | POST  | Async-задача. Lifecycle: `queued → running → ... → cancelled/partial/complete`.                                                                     |
-| `GET  /api/tasks`                  | GET   | Список задач (`?state=&limit=&engine=&profile=`).                                                                                                   |
-| `GET  /api/tasks/:id`              | GET   | Статус и результат задачи.                                                                                                                          |
-| `GET  /api/tasks/:id/events`       | GET   | SSE-стрим прогресса; resume по `Last-Event-ID`.                                                                                                     |
-| `POST /api/tasks/:id/cancel`       | POST  | Отмена.                                                                                                                                             |
-| `POST /convert`, `/convert/stream` | POST  | Совместимые OCR-маршруты.                                                                                                                           |
-| `GET  /api/health`                 | GET   | Проверка сервиса.                                                                                                                                   |
-| `GET  /api/capabilities`           | GET   | Движки, профили, effective flags, лимиты.                                                                                                           |
-| `GET  /api/diagnostics`            | GET   | Диагностика окружения.                                                                                                                              |
-| `POST /api/probe`                  | POST  | Тестовый прогон без сохранения.                                                                                                                     |
-| `GET  /v1/pipeline/flags`          | GET   | Каталог effective flag keys (общий для backend, browser, LLM).                                                                                      |
-| `POST /api/install-easyocr`        | POST  | Установка EasyOCR-моделей.                                                                                                                          |
+Entry routes заканчиваются на artifact contract. Они определяют способ
+доставки и доступный runtime, но не являются владельцами OCR engine.
+Четыре внешние рамки на схеме — фазы, блоки внутри них — stage contracts.
+Runtime adapters вложены только в свою recognition stage. Tesseract.js либо
+Python Tesseract/EasyOCR вызываются из `recognize_segments`: сплошная стрелка
+показывает call, штриховая — return. После возврата стадия выпускает image-free
+`RecognizedSegment[]`; он продолжает pipeline до structural grouping и Markdown
+render.
 
-В целевой модели `GET /v1/pipeline/flags` — это **единственный источник правды** о том, какие ключи принимаются и в каком формате сериализуются. Browser-профиль генерируется из того же каталога.
+Текущая реализация не притворяется одним центральным controller. Browser
+alignment/segmentation происходят до `runTextPipeline`, language retry в обоих
+runtime пока связан с recognition adapter, а dedicated browser handler
+`project_sparse` не зарегистрирован.
 
-## Целевые PDF-режимы
+| Stage contracts        | Browser runtime                  | Python runtime                      |
+| ---------------------- | -------------------------------- | ----------------------------------- |
+| align, segment         | До `runTextPipeline`             | Page decode и layout analysis       |
+| project_sparse         | Dedicated handler отсутствует    | Sparse codes; полная matrix — debug |
+| recognize, language    | Tesseract.js worker и reviewer   | OCR adapter и language agenda       |
+| lexical, group, render | Зарегистрированные text handlers | Formatting и structural journal     |
 
-| Режим    | Поведение                                                                                                                                                                    |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `auto`   | Backend пробует встроенный текстовый слой по `pdftotext`; пригодный текст возвращается без OCR. Если слоя нет или он непригоден, backend рендерит страницы и передаёт в OCR. |
-| `raster` | Backend пропускает проверку текстового слоя и сразу рендерит/распознаёт каждую страницу. Полезно для сканов, curl-проверок и image path.                                     |
+## Что действительно общее
 
-`pdf_mode` принимается в query (`?pdf_mode=...`), HTTP-header (`X-PDF-Mode`), JSON-поле (`pdfMode`) и CLI-аргументе (`--pdf-mode`). Неизвестные значения → HTTP 400. **Фактически использованный режим** возвращается в `meta.pdf_mode` (и при `auto` → `pdf_text_layer` или `raster_ocr`).
+`pipeline-core/src/lib.rs` и `candidates.rs` — один Rust source. Из него
+собираются:
 
-## Целевые профили
+- `libittm_pipeline_core.so`, который загружает Python;
+- `ittm_pipeline_core.wasm`, который загружает browser runtime.
 
-Профили — это заранее зафиксированные effective flags. Целевой реестр:
+Общими являются recipe mask, sparse codes, evidence score, primary replacement
+и text-block deduplication. Сборка проверяет Rust tests, Python/Rust parity и
+WASM ABI.
 
-| Профиль                      | Движок по умолчанию | Назначение                                                                             |
-| ---------------------------- | ------------------- | -------------------------------------------------------------------------------------- |
-| `backend_auto_standard`      | `auto`              | default для `auto`-движка. Standard preprocessing + spatial regions.                   |
-| `backend_tesseract_standard` | `tesseract`         | default для Tesseract. Тот же preprocessing/layout, без EasyOCR-специфики.             |
-| `backend_easyocr_standard`   | `easyocr`           | default для EasyOCR. Sparse-text recovery через Tesseract.                             |
-| `backend_easyocr_table`      | `easyocr`           | diagnostic bounded table path.                                                         |
-| `backend_easyocr_spatial`    | `easyocr`           | сложные layout-страницы, прямой региональный OCR.                                      |
-| `backend_curriculum`         | `auto`              | учебные планы и широкие таблицы. `table_word_recognition=single_pass_with_left_strip`. |
-| `backend_plain_text`         | `auto`              | plain text fallback (без layout stages).                                               |
-| `backend_raw`                | `auto`              | сырой OCR без preprocessing/layout.                                                    |
+## Что остаётся платформенным
 
-Сейчас эти профили **уже есть** в `ocr/app/pipeline_config.py`; целевая модель требует, чтобы они были видны и в `GET /v1/pipeline/flags`, и в browser debug-сессии как **один и тот же реестр**.
+| Runtime  | Исполнитель                                                   |
+| -------- | ------------------------------------------------------------- |
+| Browser  | PDF.js/image tiles, Tesseract.js, TypeScript handlers         |
+| Backend  | PDF/image decode, Tesseract/EasyOCR, Python layout и handlers |
+| Provider | trusted Markdown artifact после consent/configuration         |
 
-## Что ещё не сходится с целевой моделью
+Это один контракт и одна Rust decision-логика, но не один общий OCR engine.
 
-| Часть                | Целевая модель                                                 | Текущее состояние                                                                                                                                     |
-| -------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Override resolver    | `pipeline_flags` принимается, effective flags пересчитываются. | `overrides_enabled=false`; непустой `pipeline_flags` → HTTP 400.                                                                                      |
-| Browser flag source  | получает флаги из `GET /v1/pipeline/flags`.                    | имеет собственный mirror в `web/src/ocr/*`; синхронизирован через CI verifier, но не через единый resolver.                                           |
-| External LLM flags   | LLM-движок подключается к тому же resolver.                    | LLM-кодек публикует свои `key:value` независимо; в `pipeline_flag_catalog()` есть фиксированные заглушки `ocr_languages`, `ocr_max_dimension` и т.п.  |
-| PDF-контракт         | фактический режим всегда в `meta.pdf_mode`.                    | `meta.pdf_mode` присутствует, но клиент не обязан на него полагаться; клинтский код браузера не валидирует.                                           |
-| Launcher abstraction | Docker/bare-metal/Lite — это launcher modes, не OCR modes.     | В коде и документации уже зафиксировано, что это разные оси; целевая модель требует, чтобы launch-скрипт был полностью self-documenting по контракту. |
-| `meta.engine_chain`  | effective recovery-цепочка видна клиенту.                      | Уже реализовано для EasyOCR standard; целевая модель хочет, чтобы любая engine-цепочка была видна через `meta.engine_chain`.                          |
+## Текущие и будущие входы
 
-## Что нужно для перехода к целевой модели
+Сейчас работают Web browser source, Web backend stream, CLI/Task API и external
+provider path. Web UI вызывает Ollama прямым browser `fetch`, поэтому этот путь
+не проходит через gateway queue.
 
-1. Поднять `overrides_enabled` в `ocr/app/pipeline_flags.py` после реализации override resolver.
-2. Перевести браузерный `pipeline-flag catalog` на `/v1/pipeline/flags` (либо генерировать его из того же модуля).
-3. Зафиксировать `meta.engine_chain` и `meta.pdf_mode` в публичной OpenAPI-схеме и в `docs/ru/architecture-current-flags.md`.
-4. Добавить тест, что одно и то же `pipeline_flags` даёт одинаковые effective flags во всех трёх runtime (backend, browser, LLM).
+Главные ограничения текущего кода:
 
-Подробное описание того, что уже есть в коде, — в [текущей реализации флагов](./architecture-current-flags.md).
+- browser OCR: отдельный worker pool на вкладку, общей очереди между вкладками
+  нет;
+- compatibility backend stream: отдельный Python thread на запрос, общего OCR
+  concurrency cap нет;
+- Task API: один worker и очередь до 32 ожидающих задач;
+- Ollama/provider: прямые запросы, расписание принадлежит provider;
+- compute: OCR recognition; в полном debug sample block OCR занял около 78 с.
+
+Browser extension на схеме — штрихованный вход с пока не выбранным transport.
+Ручной Hyprland pipe уже входит через `curl /api/extract/text`; штриховкой
+показан только отсутствующий пакетированный capture UI/lifecycle. Этот путь
+использует HTTP Task API, а не WASM.
+
+Полные artifacts и время этапов:
+[debug/EXAMPLE.md](../../debug/EXAMPLE.md).

@@ -34,7 +34,7 @@ import shutil
 import sys
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace as dataclass_replace
 from pathlib import Path
 from typing import Iterable, Mapping, Protocol
 
@@ -85,6 +85,7 @@ from app.sparse_pipeline.ocr_fusion import (  # noqa: E402
     align_exact_text,
     compact_ocr_text,
 )
+from app.sparse_pipeline.quality_metrics import exact_levenshtein  # noqa: E402
 from app.sparse_pipeline.ocr_queue import (  # noqa: E402
     OcrJobResult,
     OcrJobStatus,
@@ -149,6 +150,7 @@ class BlockOcrResult:
     separated: SeparatedBlocks
     queue: OcrQueueResult
     ocr_seconds: float
+    cache_metrics: Mapping[str, int | float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -166,6 +168,7 @@ class PolicyRun:
     fusion_seconds: float
     fusion_status: str
     fusion_error: str = ""
+    cache_metrics: Mapping[str, int | float] = field(default_factory=dict)
 
     @property
     def total_seconds(self) -> float:
@@ -912,6 +915,9 @@ def separate_blocks(
         ownership=ownership,
         ownership_segment_ids=ownership_segment_ids,
         segment_spans=stored.matrix.spans,
+        segment_bboxes={
+            segment.segment_id: segment.bbox for segment in stored.segments
+        },
     )
     crop_seconds = time.perf_counter() - crop_started
     return SeparatedBlocks(
@@ -924,11 +930,59 @@ def separate_blocks(
     )
 
 
+def canonicalize_locality_separated(
+    stored: StoredObject,
+    separated: SeparatedBlocks,
+) -> SeparatedBlocks:
+    """Re-render a persisted local plan through the canonical renderer.
+
+    Debug handoffs can originate in another worktree.  Their typed plan is
+    authoritative, but their raster is not accepted unless current code can
+    reproduce the same render contract without changing that plan.
+    """
+
+    if not any(
+        block.matrix_window_kind
+        in {"polar-local-full", "polar-local-signature"}
+        for block in separated.plan.blocks
+    ):
+        return separated
+    rendered = separate_blocks(stored, policy=separated.policy)
+    expected_contract = (
+        separated.plan.aligned_size,
+        separated.plan.source_segment_ids,
+        separated.plan.blocks,
+        separated.plan.adjacent_algebra,
+        separated.plan.membership_units,
+        separated.plan.matrix_sha256,
+    )
+    actual_contract = (
+        rendered.plan.aligned_size,
+        rendered.plan.source_segment_ids,
+        rendered.plan.blocks,
+        rendered.plan.adjacent_algebra,
+        rendered.plan.membership_units,
+        rendered.plan.matrix_sha256,
+    )
+    if actual_contract != expected_contract:
+        raise ObjectRecognitionInvariantError(
+            "persisted locality plan disagrees with canonical renderer plan"
+        )
+    return dataclass_replace(
+        separated,
+        crops=rendered.crops,
+        compactions=rendered.compactions,
+        crop_seconds=rendered.crop_seconds,
+    )
+
+
 def ocr_blocks(
     separated: SeparatedBlocks,
     *,
     session: OcrSession,
 ) -> BlockOcrResult:
+    cache_metrics = getattr(session, "cache_metrics", None)
+    cache_before = cache_metrics() if callable(cache_metrics) else {}
     ocr_started = time.perf_counter()
     run_with_compaction = getattr(session, "run_with_compaction", None)
     if callable(run_with_compaction):
@@ -939,11 +993,99 @@ def ocr_blocks(
         )
     else:
         queue = session.run(plan=separated.plan, crops=separated.crops)
+    wall_seconds = time.perf_counter() - ocr_started
+    cache_after = cache_metrics() if callable(cache_metrics) else {}
+    cache_delta = {
+        key: cache_after[key] - cache_before.get(key, 0)
+        for key in cache_after
+        if key != "entries"
+    }
+    cache_delta["entries_added"] = (
+        cache_after.get("entries", 0) - cache_before.get("entries", 0)
+    )
     return BlockOcrResult(
         separated=separated,
         queue=queue,
-        ocr_seconds=time.perf_counter() - ocr_started,
+        ocr_seconds=wall_seconds,
+        cache_metrics=cache_delta,
     )
+
+
+def _fusion_metadata_crops(
+    separated: SeparatedBlocks,
+) -> tuple[BlockCropPair, ...]:
+    """Expose compact atlases to fusion in their original block geometry."""
+
+    def metadata_view(
+        crop: BlockCropPair,
+        *,
+        bbox: Box,
+    ) -> BlockCropPair:
+        # BlockCropPair construction correctly binds bbox dimensions to PNG
+        # dimensions.  Fusion's membership-only contract instead requires the
+        # original plan bbox while still hashing the immutable compact PNG.
+        # Build a read-only view of the already validated crop rather than
+        # mutating it or manufacturing different image/segment evidence.
+        view = object.__new__(BlockCropPair)
+        for field_name in BlockCropPair.__dataclass_fields__:
+            object.__setattr__(
+                view,
+                field_name,
+                bbox if field_name == "bbox" else getattr(crop, field_name),
+            )
+        return view
+
+    if not separated.compactions:
+        return separated.crops
+    block_by_id = {
+        block.block_id: block for block in separated.plan.blocks
+    }
+    compacted_block_ids = tuple(
+        item.block_id for item in separated.compactions
+    )
+    if len(compacted_block_ids) != len(set(compacted_block_ids)):
+        raise ObjectRecognitionInvariantError(
+            "compacted OCR metadata contains duplicate block IDs"
+        )
+    unknown_block_ids = tuple(
+        block_id
+        for block_id in compacted_block_ids
+        if block_id not in block_by_id
+    )
+    if unknown_block_ids:
+        raise ObjectRecognitionInvariantError(
+            "compacted OCR metadata references unknown blocks: "
+            + ",".join(unknown_block_ids)
+        )
+    compacted = set(compacted_block_ids)
+    normalized: list[BlockCropPair] = []
+    for crop in separated.crops:
+        if crop.block_id not in compacted:
+            normalized.append(crop)
+            continue
+        block = block_by_id.get(crop.block_id)
+        if block is None:
+            raise ObjectRecognitionInvariantError(
+                f"compacted crop references unknown block {crop.block_id}"
+            )
+        if crop.segment_ids != block.segment_ids:
+            raise ObjectRecognitionInvariantError(
+                f"compacted crop membership disagrees with {crop.block_id}"
+            )
+        normalized.append(
+            metadata_view(crop, bbox=block.bbox)
+        )
+    missing_crop_ids = tuple(
+        block_id
+        for block_id in compacted_block_ids
+        if all(crop.block_id != block_id for crop in separated.crops)
+    )
+    if missing_crop_ids:
+        raise ObjectRecognitionInvariantError(
+            "compacted OCR metadata has no crop for blocks: "
+            + ",".join(missing_crop_ids)
+        )
+    return tuple(normalized)
 
 
 def get_segments(
@@ -973,6 +1115,7 @@ def get_segments(
         )
     else:
         try:
+            fusion_crops = _fusion_metadata_crops(separated)
             fusion = OcrEvidenceFusion(
                 OcrFusionConfig(
                     routing_mode=OcrRoutingMode.BLOCK_MEMBERSHIP,
@@ -982,7 +1125,7 @@ def get_segments(
             ).fuse(
                 plan=plan,
                 segments=stored.segments,
-                crops=crops,
+                crops=fusion_crops,
                 queue=queue,
             )
             segment_lines, result_text, unresolved = _fusion_lines(plan, fusion)
@@ -1007,6 +1150,9 @@ def get_segments(
             result_text = best.output.text.strip()
             label = "+".join(plan.source_segment_ids)
             segment_lines = (f"{label}\t{result_text.replace(chr(9), ' ')}",)
+            unresolved = 0
+            fusion_status = "complete"
+            fusion_error = ""
     return PolicyRun(
         policy=policy,
         plan=plan,
@@ -1021,6 +1167,7 @@ def get_segments(
         fusion_seconds=fusion_seconds,
         fusion_status=fusion_status,
         fusion_error=fusion_error,
+        cache_metrics=block_ocr.cache_metrics,
     )
 
 
@@ -1113,6 +1260,8 @@ def _write_separate_block_stage(
                     {
                         "nonempty_units": len(item.placements),
                         "omitted_empty_units": list(item.omitted_empty_units),
+                        "raster_kind": item.raster_kind.value,
+                        "raw_sha256": item.raw_sha256,
                         "placements": [
                             {
                                 "unit_id": placement.unit_id,
@@ -1282,6 +1431,16 @@ def _policy_payload(run: PolicyRun) -> dict[str, object]:
         "planning_seconds": run.planning_seconds,
         "crop_seconds": run.crop_seconds,
         "ocr_seconds": run.ocr_seconds,
+        "ocr_wall_seconds": run.ocr_seconds,
+        "ocr_work_seconds": float(
+            run.cache_metrics.get("ocr_work_seconds", run.ocr_seconds)
+        ),
+        "cache_requests": int(run.cache_metrics.get("requests", 0)),
+        "cache_hits": int(run.cache_metrics.get("hits", 0)),
+        "cache_misses": int(run.cache_metrics.get("misses", 0)),
+        "exact_duplicate_calls": int(
+            run.cache_metrics.get("exact_duplicate_calls_avoided", 0)
+        ),
         "fusion_seconds": run.fusion_seconds,
         "total_seconds": run.total_seconds,
         "fusion_status": run.fusion_status,
@@ -1588,30 +1747,234 @@ def _contact_sheet(object_output: Path, runs: tuple[PolicyRun, ...]) -> None:
             thumbnail.close()
 
 
-def _metric(reference: str, recognized: str) -> dict[str, object]:
+def _metric(
+    reference: str,
+    recognized: str,
+    *,
+    debug_full_alignment: bool = False,
+) -> dict[str, object]:
     compact_reference = compact_ocr_text(reference)
     compact_recognized = compact_ocr_text(recognized)
-    alignment = align_exact_text(
-        compact_reference,
-        compact_recognized,
-        max_cells=max(1, (len(compact_reference) + 1) * (len(compact_recognized) + 1)),
-    )
+    if debug_full_alignment:
+        distance = align_exact_text(
+            compact_reference,
+            compact_recognized,
+        ).distance
+    else:
+        shorter = min(len(compact_reference), len(compact_recognized))
+        longer = max(len(compact_reference), len(compact_recognized))
+        bit_vector_work = longer * ((shorter + 63) // 64)
+        distance = exact_levenshtein(
+            compact_reference,
+            compact_recognized,
+            max_cells=max(1, bit_vector_work),
+        )
     accuracy = (
-        100.0 if alignment.distance == 0 else 0.0
+        100.0 if distance == 0 else 0.0
         if not compact_reference
         else 100.0
-        * max(0.0, 1.0 - alignment.distance / len(compact_reference))
+        * max(0.0, 1.0 - distance / len(compact_reference))
     )
     return {
-        "lost_characters": alignment.distance,
+        "lost_characters": distance,
         "reference_characters": len(compact_reference),
         "recognized_characters": len(compact_recognized),
         "accuracy_percent": accuracy,
     }
 
 
-def _object_policies(stored: StoredObject) -> tuple[str, ...]:
-    """Route tables once and A/B only paragraph/list context size."""
+def canonical_paragraph_list_policy(stored: StoredObject) -> str:
+    if stored.source_kind == ObjectKind.LIST.value:
+        return "whole-object"
+    if stored.source_kind == ObjectKind.PARAGRAPH.value:
+        return "line-windows"
+    raise ValueError("canonical paragraph/list policy requires a flow object")
+
+
+def alternate_paragraph_list_policy(stored: StoredObject) -> str:
+    canonical = canonical_paragraph_list_policy(stored)
+    return "line-windows" if canonical == "whole-object" else "whole-object"
+
+
+def _queue_grammar_percentages(queue: OcrQueueResult) -> tuple[int, ...]:
+    percentages = []
+    for diagnostic in queue.diagnostics:
+        for part in diagnostic.split(";"):
+            if part.startswith("grammar="):
+                value = part.removeprefix("grammar=")
+                if value.isdigit():
+                    percentages.append(int(value))
+    return tuple(percentages)
+
+
+def lazy_paragraph_list_fallback_reason(run: PolicyRun) -> str | None:
+    if run.fusion_status != "complete":
+        return f"fusion-{run.fusion_status}"
+    if run.unresolved_units:
+        return f"unresolved-{run.unresolved_units}"
+    usable_job_evidence = any(
+        job.status is OcrJobStatus.COMPLETE
+        and job.output is not None
+        and bool(compact_ocr_text(job.output.text))
+        for job in run.queue.jobs
+    )
+    if (
+        not compact_ocr_text(run.result_text)
+        or not usable_job_evidence
+    ):
+        return "empty-evidence"
+    return None
+
+
+def _paragraph_list_policy_evidence(
+    run: PolicyRun,
+    *,
+    maximum_text_characters: int,
+) -> dict[str, object]:
+    complete_block_ids = {
+        job.block_id
+        for job in run.queue.jobs
+        if job.status is OcrJobStatus.COMPLETE and job.output is not None
+    }
+    block_by_id = {block.block_id: block for block in run.plan.blocks}
+    covered_segment_ids = {
+        segment_id
+        for block_id in complete_block_ids
+        if block_id in block_by_id
+        for segment_id in block_by_id[block_id].segment_ids
+    }
+    source_segment_ids = set(run.plan.source_segment_ids)
+    membership_units = len(run.plan.membership_units)
+    resolved_membership_coverage = (
+        max(0.0, 1.0 - run.unresolved_units / membership_units)
+        if membership_units
+        else 1.0
+    )
+    source_segment_coverage = (
+        len(covered_segment_ids & source_segment_ids) / len(source_segment_ids)
+        if source_segment_ids
+        else 1.0
+    )
+    text_characters = len(compact_ocr_text(run.result_text))
+    relative_text_coverage = (
+        text_characters / maximum_text_characters
+        if maximum_text_characters
+        else 0.0
+    )
+    grammar = _queue_grammar_percentages(run.queue)
+    grammar_percent = (
+        sum(grammar) / len(grammar)
+        if grammar
+        else 0.0
+    )
+    confidences = tuple(
+        word.confidence
+        for job in run.queue.jobs
+        if job.status is OcrJobStatus.COMPLETE and job.output is not None
+        for word in job.output.words
+    )
+    mean_word_confidence = (
+        sum(confidences) / len(confidences)
+        if confidences
+        else 0.0
+    )
+    coverage_score = 100.0 * (
+        resolved_membership_coverage * 0.35
+        + source_segment_coverage * 0.30
+        + relative_text_coverage * 0.15
+    )
+    quality_score = (
+        grammar_percent * 0.15
+        + mean_word_confidence * 100.0 * 0.05
+    )
+    return {
+        "policy": run.policy,
+        "fusion_complete": run.fusion_status == "complete",
+        "fusion_status": run.fusion_status,
+        "unresolved_units": run.unresolved_units,
+        "resolved_membership_coverage": resolved_membership_coverage,
+        "source_segment_coverage": source_segment_coverage,
+        "relative_text_coverage": relative_text_coverage,
+        "text_characters": text_characters,
+        "grammar_percent": grammar_percent,
+        "mean_word_confidence": mean_word_confidence,
+        "coverage_score": coverage_score,
+        "quality_score": quality_score,
+        "evidence_score": coverage_score + quality_score,
+    }
+
+
+def select_paragraph_list_policy_run(
+    stored: StoredObject,
+    runs: Mapping[str, PolicyRun],
+) -> PolicyRun:
+    if stored.source_kind not in {
+        ObjectKind.PARAGRAPH.value,
+        ObjectKind.LIST.value,
+    }:
+        raise ValueError("policy evidence selection requires paragraph/list")
+    candidates = tuple(
+        run
+        for policy in (
+            canonical_paragraph_list_policy(stored),
+            alternate_paragraph_list_policy(stored),
+        )
+        if (run := runs.get(policy)) is not None
+    )
+    if not candidates:
+        raise ObjectRecognitionInvariantError(
+            "paragraph/list has no recognized policy"
+        )
+    maximum_text_characters = max(
+        len(compact_ocr_text(run.result_text))
+        for run in candidates
+    )
+    canonical = canonical_paragraph_list_policy(stored)
+    evidence_by_policy = {
+        run.policy: _paragraph_list_policy_evidence(
+            run,
+            maximum_text_characters=maximum_text_characters,
+        )
+        for run in candidates
+    }
+    return max(
+        candidates,
+        key=lambda run: (
+            int(bool(evidence_by_policy[run.policy]["fusion_complete"])),
+            float(evidence_by_policy[run.policy]["evidence_score"]),
+            int(run.policy == canonical),
+        ),
+    )
+
+
+def _paragraph_list_selection_payload(
+    stored: StoredObject,
+    runs: Mapping[str, PolicyRun],
+) -> dict[str, object]:
+    selected = select_paragraph_list_policy_run(stored, runs)
+    maximum_text_characters = max(
+        len(compact_ocr_text(run.result_text))
+        for run in runs.values()
+    )
+    return {
+        "selected_policy": selected.policy,
+        "canonical_policy": canonical_paragraph_list_policy(stored),
+        "policies": {
+            policy: _paragraph_list_policy_evidence(
+                run,
+                maximum_text_characters=maximum_text_characters,
+            )
+            for policy, run in sorted(runs.items())
+        },
+    }
+
+
+def _object_policies(
+    stored: StoredObject,
+    *,
+    paragraph_list_ab: bool | None = None,
+) -> tuple[str, ...]:
+    """Route canonical flow first; preserve legacy direct-call A/B diagnostics."""
 
     if stored.source_kind == ObjectKind.TABLE.value:
         return ("matrix-orxor",)
@@ -1619,7 +1982,12 @@ def _object_policies(stored: StoredObject) -> tuple[str, ...]:
         ObjectKind.PARAGRAPH.value,
         ObjectKind.LIST.value,
     }:
-        return ("whole-object", "line-windows")
+        if paragraph_list_ab is None:
+            return ("whole-object", "line-windows")
+        canonical = canonical_paragraph_list_policy(stored)
+        if paragraph_list_ab:
+            return (canonical, alternate_paragraph_list_policy(stored))
+        return (canonical,)
     return ("fixed-flow",)
 
 
@@ -1641,9 +2009,11 @@ def recognize_item(
     output_dir: Path,
     session: OcrSession,
     reference_path: Path | None = None,
-    replace: bool = False,
+    debug_full_metric_alignment: bool = False,
+    replace_existing: bool = False,
     geometry_dir: Path | None = None,
     objects_dir: Path | None = None,
+    paragraph_list_ab: bool = False,
 ) -> Path:
     geometry_dir = geometry_dir or item_dir / "01-geometry"
     objects_dir = objects_dir or item_dir / "06-objects" / "objects"
@@ -1653,7 +2023,7 @@ def recognize_item(
         raise FileNotFoundError(geometry_dir / "segments.jsonl")
     if not objects_dir.is_dir():
         raise FileNotFoundError(objects_dir)
-    if output_dir.exists() and not replace:
+    if output_dir.exists() and not replace_existing:
         raise FileExistsError(output_dir)
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     temporary = Path(
@@ -1687,16 +2057,60 @@ def recognize_item(
             shutil.copyfile(object_dir / "object.png", object_output / "image.png")
             (object_output / "blocks").mkdir()
             runs: list[PolicyRun] = []
-            for policy in _object_policies(stored):
+            policies = list(
+                _object_policies(
+                    stored,
+                    paragraph_list_ab=paragraph_list_ab,
+                )
+            )
+            policy_index = 0
+            while policy_index < len(policies):
+                policy = policies[policy_index]
+                policy_index += 1
                 started = time.perf_counter()
                 try:
                     separated = separate_blocks(stored, policy=policy)
+                    role = (
+                        "canonical"
+                        if stored.source_kind not in {"paragraph", "list"}
+                        or policy == canonical_paragraph_list_policy(stored)
+                        else "alternate"
+                    )
+                    separated = dataclass_replace(
+                        separated,
+                        plan=dataclass_replace(
+                            separated.plan,
+                            diagnostics=(
+                                *separated.plan.diagnostics,
+                                f"paragraph-list-policy-role={role}",
+                            ),
+                        ),
+                    )
                     _write_separate_block_stage(temporary, stored, separated)
                     block_ocr = ocr_blocks(separated, session=session)
                     _write_ocr_blocks_stage(temporary, stored, block_ocr)
                     run = get_segments(stored, block_ocr)
                     _write_get_segment_stage(temporary, stored, run)
                     runs.append(run)
+                    if (
+                        stored.source_kind in {"paragraph", "list"}
+                        and policy
+                        == canonical_paragraph_list_policy(stored)
+                        and len(policies) == 1
+                        and (
+                            fallback_reason
+                            := lazy_paragraph_list_fallback_reason(run)
+                        )
+                        is not None
+                    ):
+                        policies.append(
+                            alternate_paragraph_list_policy(stored)
+                        )
+                        log_lines.append(
+                            f"object={stored.source_object_id} "
+                            f"lazy_alternate={policies[-1]} "
+                            f"reason={fallback_reason}"
+                        )
                     log_lines.append(
                         f"object={stored.source_object_id} policy={policy} "
                         f"segments={len(stored.segments)} "
@@ -1740,28 +2154,43 @@ def recognize_item(
                 }
             )
 
-        def document_variant(flow_policy: str) -> str:
+        def selected_run(
+            stored: StoredObject,
+            runs: tuple[PolicyRun, ...],
+        ) -> PolicyRun:
+            by_policy = {item.policy: item for item in runs}
+            if stored.source_kind == ObjectKind.TABLE.value:
+                return by_policy["matrix-orxor"]
+            if stored.source_kind in {"paragraph", "list"}:
+                return select_paragraph_list_policy_run(
+                    stored,
+                    by_policy,
+                )
+            return by_policy["fixed-flow"]
+
+        def document_variant(flow_policy: str | None) -> str:
             texts: list[str] = []
             for _object_output, stored, runs in processed_objects:
                 by_policy = {item.policy: item for item in runs}
                 if stored.source_kind == ObjectKind.TABLE.value:
                     selected = by_policy["matrix-orxor"]
-                elif flow_policy in by_policy:
+                elif flow_policy is not None and flow_policy in by_policy:
                     selected = by_policy[flow_policy]
+                elif stored.source_kind in {"paragraph", "list"}:
+                    selected = selected_run(stored, runs)
                 else:
                     selected = by_policy["fixed-flow"]
                 if selected.result_text.strip():
                     texts.append(selected.result_text)
             return "\n".join(texts)
 
-        has_flow_ab = any(
-            any(run.policy == "line-windows" for run in runs)
-            for _object_output, _stored, runs in processed_objects
-        )
-        flow_policies = (
-            ("whole-object", "line-windows")
-            if has_flow_ab
-            else ("whole-object",)
+        flow_policies = tuple(
+            dict.fromkeys(
+                run.policy
+                for _object_output, stored, runs in processed_objects
+                if stored.source_kind in {"paragraph", "list"}
+                for run in runs
+            )
         )
         variant_results = {
             policy: document_variant(policy) for policy in flow_policies
@@ -1773,43 +2202,35 @@ def recognize_item(
         )
         variant_metrics = (
             {
-                policy: _metric(reference, result)
+                policy: _metric(
+                    reference,
+                    result,
+                    debug_full_alignment=debug_full_metric_alignment,
+                )
                 for policy, result in variant_results.items()
             }
             if reference is not None
             else {}
         )
-        if reference is not None:
-            flow_seconds = {
-                policy: sum(
-                    run.total_seconds
-                    for _object_output, _stored, runs in processed_objects
-                    for run in runs
-                    if run.policy == policy
-                )
-                for policy in flow_policies
-            }
-            canonical_flow_policy = max(
-                flow_policies,
-                key=lambda policy: (
-                    float(variant_metrics[policy]["accuracy_percent"]),
-                    -flow_seconds[policy],
-                    int(policy == "whole-object"),
-                ),
-            )
-        else:
-            canonical_flow_policy = "whole-object"
-        canonical_result = variant_results[canonical_flow_policy]
+        canonical_flow_policy = "canonical-first"
+        canonical_result = document_variant(None)
+        canonical_metric = (
+            _metric(reference, canonical_result)
+            if reference is not None
+            else None
+        )
         canonical_runs: list[tuple[str, PolicyRun]] = []
+        paragraph_list_selections: dict[str, dict[str, object]] = {}
         for object_output, stored, runs in processed_objects:
-            by_policy = {item.policy: item for item in runs}
-            if stored.source_kind == ObjectKind.TABLE.value:
-                canonical_run = by_policy["matrix-orxor"]
-            elif canonical_flow_policy in by_policy:
-                canonical_run = by_policy[canonical_flow_policy]
-            else:
-                canonical_run = by_policy["fixed-flow"]
+            canonical_run = selected_run(stored, runs)
             canonical_runs.append((stored.source_object_id, canonical_run))
+            if stored.source_kind in {"paragraph", "list"}:
+                paragraph_list_selections[stored.source_object_id] = (
+                    _paragraph_list_selection_payload(
+                        stored,
+                        {run.policy: run for run in runs},
+                    )
+                )
             _write_generate_object_stage(temporary, stored, canonical_run)
             _write_canonical_object_artifacts(
                 object_output,
@@ -1820,7 +2241,7 @@ def recognize_item(
             canonical_result + ("\n" if canonical_result else ""),
             encoding="utf-8",
         )
-        if has_flow_ab:
+        if len(flow_policies) > 1:
             for policy, result in variant_results.items():
                 variant_output = temporary / "ab" / policy
                 variant_output.mkdir(parents=True)
@@ -1833,7 +2254,6 @@ def recognize_item(
                         variant_output / "metric.json",
                         variant_metrics[policy],
                     )
-        canonical_metric = variant_metrics.get(canonical_flow_policy)
         aggregates: dict[str, dict[str, object]] = {}
         for policy in POLICIES:
             rows = [
@@ -1849,6 +2269,12 @@ def recognize_item(
                 "failed_jobs": sum(int(item["failed_jobs"]) for item in rows),
                 "block_pixels": sum(int(item["block_pixels"]) for item in rows),
                 "ocr_seconds": sum(float(item["ocr_seconds"]) for item in rows),
+                "ocr_work_seconds": sum(
+                    float(item["ocr_work_seconds"]) for item in rows
+                ),
+                "exact_duplicate_calls": sum(
+                    int(item["exact_duplicate_calls"]) for item in rows
+                ),
                 "total_seconds": sum(float(item["total_seconds"]) for item in rows),
                 "unresolved_units": sum(
                     int(item["unresolved_units"]) for item in rows
@@ -1908,11 +2334,9 @@ def recognize_item(
             "canonical_missing_blocks": canonical_missing_blocks,
             "table_policy": "matrix-orxor",
             "unknown_flow_policy": "fixed-flow",
-            "paragraph_list_ab_policies": [
-                "whole-object",
-                "line-windows",
-            ],
+            "paragraph_list_ab_policies": [*flow_policies],
             "canonical_paragraph_list_policy": canonical_flow_policy,
+            "paragraph_list_selections": paragraph_list_selections,
             "tables_excluded_from_context_ab": True,
             "variant_accuracy_percent": {
                 policy: metric["accuracy_percent"]
@@ -1957,7 +2381,8 @@ def recognize_item(
         ]
         benchmark_lines = [
             "policy\tobjects\tblocks\tjobs\tfailed_jobs\tblock_pixels\t"
-            "ocr_seconds\ttotal_seconds\tunresolved_units\taccuracy_percent"
+            "ocr_work_seconds\tocr_wall_seconds\texact_duplicate_calls\t"
+            "total_seconds\tunresolved_units\taccuracy_percent"
         ]
         for policy in POLICIES:
             row = aggregates[policy]
@@ -1970,7 +2395,9 @@ def recognize_item(
                         str(row["jobs"]),
                         str(row["failed_jobs"]),
                         str(row["block_pixels"]),
+                        f"{float(row['ocr_work_seconds']):.6f}",
                         f"{float(row['ocr_seconds']):.6f}",
+                        str(row["exact_duplicate_calls"]),
                         f"{float(row['total_seconds']):.6f}",
                         str(row["unresolved_units"]),
                         (
@@ -2027,11 +2454,21 @@ def _parser() -> argparse.ArgumentParser:
         help="engine output tree (default: ITEM/tesseract)",
     )
     parser.add_argument("--reference", type=Path)
+    parser.add_argument(
+        "--debug-full-metric-alignment",
+        action="store_true",
+        help="build a bounded O(n*m) edit script instead of distance-only scoring",
+    )
     parser.add_argument("--replace", action="store_true")
     parser.add_argument("--tesseract-executable", default="tesseract")
     parser.add_argument("--tessdata", type=Path)
     parser.add_argument("--tesseract-workers", type=int, default=4)
     parser.add_argument("--tesseract-psm", type=int, choices=(4, 6), default=4)
+    parser.add_argument(
+        "--paragraph-list-ab",
+        action="store_true",
+        help="always retain both paragraph/list context policies",
+    )
     return parser
 
 
@@ -2081,9 +2518,11 @@ def main(argv: Iterable[str] | None = None) -> int:
             reference_path=(
                 args.reference.resolve() if args.reference is not None else None
             ),
-            replace=args.replace,
+            debug_full_metric_alignment=args.debug_full_metric_alignment,
+            replace_existing=args.replace,
             geometry_dir=geometry_dir,
             objects_dir=objects_dir,
+            paragraph_list_ab=args.paragraph_list_ab,
         )
     print(published)
     comparison = json.loads(

@@ -15,6 +15,7 @@ from PIL import Image, PngImagePlugin
 
 from app.sparse_pipeline import crop_enhancement
 from app.sparse_pipeline.crop_enhancement import (
+    DARK_SMALL_TEXT_NORMALIZATION_ID,
     GAMMA_DARK,
     RECIPE_ID,
     CropEnhancementBackendError,
@@ -26,6 +27,7 @@ from app.sparse_pipeline.crop_enhancement import (
     EnhancementBackend,
     EnhancementStatus,
     GammaDarkCropEnhancer,
+    normalize_dark_small_text_for_ocr,
 )
 from app.sparse_pipeline.enhancement_artifacts import CropEnhancementArtifactWriter
 
@@ -148,6 +150,66 @@ def test_uniform_background_stays_uniform_for_supported_png_modes(
 
     assert output.shape == (7, 11)
     assert np.unique(output).size == 1
+
+
+def test_dark_sparse_small_text_is_gamma_normalized_at_source_scale() -> None:
+    source = np.full((80, 200, 3), 37, dtype=np.uint8)
+    for left in range(8, 188, 15):
+        source[20:29, left : left + 3] = 241
+    payload = _png_bytes(source)
+
+    normalized = normalize_dark_small_text_for_ocr(
+        payload,
+        dpi=300,
+        max_input_pixels=1_000_000,
+    )
+
+    assert DARK_SMALL_TEXT_NORMALIZATION_ID.endswith(
+        "kornia-gamma-source-scale-v1"
+    )
+    assert normalized is not None
+    with Image.open(io.BytesIO(normalized)) as opened:
+        opened.load()
+        assert (opened.size, opened.mode) == ((200, 80), "L")
+        assert opened.getpixel((0, 0)) < 37
+        assert opened.getpixel((8, 20)) < 241
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        np.full((80, 200, 3), 255, dtype=np.uint8),
+        np.full((80, 200, 3), 37, dtype=np.uint8),
+    ),
+)
+def test_light_or_non_text_dark_crop_skips_small_text_normalization(
+    source: np.ndarray,
+) -> None:
+    payload = _png_bytes(source)
+
+    assert (
+        normalize_dark_small_text_for_ocr(
+            payload,
+            dpi=300,
+            max_input_pixels=1_000_000,
+        )
+        is None
+    )
+
+
+def test_dense_dark_text_stays_on_existing_upscale_path() -> None:
+    source = np.full((40, 200, 3), 37, dtype=np.uint8)
+    source[8:32, 2:198:4] = 241
+    payload = _png_bytes(source)
+
+    assert (
+        normalize_dark_small_text_for_ocr(
+            payload,
+            dpi=300,
+            max_input_pixels=1_000_000,
+        )
+        is None
+    )
 
 
 def test_repeated_enhancement_is_byte_deterministic_and_keeps_source_immutable() -> None:

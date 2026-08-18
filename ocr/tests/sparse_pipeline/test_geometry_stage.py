@@ -850,3 +850,37 @@ def test_sparse_cells_and_spans_are_complete_canonical_and_deterministic() -> No
             and span.column_start <= cell.column < span.column_stop
             for cell in cells
         )
+
+
+def test_recursive_seams_do_not_form_a_global_cartesian_matrix() -> None:
+    image = Image.new("RGB", (88, 52), BACKGROUND)
+    draw = ImageDraw.Draw(image)
+    for top in (5, 34):
+        draw_glyph_group(draw, left=4, top=top)
+        draw_glyph_group(draw, left=58, top=top)
+
+    result = analyze(image)
+
+    assert result.segmentation.rules == ()
+    assert any(node.child_ids for node in result.segmentation.nodes)
+    assert len(result.matrix.rows) == 1
+    assert len(result.matrix.columns) == 1
+    assert len(result.matrix.cells) == len(result.segmentation.segments)
+    assert all(cell.row == 0 and cell.column == 0 for cell in result.matrix.cells)
+
+
+def test_photographic_texture_cannot_prove_a_document_grid() -> None:
+    rng = np.random.default_rng(20260802)
+    texture = rng.integers(0, 256, size=(360, 360, 3), dtype=np.uint8)
+    image = Image.fromarray(texture, mode="RGB")
+    draw = ImageDraw.Draw(image)
+    for coordinate in (30, 90, 150, 210, 270, 330):
+        draw.line((30, coordinate, 330, coordinate), fill=BLACK, width=2)
+        draw.line((coordinate, 30, coordinate, 330), fill=BLACK, width=2)
+
+    drafts = _local_structure_rule_drafts(
+        np.asarray(image),
+        GeometryConfig(),
+    )
+
+    assert drafts == ()

@@ -17,6 +17,11 @@ from pathlib import Path
 from PIL import Image, UnidentifiedImageError
 
 from app.sparse_pipeline.contracts import Box
+from app.sparse_pipeline.crop_enhancement import (
+    DARK_SMALL_TEXT_NORMALIZATION_ID,
+    CropEnhancementInvariantError,
+    normalize_dark_small_text_for_ocr,
+)
 from app.sparse_pipeline.ocr_adapter_contracts import (
     OcrAdapterError,
     OcrDependencyUnavailableError,
@@ -69,6 +74,7 @@ class TesseractConfig:
     upscale_min_height: int = 0
     upscale_max_factor: int = 4
     upscale_max_pixels: int = 16_000_000
+    dark_small_text_normalization: bool = True
     recognition_miss_retry_max_height: int = 0
     recognition_miss_retry_padding: int = 32
 
@@ -110,6 +116,10 @@ class TesseractConfig:
             raise ValueError("Tesseract upscale maximum factor must be between 1 and 8")
         if type(self.upscale_max_pixels) is not int or self.upscale_max_pixels < 1:
             raise ValueError("Tesseract upscale pixel limit must be positive")
+        if type(self.dark_small_text_normalization) is not bool:
+            raise ValueError(
+                "Tesseract dark small-text normalization flag must be boolean"
+            )
         if (
             type(self.recognition_miss_retry_max_height) is not int
             or self.recognition_miss_retry_max_height < 0
@@ -148,7 +158,50 @@ class TesseractCapabilities:
     installed_languages: tuple[str, ...]
 
 
-def probe_tesseract(config: TesseractConfig) -> TesseractCapabilities:
+@dataclass
+class _TesseractCapabilityProbe:
+    completed: threading.Event
+    capabilities: TesseractCapabilities | None = None
+    error: BaseException | None = None
+
+
+_TESSERACT_CAPABILITY_CACHE_LOCK = threading.Lock()
+_TESSERACT_CAPABILITY_CACHE: dict[tuple[object, ...], TesseractCapabilities] = {}
+_TESSERACT_CAPABILITY_PROBES: dict[
+    tuple[object, ...], _TesseractCapabilityProbe
+] = {}
+
+
+def _tesseract_capability_cache_key(config: TesseractConfig) -> tuple[object, ...]:
+    executable = shutil.which(config.executable)
+    if executable is None:
+        raise OcrExecutableUnavailableError(
+            f"Tesseract executable is unavailable: {config.executable}"
+        )
+    if config.tessdata_directory is not None and not config.tessdata_directory.is_dir():
+        raise OcrModelMissingError(
+            f"Tesseract tessdata directory is unavailable: {config.tessdata_directory}"
+        )
+    environment = _tesseract_environment(config)
+    tessdata_directory = (
+        str(config.tessdata_directory.resolve())
+        if config.tessdata_directory is not None
+        else None
+    )
+    return (
+        str(Path(executable).resolve()),
+        tessdata_directory,
+        environment.get("TESSDATA_PREFIX"),
+        environment.get("OMP_THREAD_LIMIT"),
+        environment.get("LD_LIBRARY_PATH"),
+        environment.get("LC_ALL"),
+        environment.get("LC_MESSAGES"),
+        environment.get("LANG"),
+        min(float(config.timeout_seconds), 10.0),
+    )
+
+
+def _probe_tesseract_capabilities(config: TesseractConfig) -> TesseractCapabilities:
     executable = shutil.which(config.executable)
     if executable is None:
         raise OcrExecutableUnavailableError(
@@ -194,16 +247,77 @@ def probe_tesseract(config: TesseractConfig) -> TesseractCapabilities:
         for line in languages.stdout.splitlines()
         if line.strip() and not line.startswith("List of available languages")
     )
-    missing = tuple(language for language in config.languages if language not in installed)
-    if missing:
-        raise OcrLanguageUnavailableError(
-            "Tesseract languages are missing: " + ",".join(missing)
-        )
     version_line = next(
         (line.strip() for line in version.stdout.splitlines() if line.strip()),
         "unknown",
     )
     return TesseractCapabilities(executable, version_line, installed)
+
+
+def _validate_tesseract_languages(
+    config: TesseractConfig,
+    capabilities: TesseractCapabilities,
+) -> None:
+    missing = tuple(
+        language
+        for language in config.languages
+        if language not in capabilities.installed_languages
+    )
+    if missing:
+        raise OcrLanguageUnavailableError(
+            "Tesseract languages are missing: " + ",".join(missing)
+        )
+
+
+def probe_tesseract(config: TesseractConfig) -> TesseractCapabilities:
+    capabilities = _probe_tesseract_capabilities(config)
+    _validate_tesseract_languages(config, capabilities)
+    return capabilities
+
+
+def _cached_tesseract_capabilities(
+    config: TesseractConfig,
+) -> TesseractCapabilities:
+    key = _tesseract_capability_cache_key(config)
+    with _TESSERACT_CAPABILITY_CACHE_LOCK:
+        cached = _TESSERACT_CAPABILITY_CACHE.get(key)
+        if cached is not None:
+            probe = None
+            owner = False
+        else:
+            probe = _TESSERACT_CAPABILITY_PROBES.get(key)
+            owner = probe is None
+            if probe is None:
+                probe = _TesseractCapabilityProbe(threading.Event())
+                _TESSERACT_CAPABILITY_PROBES[key] = probe
+    if cached is not None:
+        _validate_tesseract_languages(config, cached)
+        return cached
+    assert probe is not None
+    if not owner:
+        probe.completed.wait()
+        if probe.error is not None:
+            if isinstance(probe.error, OcrAdapterError):
+                raise type(probe.error)(str(probe.error))
+            raise RuntimeError("Tesseract capability probe failed") from probe.error
+        assert probe.capabilities is not None
+        _validate_tesseract_languages(config, probe.capabilities)
+        return probe.capabilities
+    try:
+        capabilities = _probe_tesseract_capabilities(config)
+    except BaseException as exc:
+        with _TESSERACT_CAPABILITY_CACHE_LOCK:
+            probe.error = exc
+            probe.completed.set()
+            _TESSERACT_CAPABILITY_PROBES.pop(key, None)
+        raise
+    with _TESSERACT_CAPABILITY_CACHE_LOCK:
+        _TESSERACT_CAPABILITY_CACHE[key] = capabilities
+        probe.capabilities = capabilities
+        probe.completed.set()
+        _TESSERACT_CAPABILITY_PROBES.pop(key, None)
+    _validate_tesseract_languages(config, capabilities)
+    return capabilities
 
 
 class TesseractWorker:
@@ -215,7 +329,7 @@ class TesseractWorker:
         if not isinstance(config, TesseractConfig):
             raise TypeError("config must be a TesseractConfig")
         self.config = config
-        self.capabilities = capabilities or probe_tesseract(config)
+        self.capabilities = capabilities or _cached_tesseract_capabilities(config)
 
     def recognize(self, png_bytes: bytes) -> OcrEngineOutput:
         if type(png_bytes) is not bytes or not png_bytes:
@@ -301,18 +415,11 @@ class _TesseractFactory:
         self.config = config
         self._lock = threading.Lock()
         self._capabilities: TesseractCapabilities | None = None
-        self._failure: OcrAdapterError | None = None
 
     def __call__(self) -> TesseractWorker:
         with self._lock:
-            if self._failure is not None:
-                raise type(self._failure)(str(self._failure))
             if self._capabilities is None:
-                try:
-                    self._capabilities = probe_tesseract(self.config)
-                except OcrAdapterError as exc:
-                    self._failure = exc
-                    raise
+                self._capabilities = _cached_tesseract_capabilities(self.config)
             capabilities = self._capabilities
         return TesseractWorker(self.config, capabilities)
 
@@ -342,6 +449,11 @@ def make_tesseract_lane(
             "upscale_min_height": resolved.upscale_min_height,
             "upscale_max_factor": resolved.upscale_max_factor,
             "upscale_max_pixels": resolved.upscale_max_pixels,
+            "dark_small_text_normalization": (
+                DARK_SMALL_TEXT_NORMALIZATION_ID
+                if resolved.dark_small_text_normalization
+                else "disabled"
+            ),
             "recognition_miss_retry_max_height": (
                 resolved.recognition_miss_retry_max_height
             ),
@@ -838,6 +950,20 @@ def _prepare_tesseract_input(
                 raise OcrInvalidEngineOutputError(
                     "Tesseract input dimensions must be positive"
                 )
+            if config.dark_small_text_normalization:
+                normalized = normalize_dark_small_text_for_ocr(
+                    png_bytes,
+                    dpi=config.dpi,
+                    max_input_pixels=config.upscale_max_pixels,
+                )
+                if normalized is not None:
+                    return (
+                        normalized,
+                        _TesseractCoordinateTransform(
+                            (width, height),
+                            Box(0, 0, width, height),
+                        ),
+                    )
             required = (
                 math.ceil(config.upscale_min_height / height)
                 if config.upscale_min_height
@@ -878,7 +1004,13 @@ def _prepare_tesseract_input(
             )
     except OcrInvalidEngineOutputError:
         raise
-    except (OSError, UnidentifiedImageError, SyntaxError, ValueError) as exc:
+    except (
+        CropEnhancementInvariantError,
+        OSError,
+        UnidentifiedImageError,
+        SyntaxError,
+        ValueError,
+    ) as exc:
         raise OcrInvalidEngineOutputError(
             "Tesseract input is not a valid PNG"
         ) from exc

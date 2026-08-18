@@ -1,6 +1,7 @@
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { findContentBounds } from "./image-content-bounds";
+import { buildNativePdfOracle } from "./pdf-native-oracle";
 import {
   PdfWorkerCanvasFactory,
   PdfWorkerFilterFactory,
@@ -128,8 +129,12 @@ async function renderPage(pageNumber: number) {
     canvas.width = 1;
     canvas.height = 1;
 
+    const textItems = textContent.items as PdfTextItem[];
     return {
-      nativeText: normalizedText(textContent.items as PdfTextItem[]),
+      nativeText: normalizedText(textItems),
+      nativeOracle: buildNativePdfOracle(
+        textItems as Parameters<typeof buildNativePdfOracle>[0],
+      ),
       image: await output.convertToBlob({ type: "image/jpeg", quality: 0.9 }),
     };
   } finally {

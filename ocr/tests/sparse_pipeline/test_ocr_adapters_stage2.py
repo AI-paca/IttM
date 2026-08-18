@@ -215,13 +215,13 @@ def test_tesseract_preflight_uses_exact_tessdata_and_never_falls_back(
             return _completed(command, stdout="tesseract 5.5.2\n")
         return _completed(
             command,
-            stdout="List of available languages (2):\neng\nrus\n",
+            stdout="List of available languages (1):\neng\n",
         )
 
     monkeypatch.setattr(adapters.subprocess, "run", missing_language)
-    with pytest.raises(OcrLanguageUnavailableError, match="chi_sim"):
+    with pytest.raises(OcrLanguageUnavailableError, match="rus"):
         adapters.probe_tesseract(config)
-    assert config.languages == ("eng", "chi_sim", "rus")
+    assert config.languages == ("rus", "eng")
 
 
 def test_tesseract_tsv_command_and_crop_local_words_are_exact(
@@ -253,7 +253,7 @@ def test_tesseract_tsv_command_and_crop_local_words_are_exact(
         "stdin",
         "stdout",
         "-l",
-        "eng+chi_sim+rus",
+        "rus+eng",
         "--oem",
         "1",
         "--psm",
@@ -342,7 +342,7 @@ def test_tesseract_runtime_language_failure_is_typed_and_has_no_retry_fallback(
         return _completed(
             command,
             stdout=b"",
-            stderr=b"Failed loading language 'chi_sim'",
+            stderr=b"Failed loading language 'rus'",
             returncode=1,
         )
 
@@ -359,7 +359,7 @@ def test_tesseract_runtime_language_failure_is_typed_and_has_no_retry_fallback(
     with pytest.raises(OcrLanguageUnavailableError):
         adapters.TesseractWorker(config, capability).recognize(_png_bytes())
     assert calls == 1
-    assert config.languages == ("eng", "chi_sim", "rus")
+    assert config.languages == ("rus", "eng")
 
 
 def test_tesseract_runtime_engine_failure_has_no_recognition_miss_retry(
@@ -536,6 +536,61 @@ def test_tesseract_small_context_upscale_is_bounded_and_boxes_map_back(
         Box(8, 1, 11, 3),
         Box(1, 5, 6, 7),
     )
+
+
+def test_tesseract_dark_sparse_small_text_replaces_upscale_in_one_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_buffer = io.BytesIO()
+    source_image = Image.new("RGB", (200, 80), (37, 37, 37))
+    try:
+        for left in range(8, 188, 15):
+            for top in range(20, 29):
+                for column in range(left, left + 3):
+                    source_image.putpixel(
+                        (column, top),
+                        (241, 241, 241),
+                    )
+        source_image.save(source_buffer, format="PNG")
+    finally:
+        source_image.close()
+    observed: list[bytes] = []
+
+    def fake_run(
+        command: list[str],
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[object]:
+        payload = kwargs["input"]
+        assert isinstance(payload, bytes)
+        observed.append(payload)
+        tsv = (
+            _empty_tsv(width=200, height=80)
+            + "5\t1\t1\t1\t1\t1\t8\t20\t18\t9\t99\tValue\n"
+        )
+        return _completed(command, stdout=tsv.encode(), stderr=b"")
+
+    monkeypatch.setattr(adapters.subprocess, "run", fake_run)
+    config = adapters.TesseractConfig(
+        upscale_min_height=320,
+        upscale_max_factor=4,
+    )
+    capability = adapters.TesseractCapabilities(
+        "/fake/tesseract",
+        "tesseract 5.5.2",
+        config.languages,
+    )
+
+    output = adapters.TesseractWorker(config, capability).recognize(
+        source_buffer.getvalue()
+    )
+
+    assert len(observed) == 1
+    with Image.open(io.BytesIO(observed[0])) as normalized:
+        normalized.load()
+        assert (normalized.size, normalized.mode) == ((200, 80), "L")
+        assert normalized.getpixel((0, 0)) < 37
+    assert output.text == "Value"
+    assert output.words == (OcrWord("Value", Box(8, 20, 26, 29), 0.99),)
 
 
 def test_tesseract_timeout_is_typed(

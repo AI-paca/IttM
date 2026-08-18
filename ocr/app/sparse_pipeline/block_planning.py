@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
 from app.sparse_pipeline.contracts import (
@@ -255,6 +255,10 @@ class BlockPlanningConfig:
     max_scope_span_pixels: int = 512
     object_local: bool = False
     adaptive_table_windows: bool = False
+    context_fallback_enabled: bool = False
+    context_fallback_minimum_confidence: float = 0.8
+    context_fallback_minimum_area_fraction: float = 0.1
+    context_fallback_minimum_page_pixels: int = 1_000_000
 
     def __post_init__(self) -> None:
         positive = (
@@ -281,6 +285,7 @@ class BlockPlanningConfig:
             self.max_padding_exclusion_checks,
             self.max_evidence_revalidation_checks,
             self.max_scope_span_pixels,
+            self.context_fallback_minimum_page_pixels,
         )
         if any(type(value) is not int or value < 1 for value in positive):
             raise ValueError("block planning limits must be positive integers")
@@ -297,6 +302,40 @@ class BlockPlanningConfig:
             raise ValueError("object_local must be a boolean")
         if type(self.adaptive_table_windows) is not bool:
             raise ValueError("adaptive_table_windows must be a boolean")
+        if type(self.context_fallback_enabled) is not bool:
+            raise ValueError("context_fallback_enabled must be a boolean")
+        if (
+            isinstance(self.context_fallback_minimum_confidence, bool)
+            or not isinstance(
+                self.context_fallback_minimum_confidence,
+                (int, float),
+            )
+            or not math.isfinite(
+                float(self.context_fallback_minimum_confidence)
+            )
+            or not 0.0
+            <= float(self.context_fallback_minimum_confidence)
+            <= 1.0
+        ):
+            raise ValueError(
+                "context fallback confidence must be between zero and one"
+            )
+        if (
+            isinstance(self.context_fallback_minimum_area_fraction, bool)
+            or not isinstance(
+                self.context_fallback_minimum_area_fraction,
+                (int, float),
+            )
+            or not math.isfinite(
+                float(self.context_fallback_minimum_area_fraction)
+            )
+            or not 0.0
+            < float(self.context_fallback_minimum_area_fraction)
+            <= 1.0
+        ):
+            raise ValueError(
+                "context fallback area fraction must be above zero and at most one"
+            )
         if self.object_local and self.mode is not BlockPlanningMode.SPATIAL_2D:
             raise ValueError("object-local planning requires spatial 2D mode")
         if self.object_local and self.adaptive_table_windows:
@@ -337,6 +376,32 @@ def _string_tuple(name: str, value: tuple[str, ...], *, allow_empty: bool) -> No
 
 
 @dataclass(frozen=True)
+class MatrixLocalIsland:
+    """Compatibility metadata for optional locality-aware OCR renderers."""
+
+    local_region_id: str
+    island_id: str
+    segment_ids: tuple[str, ...]
+    region_boundary: tuple[int, int]
+    matrix_segment_shape: tuple[int, int]
+
+
+@dataclass(frozen=True)
+class MatrixLocalPlacement:
+    """Compatibility placement for optional locality-aware OCR renderers."""
+
+    segment_id: str
+    local_region_id: str
+    island_id: str
+    polar_order: int
+    region_order: int
+    table_row: int
+    table_column: int
+    matrix_row: int
+    matrix_column: int
+
+
+@dataclass(frozen=True)
 class RecognitionBlock:
     block_id: str
     bbox: Box
@@ -348,6 +413,9 @@ class RecognitionBlock:
     matrix_window: tuple[int, int, int, int] | None = None
     matrix_window_kind: str | None = None
     matrix_segment_shape: tuple[int, int] | None = None
+    context_fallback: bool = False
+    local_islands: tuple[MatrixLocalIsland, ...] = ()
+    local_placements: tuple[MatrixLocalPlacement, ...] = ()
 
     def __post_init__(self) -> None:
         # Spatial plans may append context-only OCR probes.  They deliberately
@@ -358,6 +426,18 @@ class RecognitionBlock:
         _string_tuple("segment_ids", self.segment_ids, allow_empty=False)
         _string_tuple("context_segment_ids", self.context_segment_ids, allow_empty=True)
         _string_tuple("object_ids", self.object_ids, allow_empty=True)
+        if type(self.context_fallback) is not bool:
+            raise ValueError("context_fallback must be a boolean")
+        if type(self.local_islands) is not tuple or any(
+            not isinstance(item, MatrixLocalIsland)
+            for item in self.local_islands
+        ):
+            raise ValueError("local islands must be immutable metadata")
+        if type(self.local_placements) is not tuple or any(
+            not isinstance(item, MatrixLocalPlacement)
+            for item in self.local_placements
+        ):
+            raise ValueError("local placements must be immutable metadata")
         if type(self.block_id) is not str or not self.block_id.startswith("block-"):
             raise ValueError("block_id must use the canonical block prefix")
         if self.scope_id is not None and (
@@ -406,6 +486,17 @@ class RecognitionBlock:
         ):
             raise ValueError(
                 "matrix window metadata requires logical window bounds"
+            )
+        if self.context_fallback and (
+            self.core_segment_ids != self.segment_ids
+            or self.context_segment_ids
+            or len(self.segment_ids) != 1
+            or len(self.object_ids) != 1
+            or self.scope_id is None
+            or self.matrix_window is not None
+        ):
+            raise ValueError(
+                "a context fallback must reuse one atomic whole-object core block"
             )
         if not isinstance(self.bbox, Box):
             raise ValueError("block bbox must be a Box")
@@ -543,6 +634,23 @@ class BlockPlan:
             raise ValueError("block identifiers must be contiguous and canonical")
         source_order = {segment_id: index for index, segment_id in enumerate(self.source_segment_ids)}
         source_set = set(self.source_segment_ids)
+        fallback_blocks = tuple(
+            block for block in self.blocks if block.context_fallback
+        )
+        if len(fallback_blocks) > 1:
+            raise ValueError("a block plan permits at most one context fallback")
+        if fallback_blocks:
+            fallback = fallback_blocks[0]
+            if (
+                self.mode is not BlockPlanningMode.SPATIAL_2D
+                or fallback.core_segment_ids != fallback.segment_ids
+                or fallback.context_segment_ids
+                or len(fallback.segment_ids) != 1
+                or len(fallback.object_ids) != 1
+            ):
+                raise ValueError(
+                    "a context fallback must reuse one atomic whole-object block"
+                )
         core_ids = tuple(
             segment_id
             for block in self.blocks
@@ -1157,6 +1265,11 @@ class OverlappingBlockPlanner:
             raise BlockPlanningInvariantError(
                 "Stage 1 sparse matrix and Stage 6 segment scope disagree"
             )
+        context_fallback_gate = self._context_fallback_gate(
+            aligned_size=aligned_size,
+            source_ids=source_ids,
+            objects_result=objects_result,
+        )
         logical_row_budget = _WorkBudget(
             self.config.max_logical_row_checks,
             "logical row analysis",
@@ -1422,20 +1535,35 @@ class OverlappingBlockPlanner:
             )
             dense_column_count = min(
                 16,
-                max(1, math.ceil(math.sqrt(len(members)))),
+                1
+                << max(
+                    0,
+                    (math.ceil(math.sqrt(len(members))) - 1).bit_length(),
+                ),
             )
-            dense_row_count = math.ceil(
-                len(members) / dense_column_count
+            dense_row_count = 1 << max(
+                0,
+                (
+                    math.ceil(len(members) / dense_column_count) - 1
+                ).bit_length(),
             )
             if dense_row_count > 16:
                 raise BlockPlanningInvariantError(
                     "dyadic OCR mask exceeds the 16x16 occupied-cell limit"
                 )
+            member_spans = tuple(span_by_id[item] for item in members)
             primary_windows.append(
-                (0, dense_row_count, 0, dense_column_count)
+                (
+                    min(item.row_start for item in member_spans),
+                    max(item.row_stop for item in member_spans),
+                    min(item.column_start for item in member_spans),
+                    max(item.column_stop for item in member_spans),
+                )
             )
             primary_window_kinds.append("dyadic-mask")
-            primary_segment_shapes.append((1, 1))
+            primary_segment_shapes.append(
+                (dense_row_count, dense_column_count)
+            )
 
         row_probe_rectangles: list[
             tuple[_PlanningScope, int, int, int, int]
@@ -1971,6 +2099,22 @@ class OverlappingBlockPlanner:
                     matrix_segment_shape=segment_shape,
                 )
             )
+        if context_fallback_gate == "eligible":
+            fallback_index = self._context_fallback_block_index(
+                aligned_size=aligned_size,
+                blocks=tuple(blocks),
+                objects_result=objects_result,
+            )
+            if fallback_index is None:
+                context_fallback_gate = (
+                    "blocked-no-reusable-whole-object-evidence"
+                )
+            else:
+                blocks[fallback_index] = replace(
+                    blocks[fallback_index],
+                    context_fallback=True,
+                )
+                context_fallback_gate = "selected-whole-object"
         block_tuple = tuple(blocks)
         algebra = self._spatial_algebra(block_tuple, source_ids)
         component_count = self._overlap_component_count(block_tuple)
@@ -2080,11 +2224,89 @@ class OverlappingBlockPlanner:
                 f"membership-collisions-preserved={len(collisions)}",
                 "membership-signatures=unique-between-units",
                 "deprecated-window-knobs=ignored",
+                *(
+                    (f"context-fallback={context_fallback_gate}",)
+                    if self.config.context_fallback_enabled
+                    else ()
+                ),
                 "raw-and-gamma-selection=deferred-to-stage2",
             ),
             mode=self.config.mode,
             membership_units=membership_units,
             matrix_sha256=sparse_matrix_sha256(matrix),
+        )
+
+    def _context_fallback_gate(
+        self,
+        *,
+        aligned_size: tuple[int, int],
+        source_ids: tuple[str, ...],
+        objects_result: ObjectReconstructionResult,
+    ) -> str:
+        if not self.config.context_fallback_enabled:
+            return "disabled"
+        minimum = self.config.context_fallback_minimum_confidence
+        if objects_result.has_confirmed_table(minimum_confidence=minimum):
+            return "blocked-confirmed-table"
+        if objects_result.is_topology_confirmed(minimum_confidence=minimum):
+            return "blocked-confirmed-topology"
+        if (
+            aligned_size[0] * aligned_size[1]
+            < self.config.context_fallback_minimum_page_pixels
+        ):
+            return "blocked-small-page"
+        return "eligible"
+
+    def _context_fallback_block_index(
+        self,
+        *,
+        aligned_size: tuple[int, int],
+        blocks: tuple[RecognitionBlock, ...],
+        objects_result: ObjectReconstructionResult,
+    ) -> int | None:
+        """Choose one existing uncertain whole-object block without reshaping it."""
+
+        minimum = self.config.context_fallback_minimum_confidence
+        object_by_id = {
+            item.object_id: item for item in objects_result.objects
+        }
+        candidates: list[tuple[int, int, int, int]] = []
+        for index, block in enumerate(blocks):
+            if len(block.object_ids) != 1:
+                continue
+            document_object = object_by_id[block.object_ids[0]]
+            if (
+                document_object.kind is not ObjectKind.UNKNOWN
+                and document_object.confidence >= minimum
+            ):
+                continue
+            if len(document_object.segment_ids) != 1:
+                continue
+            if (
+                document_object.bbox.area
+                < aligned_size[0]
+                * aligned_size[1]
+                * self.config.context_fallback_minimum_area_fraction
+            ):
+                continue
+            if (
+                block.segment_ids != document_object.segment_ids
+                or block.core_segment_ids != block.segment_ids
+                or block.context_segment_ids
+            ):
+                continue
+            candidates.append(
+                (
+                    document_object.bbox.area,
+                    len(document_object.segment_ids),
+                    -document_object.reading_index,
+                    index,
+                )
+            )
+        return (
+            max(candidates)[3]
+            if candidates
+            else None
         )
 
     def _plan_object_local(
@@ -2521,17 +2743,38 @@ class OverlappingBlockPlanner:
         bit_count = 0
         maximum_context_width = 1
         for chunk in chunks:
-            column_count = min(
-                16,
-                max(1, math.ceil(math.sqrt(len(chunk)))),
+            row_coordinates = tuple(
+                sorted(
+                    {
+                        ordered_units[index][0][0]
+                        for index in chunk
+                    }
+                )
             )
-            row_count = math.ceil(len(chunk) / column_count)
+            column_coordinates = tuple(
+                sorted(
+                    {
+                        ordered_units[index][0][2]
+                        for index in chunk
+                    }
+                )
+            )
+            row_position = {
+                coordinate: index
+                for index, coordinate in enumerate(row_coordinates)
+            }
+            column_position = {
+                coordinate: index
+                for index, coordinate in enumerate(column_coordinates)
+            }
+            row_count = len(row_coordinates)
+            column_count = len(column_coordinates)
             dense_position = {
                 unit_index: (
-                    offset // column_count,
-                    offset % column_count,
+                    row_position[ordered_units[unit_index][0][0]],
+                    column_position[ordered_units[unit_index][0][2]],
                 )
-                for offset, unit_index in enumerate(chunk)
+                for unit_index in chunk
             }
             context_mask_width = 1 << (column_count.bit_length() - 1)
             if context_mask_width == column_count and column_count > 1:

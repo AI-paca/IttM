@@ -143,3 +143,29 @@ test("processPreparedPages stops before starting the next cancelled page", async
   );
   assert.equal(preparedPages, 1);
 });
+
+test("trusted native topology bypasses raster OCR", async () => {
+  let ocrCalls = 0;
+  const result = await processPreparedPages(
+    1,
+    1,
+    {},
+    () => {},
+    async () => ({
+      nativeText: "flattened text",
+      nativeOracle: {
+        assembled: {
+          markdown: "| A | B |\n| --- | --- |\n| C | D |",
+        },
+      } as never,
+      image: new Blob(["unused"]),
+    }),
+    async () => {
+      ocrCalls += 1;
+      return "raster";
+    },
+  );
+
+  assert.equal(ocrCalls, 0);
+  assert.equal(result, "| A | B |\n| --- | --- |\n| C | D |");
+});

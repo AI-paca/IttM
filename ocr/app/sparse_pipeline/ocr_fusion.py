@@ -86,6 +86,7 @@ class OcrFusionConfig:
     max_membership_signature_comparisons: int = 20_000_000
     minimum_stability: float = 0.75
     minimum_confidence: float = 0.5
+    minimum_exact_context_majority_fraction: float = 0.8
     minimum_alternative_contexts: int = 2
     minimum_significant_overlap_fraction: float = 0.1
     minimum_membership_bbox_iou: float = 0.5
@@ -118,6 +119,10 @@ class OcrFusionConfig:
             ("minimum_stability", self.minimum_stability),
             ("minimum_confidence", self.minimum_confidence),
             (
+                "minimum_exact_context_majority_fraction",
+                self.minimum_exact_context_majority_fraction,
+            ),
+            (
                 "minimum_significant_overlap_fraction",
                 self.minimum_significant_overlap_fraction,
             ),
@@ -134,6 +139,10 @@ class OcrFusionConfig:
                 or not 0.0 <= float(value) <= 1.0
             ):
                 raise ValueError(f"{name} must be between zero and one")
+        if self.minimum_exact_context_majority_fraction <= 0.5:
+            raise ValueError(
+                "minimum_exact_context_majority_fraction must be greater than one half"
+            )
         if not isinstance(self.routing_mode, OcrRoutingMode):
             raise ValueError("routing_mode must be an OcrRoutingMode")
         if type(self.membership_assume_complete_observations) is not bool:
@@ -772,6 +781,10 @@ class OcrFusionResult:
             if not item.unresolved
             for segment_id in item.segment_ids
         }
+        canonical_membership_slots = (
+            "overlap-contract=canonical-membership-slots"
+            in self.diagnostics
+        )
         expected = (
             OcrFusionStatus.COMPLETE
             if all(
@@ -781,17 +794,20 @@ class OcrFusionResult:
             )
             and not self.unassigned_word_observations
             and not self.replica_conflicts
-            and all(
-                not item.conflicting_intersection_segment_ids
-                and not (
-                    set(item.missing_intersection_segment_ids)
-                    - resolved_group_segments
+            and (
+                canonical_membership_slots
+                or all(
+                    not item.conflicting_intersection_segment_ids
+                    and not (
+                        set(item.missing_intersection_segment_ids)
+                        - resolved_group_segments
+                    )
+                    and not (
+                        set(item.deferred_intersection_segment_ids)
+                        - resolved_group_segments
+                    )
+                    for item in self.overlaps
                 )
-                and not (
-                    set(item.deferred_intersection_segment_ids)
-                    - resolved_group_segments
-                )
-                for item in self.overlaps
             )
             else OcrFusionStatus.UNRESOLVED
         )
@@ -1181,12 +1197,21 @@ class OcrEvidenceFusion:
             )
             for item in overlaps
         )
+        canonical_membership_slots = self._canonical_membership_slots(
+            plan,
+            queue,
+        )
         status = (
             OcrFusionStatus.COMPLETE
             if unresolved == 0
-            and conflicts == 0
-            and uncovered_missing == 0
-            and uncovered_deferred == 0
+            and (
+                canonical_membership_slots
+                or (
+                    conflicts == 0
+                    and uncovered_missing == 0
+                    and uncovered_deferred == 0
+                )
+            )
             and not unassigned_word_observations
             and not replica_conflicts
             else OcrFusionStatus.UNRESOLVED
@@ -1226,6 +1251,11 @@ class OcrEvidenceFusion:
                     if membership_mode
                     else "membership-per-word-omission-risk=not-applicable"
                 ),
+                (
+                    "overlap-contract=canonical-membership-slots"
+                    if canonical_membership_slots
+                    else "overlap-contract=cartesian-source-geometry"
+                ),
                 f"alignment-cells={budget.cells}",
                 f"alignment-logical-comparisons={budget.logical_comparisons}",
                 f"alignment-unique-pairs={budget.unique_alignments}",
@@ -1250,6 +1280,87 @@ class OcrEvidenceFusion:
             group_observations=group_observations,
             segment_groups=group_fusions,
         )
+
+    @staticmethod
+    def _canonical_membership_slots(
+        plan: BlockPlan,
+        queue: OcrQueueResult,
+    ) -> bool:
+        return any(
+            "geometry=canonical-membership-slots-v1" in diagnostic
+            for diagnostic in queue.diagnostics
+        ) and all(
+            block.matrix_window_kind
+            in {"polar-local-full", "polar-local-signature"}
+            for block in plan.blocks
+        )
+
+    @classmethod
+    def _canonical_membership_slot_size(
+        cls,
+        plan: BlockPlan,
+        queue: OcrQueueResult,
+    ) -> tuple[int, int] | None:
+        if not cls._canonical_membership_slots(plan, queue):
+            return None
+        sizes: set[tuple[int, int]] = set()
+        for diagnostic in queue.diagnostics:
+            fields = dict(
+                field.split("=", 1)
+                for field in diagnostic.split(";")
+                if "=" in field
+            )
+            if fields.get("geometry") != "canonical-membership-slots-v1":
+                continue
+            width_text = fields.get("width")
+            height_text = fields.get("height")
+            if width_text is None and height_text is None:
+                continue
+            try:
+                width = int(width_text or "")
+                height = int(height_text or "")
+            except ValueError as error:
+                raise OcrFusionInvariantError(
+                    "canonical membership slot bound is malformed"
+                ) from error
+            if width <= 0 or height <= 0:
+                raise OcrFusionInvariantError(
+                    "canonical membership slot bound must be positive"
+                )
+            sizes.add((width, height))
+        if len(sizes) > 1:
+            raise OcrFusionInvariantError(
+                "canonical membership slot bounds disagree"
+            )
+        if not sizes:
+            return None
+        size = next(iter(sizes))
+        if len(plan.membership_units) > size[0] * size[1]:
+            raise OcrFusionInvariantError(
+                "canonical membership slots exceed their declared bound"
+            )
+        return size
+
+    @staticmethod
+    def _bound_png_size(crop: BlockCropPair) -> tuple[int, int]:
+        """Read the immutable hash-bound PNG canvas without decoding pixels."""
+
+        payload = crop.raw.png_bytes
+        if (
+            len(payload) < 24
+            or payload[:8] != b"\x89PNG\r\n\x1a\n"
+            or payload[12:16] != b"IHDR"
+        ):
+            raise OcrFusionInvariantError(
+                "canonical membership crop has invalid PNG geometry"
+            )
+        width = int.from_bytes(payload[16:20], "big")
+        height = int.from_bytes(payload[20:24], "big")
+        if width < 1 or height < 1:
+            raise OcrFusionInvariantError(
+                "canonical membership crop has invalid PNG geometry"
+            )
+        return width, height
 
     def _validate_inputs(
         self,
@@ -1316,6 +1427,11 @@ class OcrEvidenceFusion:
     ) -> None:
         block_by_id = {block.block_id: block for block in plan.blocks}
         crop_by_id = {crop.block_id: crop for crop in crops}
+        canonical_membership = self._canonical_membership_slots(plan, queue)
+        canonical_slot_size = self._canonical_membership_slot_size(
+            plan,
+            queue,
+        )
         seen: set[tuple[str, OcrTransform, str]] = set()
         lane_contract: dict[str, tuple[object, str]] = {}
         for job in queue.jobs:
@@ -1342,7 +1458,10 @@ class OcrEvidenceFusion:
             crop = crop_by_id[job.block_id]
             expected_input = (
                 crop.raw.png_bytes
-                if job.transform is OcrTransform.RAW
+                if job.transform in (
+                    OcrTransform.RAW,
+                    OcrTransform.CONTEXTUAL_COMPOSITE,
+                )
                 else crop.gamma.png_bytes
                 if crop.gamma is not None
                 else None
@@ -1365,7 +1484,27 @@ class OcrEvidenceFusion:
                         "complete sparse OCR job lost its output"
                     )
                 if job.output.geometry is OcrOutputGeometry.WORD_BOXES:
-                    canvas = Box(0, 0, crop.bbox.width, crop.bbox.height)
+                    if canonical_membership:
+                        bound_width, bound_height = self._bound_png_size(crop)
+                        if canonical_slot_size is not None and (
+                            canonical_slot_size[0] > bound_width
+                            or canonical_slot_size[1] > bound_height
+                        ):
+                            raise OcrFusionInvariantError(
+                                "canonical membership slot canvas exceeds "
+                                "bound crop raster"
+                            )
+                        canvas_size = canonical_slot_size or (
+                            bound_width,
+                            bound_height,
+                        )
+                    else:
+                        canvas_size = (crop.bbox.width, crop.bbox.height)
+                    canvas = Box(
+                        0,
+                        0,
+                        *canvas_size,
+                    )
                     if any(
                         word.bbox.intersection(canvas) != word.bbox
                         for word in job.output.words
@@ -1465,7 +1604,10 @@ class OcrEvidenceFusion:
             crop = crop_by_id[job.block_id]
             expected_input = (
                 crop.raw.png_bytes
-                if job.transform is OcrTransform.RAW
+                if job.transform in (
+                    OcrTransform.RAW,
+                    OcrTransform.CONTEXTUAL_COMPOSITE,
+                )
                 else crop.gamma.png_bytes
             )
             input_sha256 = hashlib.sha256(expected_input).hexdigest()
@@ -1653,6 +1795,10 @@ class OcrEvidenceFusion:
 
         block_by_id = {block.block_id: block for block in plan.blocks}
         conflict_keys, replica_conflicts = self._replica_conflicts(queue)
+        canonical_membership_slots = self._canonical_membership_slots(
+            plan,
+            queue,
+        )
         projected: list[_ProjectedWordObservation] = []
         block_text_observations: list[BlockTextObservation] = []
 
@@ -1696,11 +1842,15 @@ class OcrEvidenceFusion:
                         job=job,
                         word_index=word_index,
                         word=word,
-                        page_bbox=Box(
-                            word.bbox.left + block.bbox.left,
-                            word.bbox.top + block.bbox.top,
-                            word.bbox.right + block.bbox.left,
-                            word.bbox.bottom + block.bbox.top,
+                        page_bbox=(
+                            word.bbox
+                            if canonical_membership_slots
+                            else Box(
+                                word.bbox.left + block.bbox.left,
+                                word.bbox.top + block.bbox.top,
+                                word.bbox.right + block.bbox.left,
+                                word.bbox.bottom + block.bbox.top,
+                            )
                         ),
                         source_replica_conflict=source_replica_conflict,
                     )
@@ -1739,6 +1889,10 @@ class OcrEvidenceFusion:
                 (job.block_id, job.capability_id), set()
             ).add(job.transform)
 
+        canonical_membership_slots = self._canonical_membership_slots(
+            plan,
+            queue,
+        )
         decisions: dict[int, tuple[MembershipUnit | None, str | None]] = {}
         signature_decisions: dict[
             frozenset[str], tuple[MembershipUnit | None, str | None]
@@ -1807,6 +1961,7 @@ class OcrEvidenceFusion:
                 candidate is not None
                 and self.config.membership_assume_complete_observations
                 and complete_observation_lattice
+                and not canonical_membership_slots
             ):
                 for expected_signature in expected_by_signature:
                     signature_comparisons += 1
@@ -1876,7 +2031,10 @@ class OcrEvidenceFusion:
                     decision = (None, "membership-signature-unmatched")
                 else:
                     omission_ambiguous = False
-                    if not self.config.membership_assume_complete_observations:
+                    if (
+                        not self.config.membership_assume_complete_observations
+                        and not canonical_membership_slots
+                    ):
                         for expected_signature in expected_by_signature:
                             signature_comparisons += 1
                             if (
@@ -2264,6 +2422,22 @@ class OcrEvidenceFusion:
             )
         )
         raw_choice, raw_confidence, stability = self._observed_medoid(raw, budget)
+        exact_context_majority = self._has_exact_context_majority(
+            raw,
+            selected=raw_choice,
+        )
+        script_confidence_override = self._script_confidence_override(raw)
+        if (
+            script_confidence_override is not None
+            and (
+                raw_choice is None
+                or script_confidence_override[0].observation_id
+                != raw_choice.observation_id
+            )
+        ):
+            raw_choice, raw_confidence = script_confidence_override
+        else:
+            script_confidence_override = None
         alternative, alternative_confidence = self._stable_alternative(
             observations,
             control=raw_choice,
@@ -2317,7 +2491,14 @@ class OcrEvidenceFusion:
         if gamma_override:
             selected_stability = 1.0
             reasons.append("gamma_stable_override")
-        elif len(raw) > 1 and stability < self.config.minimum_stability:
+        elif script_confidence_override is not None:
+            selected_stability = 1.0
+            reasons.append("script_confidence_override")
+        elif (
+            len(raw) > 1
+            and stability < self.config.minimum_stability
+            and not exact_context_majority
+        ):
             reasons.append("unstable_raw_text")
         if transform_conflict and not gamma_override:
             reasons.append("transform_conflict")
@@ -2461,6 +2642,46 @@ class OcrEvidenceFusion:
             )
         return any(len(values) > 1 for values in observed_texts.values())
 
+    def _has_exact_context_majority(
+        self,
+        observations: tuple[SegmentObservation, ...],
+        *,
+        selected: SegmentObservation | None,
+    ) -> bool:
+        """Accept a strong exact medoid majority over low-confidence outliers."""
+
+        if selected is None or len(observations) < 2:
+            return False
+        if any(
+            item.capability_id != selected.capability_id
+            for item in observations
+        ):
+            return False
+        contexts = {item.context_sha256 for item in observations}
+        if len(contexts) != len(observations):
+            return False
+        agreeing = tuple(
+            item
+            for item in observations
+            if item.comparison_text == selected.comparison_text
+        )
+        disagreeing = tuple(
+            item
+            for item in observations
+            if item.comparison_text != selected.comparison_text
+        )
+        agreement_fraction = len(agreeing) / len(observations)
+        return (
+            len(agreeing) > len(disagreeing)
+            and agreement_fraction
+            >= self.config.minimum_exact_context_majority_fraction
+            and bool(disagreeing)
+            and all(
+                item.confidence < self.config.minimum_confidence
+                for item in disagreeing
+            )
+        )
+
     def _observed_medoid(
         self,
         observations: tuple[SegmentObservation, ...],
@@ -2518,6 +2739,135 @@ class OcrEvidenceFusion:
                 )
         stability = weighted_similarity / pair_count if pair_count else 0.0
         return winner[4], winner[2], stability
+
+    @staticmethod
+    def _script_confidence_override(
+        observations: tuple[SegmentObservation, ...],
+    ) -> tuple[SegmentObservation, float] | None:
+        if len({item.context_sha256 for item in observations}) < 2:
+            return None
+        minimum_script_density = 0.01
+        script_contexts: dict[str, set[str]] = {}
+        scripts_by_observation: dict[str, frozenset[str]] = {}
+        for observation in observations:
+            scripts = frozenset(
+                script
+                for script, density in exact_script_scores(observation.text)
+                if density >= minimum_script_density
+            )
+            scripts_by_observation[observation.observation_id] = scripts
+            for script in scripts:
+                script_contexts.setdefault(script, set()).add(
+                    observation.context_sha256
+                )
+        supported_scripts = frozenset(
+            script
+            for script, contexts in script_contexts.items()
+            if len(contexts) >= 2
+        )
+        if len(supported_scripts) < 2:
+            return None
+
+        grouped: dict[str, list[SegmentObservation]] = {}
+        for observation in observations:
+            grouped.setdefault(observation.comparison_text, []).append(
+                observation
+            )
+        visually_confusable_latin = frozenset(
+            "ABCEHKMOPTXYabcehkmoptxyl"
+        )
+
+        def minority_confusables(text: str) -> int:
+            if not any("\u0400" <= character <= "\u04ff" for character in text):
+                return 0
+            tokens = []
+            current = []
+            for character in text:
+                if (
+                    "A" <= character <= "Z"
+                    or "a" <= character <= "z"
+                ):
+                    current.append(character)
+                elif current:
+                    tokens.append("".join(current))
+                    current = []
+            if current:
+                tokens.append("".join(current))
+            return sum(
+                len(token) <= 2
+                and all(
+                    character in visually_confusable_latin
+                    for character in token
+                )
+                for token in tokens
+            )
+
+        candidates = []
+        for first_index, members in enumerate(grouped.values()):
+            representative = max(
+                members,
+                key=lambda item: item.confidence,
+            )
+            mean_confidence = sum(
+                item.confidence for item in members
+            ) / len(members)
+            coverage = len(
+                scripts_by_observation[representative.observation_id]
+                & supported_scripts
+            )
+            candidates.append(
+                (
+                    coverage,
+                    mean_confidence,
+                    len({item.context_sha256 for item in members}),
+                    -first_index,
+                    representative,
+                    minority_confusables(representative.text),
+                    sum(character in "!?" for character in representative.text),
+                )
+            )
+        minimum_confusables = min(item[5] for item in candidates)
+        clean_candidates = tuple(
+            item for item in candidates if item[5] == minimum_confusables
+        )
+        if len(clean_candidates) == 1 and any(
+            item[5] > minimum_confusables for item in candidates
+        ):
+            clean = clean_candidates[0]
+            runner_confidence = max(
+                item[1] for item in candidates if item is not clean
+            )
+            clean_text = clean[4].comparison_text
+            similar_to_runner = any(
+                sum(
+                    left == right
+                    for left, right in zip(
+                        clean_text,
+                        item[4].comparison_text,
+                    )
+                )
+                / max(1, len(clean_text), len(item[4].comparison_text))
+                >= 0.80
+                for item in candidates
+                if item is not clean
+            )
+            runner_punctuation = min(
+                item[6] for item in candidates if item is not clean
+            )
+            if (
+                clean[1] >= runner_confidence - 0.02
+                and clean[6] <= runner_punctuation
+                and similar_to_runner
+            ):
+                return clean[4], clean[1]
+        candidates.sort(key=lambda item: item[:4], reverse=True)
+        winner = candidates[0]
+        if winner[0] < 2:
+            return None
+        exact_contexts = winner[2]
+        if exact_contexts < 2:
+            return None
+        return winner[4], winner[1]
 
     def _stable_alternative(
         self,

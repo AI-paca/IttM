@@ -1344,7 +1344,8 @@ def main() -> int:
         horizontal_coverage=args.horizontal_rule_coverage,
         vertical_coverage=args.vertical_rule_coverage,
     )
-    visual_rows = _visual_rows(_read_jsonl(segments_path))
+    source_segments = _read_jsonl(segments_path)
+    visual_rows = _visual_rows(source_segments)
     excluded_y = tuple(
         (network.y_lines[0], network.y_lines[-1]) for network in networks
     )
@@ -1432,6 +1433,7 @@ def main() -> int:
                 "merge_left": 5,
                 "empty": 7,
                 "merge_both": 8,
+                "empty_merge_up": 10,
             },
             "null_semantics": "repeat the last segment code through the logical row tail",
             "rows": serialized_rows,
@@ -1472,6 +1474,100 @@ def main() -> int:
         ),
         encoding="utf-8",
     )
+    valid_codes = frozenset((0, 3, 5, 7, 8, 10))
+    row_bounds_valid = all(
+        0 <= row.top < row.bottom <= height for row in physical_rows
+    )
+    rows_do_not_overlap = all(
+        first.bottom <= second.top
+        for first, second in zip(
+            physical_rows,
+            physical_rows[1:],
+        )
+    )
+    slots_partition_width = all(
+        bool(row.slots)
+        and row.slots[0].start == 0
+        and row.slots[-1].end == width
+        and all(
+            first.end == second.start
+            for first, second in zip(row.slots, row.slots[1:])
+        )
+        for row in physical_rows
+    )
+    codes_match_slots = all(
+        len(row.slots) == len(row_codes)
+        for row, row_codes in zip(physical_rows, codes, strict=True)
+    )
+    codes_are_known = all(
+        code in valid_codes for row_codes in codes for code in row_codes
+    )
+    payload_slots = sum(
+        slot.value is not EMPTY
+        for row in physical_rows
+        for slot in row.slots
+    )
+    payload_presence_matches_source = bool(payload_slots) == bool(
+        source_segments
+    )
+    geometry_manifest_path = stage / "manifest.json"
+    geometry_manifest = (
+        _read_json(geometry_manifest_path)
+        if geometry_manifest_path.is_file()
+        else {}
+    )
+    geometry_is_complete = (
+        isinstance(geometry_manifest, dict)
+        and geometry_manifest.get("status") == "complete"
+        and geometry_manifest.get("limit_leaf_count") == 0
+    )
+    invariants = {
+        "geometry_input_complete": geometry_is_complete,
+        "row_bounds_valid": row_bounds_valid,
+        "rows_do_not_overlap": rows_do_not_overlap,
+        "slots_partition_full_width": slots_partition_width,
+        "codes_match_slots": codes_match_slots,
+        "codes_are_known": codes_are_known,
+        "payload_presence_matches_source": payload_presence_matches_source,
+    }
+    status = "complete" if all(invariants.values()) else "bad"
+    _write_json(
+        output_stage / "manifest.json",
+        {
+            "schema": "debug-topology-stage-v1",
+            "stage_name": "physical-sparse-topology",
+            "status": status,
+            "source": {
+                "geometry": str(stage),
+                "geometry_status": geometry_manifest.get("status")
+                if isinstance(geometry_manifest, dict)
+                else None,
+                "segments": len(source_segments),
+                "matrix_cells": len(raw_cells),
+                "rules": len(rules),
+            },
+            "result": {
+                "rows": len(physical_rows),
+                "ruled_networks": len(networks),
+                "payload_slots": payload_slots,
+                "empty_slots": sum(
+                    slot.value is EMPTY
+                    for row in physical_rows
+                    for slot in row.slots
+                ),
+                "maximum_segments_per_row": maximum_segments,
+            },
+            "invariants": invariants,
+            "manual_review_required": True,
+            "visual_evidence": args.output,
+            "canonical_topology": args.topology,
+        },
+    )
+    if status != "complete":
+        failed = ", ".join(
+            name for name, passed in invariants.items() if not passed
+        )
+        raise RuntimeError(f"topology invariants failed: {failed}")
     print(output_path)
     print(output_stage / args.topology)
     print(

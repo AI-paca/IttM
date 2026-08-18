@@ -30,6 +30,8 @@ from app.sparse_pipeline.ocr_fusion import (
     OcrRoutingMode,
     OcrReplicaConflict,
     OverlapConsensus,
+    SegmentObservation,
+    _AlignmentBudget,
     align_exact_text,
     compact_ocr_text,
     exact_script_scores,
@@ -502,6 +504,35 @@ def _fused(result: object, segment_id: str) -> object:
     return next(item for item in segments if item.segment_id == segment_id)
 
 
+def _fuse_raw_context_votes(
+    votes: tuple[tuple[str, float], ...],
+):
+    fusion = OcrEvidenceFusion()
+    observations = tuple(
+        SegmentObservation(
+            observation_id=f"observation-{index}",
+            job_id=f"job-{index}",
+            segment_id="segment-target",
+            block_id=f"block-{index}",
+            transform=OcrTransform.RAW,
+            lane_id="cpu",
+            capability_id="cap-shared",
+            text=text,
+            confidence=confidence,
+            page_bboxes=(Box(0, 0, 10, 10),),
+            input_sha256=f"{index + 100:064x}",
+            context_sha256=f"{index + 1:064x}",
+            source_replica_conflict=False,
+        )
+        for index, (text, confidence) in enumerate(votes)
+    )
+    return fusion._fuse_segment(
+        "segment-target",
+        observations,
+        budget=_AlignmentBudget(fusion.config),
+    )
+
+
 def test_lost_metric_removes_whitespace_then_counts_exact_positional_edits() -> None:
     alignment = align_exact_text("a b\nc", "aXc !")
 
@@ -857,6 +888,60 @@ def test_observed_medoid_beats_one_high_confidence_outlier() -> None:
     }
 
 
+def test_existing_clean_raw_beats_repeated_short_script_confusable() -> None:
+    plan, segments, crops = _overlap_fixture()
+    target = "segment-000001"
+    jobs = (
+        replace(
+            _evidence_job(
+                0,
+                plan=plan,
+                segments=segments,
+                block_index=0,
+                transform=OcrTransform.RAW,
+                lane_id="cpu-a",
+                evidence={target: ("Инструмент запущен, Ho без", 0.955)},
+            ),
+            capability_id="cap-a",
+        ),
+        replace(
+            _evidence_job(
+                1,
+                plan=plan,
+                segments=segments,
+                block_index=1,
+                transform=OcrTransform.RAW,
+                lane_id="cpu-a",
+                evidence={target: ("Инструмент запущен, Ho без", 0.955)},
+            ),
+            capability_id="cap-a",
+        ),
+        replace(
+            _evidence_job(
+                2,
+                plan=plan,
+                segments=segments,
+                block_index=0,
+                transform=OcrTransform.RAW,
+                lane_id="cpu-clean",
+                evidence={target: ("Инструмент запущен, но без", 0.956)},
+            ),
+            capability_id="cap-clean",
+        ),
+    )
+
+    result = OcrEvidenceFusion().fuse(
+        plan=plan,
+        segments=segments,
+        crops=crops,
+        queue=_matrix_queue(plan, crops, *jobs),
+    )
+
+    assert _fused(result, target).selected_text == (
+        "Инструмент запущен, но без"
+    )
+
+
 def test_capability_replicas_cannot_outvote_two_independent_capabilities() -> None:
     plan, segments, crops = _overlap_fixture()
     target = "segment-000001"
@@ -923,6 +1008,113 @@ def test_complete_queue_word_bbox_outside_bound_crop_is_rejected() -> None:
             segments=segments,
             crops=crops,
             queue=complete_queue,
+        )
+
+
+def test_canonical_slot_words_use_declared_canvas_and_overflow_fails_closed(
+) -> None:
+    plan, _segments, _original_crops = _single_segment_fixture()
+    raster_block = replace(
+        plan.blocks[0],
+        bbox=Box(0, 0, 720, 1406),
+    )
+    raster_plan = replace(
+        plan,
+        aligned_size=(720, 1406),
+        blocks=(raster_block,),
+    )
+    raster_crop = _crops(raster_plan)[0]
+    block = replace(plan.blocks[0])
+    object.__setattr__(block, "matrix_window_kind", "polar-local-full")
+    plan = replace(plan, blocks=(block,))
+    metadata_crop = object.__new__(BlockCropPair)
+    for field_name in BlockCropPair.__dataclass_fields__:
+        object.__setattr__(
+            metadata_crop,
+            field_name,
+            block.bbox
+            if field_name == "bbox"
+            else getattr(raster_crop, field_name),
+        )
+    crops = (metadata_crop,)
+    doc_course_word = OcrWord(
+        text="membership-86",
+        bbox=Box(86, 0, 87, 1),
+        confidence=0.99,
+    )
+    jobs = tuple(
+        _complete_job(
+            index,
+            block=block,
+            transform=transform,
+            lane_id="cpu",
+            words=(doc_course_word,),
+        )
+        for index, transform in enumerate(
+            (OcrTransform.RAW, OcrTransform.GAMMA)
+        )
+    )
+    queue = replace(
+        _matrix_queue(plan, crops, *jobs),
+        diagnostics=(
+            "geometry=canonical-membership-slots-v1;"
+            "width=720;height=1406",
+        ),
+    )
+    fusion = OcrEvidenceFusion()
+
+    fusion._validate_sparse_jobs(plan=plan, crops=crops, queue=queue)
+
+    legacy_v53_queue = replace(
+        queue,
+        diagnostics=(
+            "block=block-000000;geometry=canonical-membership-slots-v1",
+        ),
+    )
+    fusion._validate_sparse_jobs(
+        plan=plan,
+        crops=crops,
+        queue=legacy_v53_queue,
+    )
+
+    oversized_canvas_queue = replace(
+        queue,
+        diagnostics=(
+            "geometry=canonical-membership-slots-v1;"
+            "width=721;height=1406",
+        ),
+    )
+    with pytest.raises(
+        OcrFusionInvariantError,
+        match="slot canvas exceeds bound crop raster",
+    ):
+        fusion._validate_sparse_jobs(
+            plan=plan,
+            crops=crops,
+            queue=oversized_canvas_queue,
+        )
+
+    overflow = replace(
+        doc_course_word,
+        bbox=Box(719, 0, 721, 1),
+    )
+    overflow_jobs = tuple(
+        replace(
+            job,
+            output=replace(
+                job.output,
+                text=overflow.text,
+                words=(overflow,),
+            ),
+        )
+        for job in queue.jobs
+    )
+    overflow_queue = replace(queue, jobs=overflow_jobs)
+    with pytest.raises(OcrFusionInvariantError, match="outside.*crop"):
+        fusion._validate_sparse_jobs(
+            plan=plan,
+            crops=crops,
+            queue=overflow_queue,
         )
 
 
@@ -2181,6 +2373,81 @@ def test_production_profile_orthogonal_membership_decodes_all_six() -> None:
     )
 
 
+def test_canonical_polar_slots_prove_placement_omission() -> None:
+    plan, segments, _crops_before_locality = _orthogonal_membership_fixture()
+    common_bbox = Box(0, 0, *plan.aligned_size)
+    local_blocks = []
+    for index, block in enumerate(plan.blocks):
+        local_block = replace(block, bbox=common_bbox)
+        # This unit isolates the fusion boundary.  Planner/renderer tests own
+        # construction and validation of the full island metadata payload.
+        object.__setattr__(
+            local_block,
+            "matrix_window_kind",
+            (
+                "polar-local-full"
+                if index == 0
+                else "polar-local-signature"
+            ),
+        )
+        local_blocks.append(local_block)
+    plan = replace(
+        plan,
+        blocks=tuple(local_blocks),
+    )
+    crops = _crops(plan)
+    jobs = tuple(
+        _evidence_job(
+            block_index * 2 + transform_index,
+            plan=plan,
+            segments=segments,
+            block_index=block_index,
+            transform=transform,
+            lane_id="cpu",
+            evidence={
+                segment_id: (f"value-{int(segment_id[-6:])}", 0.95)
+                for segment_id in plan.blocks[block_index].segment_ids
+            },
+        )
+        for block_index in range(len(plan.blocks))
+        for transform_index, transform in enumerate(
+            (OcrTransform.RAW, OcrTransform.GAMMA)
+        )
+    )
+    queue = _matrix_queue(plan, crops, *jobs)
+    profile = replace(
+        OcrFusionConfig(),
+        routing_mode=OcrRoutingMode.BLOCK_MEMBERSHIP,
+        membership_assume_complete_observations=False,
+        require_exact_job_matrix=False,
+    )
+
+    without_provenance = OcrEvidenceFusion(profile).fuse(
+        plan=plan,
+        segments=segments,
+        crops=crops,
+        queue=queue,
+    )
+    with_provenance = OcrEvidenceFusion(profile).fuse(
+        plan=plan,
+        segments=segments,
+        crops=crops,
+        queue=replace(
+            queue,
+            diagnostics=("geometry=canonical-membership-slots-v1",),
+        ),
+    )
+
+    assert without_provenance.status is OcrFusionStatus.UNRESOLVED
+    assert with_provenance.unassigned_word_observations == ()
+    assert tuple(
+        item.selected_text for item in with_provenance.segments
+    ) == tuple(f"value-{index}" for index in range(6))
+    assert "overlap-contract=canonical-membership-slots" in (
+        with_provenance.diagnostics
+    )
+
+
 def test_production_membership_does_not_alias_incomplete_separator_signature() -> None:
     """A one-block rule token cannot impersonate a shorter source code.
 
@@ -3121,6 +3388,54 @@ def test_low_confidence_context_consensus_does_not_hide_transform_conflict() -> 
     assert "transform_conflict" in fused.uncertainty_reasons
     assert fused.unresolved is True
     assert result.status is OcrFusionStatus.UNRESOLVED
+
+
+def test_four_of_five_exact_contexts_ignore_one_low_confidence_outlier() -> None:
+    fused = _fuse_raw_context_votes(
+        (
+            ("trusted exact consensus", 0.934),
+            ("trusted exact consensus", 0.931),
+            ("trusted exact consensus", 0.929),
+            ("trusted exact consensus", 0.927),
+            ("unrelated noisy outlier", 0.416),
+        )
+    )
+
+    assert fused.selected_text == "trusted exact consensus"
+    assert fused.independent_context_count == 5
+    assert fused.stability < OcrFusionConfig().minimum_stability
+    assert "unstable_raw_text" not in fused.uncertainty_reasons
+    assert fused.unresolved is False
+
+
+@pytest.mark.parametrize(
+    "votes",
+    (
+        (
+            ("trusted exact consensus", 0.934),
+            ("trusted exact consensus", 0.931),
+            ("trusted exact consensus", 0.929),
+            ("minority noisy text", 0.416),
+            ("minority noisy text", 0.412),
+        ),
+        (
+            ("trusted exact consensus", 0.934),
+            ("trusted exact consensus", 0.931),
+            ("trusted exact consensus", 0.929),
+            ("trusted exact consensus", 0.927),
+            ("high confidence conflict", 0.92),
+        ),
+    ),
+    ids=("three-of-five", "high-confidence-conflict"),
+)
+def test_exact_context_majority_does_not_bypass_ambiguous_votes(
+    votes: tuple[tuple[str, float], ...],
+) -> None:
+    fused = _fuse_raw_context_votes(votes)
+
+    assert fused.stability < OcrFusionConfig().minimum_stability
+    assert "unstable_raw_text" in fused.uncertainty_reasons
+    assert fused.unresolved is True
 
 
 def test_exact_job_matrix_and_crop_hashes_are_required() -> None:

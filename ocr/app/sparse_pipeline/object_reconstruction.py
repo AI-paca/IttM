@@ -170,6 +170,44 @@ class ObjectReconstructionResult:
     status: ObjectReconstructionStatus = ObjectReconstructionStatus.COMPLETE
     diagnostics: tuple[str, ...] = ()
 
+    @property
+    def topology_confidence(self) -> float:
+        """Return the weakest object-level topology confidence on the page."""
+
+        return min((item.confidence for item in self.objects), default=1.0)
+
+    def is_topology_confirmed(self, *, minimum_confidence: float) -> bool:
+        """Require every reconstructed object to have typed, confident topology."""
+
+        if (
+            isinstance(minimum_confidence, bool)
+            or not isinstance(minimum_confidence, (int, float))
+            or not math.isfinite(float(minimum_confidence))
+            or not 0.0 <= float(minimum_confidence) <= 1.0
+        ):
+            raise ValueError("minimum topology confidence must be between zero and one")
+        return all(
+            item.kind is not ObjectKind.UNKNOWN
+            and item.confidence >= float(minimum_confidence)
+            for item in self.objects
+        )
+
+    def has_confirmed_table(self, *, minimum_confidence: float) -> bool:
+        """Return whether Stage 6 positively identified any table topology."""
+
+        if (
+            isinstance(minimum_confidence, bool)
+            or not isinstance(minimum_confidence, (int, float))
+            or not math.isfinite(float(minimum_confidence))
+            or not 0.0 <= float(minimum_confidence) <= 1.0
+        ):
+            raise ValueError("minimum topology confidence must be between zero and one")
+        return any(
+            item.kind is ObjectKind.TABLE
+            and item.confidence >= float(minimum_confidence)
+            for item in self.objects
+        )
+
     def __post_init__(self) -> None:
         if (
             type(self.aligned_size) is not tuple

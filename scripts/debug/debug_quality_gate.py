@@ -6,6 +6,7 @@ import csv
 from pathlib import Path
 
 UNAVAILABLE_VALUES = {"", "n/a", "not_applicable", "not_checked", "missing_reference"}
+INCOMPLETE_VALUES = {"not_checked", "missing_reference"}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -24,6 +25,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Comma-separated methods that must have percent and gate columns. "
             "Missing method columns fail the gate."
+        ),
+    )
+    parser.add_argument(
+        "--require-complete-scoring",
+        action="store_true",
+        help=(
+            "Fail when a corpus row has missing_reference/not_checked overall "
+            "quality. Without this flag the gate reports an explicit PARTIAL "
+            "status instead of a false PASS."
         ),
     )
     return parser.parse_args(argv)
@@ -59,12 +69,25 @@ def _display_label(row: dict[str, str], gate_label: str) -> str:
     return gate_label
 
 
+def _is_overall_gate(gate_label: str) -> bool:
+    return not gate_label.endswith(
+        (
+            " text",
+            " compact quality",
+            " lexical t9",
+            " markdown grammar",
+            " success probability",
+        )
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     with args.result.open(encoding="utf-8", newline="") as source:
         rows = list(csv.DictReader(source))
 
     failures: list[str] = []
+    incomplete: list[str] = []
     required_methods = [
         method.strip() for method in args.required_methods.split(",") if method.strip()
     ]
@@ -73,6 +96,8 @@ def main(argv: list[str] | None = None) -> int:
         for method in required_methods:
             if f"{method} %" not in columns or f"{method} gate" not in columns:
                 failures.append(f"missing required method column: {method}")
+    if args.require_complete_scoring and not rows:
+        failures.append("result contains no corpus rows")
 
     for row in rows:
         file_name = row["file"]
@@ -88,12 +113,23 @@ def main(argv: list[str] | None = None) -> int:
                 label = _display_label(row, method)
                 threshold = row.get("threshold", "87")
                 failures.append(f"{file_name}: {label}={percent}% < {threshold}%")
+            elif value in INCOMPLETE_VALUES and _is_overall_gate(method):
+                issue = f"{file_name}: {method}={value}"
+                incomplete.append(issue)
+                if args.require_complete_scoring:
+                    failures.append(issue)
 
     if failures:
         print("Debug quality gate failed:")
         for failure in failures:
             print(f"- {failure}")
         return 1
+
+    if incomplete:
+        print("Debug quality gate PARTIAL:")
+        for issue in incomplete:
+            print(f"- {issue}")
+        return 0
 
     print("Debug quality gate passed.")
     return 0

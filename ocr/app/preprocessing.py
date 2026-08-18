@@ -1,10 +1,321 @@
 import math
 import os
+from dataclasses import dataclass
 
 from PIL import Image, ImageEnhance, ImageFilter
 
+from app.sparse_pipeline.contracts import AffineTransform, Matrix3
+
 DEFAULT_MAX_DEWARP_PIXELS = 16_000_000
 TEXT_PROJECTOR_EDGE_DENSITY = 0.08
+REGION_DESKEW_MIN_CONFIDENCE = 0.82
+REGION_DESKEW_MIN_DEGREES = 1.0
+
+
+def _matrix_product(first: Matrix3, second: Matrix3) -> Matrix3:
+    return tuple(
+        sum(
+            first[row * 3 + inner] * second[inner * 3 + column]
+            for inner in range(3)
+        )
+        for row in range(3)
+        for column in range(3)
+    )
+
+
+def _normalized_matrix(values) -> Matrix3:
+    flattened = tuple(float(value) for value in values)
+    if len(flattened) != 9:
+        raise ValueError("transform matrix must contain nine values")
+    scale = flattened[8]
+    if abs(scale) < 1e-12:
+        raise ValueError("transform matrix has a zero projective scale")
+    return tuple(value / scale for value in flattened)
+
+
+@dataclass(frozen=True)
+class RasterTransform(AffineTransform):
+    """One raw-source to aligned-raster transform, affine or projective."""
+
+    operation: str = "identity"
+    confidence: float = 1.0
+    source_angle_degrees: float = 0.0
+    residual_angle_degrees: float = 0.0
+
+    def __post_init__(self) -> None:
+        if min(*self.original_size, *self.aligned_size) < 1:
+            raise ValueError("transform image sizes must be positive")
+        for matrix in (self.forward, self.inverse):
+            if len(matrix) != 9 or not all(math.isfinite(value) for value in matrix):
+                raise ValueError("transform matrices must contain nine finite values")
+        identity = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+        for first, second in (
+            (self.forward, self.inverse),
+            (self.inverse, self.forward),
+        ):
+            product = _normalized_matrix(_matrix_product(first, second))
+            if any(
+                abs(value - expected) > 1e-7
+                for value, expected in zip(product, identity)
+            ):
+                raise ValueError("forward and inverse matrices are not inverses")
+        if type(self.operation) is not str or not self.operation:
+            raise ValueError("transform operation must be a non-empty string")
+        if (
+            not math.isfinite(self.confidence)
+            or not 0.0 <= self.confidence <= 1.0
+        ):
+            raise ValueError("transform confidence must be between zero and one")
+        if not all(
+            math.isfinite(value)
+            for value in (
+                self.source_angle_degrees,
+                self.residual_angle_degrees,
+            )
+        ):
+            raise ValueError("transform angles must be finite")
+
+    @classmethod
+    def compose(
+        cls,
+        region: "RasterTransform",
+        alignment: AffineTransform,
+        *,
+        alignment_degrees: float,
+    ) -> "RasterTransform":
+        if region.aligned_size != alignment.original_size:
+            raise ValueError("transform chain has incompatible canvas sizes")
+        forward = _normalized_matrix(
+            _matrix_product(alignment.forward, region.forward)
+        )
+        inverse = _normalized_matrix(
+            _matrix_product(region.inverse, alignment.inverse)
+        )
+        operations = tuple(
+            operation
+            for operation in (
+                None if region.operation == "identity" else region.operation,
+                "affine-deskew" if abs(alignment_degrees) >= 1e-12 else None,
+            )
+            if operation is not None
+        )
+        return cls(
+            original_size=region.original_size,
+            aligned_size=alignment.aligned_size,
+            forward=forward,
+            inverse=inverse,
+            operation="+".join(operations) if operations else "identity",
+            confidence=region.confidence,
+            source_angle_degrees=region.source_angle_degrees,
+            residual_angle_degrees=(
+                region.residual_angle_degrees - alignment_degrees
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class RegionPreprocessingResult:
+    image: Image.Image
+    transform: RasterTransform
+    applied: bool
+    gate_reason: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.image, Image.Image):
+            raise TypeError("preprocessed image must be a Pillow Image")
+        if not isinstance(self.transform, RasterTransform):
+            raise TypeError("preprocessing transform must be a RasterTransform")
+        if self.image.size != self.transform.aligned_size:
+            raise ValueError("preprocessed image and transform sizes disagree")
+        if self.applied != (self.transform.operation != "identity"):
+            raise ValueError("preprocessing application state disagrees with transform")
+        if type(self.gate_reason) is not str or not self.gate_reason:
+            raise ValueError("preprocessing gate reason must be non-empty")
+
+
+def confidence_gated_region_deskew(
+    image: Image.Image,
+    *,
+    enabled: bool = True,
+    minimum_confidence: float = REGION_DESKEW_MIN_CONFIDENCE,
+    minimum_degrees: float = REGION_DESKEW_MIN_DEGREES,
+    maximum_pixels: int | None = None,
+) -> RegionPreprocessingResult:
+    """Rectify one confidently bounded document region before geometry."""
+
+    if not isinstance(image, Image.Image):
+        raise TypeError("image must be a Pillow Image")
+    if type(enabled) is not bool:
+        raise TypeError("enabled must be a boolean")
+    if (
+        not math.isfinite(minimum_confidence)
+        or not 0.0 <= minimum_confidence <= 1.0
+    ):
+        raise ValueError("minimum confidence must be between zero and one")
+    if not math.isfinite(minimum_degrees) or not 0.0 <= minimum_degrees <= 15.0:
+        raise ValueError("minimum degrees must be between zero and 15")
+    pixel_limit = max_dewarp_pixels() if maximum_pixels is None else maximum_pixels
+    if type(pixel_limit) is not int or pixel_limit <= 0:
+        raise ValueError("maximum pixels must be a positive integer")
+
+    identity = RasterTransform.identity(image.size)
+    if not enabled:
+        return RegionPreprocessingResult(image, identity, False, "disabled")
+    if min(image.size) < 300:
+        return RegionPreprocessingResult(image, identity, False, "dimension-gate")
+    if image.width * image.height > pixel_limit:
+        return RegionPreprocessingResult(image, identity, False, "pixel-gate")
+
+    source = _detected_projector_quad(image)
+    detector = "projector"
+    detector_floor = 0.55
+    if source is None:
+        source = _detected_document_quad(image)
+        detector = "document"
+        detector_floor = 0.35
+    if source is None:
+        return RegionPreprocessingResult(image, identity, False, "no-region")
+
+    metrics = _quad_metrics(source, image.size, detector_floor=detector_floor)
+    if metrics["confidence"] < minimum_confidence:
+        return RegionPreprocessingResult(
+            image,
+            identity,
+            False,
+            f"confidence-gate:{metrics['confidence']:.3f}",
+        )
+    if metrics["correction_magnitude"] < minimum_degrees:
+        return RegionPreprocessingResult(
+            image,
+            identity,
+            False,
+            f"angle-gate:{metrics['correction_magnitude']:.3f}",
+        )
+    target_size = metrics["target_size"]
+    if target_size[0] * target_size[1] > pixel_limit:
+        return RegionPreprocessingResult(image, identity, False, "output-pixel-gate")
+    if _is_suspicious_horizontal_dewarp_crop(image.size, target_size):
+        return RegionPreprocessingResult(image, identity, False, "aspect-gate")
+
+    return _warp_region_with_contract(
+        image,
+        source,
+        target_size,
+        operation=f"region-{detector}-dewarp",
+        confidence=metrics["confidence"],
+        source_angle_degrees=metrics["source_angle_degrees"],
+    )
+
+
+def _quad_metrics(
+    source,
+    image_size: tuple[int, int],
+    *,
+    detector_floor: float,
+) -> dict[str, object]:
+    width, height = image_size
+    top_width = math.dist(source[0], source[1])
+    bottom_width = math.dist(source[3], source[2])
+    left_height = math.dist(source[0], source[3])
+    right_height = math.dist(source[1], source[2])
+    target_width = max(1, round((top_width + bottom_width) / 2))
+    target_height = max(1, round((left_height + right_height) / 2))
+    polygon_area = abs(
+        sum(
+            source[index][0] * source[(index + 1) % 4][1]
+            - source[(index + 1) % 4][0] * source[index][1]
+            for index in range(4)
+        )
+    ) / 2.0
+    area_ratio = polygon_area / max(1.0, width * height)
+    edge_balance = min(
+        min(top_width, bottom_width) / max(top_width, bottom_width, 1.0),
+        min(left_height, right_height) / max(left_height, right_height, 1.0),
+    )
+    top_angle = math.degrees(
+        math.atan2(
+            source[1][1] - source[0][1],
+            source[1][0] - source[0][0],
+        )
+    )
+    bottom_angle = math.degrees(
+        math.atan2(
+            source[2][1] - source[3][1],
+            source[2][0] - source[3][0],
+        )
+    )
+    source_angle = (top_angle + bottom_angle) / 2.0
+    perspective_spread = abs(top_angle - bottom_angle)
+    correction_magnitude = max(
+        abs(top_angle),
+        abs(bottom_angle),
+        perspective_spread,
+    )
+    area_score = min(1.0, area_ratio / 0.5)
+    confidence = min(
+        1.0,
+        detector_floor + 0.25 * area_score + 0.20 * edge_balance,
+    )
+    return {
+        "confidence": confidence,
+        "correction_magnitude": correction_magnitude,
+        "source_angle_degrees": source_angle,
+        "target_size": (target_width, target_height),
+    }
+
+
+def _warp_region_with_contract(
+    image: Image.Image,
+    source,
+    target_size: tuple[int, int],
+    *,
+    operation: str,
+    confidence: float,
+    source_angle_degrees: float,
+) -> RegionPreprocessingResult:
+    target_width, target_height = target_size
+    destination = (
+        (0.0, 0.0),
+        (float(target_width - 1), 0.0),
+        (float(target_width - 1), float(target_height - 1)),
+        (0.0, float(target_height - 1)),
+    )
+    coefficients = _perspective_coefficients(destination, source)
+    inverse = _normalized_matrix(
+        (
+            coefficients[0],
+            coefficients[1],
+            coefficients[2],
+            coefficients[3],
+            coefficients[4],
+            coefficients[5],
+            coefficients[6],
+            coefficients[7],
+            1.0,
+        )
+    )
+    import numpy as np
+
+    forward = _normalized_matrix(
+        np.linalg.inv(np.asarray(inverse, dtype=np.float64).reshape(3, 3)).reshape(-1)
+    )
+    transform = RasterTransform(
+        original_size=image.size,
+        aligned_size=target_size,
+        forward=forward,
+        inverse=inverse,
+        operation=operation,
+        confidence=confidence,
+        source_angle_degrees=source_angle_degrees,
+        residual_angle_degrees=0.0,
+    )
+    processed = image.transform(
+        target_size,
+        Image.Transform.PERSPECTIVE,
+        coefficients,
+        getattr(Image, "Resampling", Image).BICUBIC,
+    ).convert("RGB")
+    return RegionPreprocessingResult(processed, transform, True, "applied")
 
 
 def max_dewarp_pixels() -> int:
@@ -407,6 +718,54 @@ def _detected_projector_quad(
         (right, bottom_right),
         (left, bottom_left),
     )
+
+
+def _detected_document_quad(
+    image: Image.Image,
+) -> tuple[tuple[float, float], ...] | None:
+    """Detect a bounded bright page only when its contour is unambiguous."""
+
+    try:
+        import cv2
+        import numpy as np
+    except Exception:
+        return None
+
+    rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    height, width = gray.shape[:2]
+    image_area = width * height
+    for threshold in (180, 160, 140, 120):
+        mask = cv2.inRange(blurred, threshold, 255)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+        contours, _ = cv2.findContours(
+            mask,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
+        for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:3]:
+            area = float(cv2.contourArea(contour))
+            area_ratio = area / max(1, image_area)
+            if area_ratio < 0.35 or area_ratio > 0.90:
+                continue
+            perimeter = cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, 0.015 * perimeter, True)
+            if len(approx) != 4 or not cv2.isContourConvex(approx):
+                continue
+            corners = _order_quad(approx.reshape(4, 2))
+            if _is_near_full_frame_quad(corners, width, height, area_ratio):
+                continue
+            bounding = cv2.boundingRect(approx)
+            rectangularity = area / max(1, bounding[2] * bounding[3])
+            if rectangularity < 0.72:
+                continue
+            return tuple(
+                (float(point[0]), float(point[1]))
+                for point in corners
+            )
+    return None
 
 
 def _robust_line_fit(x, y) -> tuple[float, float] | None:

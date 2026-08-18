@@ -29,7 +29,9 @@ from app.sparse_pipeline.recursive_object_partition import (  # noqa: E402
     PartitionSegment,
     PartitionedObject,
     RuledNetwork,
+    StructuralRule,
     has_two_dimensional_object_extent,
+    horizontal_rule_table_regions,
     partition_recursive_objects,
     table_upper_left_boundary,
 )
@@ -56,6 +58,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--topology", default="sparse-topology-canonical.json")
     parser.add_argument("--segments", default="segments.jsonl")
     parser.add_argument("--nodes", default="nodes.jsonl")
+    parser.add_argument("--rules", default="rules.jsonl")
     parser.add_argument("--image", default="aligned.png")
     parser.add_argument("--ownership", default="ownership-plain.png")
     parser.add_argument("--output-dir", type=Path)
@@ -823,11 +826,19 @@ def main() -> int:
     topology_path = topology_stage / args.topology
     segments_path = stage / args.segments
     nodes_path = stage / args.nodes
+    rules_path = stage / args.rules
     image_path = stage / args.image
     ownership_path = stage / args.ownership
     if not ownership_path.is_file():
         ownership_path = stage / "ownership.png"
-    for path in (topology_path, segments_path, nodes_path, image_path, ownership_path):
+    for path in (
+        topology_path,
+        segments_path,
+        nodes_path,
+        rules_path,
+        image_path,
+        ownership_path,
+    ):
         if not path.is_file():
             raise FileNotFoundError(path)
 
@@ -852,11 +863,32 @@ def main() -> int:
         bbox_overrides=bbox_overrides,
     )
     nodes = _parse_nodes(_read_jsonl(nodes_path))
+    root = next((node for node in nodes if node.node_id == "geo-root"), None)
+    if root is None:
+        raise ValueError("recursive partition requires exactly one geo-root")
+    structural_rules = tuple(
+        StructuralRule(
+            axis=str(value.get("axis")),
+            bbox=_bbox(value.get("bbox"), name="structural rule bbox"),
+        )
+        for value in _read_jsonl(rules_path)
+        if value.get("axis") in ("horizontal", "vertical")
+    )
+    rule_regions = horizontal_rule_table_regions(
+        rules=tuple(
+            rule.bbox
+            for rule in structural_rules
+            if rule.axis == "horizontal"
+        ),
+        page_bbox=root.bbox,
+    )
     candidates = partition_recursive_objects(
         segments=segments,
         nodes=nodes,
         rows=rows,
         networks=networks,
+        horizontal_rule_regions=rule_regions,
+        structural_rules=structural_rules,
     )
     objects = tuple(
         item for item in candidates if has_two_dimensional_object_extent(item)
@@ -992,6 +1024,7 @@ def main() -> int:
                 "topology": str(topology_path),
                 "segments": str(segments_path),
                 "nodes": str(nodes_path),
+                "rules": str(rules_path),
                 "image": str(image_path),
                 "legacy_trace": (
                     str(legacy_trace_path) if legacy_trace_path.is_file() else None

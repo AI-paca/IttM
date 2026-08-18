@@ -12,7 +12,7 @@ from __future__ import annotations
 import io
 import re
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from PIL import Image
 
@@ -21,6 +21,7 @@ from app.sparse_pipeline.block_crops import (
     BlockCropper,
 )
 from app.sparse_pipeline.block_planning import (
+    BlockPlan,
     BlockPlanningConfig,
     BlockPlanningMode,
     OverlappingBlockPlanner,
@@ -41,12 +42,20 @@ from app.sparse_pipeline.object_reconstruction import (
     ObjectReconstructionConfig,
     ObjectReconstructor,
 )
+from app.sparse_pipeline.ocr_adapter_contracts import OcrOutputGeometry
 from app.sparse_pipeline.ocr_fusion import (
     OcrEvidenceFusion,
     OcrFusionConfig,
     OcrRoutingMode,
 )
-from app.sparse_pipeline.ocr_queue import OcrLane, OcrQueueConfig
+from app.sparse_pipeline.ocr_queue import (
+    OcrEngineOutput,
+    OcrJobResult,
+    OcrJobStatus,
+    OcrLane,
+    OcrQueueConfig,
+    OcrQueueResult,
+)
 from app.sparse_pipeline.ocr_session import PersistentOcrSession
 from app.sparse_pipeline.pipeline_control import (
     PIPELINE_ORDER,
@@ -65,6 +74,7 @@ def _standard_block_planning() -> BlockPlanningConfig:
         padding=24,
         object_local=False,
         adaptive_table_windows=True,
+        context_fallback_enabled=True,
     )
 
 
@@ -75,6 +85,115 @@ def _standard_ocr_fusion() -> OcrFusionConfig:
     return OcrFusionConfig(
         routing_mode=OcrRoutingMode.BLOCK_MEMBERSHIP,
         membership_assume_complete_observations=True,
+    )
+
+
+def _fallback_tokens(text: str) -> frozenset[str]:
+    return frozenset(re.findall(r"[^\W_]+", text.casefold()))
+
+
+def _fallback_output_confidence(job: OcrJobResult) -> float:
+    assert job.output is not None
+    if not job.output.words:
+        return 0.0
+    return sum(item.confidence for item in job.output.words) / len(
+        job.output.words
+    )
+
+
+def _select_context_fallback_queue(
+    *,
+    plan: BlockPlan,
+    queue: OcrQueueResult,
+) -> OcrQueueResult:
+    """Keep exactly one observed whole-region output selected by agreement."""
+
+    fallback_blocks = tuple(
+        block for block in plan.blocks if block.context_fallback
+    )
+    if not fallback_blocks:
+        return queue
+    if len(fallback_blocks) != 1:
+        raise RuntimeError("a page may execute at most one context fallback")
+    fallback_id = fallback_blocks[0].block_id
+    candidates = tuple(
+        job
+        for job in queue.jobs
+        if job.block_id == fallback_id
+        and job.status is OcrJobStatus.COMPLETE
+        and job.output is not None
+        and job.output.text.strip()
+    )
+    tokens_by_job = {
+        job.job_id: _fallback_tokens(job.output.text)
+        for job in candidates
+        if job.output is not None
+    }
+    order = {job.job_id: index for index, job in enumerate(queue.jobs)}
+
+    def score(job: OcrJobResult) -> tuple[float, float, int, int, int]:
+        assert job.output is not None
+        own = tokens_by_job[job.job_id]
+        others = tuple(
+            tokens
+            for job_id, tokens in tokens_by_job.items()
+            if job_id != job.job_id and tokens
+        )
+        retention = (
+            sum(len(own & other) / len(other) for other in others)
+            / len(others)
+            if others
+            else 1.0
+        )
+        return (
+            retention,
+            _fallback_output_confidence(job),
+            len(own),
+            len("".join(job.output.text.split())),
+            -order[job.job_id],
+        )
+
+    selected = max(candidates, key=score, default=None)
+    selected_id = selected.job_id if selected is not None else None
+    selected_jobs = []
+    for job in queue.jobs:
+        if (
+            job.block_id != fallback_id
+            or job.status is not OcrJobStatus.COMPLETE
+            or job.output is None
+            or job.job_id != selected_id
+        ):
+            selected_jobs.append(job)
+            continue
+        selected_jobs.append(
+            replace(
+                job,
+                output=OcrEngineOutput(
+                    text=job.output.text,
+                    words=(),
+                    geometry=OcrOutputGeometry.TEXT_ONLY,
+                ),
+            )
+        )
+    return replace(
+        queue,
+        jobs=tuple(selected_jobs),
+        diagnostics=queue.diagnostics
+        + (
+            "context-fallback-selected="
+            f"{selected_id or 'none'};candidates={len(candidates)}",
+        ),
+    )
+
+
+def _context_fallback_selected(queue: OcrQueueResult) -> bool:
+    """Return whether selection reused an already completed OCR output."""
+
+    prefix = "context-fallback-selected="
+    return any(
+        diagnostic.startswith(prefix)
+        and not diagnostic.startswith(f"{prefix}none;")
+        for diagnostic in queue.diagnostics
     )
 
 
@@ -300,6 +419,15 @@ class SparsePipelineRuntime:
             image
         )
         geometry = geometry_bundle.result
+        transform = geometry.alignment.transform
+        if transform.original_size != image.size:
+            raise RuntimeError(
+                "Stage 0/1 transform does not originate at the raw page canvas"
+            )
+        if transform.aligned_size != geometry.segmentation.aligned_size:
+            raise RuntimeError(
+                "Stage 0/1 transform does not terminate at the geometry canvas"
+            )
         if geometry.matrix.coordinate_mode is not SparseCoordinateMode.PIXEL_PARTITION:
             raise RuntimeError(
                 "production Stage 1 requires a physical pixel partition; "
@@ -348,7 +476,17 @@ class SparsePipelineRuntime:
 
         # Stage 2: reuse persistent, thread-affine workers and fuse observed text.
         queue = self._session.run(plan=plan, crops=crops)
-        fusion = OcrEvidenceFusion(self.config.ocr_fusion).fuse(
+        queue = _select_context_fallback_queue(plan=plan, queue=queue)
+        context_fallback = _context_fallback_selected(queue)
+        fusion_config = (
+            replace(
+                self.config.ocr_fusion,
+                membership_assume_complete_observations=False,
+            )
+            if context_fallback
+            else self.config.ocr_fusion
+        )
+        fusion = OcrEvidenceFusion(fusion_config).fuse(
             plan=plan,
             segments=geometry.segmentation.segments,
             crops=crops,
@@ -371,7 +509,7 @@ class SparsePipelineRuntime:
             object_config=self.config.objects,
             planning_config=self.config.block_planning,
             crop_config=self.config.block_crops,
-            fusion_config=self.config.ocr_fusion,
+            fusion_config=fusion_config,
             stage4_config=None,
         )
 
@@ -392,7 +530,7 @@ class SparsePipelineRuntime:
             object_config=self.config.objects,
             planning_config=self.config.block_planning,
             crop_config=self.config.block_crops,
-            fusion_config=self.config.ocr_fusion,
+            fusion_config=fusion_config,
         )
         return SparsePageResult(
             page_id=page_id,

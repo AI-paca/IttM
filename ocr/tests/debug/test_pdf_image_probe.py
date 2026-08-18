@@ -139,6 +139,97 @@ def test_rasterize_pdf_does_not_guess_unsegmented_page_expected(
     assert list((tmp_path / "probe-reference").iterdir()) == []
 
 
+def test_rasterize_pdf_keeps_multi_page_raster_reference_aggregate(
+    tmp_path,
+    monkeypatch,
+):
+    probe = _load_probe_module()
+    source = tmp_path / "plan.pdf"
+    source.write_bytes(b"%PDF-1.7\n")
+    expected_root = tmp_path / "expected"
+    expected_root.mkdir()
+    (expected_root / "plan.pdf.md").write_text(
+        "combined PDF text without page boundaries\n",
+        encoding="utf-8",
+    )
+    (expected_root / "plan.pdf.raster.png.md").write_text(
+        "representative visible raster\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        probe,
+        "_render_pdf",
+        lambda path, *, dpi, max_pages: [
+            Image.new("RGB", (10, 8), "white"),
+            Image.new("RGB", (10, 8), "white"),
+        ],
+    )
+
+    outputs = probe.rasterize_pdf(
+        source,
+        expected_root=expected_root,
+        output_dir=tmp_path / "fixtures",
+        probe_reference_root=tmp_path / "probe-reference",
+        dpi=150,
+        max_pages=2,
+        gap=1,
+        formats=("png",),
+    )
+
+    assert [path.name for path in outputs] == [
+        "plan.pdf.page-001.raster.png",
+        "plan.pdf.page-002.raster.png",
+    ]
+    references = tmp_path / "probe-reference"
+    assert (
+        references / "plan.pdf.raster.png.md"
+    ).read_text(encoding="utf-8") == "representative visible raster\n"
+    assert not (references / "plan.pdf.page-001.raster.png.md").exists()
+    assert not (references / "plan.pdf.page-002.raster.png.md").exists()
+
+
+def test_rasterize_pdf_accepts_representative_reference_without_pdf_reference(
+    tmp_path,
+    monkeypatch,
+):
+    probe = _load_probe_module()
+    source = tmp_path / "plan.pdf"
+    source.write_bytes(b"%PDF-1.7\n")
+    expected_root = tmp_path / "expected"
+    expected_root.mkdir()
+    (expected_root / "plan.pdf.raster.png.md").write_text(
+        "only raster truth\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        probe,
+        "_render_pdf",
+        lambda path, *, dpi, max_pages: [
+            Image.new("RGB", (10, 8), "white"),
+        ],
+    )
+
+    outputs = probe.rasterize_pdf(
+        source,
+        expected_root=expected_root,
+        output_dir=tmp_path / "fixtures",
+        probe_reference_root=tmp_path / "probe-reference",
+        dpi=150,
+        max_pages=1,
+        gap=1,
+        formats=("png",),
+    )
+
+    assert [path.name for path in outputs] == [
+        "plan.pdf.page-001.raster.png",
+    ]
+    assert (
+        tmp_path
+        / "probe-reference"
+        / "plan.pdf.page-001.raster.png.md"
+    ).read_text(encoding="utf-8") == "only raster truth\n"
+
+
 def test_page_expected_texts_keeps_unsegmented_single_page():
     probe = _load_probe_module()
 

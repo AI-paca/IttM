@@ -13,9 +13,121 @@ from PIL import Image, UnidentifiedImageError
 
 GAMMA_DARK = 1.2
 RECIPE_ID = "kornia-gamma-dark-v1"
+DARK_SMALL_TEXT_NORMALIZATION_ID = (
+    "dark-sparse-xheight-kornia-gamma-source-scale-v1"
+)
 CANDIDATE_ROLE = "optional-preprocessing-candidate"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _SAFE_CROP_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+_DARK_BACKGROUND_MAX = 96.0
+_DARK_TEXT_CONTRAST_MIN = 96.0
+_DARK_TEXT_FOREGROUND_MIN = 0.003
+_DARK_TEXT_FOREGROUND_MAX = 0.05
+_DARK_TEXT_COMPONENTS_MIN = 8
+_DARK_TEXT_X_HEIGHT_MIN = 5.0
+_DARK_TEXT_X_HEIGHT_MAX = 14.0
+
+
+def _otsu_foreground(grayscale: np.ndarray) -> tuple[float, np.ndarray]:
+    histogram = np.bincount(grayscale.ravel(), minlength=256).astype(
+        np.float64
+    )
+    total = float(grayscale.size)
+    weighted_total = float(
+        np.dot(np.arange(256, dtype=np.float64), histogram)
+    )
+    background_weight = 0.0
+    background_sum = 0.0
+    best_variance = -1.0
+    best_threshold = 0
+    for threshold, count in enumerate(histogram):
+        background_weight += float(count)
+        if background_weight <= 0.0:
+            continue
+        foreground_weight = total - background_weight
+        if foreground_weight <= 0.0:
+            break
+        background_sum += threshold * float(count)
+        background_mean = background_sum / background_weight
+        foreground_mean = (
+            weighted_total - background_sum
+        ) / foreground_weight
+        variance = (
+            background_weight
+            * foreground_weight
+            * (background_mean - foreground_mean) ** 2
+        )
+        if variance > best_variance:
+            best_variance = variance
+            best_threshold = threshold
+    return float(best_threshold), grayscale > best_threshold
+
+
+def _foreground_component_stats(
+    foreground: np.ndarray,
+) -> tuple[tuple[int, int, int], ...]:
+    """Return width, height, and area for 8-connected row-run components."""
+
+    parent: list[int] = []
+    runs: list[tuple[int, int, int, int]] = []
+    previous: list[tuple[int, int, int]] = []
+
+    def find(value: int) -> int:
+        while parent[value] != value:
+            parent[value] = parent[parent[value]]
+            value = parent[value]
+        return value
+
+    def union(first: int, second: int) -> None:
+        first_root = find(first)
+        second_root = find(second)
+        if first_root != second_root:
+            parent[second_root] = first_root
+
+    for top, row in enumerate(foreground):
+        padded = np.pad(row, (1, 1), constant_values=False)
+        transitions = np.diff(padded.astype(np.int8))
+        starts = np.flatnonzero(transitions == 1)
+        stops = np.flatnonzero(transitions == -1)
+        current: list[tuple[int, int, int]] = []
+        previous_index = 0
+        for left_value, right_value in zip(starts, stops):
+            left = int(left_value)
+            right = int(right_value)
+            run_id = len(runs)
+            parent.append(run_id)
+            runs.append((left, right, top, right - left))
+            while (
+                previous_index < len(previous)
+                and previous[previous_index][1] < left - 1
+            ):
+                previous_index += 1
+            overlap_index = previous_index
+            while (
+                overlap_index < len(previous)
+                and previous[overlap_index][0] <= right
+            ):
+                union(run_id, previous[overlap_index][2])
+                overlap_index += 1
+            current.append((left, right, run_id))
+        previous = current
+
+    aggregates: dict[int, list[int]] = {}
+    for run_id, (left, right, top, area) in enumerate(runs):
+        root = find(run_id)
+        value = aggregates.setdefault(
+            root,
+            [left, right, top, top + 1, 0],
+        )
+        value[0] = min(value[0], left)
+        value[1] = max(value[1], right)
+        value[2] = min(value[2], top)
+        value[3] = max(value[3], top + 1)
+        value[4] += area
+    return tuple(
+        (right - left, bottom - top, area)
+        for left, right, top, bottom, area in aggregates.values()
+    )
 
 
 class EnhancementBackend(str, Enum):
@@ -180,6 +292,128 @@ class _DecodedCrop:
     @property
     def source_sha256(self) -> str:
         return self.header.source_sha256
+
+
+def normalize_dark_small_text_for_ocr(
+    png_bytes: bytes,
+    *,
+    dpi: int,
+    max_input_pixels: int,
+) -> bytes | None:
+    """Normalize sparse high-contrast dark crops without changing geometry.
+
+    Height-only upscaling can enlarge an already legible UI/table x-height
+    until narrow punctuation merges into neighbouring digits.  This gate uses
+    image evidence rather than crop names: dark background, strong contrast,
+    sparse foreground, and a robust connected-component height.  Dense dark
+    text and every light crop remain on the existing adapter path.
+
+    Raw RGB/RGBA crops receive the frozen Kornia gamma-dark recipe.  A
+    grayscale payload is already a possible output of that recipe, so it is
+    retained byte-for-byte to avoid applying gamma twice.  Geometry is always
+    source scale; this function replaces one OCR payload and never schedules
+    another recognition call.
+    """
+
+    if type(png_bytes) is not bytes or not png_bytes:
+        raise CropEnhancementInvariantError(
+            "small-text normalization requires immutable PNG bytes"
+        )
+    if type(dpi) is not int or not 1 <= dpi <= 2_400:
+        raise ValueError("small-text normalization DPI is invalid")
+    if type(max_input_pixels) is not int or max_input_pixels < 1:
+        raise ValueError("small-text normalization pixel limit must be positive")
+    try:
+        with Image.open(io.BytesIO(png_bytes)) as opened:
+            if (
+                opened.format != "PNG"
+                or getattr(opened, "n_frames", 1) != 1
+            ):
+                raise CropEnhancementInvariantError(
+                    "small-text normalization requires one PNG frame"
+                )
+            opened.load()
+            width, height = opened.size
+            if (
+                width < 1
+                or height < 1
+                or width * height > max_input_pixels
+            ):
+                return None
+            source_mode = opened.mode
+            if source_mode in {"RGBA", "LA"} or "transparency" in opened.info:
+                rgba = opened.convert("RGBA")
+                flattened = Image.new("RGBA", opened.size, "white")
+                try:
+                    flattened.alpha_composite(rgba)
+                    grayscale_image = flattened.convert("L")
+                finally:
+                    rgba.close()
+                    flattened.close()
+            else:
+                grayscale_image = opened.convert("L")
+            try:
+                grayscale = np.array(
+                    grayscale_image,
+                    dtype=np.uint8,
+                    copy=True,
+                )
+            finally:
+                grayscale_image.close()
+    except CropEnhancementInvariantError:
+        raise
+    except (OSError, UnidentifiedImageError, SyntaxError, ValueError) as exc:
+        raise CropEnhancementInvariantError(
+            "small-text normalization input is not a valid PNG"
+        ) from exc
+
+    background = float(np.median(grayscale))
+    if background > _DARK_BACKGROUND_MAX:
+        return None
+    _threshold, foreground = _otsu_foreground(grayscale)
+    contrast = float(np.percentile(grayscale, 99.0)) - background
+    foreground_ratio = float(np.mean(foreground))
+    if (
+        contrast < _DARK_TEXT_CONTRAST_MIN
+        or not (
+            _DARK_TEXT_FOREGROUND_MIN
+            <= foreground_ratio
+            <= _DARK_TEXT_FOREGROUND_MAX
+        )
+    ):
+        return None
+
+    maximum_component_width = min(80, max(2, width // 3))
+    component_heights = tuple(
+        int(component_height)
+        for (
+            component_width,
+            component_height,
+            component_area,
+        ) in _foreground_component_stats(foreground)
+        if (
+            2 <= component_width <= maximum_component_width
+            and 3 <= component_height <= min(40, height)
+            and 3 <= component_area <= 1_000
+            and component_width * component_height <= 7 * component_area
+        )
+    )
+    if len(component_heights) < _DARK_TEXT_COMPONENTS_MIN:
+        return None
+    x_height = float(np.percentile(component_heights, 75.0))
+    if not _DARK_TEXT_X_HEIGHT_MIN <= x_height <= _DARK_TEXT_X_HEIGHT_MAX:
+        return None
+
+    if source_mode == "L":
+        return png_bytes
+    config = CropEnhancementConfig(
+        max_input_pixels=max_input_pixels,
+        max_batch_pixels=max_input_pixels,
+        dpi=dpi,
+    )
+    return GammaDarkCropEnhancer(config).enhance(
+        CropInput("tesseract-dark-small-text", png_bytes)
+    ).png_bytes
 
 
 class GammaDarkCropEnhancer:
@@ -421,6 +655,7 @@ class GammaDarkCropEnhancer:
 
 __all__ = [
     "CANDIDATE_ROLE",
+    "DARK_SMALL_TEXT_NORMALIZATION_ID",
     "CropEnhancementBackendError",
     "CropEnhancementConfig",
     "CropEnhancementInvariantError",
@@ -432,4 +667,5 @@ __all__ = [
     "GAMMA_DARK",
     "GammaDarkCropEnhancer",
     "RECIPE_ID",
+    "normalize_dark_small_text_for_ocr",
 ]

@@ -124,6 +124,7 @@ for lang in eng rus chi_sim; do
     exit 2
   fi
   docker run --rm \
+    --user "$(id -u):$(id -g)" \
     -v "$lang_path:/out" \
     "$tessdata_image" \
     sh -c 'set -eu

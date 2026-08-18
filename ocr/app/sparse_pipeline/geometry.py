@@ -9,6 +9,10 @@ from typing import Iterable
 import numpy as np
 from PIL import Image, ImageFilter
 
+from app.preprocessing import (
+    RasterTransform,
+    confidence_gated_region_deskew,
+)
 from app.sparse_pipeline.contracts import (
     AffineTransform,
     AlignmentTrace,
@@ -48,10 +52,14 @@ class GeometryConfig:
     min_rule_aspect_ratio: float = 12.0
     min_rule_contrast: int = 32
     min_safe_gap: int = 3
-    max_depth: int = 32
+    max_depth: int = 64
     max_nodes: int = 32_767
     max_runs: int = 500_000
-    max_components: int = 100_000
+    # A connected component cannot exist without at least one run.  Keep both
+    # limits equal by default so a legitimate multi-page raster cannot fail
+    # merely because it contains more than 100k disconnected glyph strokes.
+    # Explicitly smaller component limits remain available to callers/tests.
+    max_components: int = 500_000
     max_input_pixels: int = 80_000_000
     max_aligned_pixels: int = 100_000_000
     deskew_max_degrees: float = 5.0
@@ -60,6 +68,9 @@ class GeometryConfig:
     deskew_min_foreground_pixels: int = 128
     deskew_min_gain: float = 0.02
     deskew_max_sample_dimension: int = 1200
+    region_deskew_enabled: bool = True
+    region_deskew_min_confidence: float = 0.82
+    region_deskew_min_degrees: float = 1.0
     alpha_background_rgb: tuple[int, int, int] = (255, 255, 255)
 
     def __post_init__(self) -> None:
@@ -86,6 +97,8 @@ class GeometryConfig:
             self.deskew_coarse_step,
             self.deskew_fine_step,
             self.deskew_min_gain,
+            self.region_deskew_min_confidence,
+            self.region_deskew_min_degrees,
         )
         if any(
             isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value))
@@ -126,6 +139,16 @@ class GeometryConfig:
             raise ValueError("deskew steps must be positive")
         if self.deskew_min_gain < 0.0:
             raise ValueError("deskew_min_gain must be non-negative")
+        if type(self.region_deskew_enabled) is not bool:
+            raise ValueError("region_deskew_enabled must be a boolean")
+        if not 0.0 <= self.region_deskew_min_confidence <= 1.0:
+            raise ValueError(
+                "region_deskew_min_confidence must be between zero and one"
+            )
+        if not 0.0 <= self.region_deskew_min_degrees <= 15.0:
+            raise ValueError(
+                "region_deskew_min_degrees must be between zero and 15"
+            )
         if len(self.alpha_background_rgb) != 3 or any(
             type(value) is not int or not 0 <= value <= 255 for value in self.alpha_background_rgb
         ):
@@ -229,15 +252,52 @@ class GeometryAnalyzer:
             )
 
         source_rgb = _source_rgb(image, self.config.alpha_background_rgb)
-        background = _estimate_background(source_rgb)
-        source_foreground = _detect_foreground(source_rgb, background, self.config.foreground_threshold)
+        preprocessed = confidence_gated_region_deskew(
+            image,
+            enabled=self.config.region_deskew_enabled,
+            minimum_confidence=self.config.region_deskew_min_confidence,
+            minimum_degrees=self.config.region_deskew_min_degrees,
+            maximum_pixels=min(
+                self.config.max_input_pixels,
+                self.config.max_aligned_pixels,
+            ),
+        )
+        if preprocessed.applied:
+            try:
+                geometry_source_rgb = _source_rgb(
+                    preprocessed.image,
+                    self.config.alpha_background_rgb,
+                )
+            finally:
+                preprocessed.image.close()
+        else:
+            geometry_source_rgb = source_rgb
+        geometry_source_pixels = (
+            geometry_source_rgb.shape[0] * geometry_source_rgb.shape[1]
+        )
+        if geometry_source_pixels > self.config.max_aligned_pixels:
+            raise GeometryLimitError(
+                "region-aligned pixel limit exceeded: "
+                f"{geometry_source_pixels} > {self.config.max_aligned_pixels}"
+            )
+        background = _estimate_background(geometry_source_rgb)
+        source_foreground = _detect_foreground(
+            geometry_source_rgb,
+            background,
+            self.config.foreground_threshold,
+        )
         correction = _estimate_correction(source_foreground, self.config)
-        aligned_rgb, warped_source_mask, transform = _align(
-            source_rgb,
+        aligned_rgb, warped_source_mask, geometry_transform = _align(
+            geometry_source_rgb,
             source_foreground,
             background,
             correction,
             max_aligned_pixels=self.config.max_aligned_pixels,
+        )
+        transform = RasterTransform.compose(
+            preprocessed.transform,
+            geometry_transform,
+            alignment_degrees=correction,
         )
         aligned_foreground = np.logical_or(
             _detect_foreground(aligned_rgb, background, self.config.foreground_threshold),
@@ -298,6 +358,7 @@ class GeometryAnalyzer:
             seam_guard_mask,
             np.logical_not(partition_mask),
         )
+        diacritic_guard_stale = False
         row_grid = _estimate_regular_row_grid(
             partition_mask,
             partition_components,
@@ -404,6 +465,7 @@ class GeometryAnalyzer:
                 seam_guard_mask,
                 np.logical_not(partition_mask),
             )
+            diacritic_guard_stale = False
             row_grid = _estimate_regular_row_grid(
                 partition_mask,
                 partition_components,
@@ -483,23 +545,7 @@ class GeometryAnalyzer:
                 max_runs=self.config.max_runs,
                 max_components=self.config.max_components,
             )
-            partition_mask = np.logical_and(
-                partition_foreground,
-                np.logical_not(rule_mask),
-            )
-            partition_components = _connected_components(
-                partition_mask,
-                max_runs=self.config.max_runs,
-                max_components=self.config.max_components,
-            )
-            seam_guard_mask = _guard_diacritic_gaps(
-                partition_mask,
-                partition_components,
-            )
-            diacritic_guard = np.logical_and(
-                seam_guard_mask,
-                np.logical_not(partition_mask),
-            )
+            diacritic_guard_stale = True
             components = _fragment_components_for_leaves(
                 connected_components,
                 drafts,
@@ -553,6 +599,13 @@ class GeometryAnalyzer:
                 max_runs=self.config.max_runs,
                 max_components=self.config.max_components,
             )
+            diacritic_guard_stale = True
+            components = _fragment_components_for_leaves(
+                connected_components,
+                drafts,
+            )
+        final_line_drafts = tuple(final_line_draft_values)
+        if diacritic_guard_stale:
             partition_mask = np.logical_and(
                 partition_foreground,
                 np.logical_not(rule_mask),
@@ -570,11 +623,6 @@ class GeometryAnalyzer:
                 seam_guard_mask,
                 np.logical_not(partition_mask),
             )
-            components = _fragment_components_for_leaves(
-                connected_components,
-                drafts,
-            )
-        final_line_drafts = tuple(final_line_draft_values)
         drafts = _refine_component_boundaries(
             drafts,
             components,
@@ -640,6 +688,11 @@ class GeometryAnalyzer:
             ).hexdigest(),
             status=status,
             diagnostics=(
+                f"region_transform={transform.operation}",
+                f"region_gate={preprocessed.gate_reason}",
+                f"region_confidence={transform.confidence:.6f}",
+                f"region_source_angle={transform.source_angle_degrees:.6f}",
+                f"region_residual_angle={transform.residual_angle_degrees:.6f}",
                 f"connected_components={len(connected_components)}",
                 f"foreground_mode={foreground_mode}",
                 f"component_fragments={len(components)}",
@@ -929,8 +982,28 @@ def _select_layout_foreground(
             and anchored_fraction >= 0.80
             and flat_suppressed_fraction >= 2.0 / 3.0
         )
-        if not fill_dominates:
+        quantized_rgb = rgb.astype(np.uint16, copy=False) // 8
+        quantized_keys = (
+            quantized_rgb[:, :, 0] * 1024
+            + quantized_rgb[:, :, 1] * 32
+            + quantized_rgb[:, :, 2]
+        )
+        dominant_quantized_fraction = float(
+            np.bincount(
+                quantized_keys.ravel(),
+                minlength=32768,
+            ).max()
+        ) / max(1, quantized_keys.size)
+        unstable_paper_background = (
+            physical_occupancy >= 0.30
+            and physical_occupancy - adaptive_occupancy >= 0.15
+            and adaptive_occupancy <= 0.20
+            and dominant_quantized_fraction < 0.15
+        )
+        if not fill_dominates and not unstable_paper_background:
             return np.array(physical_foreground, copy=True), "physical"
+        if unstable_paper_background and not fill_dominates:
+            mode += ":unstable-paper-background"
     return selected, mode
 
 
@@ -1197,15 +1270,45 @@ def _guard_diacritic_gaps(mask: np.ndarray, components: tuple[_Component, ...]) 
     # accent and its body (DejaVu Serif ``ё`` reaches 4/9).  Shape, overlap and
     # pixel-ratio checks below keep this wider search from joining text rows.
     maximum_gap = max(1, round(float(np.percentile(search_heights, 95)) * 0.5))
-    ordered = tuple(sorted(components, key=lambda component: (component.bbox.top, component.bbox.left)))
-    tops = tuple(component.bbox.top for component in ordered)
+    # A page row can contain thousands of components.  The old vertical-only
+    # sweep compared every accent candidate with every component in the same
+    # narrow y band even though almost all pairs were horizontally disjoint.
+    # Fixed-width x bins are an exact overlap index: overlapping half-open
+    # boxes necessarily share at least one bin, and the original predicates
+    # below remain the final authority.
+    bin_width = 64
+    x_bins: dict[int, list[_Component]] = {}
+    for component in components:
+        first_bin = component.bbox.left // bin_width
+        last_bin = (component.bbox.right - 1) // bin_width
+        for bin_index in range(first_bin, last_bin + 1):
+            x_bins.setdefault(bin_index, []).append(component)
+    x_bin_tops: dict[int, tuple[int, ...]] = {}
+    for bin_index, candidates in x_bins.items():
+        candidates.sort(
+            key=lambda component: (component.bbox.top, component.bbox.left)
+        )
+        x_bin_tops[bin_index] = tuple(
+            component.bbox.top for component in candidates
+        )
     for upper in components:
-        start = bisect_left(tops, upper.bbox.bottom)
-        for lower_index in range(start, len(ordered)):
-            lower = ordered[lower_index]
+        candidates: dict[int, _Component] = {}
+        first_bin = upper.bbox.left // bin_width
+        last_bin = (upper.bbox.right - 1) // bin_width
+        for bin_index in range(first_bin, last_bin + 1):
+            bin_candidates = x_bins.get(bin_index, ())
+            tops = x_bin_tops.get(bin_index, ())
+            start = bisect_left(tops, upper.bbox.bottom)
+            stop = bisect_left(
+                tops,
+                upper.bbox.bottom + maximum_gap + 1,
+            )
+            for candidate in bin_candidates[start:stop]:
+                candidates[candidate.component_id] = candidate
+        for lower in candidates.values():
             gap = lower.bbox.top - upper.bbox.bottom
             if gap > maximum_gap:
-                break
+                continue
             if gap <= 0:
                 continue
             if gap > max(1, round(lower.bbox.height * 0.5)):
@@ -1670,6 +1773,8 @@ def _local_structure_rule_drafts(
         for network in networks:
             if network.bbox[2] - network.bbox[0] < minimum_extent or network.bbox[3] - network.bbox[1] < minimum_extent:
                 continue
+            if _is_photographic_rule_region(rgb, network.bbox):
+                continue
             values.append(
                 (
                     network,
@@ -1933,6 +2038,62 @@ def _local_structure_rule_drafts(
                 value.bbox[2],
             ),
         )
+    )
+
+
+def _is_photographic_rule_region(
+    rgb: np.ndarray,
+    bbox: tuple[int, int, int, int],
+) -> bool:
+    """Reject line lattices explained by photographic texture.
+
+    Building facades, bridges, book covers, and product photographs contain
+    many real perpendicular edges.  Junction count alone therefore cannot
+    prove a document table.  A photograph differs from a printed or coloured
+    table by combining high quantized colour entropy with dense local
+    gradients.  Sampling keeps this gate bounded and independent of page or
+    fixture dimensions; flat coloured cells and low-contrast graph paper stay
+    eligible as physical rule evidence.
+    """
+
+    left, top, right, bottom = bbox
+    crop = rgb[top:bottom, left:right]
+    if crop.size == 0:
+        return False
+    step = max(1, math.ceil(max(crop.shape[:2]) / 256))
+    sample = crop[::step, ::step].astype(np.int16, copy=False)
+    if min(sample.shape[:2]) < 8:
+        return False
+
+    horizontal = np.max(
+        np.abs(sample[:, 1:] - sample[:, :-1]),
+        axis=2,
+    )
+    vertical = np.max(
+        np.abs(sample[1:] - sample[:-1]),
+        axis=2,
+    )
+    gradients = np.zeros(sample.shape[:2], dtype=np.int16)
+    gradients[:, 1:] = np.maximum(gradients[:, 1:], horizontal)
+    gradients[1:] = np.maximum(gradients[1:], vertical)
+    dense_gradient_fraction = float(np.mean(gradients >= 32))
+
+    quantized = sample.astype(np.uint16, copy=False) // 16
+    keys = (
+        quantized[:, :, 0] * 256
+        + quantized[:, :, 1] * 16
+        + quantized[:, :, 2]
+    )
+    counts = np.bincount(keys.reshape(-1), minlength=4096)
+    occupied = counts[counts > 0].astype(np.float64)
+    probabilities = occupied / max(1.0, float(occupied.sum()))
+    entropy = float(
+        -np.sum(probabilities * np.log2(probabilities))
+    )
+    return (
+        len(occupied) >= 256
+        and entropy >= 5.0
+        and dense_gradient_fraction >= 0.12
     )
 
 
@@ -3674,6 +3835,30 @@ def _offset_components(
     )
 
 
+def _layout_partition_evidence(
+    mask: np.ndarray,
+    components: tuple[_Component, ...],
+    *,
+    maximum_evidence_components: int,
+) -> tuple[np.ndarray, tuple[_Component, ...]]:
+    """Keep dust lossless without allowing it to create recursive leaves."""
+
+    if len(components) <= maximum_evidence_components:
+        return np.array(mask, copy=True), components
+    meaningful = tuple(
+        component
+        for component in components
+        if component.pixels >= 4 and component.bbox.height >= 3
+    )
+    if not meaningful:
+        return np.array(mask, copy=True), components
+    evidence = np.zeros_like(mask, dtype=bool)
+    for component in meaningful:
+        for run in component.runs:
+            evidence[run.row, run.start : run.stop] = True
+    return evidence, meaningful
+
+
 def _recursive_partition(
     mask: np.ndarray,
     components: tuple[_Component, ...],
@@ -3692,7 +3877,15 @@ def _recursive_partition(
         raise ValueError("partition RGB and mask shapes disagree")
     if physical_fallback is not None and physical_fallback.shape != mask.shape:
         raise ValueError("partition fallback and mask shapes disagree")
-    working_mask = np.array(mask, copy=True)
+    original_component_count = len(components)
+    working_mask, components = _layout_partition_evidence(
+        mask,
+        components,
+        maximum_evidence_components=config.max_nodes,
+    )
+    cover_separators = (
+        cover_separators or len(components) != original_component_count
+    )
     working_guard = (
         np.array(diacritic_guard, copy=True)
         if diacritic_guard is not None
@@ -3747,15 +3940,20 @@ def _recursive_partition(
                     intersection.top - node.bbox.top : intersection.bottom - node.bbox.top,
                     intersection.left - node.bbox.left : intersection.right - node.bbox.left,
                 ] = False
-            working_mask[
-                node.bbox.top : node.bbox.bottom,
-                node.bbox.left : node.bbox.right,
-            ] = local_mask
             crop_components = _connected_components(
                 local_mask,
                 max_runs=config.max_runs,
                 max_components=config.max_components,
             )
+            local_mask, crop_components = _layout_partition_evidence(
+                local_mask,
+                crop_components,
+                maximum_evidence_components=config.max_nodes,
+            )
+            working_mask[
+                node.bbox.top : node.bbox.bottom,
+                node.bbox.left : node.bbox.right,
+            ] = local_mask
             local_components = _offset_components(
                 crop_components,
                 left=node.bbox.left,
@@ -3801,9 +3999,6 @@ def _recursive_partition(
         )
         if local_pixels == 0:
             node.stop_reason = StopReason.EMPTY if node.parent_id is None else StopReason.ATOMIC
-            continue
-        if node.depth >= config.max_depth or len(nodes) + 2 > config.max_nodes:
-            node.stop_reason = StopReason.LIMIT
             continue
         decision = _best_separator(
             working_mask,
@@ -3878,6 +4073,12 @@ def _recursive_partition(
             separator = None
         else:
             axis, separator, _ = decision
+        if node.depth >= config.max_depth or len(nodes) + 2 > config.max_nodes:
+            # Reaching a safety bound is only degradation when another split
+            # is actually required.  Tiny terminal regions at the bound are
+            # valid atomic leaves, not unfinished recursion.
+            node.stop_reason = StopReason.LIMIT
+            continue
         if split_coordinate is not None:
             child_boxes = (
                 Box(node.bbox.left, node.bbox.top, node.bbox.right, split_coordinate),
@@ -3993,17 +4194,37 @@ def _fragment_components_for_leaves(
     components: tuple[_Component, ...],
     drafts: tuple[_NodeDraft, ...],
 ) -> tuple[_Component, ...]:
-    leaves = tuple(draft for draft in drafts if not draft.child_ids)
+    drafts_by_id = {draft.node_id: draft for draft in drafts}
+    root = drafts_by_id["geo-root"]
     grouped: dict[tuple[int, str], list[_Run]] = {}
     for component in components:
         for run in component.runs:
-            row_leaves = tuple(
-                leaf
-                for leaf in leaves
-                if leaf.bbox.top <= run.row < leaf.bbox.bottom
-                and leaf.bbox.left < run.stop
-                and run.start < leaf.bbox.right
-            )
+            # Follow only branches that intersect this run.  The former scan
+            # compared every run with every leaf, turning long multi-page
+            # documents into O(runs * leaves) work.  The recursive tree is
+            # already the spatial index we need, including the rare case in
+            # which one physical run is split across two child boxes.
+            row_leaves: list[_NodeDraft] = []
+            stack = [root]
+            while stack:
+                node = stack.pop()
+                if (
+                    not node.bbox.top <= run.row < node.bbox.bottom
+                    or node.bbox.left >= run.stop
+                    or run.start >= node.bbox.right
+                ):
+                    continue
+                if node.child_ids:
+                    stack.extend(
+                        reversed(
+                            tuple(
+                                drafts_by_id[child_id]
+                                for child_id in node.child_ids
+                            )
+                        )
+                    )
+                else:
+                    row_leaves.append(node)
             owned = 0
             for leaf in row_leaves:
                 start = max(run.start, leaf.bbox.left)
@@ -4044,26 +4265,107 @@ def _best_component_boundary(
 ) -> tuple[int, tuple[_Component, ...], tuple[_Component, ...]] | None:
     if len(components) < 2:
         return None
-    total_pixels = sum(component.pixels for component in components)
-    content_box = Box.union(component.bbox for component in components)
-    candidates: list[tuple[float, int, tuple[_Component, ...], tuple[_Component, ...]]] = []
-    coordinates = sorted(
-        {
-            coordinate
-            for component in components
-            for coordinate in (component.bbox.top, component.bbox.bottom)
-            if bbox.top < coordinate < bbox.bottom
-        }
+    # Single-pixel scan dust must retain an owner, but it is not evidence for
+    # creating another OCR segment.  Let meaningful glyph bodies choose the
+    # seam; all components are assigned to the resulting children below.
+    decision_components = tuple(
+        component
+        for component in components
+        if component.pixels >= 4 and component.bbox.height >= 3
     )
-    for coordinate in coordinates:
-        upper = tuple(component for component in components if component.bbox.bottom <= coordinate)
-        lower = tuple(component for component in components if component.bbox.top >= coordinate)
-        if not upper or not lower or len(upper) + len(lower) != len(components):
+    if len(decision_components) < 2:
+        return None
+    ordered = tuple(
+        sorted(
+            decision_components,
+            key=lambda component: (
+                component.bbox.top,
+                component.bbox.bottom,
+                component.bbox.left,
+                component.bbox.right,
+                component.component_id,
+            ),
+        )
+    )
+    count = len(ordered)
+    total_pixels = sum(component.pixels for component in ordered)
+    content_box = Box.union(component.bbox for component in ordered)
+
+    prefix_pixels: list[int] = []
+    prefix_bottoms: list[int] = []
+    prefix_lefts: list[int] = []
+    prefix_rights: list[int] = []
+    pixels = 0
+    bottom = bbox.top
+    left = bbox.right
+    right = bbox.left
+    for component in ordered:
+        pixels += component.pixels
+        bottom = max(bottom, component.bbox.bottom)
+        left = min(left, component.bbox.left)
+        right = max(right, component.bbox.right)
+        prefix_pixels.append(pixels)
+        prefix_bottoms.append(bottom)
+        prefix_lefts.append(left)
+        prefix_rights.append(right)
+
+    suffix_lefts = [bbox.right] * count
+    suffix_rights = [bbox.left] * count
+    left = bbox.right
+    right = bbox.left
+    for index in range(count - 1, -1, -1):
+        component = ordered[index]
+        left = min(left, component.bbox.left)
+        right = max(right, component.bbox.right)
+        suffix_lefts[index] = left
+        suffix_rights[index] = right
+
+    candidates: list[tuple[float, int, int, int, int]] = []
+    required_width = max(1, round(content_box.width * 0.15))
+    for index in range(1, count):
+        coordinate = prefix_bottoms[index - 1]
+        if (
+            not bbox.top < coordinate < bbox.bottom
+            or coordinate > ordered[index].bbox.top
+        ):
             continue
-        upper_pixels = sum(component.pixels for component in upper)
+        upper_pixels = prefix_pixels[index - 1]
         lower_pixels = total_pixels - upper_pixels
         pixel_balance = min(upper_pixels, lower_pixels) / max(upper_pixels, lower_pixels)
         if pixel_balance < 0.12:
+            continue
+        upper_width = prefix_rights[index - 1] - prefix_lefts[index - 1]
+        lower_width = suffix_rights[index] - suffix_lefts[index]
+        if upper_width < required_width or lower_width < required_width:
+            continue
+        component_balance = min(index, count - index) / max(index, count - index)
+        score = pixel_balance + 0.25 * component_balance
+        candidates.append(
+            (score, -coordinate, index, upper_pixels, lower_pixels)
+        )
+    if not candidates:
+        return None
+    for _, negative_coordinate, index, upper_pixels, lower_pixels in sorted(
+        candidates,
+        key=lambda value: value[:2],
+        reverse=True,
+    ):
+        coordinate = -negative_coordinate
+        upper = tuple(
+            component
+            for component in components
+            if component.bbox.bottom <= coordinate
+        )
+        lower = tuple(
+            component
+            for component in components
+            if component.bbox.top >= coordinate
+        )
+        if (
+            not upper
+            or not lower
+            or len(upper) + len(lower) != len(components)
+        ):
             continue
         if upper_pixels < lower_pixels:
             guard_top = max(bbox.top, coordinate - 1)
@@ -4073,47 +4375,34 @@ def _best_component_boundary(
                 bbox.left : bbox.right,
             ].any(axis=0)
             lookback = max(3, 2 * (guard_bottom - guard_top))
-            # ``coordinate`` is the lower component's top, so a guarded gap
-            # may occupy several rows immediately before it.  Anchor the
-            # evidence window at the nearest upper ink rather than at the far
-            # edge of that gap.
-            nearest_upper_bottom = max(component.bbox.bottom for component in upper)
+            nearest_upper_bottom = prefix_bottoms[index - 1]
             window_top = max(bbox.top, nearest_upper_bottom - lookback)
-            upper_window = np.zeros((coordinate - window_top, bbox.width), dtype=bool)
+            upper_window = np.zeros(
+                (coordinate - window_top, bbox.width),
+                dtype=bool,
+            )
             for component in upper:
                 for run in component.runs:
-                    # Remote dust belongs to ``upper`` too, but cannot be the
-                    # mark participating in this boundary.  Measure only ink
-                    # close enough to meet the guarded seam, just as the
-                    # recursive row separator does.
                     if run.row < window_top or run.row >= coordinate:
                         continue
-                    left = max(bbox.left, run.start) - bbox.left
-                    right = min(bbox.right, run.stop) - bbox.left
-                    if right > left:
-                        upper_window[run.row - window_top, left:right] = True
+                    local_left = max(bbox.left, run.start) - bbox.left
+                    local_right = min(bbox.right, run.stop) - bbox.left
+                    if local_right > local_left:
+                        upper_window[
+                            run.row - window_top,
+                            local_left:local_right,
+                        ] = True
             upper_columns = _bridge_supported_upper_columns(
                 upper_window,
                 bridge_columns,
             )
-            guard_coverage = int(np.logical_and(bridge_columns, upper_columns).sum()) / max(
-                1,
-                int(upper_columns.sum()),
-            )
+            guard_coverage = int(
+                np.logical_and(bridge_columns, upper_columns).sum()
+            ) / max(1, int(upper_columns.sum()))
             if guard_coverage >= 0.6:
                 continue
-        upper_box = Box.union(component.bbox for component in upper)
-        lower_box = Box.union(component.bbox for component in lower)
-        required_width = max(1, round(content_box.width * 0.15))
-        if upper_box.width < required_width or lower_box.width < required_width:
-            continue
-        component_balance = min(len(upper), len(lower)) / max(len(upper), len(lower))
-        score = pixel_balance + 0.25 * component_balance
-        candidates.append((score, -coordinate, upper, lower))
-    if not candidates:
-        return None
-    _, negative_coordinate, upper, lower = max(candidates, key=lambda value: value[:2])
-    return -negative_coordinate, upper, lower
+        return coordinate, upper, lower
+    return None
 
 
 def _best_component_rule_boundary(
@@ -4197,11 +4486,16 @@ def _refine_component_boundaries(
 ) -> tuple[_NodeDraft, ...]:
     nodes = list(drafts)
     leaves = tuple(node for node in nodes if not node.child_ids)
+    drafts_by_id = {node.node_id: node for node in nodes}
     components_by_leaf: dict[str, list[_Component]] = {
         leaf.node_id: [] for leaf in leaves
     }
     for component in components:
-        components_by_leaf[_leaf_for_component(component, leaves).node_id].append(component)
+        # ``components`` were already fragmented by the same recursive tree.
+        # Re-scanning every leaf for every component is O(C * leaves); descend
+        # the tree once from a component's first physical run instead.
+        leaf = _leaf_for_run(component.runs[0], drafts_by_id)
+        components_by_leaf[leaf.node_id].append(component)
     stack = [
         (leaf, tuple(components_by_leaf[leaf.node_id]))
         for leaf in reversed(leaves)
@@ -4286,10 +4580,14 @@ def _materialize_segments(
     shape: tuple[int, int],
 ) -> tuple[tuple[Segment, ...], np.ndarray, dict[str, tuple[str, ...]]]:
     leaves = tuple(node for node in drafts if not node.child_ids)
+    drafts_by_id = {node.node_id: node for node in drafts}
     grouped: dict[str, list[_Component]] = {leaf.node_id: [] for leaf in leaves}
     leaf_by_id = {leaf.node_id: leaf for leaf in leaves}
     for component in components:
-        grouped[_leaf_for_component(component, leaves).node_id].append(component)
+        # Components are already fragmented against this exact tree.  Use its
+        # spatial index instead of another O(C * leaves) ownership scan.
+        leaf = _leaf_for_run(component.runs[0], drafts_by_id)
+        grouped[leaf.node_id].append(component)
 
     segment_drafts: list[tuple[Box, _NodeDraft, tuple[_Component, ...]]] = []
     for leaf_id, values in grouped.items():
@@ -4402,17 +4700,17 @@ def _project_sparse_matrix(
         return SparseSegmentMatrix(rows=(), columns=(), cells=(), spans=())
     row_cuts = {0, height}
     column_cuts = {0, width}
-    boxes = [rule.bbox for rule in rules]
-    boxes.extend(separator for node in nodes for separator in node.separator_boxes)
-    for box in boxes:
-        row_cuts.update((box.top, box.bottom))
-        column_cuts.update((box.left, box.right))
-    row_cuts.update(
-        node.split_coordinate for node in nodes if node.axis is SplitAxis.ROWS and node.split_coordinate is not None
-    )
-    column_cuts.update(
-        node.split_coordinate for node in nodes if node.axis is SplitAxis.COLUMNS and node.split_coordinate is not None
-    )
+    # The matrix is one physical rule partition, not the Cartesian product of
+    # every object-local recursive decision.  Local whitespace/valley seams
+    # remain losslessly represented by ``nodes``.  Projecting those local
+    # coordinates globally made unrelated page regions cross each other and
+    # produced hundreds of thousands of false sparse cells on long scans.
+    for rule in rules:
+        box = rule.bbox
+        if rule.axis is RuleAxis.HORIZONTAL:
+            row_cuts.update((box.top, box.bottom))
+        else:
+            column_cuts.update((box.left, box.right))
     rows = _intervals(row_cuts)
     columns = _intervals(column_cuts)
     row_lookup = np.empty(height, dtype=np.int32)
@@ -4446,9 +4744,14 @@ def _project_sparse_matrix(
     cells = tuple(
         SparseCell(row=row, column=column, segment_id=segment_id) for row, column, segment_id in sorted(cell_entries)
     )
+    cells_by_segment: dict[str, list[SparseCell]] = {
+        segment.segment_id: [] for segment in segments
+    }
+    for cell in cells:
+        cells_by_segment[cell.segment_id].append(cell)
     spans: list[SegmentSpan] = []
     for segment in segments:
-        owned_cells = tuple(cell for cell in cells if cell.segment_id == segment.segment_id)
+        owned_cells = cells_by_segment[segment.segment_id]
         if not owned_cells:
             raise RuntimeError(f"segment {segment.segment_id} has no sparse cells")
         spans.append(

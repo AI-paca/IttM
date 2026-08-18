@@ -620,7 +620,10 @@ class SparsePipelineEvidence:
                 )
             payload = (
                 crop.raw.png_bytes
-                if job.transform is OcrTransform.RAW
+                if job.transform in (
+                    OcrTransform.RAW,
+                    OcrTransform.CONTEXTUAL_COMPOSITE,
+                )
                 else crop.gamma.png_bytes
             )
             expected_input = hashlib.sha256(payload).hexdigest()

@@ -41,6 +41,8 @@ class OcrInvalidOutputError(ValueError):
 class OcrTransform(str, Enum):
     RAW = "raw"
     GAMMA = "gamma"
+    CONTEXTUAL_COMPOSITE = "contextual/composite"
+    SOURCE_PLACEMENT_FALLBACK = "source-placement-fallback"
 
 
 class OcrJobStatus(str, Enum):
@@ -680,7 +682,10 @@ def input_sha256(job: OcrJobResult, crops: tuple[BlockCropPair, ...]) -> str:
         raise OcrQueueInvariantError("job references an unknown block crop")
     payload = (
         crop.raw.png_bytes
-        if job.transform is OcrTransform.RAW
+        if job.transform in (
+            OcrTransform.RAW,
+            OcrTransform.CONTEXTUAL_COMPOSITE,
+        )
         else crop.gamma.png_bytes
     )
     return hashlib.sha256(payload).hexdigest()

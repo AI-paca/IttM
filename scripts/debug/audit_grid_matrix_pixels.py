@@ -18,12 +18,14 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import io
 import json
 import math
 import re
 import shutil
 import sys
 import tempfile
+import zipfile
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,7 +36,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 
-_CONTACT_RANGE = re.compile(r"^segments-(\d{6})-(\d{6})\.png$")
+_CONTACT_RANGE = re.compile(r"^segments-(\d{6})-(\d{6})\.(?:png|svg)$")
 _RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
@@ -1136,42 +1138,73 @@ def audit(
         item_by_id = {str(item["segment_id"]): item for item in crop_items}
         if len(item_by_id) != len(crop_items):
             crop_failures.append({"kind": "duplicate-crop-manifest-id"})
-        for segment in segments:
-            segment_id = str(segment["segment_id"])
-            item = item_by_id.get(segment_id)
-            if item is None:
-                crop_failures.append({"segment_id": segment_id, "kind": "missing-manifest-item"})
-                continue
-            raw_path = crop_root / str(item["raw"])
-            isolated_path = crop_root / str(item["isolated"])
-            if not raw_path.is_file() or not isolated_path.is_file():
-                crop_failures.append({"segment_id": segment_id, "kind": "missing-crop-file"})
-                continue
-            index = segment_index[segment_id]
-            leaf_index = segment_to_leaf.get(segment_id, -1)
-            if leaf_index < 0:
-                continue
-            left, top, right, bottom = _box(segment["bbox"])
-            expected_raw = aligned[top:bottom, left:right]
-            local_leaf = leaf_raster[top:bottom, left:right]
-            expected_mask = np.logical_and(non_rule[top:bottom, left:right], local_leaf == leaf_index)
-            expected_isolated = np.full(expected_raw.shape, 255, dtype=np.uint8)
-            expected_isolated[expected_mask] = expected_raw[expected_mask]
-            actual_raw = _load_rgb(raw_path)
-            actual_isolated = _load_rgb(isolated_path)
-            mismatch = []
-            if not np.array_equal(actual_raw, expected_raw):
-                mismatch.append("raw-pixels")
-            if not np.array_equal(actual_isolated, expected_isolated):
-                mismatch.append("isolated-pixels")
-            if str(item.get("raw_sha256")) != _sha256_file(raw_path):
-                mismatch.append("raw-sha")
-            if str(item.get("isolated_sha256")) != _sha256_file(isolated_path):
-                mismatch.append("isolated-sha")
-            if int(item.get("ownership_pixels", -1)) != int(segment_pixel_counts[index]):
-                mismatch.append("manifest-ownership-count")
-            if mismatch:
-                crop_failures.append({"segment_id": segment_id, "kind": mismatch})
+        archive_name = crop_manifest.get("archive") if isinstance(crop_manifest, dict) else None
+        archive_path = crop_root / str(archive_name) if archive_name else None
+        archive = (
+            zipfile.ZipFile(archive_path)
+            if archive_path is not None and archive_path.is_file()
+            else None
+        )
+        try:
+            for segment in segments:
+                segment_id = str(segment["segment_id"])
+                item = item_by_id.get(segment_id)
+                if item is None:
+                    crop_failures.append({"segment_id": segment_id, "kind": "missing-manifest-item"})
+                    continue
+                if archive is not None:
+                    try:
+                        raw_bytes = archive.read(str(item["raw_archive_member"]))
+                        isolated_bytes = archive.read(
+                            str(item["isolated_archive_member"])
+                        )
+                    except KeyError:
+                        crop_failures.append(
+                            {"segment_id": segment_id, "kind": "missing-crop-member"}
+                        )
+                        continue
+                    with Image.open(io.BytesIO(raw_bytes)) as opened:
+                        actual_raw = np.asarray(opened.convert("RGB"))
+                    with Image.open(io.BytesIO(isolated_bytes)) as opened:
+                        actual_isolated = np.asarray(opened.convert("RGB"))
+                    raw_sha256 = hashlib.sha256(raw_bytes).hexdigest()
+                    isolated_sha256 = hashlib.sha256(isolated_bytes).hexdigest()
+                else:
+                    raw_path = crop_root / str(item["raw"])
+                    isolated_path = crop_root / str(item["isolated"])
+                    if not raw_path.is_file() or not isolated_path.is_file():
+                        crop_failures.append({"segment_id": segment_id, "kind": "missing-crop-file"})
+                        continue
+                    actual_raw = _load_rgb(raw_path)
+                    actual_isolated = _load_rgb(isolated_path)
+                    raw_sha256 = _sha256_file(raw_path)
+                    isolated_sha256 = _sha256_file(isolated_path)
+                index = segment_index[segment_id]
+                leaf_index = segment_to_leaf.get(segment_id, -1)
+                if leaf_index < 0:
+                    continue
+                left, top, right, bottom = _box(segment["bbox"])
+                expected_raw = aligned[top:bottom, left:right]
+                local_leaf = leaf_raster[top:bottom, left:right]
+                expected_mask = np.logical_and(non_rule[top:bottom, left:right], local_leaf == leaf_index)
+                expected_isolated = np.full(expected_raw.shape, 255, dtype=np.uint8)
+                expected_isolated[expected_mask] = expected_raw[expected_mask]
+                mismatch = []
+                if not np.array_equal(actual_raw, expected_raw):
+                    mismatch.append("raw-pixels")
+                if not np.array_equal(actual_isolated, expected_isolated):
+                    mismatch.append("isolated-pixels")
+                if str(item.get("raw_sha256")) != raw_sha256:
+                    mismatch.append("raw-sha")
+                if str(item.get("isolated_sha256")) != isolated_sha256:
+                    mismatch.append("isolated-sha")
+                if int(item.get("ownership_pixels", -1)) != int(segment_pixel_counts[index]):
+                    mismatch.append("manifest-ownership-count")
+                if mismatch:
+                    crop_failures.append({"segment_id": segment_id, "kind": mismatch})
+        finally:
+            if archive is not None:
+                archive.close()
         unexpected_crop_ids = set(item_by_id) - set(segment_ids)
         crop_failures.extend({"segment_id": value, "kind": "unexpected-manifest-item"} for value in sorted(unexpected_crop_ids))
         _write_jsonl(temporary / "segment-crop-failures.jsonl", crop_failures)
@@ -1201,9 +1234,13 @@ def audit(
             covered_indexes.extend(range(start, stop + 1))
             target_sheet = copied_sheet_root / source_sheet.name
             shutil.copy2(source_sheet, target_sheet)
-            with Image.open(target_sheet) as opened:
-                if opened.width < 1 or opened.height < 1:
-                    contact_failures.append({"path": str(relative), "kind": "empty-image"})
+            if target_sheet.suffix == ".svg":
+                if "<svg" not in target_sheet.read_text("utf-8"):
+                    contact_failures.append({"path": str(relative), "kind": "invalid-svg"})
+            else:
+                with Image.open(target_sheet) as opened:
+                    if opened.width < 1 or opened.height < 1:
+                        contact_failures.append({"path": str(relative), "kind": "empty-image"})
         if sorted(covered_indexes) != list(range(len(segments))):
             contact_failures.append(
                 {

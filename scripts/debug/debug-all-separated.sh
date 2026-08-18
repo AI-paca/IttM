@@ -82,7 +82,7 @@ Execution:
   --preprocess-override GLOB=STEP
                               Override preprocessing per source; repeatable.
   --reference-root DIR        Exact text references (default: debug/reference).
-  --languages CSV             Tesseract ids (default: eng,chi_sim,rus).
+  --languages CSV             Base Tesseract ids (default: rus,eng).
   --tessdata DIR              Explicit tessdata directory.
   --tesseract-workers N       Default: 4.
   --tesseract-psm 4|6         Default: 6.
@@ -99,7 +99,7 @@ from_stage="preprocess"
 to_stage="generate-object"
 preprocess_step="projector_slide_dewarp"
 preprocess_overrides=()
-languages="${DEBUG_TESSERACT_LANGUAGES:-eng,chi_sim,rus}"
+languages="${DEBUG_TESSERACT_LANGUAGES:-rus,eng}"
 tessdata=""
 tesseract_workers=4
 tesseract_psm=6

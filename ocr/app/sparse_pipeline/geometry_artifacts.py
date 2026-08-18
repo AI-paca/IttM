@@ -6,12 +6,17 @@ import re
 import shutil
 import tempfile
 from dataclasses import asdict
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZIP_STORED, ZipFile
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from app.sparse_pipeline.contact_sheets import write_paired_contact_sheets
+from app.sparse_pipeline.contact_sheets import (
+    write_paired_contact_sheets,
+    write_paired_contact_sheets_from_archive,
+)
 from app.sparse_pipeline.contracts import RecursiveNode, SparseCoordinateMode
 from app.sparse_pipeline.geometry import GeometryBundle
 
@@ -20,6 +25,8 @@ _SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 class GeometryArtifactWriter:
     """Atomically publish all evidence needed to audit stage 1."""
+
+    INDIVIDUAL_SEGMENT_CROP_LIMIT = 512
 
     def write(self, root: Path, *, run_id: str, bundle: GeometryBundle) -> Path:
         if type(run_id) is not str or not _SAFE_RUN_ID.fullmatch(run_id):
@@ -178,13 +185,18 @@ class GeometryArtifactWriter:
     def _ownership_rgb(bundle: GeometryBundle) -> np.ndarray:
         output = np.array(bundle.aligned_rgb, copy=True)
         output[bundle.rule_mask] = (225, 35, 35)
+        palette = np.empty(
+            (len(bundle.result.segmentation.segments), 3),
+            dtype=np.uint8,
+        )
         for index, _ in enumerate(bundle.result.segmentation.segments):
             digest = hashlib.sha256(f"segment-{index}".encode("ascii")).digest()
-            color = np.asarray(
+            palette[index] = np.asarray(
                 (64 + digest[0] // 2, 64 + digest[1] // 2, 64 + digest[2] // 2),
                 dtype=np.uint8,
             )
-            output[bundle.ownership == index] = color
+        owned = bundle.ownership >= 0
+        output[owned] = palette[bundle.ownership[owned]]
         return output
 
     @staticmethod
@@ -584,14 +596,19 @@ class GeometryArtifactWriter:
         """Persist actual bbox and exact-ownership pixels for every segment."""
 
         crop_root = stage / "segment-crops"
+        segments = geometry.result.segmentation.segments
+        compact = len(segments) > cls.INDIVIDUAL_SEGMENT_CROP_LIMIT
+        archive_path = crop_root / "segments.zip"
         raw_root = crop_root / "raw"
         isolated_root = crop_root / "isolated"
-        raw_root.mkdir(parents=True)
-        isolated_root.mkdir()
+        crop_root.mkdir(parents=True)
+        if not compact:
+            raw_root.mkdir()
+            isolated_root.mkdir()
 
         matrix_cells: dict[str, list[list[int]]] = {
             item.segment_id: []
-            for item in geometry.result.segmentation.segments
+            for item in segments
         }
         for cell in geometry.result.matrix.cells:
             matrix_cells[cell.segment_id].append([cell.row, cell.column])
@@ -606,47 +623,71 @@ class GeometryArtifactWriter:
         }
 
         entries: list[dict[str, object]] = []
-        contact_items: list[tuple[str, Path, Path]] = []
-        for index, segment in enumerate(geometry.result.segmentation.segments):
-            if not _SAFE_RUN_ID.fullmatch(segment.segment_id):
-                raise ValueError(
-                    "segment_id contains unsafe artifact characters"
+        file_contact_items: list[tuple[str, Path, Path]] = []
+        archive_contact_items: list[tuple[str, str, str]] = []
+        archive = ZipFile(archive_path, "w", compression=ZIP_STORED) if compact else None
+        try:
+            for index, segment in enumerate(segments):
+                if not _SAFE_RUN_ID.fullmatch(segment.segment_id):
+                    raise ValueError(
+                        "segment_id contains unsafe artifact characters"
+                    )
+                box = segment.bbox
+                raw = np.array(
+                    geometry.aligned_rgb[
+                        box.top : box.bottom,
+                        box.left : box.right,
+                    ],
+                    copy=True,
                 )
-            box = segment.bbox
-            raw = np.array(
-                geometry.aligned_rgb[
+                ownership = geometry.ownership[
                     box.top : box.bottom,
                     box.left : box.right,
-                ],
-                copy=True,
-            )
-            ownership = geometry.ownership[
-                box.top : box.bottom,
-                box.left : box.right,
-            ]
-            foreground = geometry.foreground_mask[
-                box.top : box.bottom,
-                box.left : box.right,
-            ]
-            exact_mask = (ownership == index) & foreground
-            ownership_pixels = int(np.count_nonzero(exact_mask))
-            if ownership_pixels != segment.ink_pixels:
-                raise ValueError(
-                    "isolated crop ownership disagrees with "
-                    f"{segment.segment_id}"
-                )
-            isolated = np.full(raw.shape, 255, dtype=np.uint8)
-            isolated[exact_mask] = raw[exact_mask]
+                ]
+                foreground = geometry.foreground_mask[
+                    box.top : box.bottom,
+                    box.left : box.right,
+                ]
+                exact_mask = (ownership == index) & foreground
+                ownership_pixels = int(np.count_nonzero(exact_mask))
+                if ownership_pixels != segment.ink_pixels:
+                    raise ValueError(
+                        "isolated crop ownership disagrees with "
+                        f"{segment.segment_id}"
+                    )
+                isolated = np.full(raw.shape, 255, dtype=np.uint8)
+                isolated[exact_mask] = raw[exact_mask]
 
-            raw_path = raw_root / f"{segment.segment_id}.png"
-            isolated_path = isolated_root / f"{segment.segment_id}.png"
-            cls._save_rgb(raw_path, raw)
-            cls._save_rgb(isolated_path, isolated)
-            contact_items.append(
-                (segment.segment_id, raw_path, isolated_path)
-            )
-            entries.append(
-                {
+                raw_name = f"raw/{segment.segment_id}.png"
+                isolated_name = f"isolated/{segment.segment_id}.png"
+                if archive is not None:
+                    raw_bytes = cls._rgb_png_bytes(raw)
+                    isolated_bytes = cls._rgb_png_bytes(isolated)
+                    archive.writestr(raw_name, raw_bytes)
+                    archive.writestr(isolated_name, isolated_bytes)
+                    raw_value: str | None = None
+                    isolated_value: str | None = None
+                    archive_contact_items.append(
+                        (segment.segment_id, raw_name, isolated_name)
+                    )
+                    raw_sha256 = hashlib.sha256(raw_bytes).hexdigest()
+                    isolated_sha256 = hashlib.sha256(isolated_bytes).hexdigest()
+                else:
+                    raw_path = crop_root / raw_name
+                    isolated_path = crop_root / isolated_name
+                    cls._save_rgb(raw_path, raw)
+                    cls._save_rgb(isolated_path, isolated)
+                    raw_value = raw_name
+                    isolated_value = isolated_name
+                    file_contact_items.append(
+                        (segment.segment_id, raw_path, isolated_path)
+                    )
+                    raw_sha256 = hashlib.sha256(raw_path.read_bytes()).hexdigest()
+                    isolated_sha256 = hashlib.sha256(
+                        isolated_path.read_bytes()
+                    ).hexdigest()
+                entries.append(
+                    {
                     "segment_id": segment.segment_id,
                     "bbox": list(box.as_tuple()),
                     "width": box.width,
@@ -660,28 +701,43 @@ class GeometryArtifactWriter:
                     "component_ids": list(segment.component_ids),
                     "sparse_cells": matrix_cells[segment.segment_id],
                     "sparse_span": matrix_spans[segment.segment_id],
-                    "raw": raw_path.relative_to(crop_root).as_posix(),
-                    "isolated": isolated_path.relative_to(crop_root).as_posix(),
-                    "raw_sha256": hashlib.sha256(
-                        raw_path.read_bytes()
-                    ).hexdigest(),
-                    "isolated_sha256": hashlib.sha256(
-                        isolated_path.read_bytes()
-                    ).hexdigest(),
-                }
-            )
+                        "raw": raw_value,
+                        "isolated": isolated_value,
+                        "raw_archive_member": raw_name if compact else None,
+                        "isolated_archive_member": (
+                            isolated_name if compact else None
+                        ),
+                        "raw_sha256": raw_sha256,
+                        "isolated_sha256": isolated_sha256,
+                    }
+                )
+        finally:
+            if archive is not None:
+                archive.close()
 
-        contact_sheets = write_paired_contact_sheets(
-            crop_root,
-            stem="segments",
-            first_label="raw bbox",
-            second_label="isolated ownership",
-            items=tuple(contact_items),
-        )
+        if compact:
+            contact_sheets = write_paired_contact_sheets_from_archive(
+                crop_root,
+                archive_path=archive_path,
+                stem="segments",
+                first_label="raw bbox",
+                second_label="isolated ownership",
+                items=tuple(archive_contact_items),
+            )
+        else:
+            contact_sheets = write_paired_contact_sheets(
+                crop_root,
+                stem="segments",
+                first_label="raw bbox",
+                second_label="isolated ownership",
+                items=tuple(file_contact_items),
+            )
         cls._write_json(
             crop_root / "manifest.json",
             {
-                "schema": "sparse-segment-crops-v1",
+                "schema": "sparse-segment-crops-v2",
+                "storage": "archive" if compact else "files",
+                "archive": archive_path.name if compact else None,
                 "definition": {
                     "raw": (
                         "unaltered aligned-page pixels inside the segment "
@@ -701,6 +757,7 @@ class GeometryArtifactWriter:
             crop_root / "gallery.md",
             entries=tuple(entries),
             contact_sheets=contact_sheets,
+            compact=compact,
         )
 
     @staticmethod
@@ -709,6 +766,7 @@ class GeometryArtifactWriter:
         *,
         entries: tuple[dict[str, object], ...],
         contact_sheets: list[str],
+        compact: bool,
     ) -> None:
         lines = [
             "# Actual Stage 1 segment crops",
@@ -721,6 +779,16 @@ class GeometryArtifactWriter:
         if contact_sheets:
             lines.extend(("## Контактные листы", ""))
             lines.extend(f"![{item}]({item})" for item in contact_sheets)
+        if compact:
+            lines.extend(
+                (
+                    "",
+                    "Полные raw/isolated PNG находятся в `segments.zip`; "
+                    "имена и SHA-256 перечислены в `manifest.json`.",
+                )
+            )
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            return
         for entry in entries:
             segment_id = str(entry["segment_id"])
             lines.extend(
@@ -746,6 +814,16 @@ class GeometryArtifactWriter:
     @staticmethod
     def _save_rgb(path: Path, value: np.ndarray) -> None:
         Image.fromarray(value.astype(np.uint8), mode="RGB").save(path, format="PNG")
+
+    @staticmethod
+    def _rgb_png_bytes(value: np.ndarray) -> bytes:
+        buffer = BytesIO()
+        Image.fromarray(value.astype(np.uint8), mode="RGB").save(
+            buffer,
+            format="PNG",
+            compress_level=1,
+        )
+        return buffer.getvalue()
 
     @staticmethod
     def _save_mask(path: Path, value: np.ndarray) -> None:

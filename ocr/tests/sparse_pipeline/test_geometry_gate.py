@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -1315,3 +1316,52 @@ def test_limit_is_explicitly_degraded_in_result_and_artifact(tmp_path: Path) -> 
         assert (crop_root / item["raw"]).is_file()
         assert (crop_root / item["isolated"]).is_file()
         assert item["ownership_pixels"] == item["ink_pixels"]
+
+
+def test_large_segment_crop_evidence_uses_one_archive(tmp_path: Path) -> None:
+    bundle = GeometryAnalyzer().analyze_bundle(_draw_four_groups())
+
+    class CompactWriter(GeometryArtifactWriter):
+        INDIVIDUAL_SEGMENT_CROP_LIMIT = 1
+
+    run_dir = CompactWriter().write(tmp_path, run_id="compact", bundle=bundle)
+    crop_root = run_dir / "01-geometry" / "segment-crops"
+    manifest = json.loads((crop_root / "manifest.json").read_text("utf-8"))
+    assert manifest["storage"] == "archive"
+    assert manifest["archive"] == "segments.zip"
+    assert manifest["contact_sheets"]
+    assert all(value.endswith(".svg") for value in manifest["contact_sheets"])
+    assert not (crop_root / "raw").exists()
+    with zipfile.ZipFile(crop_root / "segments.zip") as archive:
+        members = set(archive.namelist())
+    for item in manifest["items"]:
+        assert item["raw"] is None
+        assert item["isolated"] is None
+        assert item["raw_archive_member"] in members
+        assert item["isolated_archive_member"] in members
+
+
+def test_unstable_paper_background_uses_adaptive_ink() -> None:
+    height, width = 240, 400
+    gradient = np.linspace(180, 252, width, dtype=np.uint8)
+    gray = np.repeat(gradient[None, :], height, axis=0)
+    rgb = np.repeat(gray[:, :, None], 3, axis=2)
+    rgb[40:48, 45:355] = 35
+    rgb[90:98, 70:330] = 45
+    physical = np.ones((height, width), dtype=bool)
+
+    selected, mode = geometry_module._select_layout_foreground(rgb, physical)
+
+    assert mode.startswith("adaptive-")
+    assert 0 < int(selected.sum()) < int(physical.sum() * 0.20)
+
+
+def test_dominant_digital_background_keeps_physical_ink() -> None:
+    rgb = np.full((120, 240, 3), 255, dtype=np.uint8)
+    rgb[20:100, 35:205] = 0
+    physical = np.any(rgb != 255, axis=2)
+
+    selected, mode = geometry_module._select_layout_foreground(rgb, physical)
+
+    assert mode == "physical"
+    assert np.array_equal(selected, physical)

@@ -111,6 +111,15 @@ def _normalized_formats(formats: list[str] | tuple[str, ...]) -> tuple[str, ...]
     return tuple(normalized)
 
 
+def _representative_reference(
+    expected_root: Path,
+    source: Path,
+    image_format: str,
+) -> Path:
+    suffix = "jpg" if image_format == "jpg" else "png"
+    return expected_root / f"{source.name}.raster.{suffix}.md"
+
+
 def rasterize_pdf(
     source: Path,
     *,
@@ -124,9 +133,26 @@ def rasterize_pdf(
     formats: tuple[str, ...] = DEFAULT_FORMATS,
 ) -> list[Path]:
     expected = expected_root / f"{source.name}.md"
-    if not expected.exists():
-        raise FileNotFoundError(f"Missing expected file: {expected}")
-    expected_text = expected.read_text(encoding="utf-8", errors="replace")
+    representative_references = {
+        image_format: _representative_reference(
+            expected_root,
+            source,
+            image_format,
+        )
+        for image_format in formats
+    }
+    if not expected.exists() and not any(
+        path.is_file() for path in representative_references.values()
+    ):
+        raise FileNotFoundError(
+            "Missing expected file: "
+            f"{expected} or {source.name}.raster.<format>.md"
+        )
+    expected_text = (
+        expected.read_text(encoding="utf-8", errors="replace")
+        if expected.is_file()
+        else ""
+    )
 
     pages = _render_pdf(source, dpi=dpi, max_pages=max_pages)
     try:
@@ -134,9 +160,13 @@ def rasterize_pdf(
         probe_reference_root.mkdir(parents=True, exist_ok=True)
         outputs: list[Path] = []
         if stack_pages:
-            limited_expected = _limited_expected_text(
-                expected_text,
-                max_pages=max_pages,
+            limited_expected = (
+                _limited_expected_text(
+                    expected_text,
+                    max_pages=max_pages,
+                )
+                if expected_text
+                else None
             )
             image = _stack_pages(pages, gap=gap)
             try:
@@ -147,20 +177,46 @@ def rasterize_pdf(
                         image.save(output, format="JPEG", quality=92, optimize=True)
                     else:
                         image.save(output, format="PNG")
-                    (probe_reference_root / f"{output.name}.md").write_text(
-                        limited_expected,
-                        encoding="utf-8",
+                    representative = representative_references[image_format]
+                    reference_text = (
+                        representative.read_text(
+                            encoding="utf-8",
+                            errors="replace",
+                        )
+                        if representative.is_file()
+                        else limited_expected
                     )
+                    if reference_text is not None:
+                        (probe_reference_root / f"{output.name}.md").write_text(
+                            reference_text,
+                            encoding="utf-8",
+                        )
                     outputs.append(output)
             finally:
                 image.close()
             return outputs
 
-        expected_pages = _page_expected_texts(
-            expected_text,
-            max_pages=max_pages,
-            rendered_pages=len(pages),
+        expected_pages = (
+            _page_expected_texts(
+                expected_text,
+                max_pages=max_pages,
+                rendered_pages=len(pages),
+            )
+            if expected_text
+            else []
         )
+        if len(pages) > 1 and not expected_pages:
+            for image_format, representative in representative_references.items():
+                if representative.is_file():
+                    (
+                        probe_reference_root / representative.name
+                    ).write_text(
+                        representative.read_text(
+                            encoding="utf-8",
+                            errors="replace",
+                        ),
+                        encoding="utf-8",
+                    )
 
         for page_number, page in enumerate(pages, start=1):
             image = page.convert("RGB")
@@ -175,9 +231,25 @@ def rasterize_pdf(
                         image.save(output, format="JPEG", quality=92, optimize=True)
                     else:
                         image.save(output, format="PNG")
-                    if page_number <= len(expected_pages):
+                    reference_text = (
+                        expected_pages[page_number - 1]
+                        if page_number <= len(expected_pages)
+                        else None
+                    )
+                    representative = representative_references[image_format]
+                    if (
+                        page_number == 1
+                        and representative.is_file()
+                        and len(pages) == 1
+                        and not expected_pages
+                    ):
+                        reference_text = representative.read_text(
+                            encoding="utf-8",
+                            errors="replace",
+                        )
+                    if reference_text is not None:
                         (probe_reference_root / f"{output.name}.md").write_text(
-                            expected_pages[page_number - 1],
+                            reference_text,
                             encoding="utf-8",
                         )
                     outputs.append(output)

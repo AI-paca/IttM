@@ -10,6 +10,9 @@ from types import ModuleType, SimpleNamespace
 import pytest
 from PIL import Image
 
+from app.sparse_pipeline.ocr_fusion import OcrFusionLimitError
+from app.sparse_pipeline.ocr_queue import OcrJobStatus
+
 
 @pytest.fixture(scope="module")
 def recognition() -> ModuleType:
@@ -178,7 +181,10 @@ def test_saved_object_matrix_drives_real_overlapping_planner(
     }
     assert all(signatures.values())
     assert len(set(signatures.values())) == len(signatures)
-    assert {item.matrix_segment_shape for item in plan.blocks} == {(1, 1)}
+    assert {item.matrix_segment_shape for item in plan.blocks} == {
+        (1, 2),
+        (2, 2),
+    }
     assert len(plan.membership_units) == 6
     assert all(len(item.segment_ids) == 1 for item in plan.membership_units)
     assert plan.adjacent_algebra
@@ -253,6 +259,121 @@ def test_line_window_ab_uses_overlapping_rows_without_singletons(
     ) == ("fixed-flow",)
 
 
+def test_lazy_selection_keeps_stronger_computed_whole_object_evidence(
+    recognition: ModuleType,
+) -> None:
+    source_segment_ids = ("segment-0", "segment-1", "segment-2")
+
+    def policy_run(
+        policy: str,
+        *,
+        text: str,
+        grammar: int,
+        fusion_status: str = "complete",
+        unresolved_units: int = 0,
+        covered_segment_ids: tuple[str, ...] = source_segment_ids,
+    ) -> SimpleNamespace:
+        block = SimpleNamespace(
+            block_id=f"{policy}-block",
+            segment_ids=covered_segment_ids,
+        )
+        output = SimpleNamespace(
+            text=text,
+            words=(SimpleNamespace(confidence=0.95),),
+        )
+        job = SimpleNamespace(
+            block_id=block.block_id,
+            status=OcrJobStatus.COMPLETE,
+            output=output,
+        )
+        return SimpleNamespace(
+            policy=policy,
+            plan=SimpleNamespace(
+                blocks=(block,),
+                source_segment_ids=source_segment_ids,
+                membership_units=(
+                    SimpleNamespace(unit_id="unit-0"),
+                    SimpleNamespace(unit_id="unit-1"),
+                    SimpleNamespace(unit_id="unit-2"),
+                ),
+            ),
+            queue=SimpleNamespace(
+                jobs=(job,),
+                diagnostics=(
+                    f"block={block.block_id};grammar={grammar};transform=raw",
+                ),
+            ),
+            result_text=text,
+            unresolved_units=unresolved_units,
+            fusion_status=fusion_status,
+        )
+
+    stored = SimpleNamespace(source_kind="list")
+    whole_object = policy_run(
+        "whole-object",
+        text="Полный исходный текст с сохранённым содержанием",
+        grammar=94,
+    )
+    line_windows = policy_run(
+        "line-windows",
+        text="Потерянный текст",
+        grammar=100,
+        covered_segment_ids=("segment-0", "segment-1"),
+    )
+
+    selected = recognition.select_paragraph_list_policy_run(
+        stored,
+        {
+            whole_object.policy: whole_object,
+            line_windows.policy: line_windows,
+        },
+    )
+
+    assert recognition.lazy_paragraph_list_fallback_reason(
+        whole_object
+    ) is None
+    assert selected is whole_object
+    payload = recognition._paragraph_list_selection_payload(
+        stored,
+        {
+            whole_object.policy: whole_object,
+            line_windows.policy: line_windows,
+        },
+    )
+    assert payload["selected_policy"] == "whole-object"
+    assert (
+        payload["policies"]["whole-object"]["evidence_score"]
+        > payload["policies"]["line-windows"]["evidence_score"]
+    )
+    assert recognition._object_policies(
+        stored,
+        paragraph_list_ab=True,
+    ) == ("whole-object", "line-windows")
+
+    failed_whole_object = policy_run(
+        "whole-object",
+        text="Полный исходный текст с сохранённым содержанием",
+        grammar=94,
+        fusion_status="failed",
+    )
+    assert recognition.select_paragraph_list_policy_run(
+        stored,
+        {
+            failed_whole_object.policy: failed_whole_object,
+            line_windows.policy: line_windows,
+        },
+    ) is line_windows
+
+    empty_whole_object = policy_run(
+        "whole-object",
+        text="",
+        grammar=100,
+    )
+    assert recognition.lazy_paragraph_list_fallback_reason(
+        empty_whole_object
+    ) == "empty-evidence"
+
+
 def test_saved_table_crop_may_retain_structural_margin(
     recognition: ModuleType,
     tmp_path: Path,
@@ -285,7 +406,7 @@ def test_saved_table_crop_may_retain_structural_margin(
 
     assert stored.aligned_size == (220, 140)
     assert stored.objects_result.objects[0].bbox.as_tuple() == (10, 10, 210, 130)
-    assert len(plan.blocks) == 3
+    assert len(plan.blocks) == 4
 
 
 def test_saved_matrix_row_gaps_remain_physical_whitespace(
@@ -382,3 +503,153 @@ def test_canonical_object_tree_contains_only_requested_files(
             "recognized.txt",
             "block.json",
         }
+
+
+@pytest.mark.parametrize(
+    ("reference", "recognized"),
+    (
+        ("", ""),
+        ("", "текст"),
+        ("a b\t中\n", "ab中"),
+        ("kitten", "sitting"),
+        ("А" * 1_500 + "x" + "中" * 300, "Б" * 1_500 + "y" + "中" * 300),
+    ),
+)
+def test_distance_only_metric_is_bit_exact_with_full_alignment(
+    recognition: ModuleType,
+    reference: str,
+    recognized: str,
+) -> None:
+    assert recognition._metric(reference, recognized) == recognition._metric(
+        reference,
+        recognized,
+        debug_full_alignment=True,
+    )
+
+
+def test_long_metric_uses_bit_vector_without_full_alignment(
+    recognition: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reject_full_alignment(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("full edit script must be debug-only")
+
+    monkeypatch.setattr(recognition, "align_exact_text", reject_full_alignment)
+
+    assert recognition._metric("А" * 13_561, "Б" * 13_561) == {
+        "lost_characters": 13_561,
+        "reference_characters": 13_561,
+        "recognized_characters": 13_561,
+        "accuracy_percent": 0.0,
+    }
+
+
+def test_full_metric_alignment_is_explicit_and_bounded(
+    recognition: ModuleType,
+) -> None:
+    args = recognition._parser().parse_args(["--debug-full-metric-alignment"])
+
+    assert args.debug_full_metric_alignment is True
+    with pytest.raises(OcrFusionLimitError):
+        recognition._metric(
+            "А" * 2_000,
+            "Б" * 2_000,
+            debug_full_alignment=True,
+        )
+
+
+def test_compact_atlas_uses_original_block_bbox_for_fusion(
+    recognition: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    block = SimpleNamespace(
+        block_id="block-000000",
+        bbox=recognition.Box(40, 60, 140, 180),
+        segment_ids=("segment-0",),
+    )
+    plan = SimpleNamespace(
+        blocks=(block,),
+        membership_units=(
+            SimpleNamespace(
+                unit_id="membership-unit-000000",
+                kind=recognition.MembershipUnitKind.SEGMENT,
+                segment_ids=("segment-0",),
+            ),
+        ),
+    )
+    png_stream = recognition.io.BytesIO()
+    recognition.Image.new("RGB", (32, 24), "white").save(
+        png_stream,
+        format="PNG",
+        dpi=(300, 300),
+    )
+    png_bytes = png_stream.getvalue()
+    crop = recognition.BlockCropPair(
+        block_id=block.block_id,
+        bbox=recognition.Box(0, 0, 32, 24),
+        segment_ids=block.segment_ids,
+        raw=recognition.CropInput(
+            "block-000000-raw",
+            png_bytes,
+        ),
+        gamma=None,
+    )
+    separated = recognition.SeparatedBlocks(
+        policy="matrix-orxor",
+        plan=plan,
+        crops=(crop,),
+        planning_seconds=0.0,
+        crop_seconds=0.0,
+        compactions=(
+            recognition.BlockCompaction(
+                block_id=block.block_id,
+                placements=(),
+                    omitted_empty_units=(),
+                    occupied_pixels_before=1,
+                    occupied_pixels_after=1,
+                    packed_canvas_pixels=1,
+            ),
+        ),
+    )
+    block_ocr = recognition.BlockOcrResult(
+        separated=separated,
+        queue=SimpleNamespace(),
+        ocr_seconds=0.0,
+    )
+    stored = SimpleNamespace(
+        segments=(SimpleNamespace(segment_id="segment-0"),),
+    )
+
+    class Fusion:
+        def fuse(self, *, plan, segments, crops, queue):
+            assert crops[0].bbox == block.bbox
+            assert crops[0].segment_ids == crop.segment_ids
+            assert crops[0].raw.png_bytes is png_bytes
+            assert crop.bbox.as_tuple() == (0, 0, 32, 24)
+            return SimpleNamespace(
+                segments=(
+                    SimpleNamespace(
+                        segment_id="segment-0",
+                        selected_text="recognized",
+                        unresolved=False,
+                    ),
+                ),
+                segment_groups=(),
+                status=SimpleNamespace(value="complete"),
+            )
+
+    monkeypatch.setattr(
+        recognition,
+        "_best_job_by_block",
+        lambda _queue: {block.block_id: object()},
+    )
+    monkeypatch.setattr(
+        recognition,
+        "OcrEvidenceFusion",
+        lambda _config: Fusion(),
+    )
+
+    run = recognition.get_segments(stored, block_ocr)
+
+    assert run.fusion_status == "complete"
+    assert run.result_text == "recognized"

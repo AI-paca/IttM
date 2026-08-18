@@ -26,6 +26,7 @@ Options:
   --max-pages N                  Backend first N PDF pages.
   --fixture-max-pages GLOB=N     Backend first N PDF pages for one fixture glob.
   --no-pdf-raster                Do not add PDF raster PNG/JPEG rows.
+  --pdf-raster-only              Run only generated PDF raster rows.
   --pdf-raster-formats CSV       Raster formats for selected PDFs; default png,jpg.
   --pdf-raster-max-pages N       First N PDF pages for raster rows; default 5.
   --pdf-raster-dpi N             PDF raster DPI; default 300.
@@ -36,6 +37,7 @@ Options:
   --expected-root DIR            Manual reference directory; default debug/reference.
   --tmp-root DIR                 Intermediate output root; default debug/tmp.
   --output-root DIR              Final CSV directory; default debug.
+  --require-complete-scoring     Fail on missing_reference/not_checked corpus rows.
 
 API engines are scaffolded as tmp folders but are not implemented yet:
 api-ollama, api-openrouter, api-gemini.
@@ -57,9 +59,11 @@ backend_profile_args=()
 backend_page_args=(--fixture-max-pages 'Adobe Scan Oct 26, 2022 (1).pdf=5')
 resume_arg=()
 pdf_raster=1
+pdf_raster_only=0
 pdf_raster_formats="png,jpg"
 pdf_raster_max_pages=5
 pdf_raster_dpi=300
+require_complete_scoring=0
 
 if [[ -f debug/.env ]]; then
   set -a
@@ -134,6 +138,11 @@ while [[ $# -gt 0 ]]; do
       pdf_raster=0
       shift
       ;;
+    --pdf-raster-only)
+      pdf_raster=1
+      pdf_raster_only=1
+      shift
+      ;;
     --pdf-raster-formats)
       pdf_raster_formats="$2"
       shift 2
@@ -149,6 +158,10 @@ while [[ $# -gt 0 ]]; do
     --timeout)
       timeout_seconds="$2"
       shift 2
+      ;;
+    --require-complete-scoring)
+      require_complete_scoring=1
+      shift
       ;;
     --resume)
       resume_arg=(--resume)
@@ -260,6 +273,13 @@ stage_debug_file() {
   fi
 }
 
+aggregate_raster_reference_name() {
+  local file_name="$1"
+  if [[ "$file_name" =~ ^(.+\.pdf)\.page-[0-9]{3}\.raster\.(png|jpg)$ ]]; then
+    printf '%s.raster.%s.md\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+  fi
+}
+
 mapfile -t selected_fixtures < <(
   find "$fixtures_root" -maxdepth 1 -type f \
     \( -iname '*.pdf' -o -iname '*.png' -o -iname '*.jpg' \
@@ -284,10 +304,20 @@ if [[ "$pdf_raster" -eq 1 && ${#selected_fixtures[@]} -gt 0 ]]; then
     if [[ "${file_name,,}" != *.pdf ]]; then
       continue
     fi
-    if [[ -f "$expected_root/$file_name.md" ]]; then
+    representative_reference=0
+    IFS=',' read -r -a requested_raster_formats <<< "$pdf_raster_formats"
+    for raster_format in "${requested_raster_formats[@]}"; do
+      raster_format="${raster_format,,}"
+      [[ "$raster_format" == "jpeg" ]] && raster_format="jpg"
+      if [[ -f "$expected_root/$file_name.raster.$raster_format.md" ]]; then
+        representative_reference=1
+        break
+      fi
+    done
+    if [[ -f "$expected_root/$file_name.md" || "$representative_reference" -eq 1 ]]; then
       selected_pdf_fixtures+=("$fixture")
     else
-      echo "Skipping PDF raster for $file_name: missing $expected_root/$file_name.md" >&2
+      echo "Skipping PDF raster for $file_name: no PDF or raster reference" >&2
     fi
   done
 
@@ -306,28 +336,28 @@ if [[ "$pdf_raster" -eq 1 && ${#selected_fixtures[@]} -gt 0 ]]; then
   fi
 fi
 
-# A raster page is comparable only when the PDF reference has an exact page
-# boundary.  Keeping an image without its matching page reference would create
-# an unavoidable N/A row and, worse, invite comparing one page with the whole
-# document.  Preserve an explicit skip ledger for manual debug instead.
+# Keep every generated raster in the corpus. Exact page references are staged
+# per page. A document-level raster reference is scored once against an ordered
+# aggregate candidate, never duplicated onto each generated page.
 raster_skip_ledger="$tmp_root/unscored-raster-fixtures.txt"
 : > "$raster_skip_ledger"
 if [[ ${#raster_outputs[@]} -gt 0 ]]; then
-  comparable_raster_outputs=()
   for fixture in "${raster_outputs[@]}"; do
     file_name="$(basename "$fixture")"
     raster_reference="$tmp_root/pdf-image-reference/$file_name.md"
-    if [[ -f "$raster_reference" ]]; then
-      comparable_raster_outputs+=("$fixture")
-    else
+    aggregate_reference_name="$(aggregate_raster_reference_name "$file_name")"
+    aggregate_reference=""
+    if [[ -n "$aggregate_reference_name" ]]; then
+      aggregate_reference="$tmp_root/pdf-image-reference/$aggregate_reference_name"
+    fi
+    if [[ ! -f "$raster_reference" && ! -f "$aggregate_reference" ]]; then
       printf '%s\t%s\n' \
         "$fixture" \
-        "skipped: exact per-page reference is unavailable" \
+        "missing_reference: exact or representative raster reference is unavailable" \
         >> "$raster_skip_ledger"
-      echo "Skipping unscored PDF raster: $file_name" >&2
+      echo "Keeping unscored PDF raster as missing_reference: $file_name" >&2
     fi
   done
-  raster_outputs=("${comparable_raster_outputs[@]}")
 fi
 
 if [[ ${#raster_outputs[@]} -gt 0 ]]; then
@@ -336,13 +366,15 @@ if [[ ${#raster_outputs[@]} -gt 0 ]]; then
   rm -rf "$combined_fixtures_root" "$combined_reference_root"
   mkdir -p "$combined_fixtures_root" "$combined_reference_root"
 
-  for fixture in "${selected_fixtures[@]}"; do
-    file_name="$(basename "$fixture")"
-    stage_debug_file "$fixture" "$combined_fixtures_root/$file_name"
-    if [[ -f "$expected_root/$file_name.md" ]]; then
-      stage_debug_file "$expected_root/$file_name.md" "$combined_reference_root/$file_name.md"
-    fi
-  done
+  if [[ "$pdf_raster_only" -eq 0 ]]; then
+    for fixture in "${selected_fixtures[@]}"; do
+      file_name="$(basename "$fixture")"
+      stage_debug_file "$fixture" "$combined_fixtures_root/$file_name"
+      if [[ -f "$expected_root/$file_name.md" ]]; then
+        stage_debug_file "$expected_root/$file_name.md" "$combined_reference_root/$file_name.md"
+      fi
+    done
+  fi
 
   for fixture in "${raster_outputs[@]}"; do
     file_name="$(basename "$fixture")"
@@ -353,6 +385,16 @@ if [[ ${#raster_outputs[@]} -gt 0 ]]; then
         "$combined_reference_root/$file_name.md"
     fi
   done
+  while IFS= read -r aggregate_reference; do
+    file_name="$(basename "$aggregate_reference")"
+    stage_debug_file \
+      "$aggregate_reference" \
+      "$combined_reference_root/$file_name"
+  done < <(
+    find "$tmp_root/pdf-image-reference" -maxdepth 1 -type f \
+      \( -iname '*.pdf.raster.png.md' -o -iname '*.pdf.raster.jpg.md' \) \
+      -printf '%p\n' | sort
+  )
 
   fixtures_root="$combined_fixtures_root"
   expected_root="$combined_reference_root"
@@ -363,6 +405,25 @@ fixture_args=()
 for pattern in "${fixture_patterns[@]}"; do
   fixture_args+=(--fixture "$pattern")
 done
+
+# Page selection applies only to native PDF inputs. Phase 2 has already
+# materialized bounded page rasters, and image-only phases must keep their
+# stable expected-root alive until debug_report.py has scored every row.
+has_selected_pdf_fixtures() {
+  local fixture
+  while IFS= read -r fixture; do
+    if matches_fixture_patterns "$(basename "$fixture")"; then
+      return 0
+    fi
+  done < <(
+    find "$fixtures_root" -maxdepth 1 -type f -iname '*.pdf' -printf '%p\n'
+  )
+  return 1
+}
+
+if ! has_selected_pdf_fixtures; then
+  backend_page_args=()
+fi
 
 has_selected_browser_fixtures() {
   local browser_fixtures_root="$fixtures_root"
@@ -429,4 +490,8 @@ if [[ -n "$browser_root" ]]; then
   matrix_args+=(--browser-root "$browser_root")
 fi
 python3 scripts/debug/debug_matrix_report.py "${matrix_args[@]}"
-python3 scripts/debug/debug_quality_gate.py --result "$output_root/result.csv"
+quality_gate_args=(--result "$output_root/result.csv")
+if [[ "$require_complete_scoring" -eq 1 ]]; then
+  quality_gate_args+=(--require-complete-scoring)
+fi
+python3 scripts/debug/debug_quality_gate.py "${quality_gate_args[@]}"

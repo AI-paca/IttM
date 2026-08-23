@@ -11,7 +11,7 @@ import {
 
 function fakeCore() {
   return new BrowserPipelineCore({
-    ittm_pipeline_abi_version: () => 3,
+    ittm_pipeline_abi_version: () => 4,
     ittm_pipeline_recipe_mask: (bits: number) => {
       const trusted = Boolean(bits & 1);
       const layout = Boolean(bits & 2);
@@ -88,7 +88,7 @@ test("browser adapter rejects an incompatible ABI", () => {
 
 test("browser adapter maps raw sparse errors", () => {
   const core = new BrowserPipelineCore({
-    ittm_pipeline_abi_version: () => 3,
+    ittm_pipeline_abi_version: () => 4,
     ittm_pipeline_recipe_mask: () => 0,
     ittm_sparse_add_signal: (_code: number, signal: number) =>
       signal === 1 ? -2 : -1,
@@ -104,7 +104,7 @@ test("browser adapter maps raw sparse errors", () => {
 
 test("browser adapter delegates heading classification to WASM", () => {
   const core = new BrowserPipelineCore({
-    ittm_pipeline_abi_version: () => 3,
+    ittm_pipeline_abi_version: () => 4,
     ittm_pipeline_recipe_mask: () => 0,
     ittm_sparse_add_signal: () => 0,
     ittm_is_isolated_heading: (_rows, chars, _line, boundaries) =>

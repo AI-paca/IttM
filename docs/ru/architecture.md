@@ -4,12 +4,12 @@
 [Ограничения](./architecture-limitations.md) |
 [Развитие](./roadmap/development-branches.md)
 
-IttM имеет один логический pipeline contract и четыре пользовательских маршрута
-входа: browser OCR, Web compatibility stream через локальный Python OCR, Task
-API/CLI через тот же Python OCR и внешний provider. Локальный debug runner
-вызывает тот же pipeline с запросом полного evidence, но возвращает результат
-в каталог artifacts, а не в пользовательское окно. Способ запуска приложения
-не является OCR engine.
+IttM имеет один исполняемый raster pipeline и несколько transport-входов:
+browser OCR, Web compatibility stream через локальный Python OCR, Task API/CLI
+и внешний provider. Все raster-входы используют восемь стадий Rust separated
+core; Python Tesseract/EasyOCR, Tesseract.js и providers являются только
+адаптерами стадии `ocr-blocks`. Единственный обход — надёжный native text layer
+PDF, если пользователь не включил принудительный raster.
 
 ![Текущая архитектура IttM](../assets/project-architecture.svg)
 
@@ -17,23 +17,20 @@ API/CLI через тот же Python OCR и внешний provider. Локал
 [`project-architecture.drawio`](../assets/project-architecture.drawio).
 
 На этой схеме pipeline намеренно показан black box. В него входят
-`PipelineArtifact` и одна из двух сборок одного Rust source: WASM ABI 3 для
-browser executor либо native `.so` ABI 3 для Python executor. Его подробная
+`PipelineArtifact` и одна из двух сборок одного Rust source: WASM ABI 4 для
+browser executor либо native `.so` ABI 4 для Python executor. Его подробная
 под-схема: [этапы pipeline](./architecture-unified-pipeline.md) и
 [`ocr-pipeline.drawio`](../assets/ocr-pipeline.drawio).
 
 Точка входа определяет transport, scheduling, output adapter и runtime
 capabilities входного artifact, но не владеет OCR engine. Tesseract.js и Python
-Tesseract/EasyOCR вложены в этап `recognize_segments`: стадия вызывает adapter
-с blocks/hints и получает обратно text/boxes/evidence без engine objects.
+Tesseract/EasyOCR вложены в этап `ocr-blocks`: Rust передаёт им crop job и
+получает обратно текст без engine objects.
 
-Markdown не является прямым результатом OCR engine. Pipeline принимает
-recognition evidence, выполняет selection/fusion/grouping и формирует Markdown
-на render boundary. `PipelineResult` затем идёт через Result API в
-`ReadingPanel`, HTTP/CLI output либо debug artifact writer в зависимости от
-caller. Trusted provider Markdown получает capabilities
-`trustedText/providesLayout/providesMarkdown`, поэтому recipe пропускает
-ненужные layout, correction и render handlers.
+Markdown не является прямым результатом OCR engine. Rust separated core
+выдаёт block jobs, принимает OCR-текст и собирает сегменты в source order на
+`generate-object`. `PipelineResult` затем идёт в `ReadingPanel`, HTTP/CLI output
+либо debug artifact writer в зависимости от caller.
 
 ## Runtime-компоненты
 
@@ -46,17 +43,17 @@ caller. Trusted provider Markdown получает capabilities
 | Python FastAPI         | Upload guard, health и conversion routes                                  | [`ocr/app/routers`](../../ocr/app/routers)                                     |
 | `convert_service.py`   | Текущий публичный PDF/image pipeline                                      | [Backend pipeline](../en/backend-pipeline.md)                                  |
 | Tesseract / EasyOCR    | Платформенные OCR adapters                                                | [`ocr/app/engines`](../../ocr/app/engines)                                     |
-| `pipeline-core` ABI 3  | Единые recipe/evidence/dedupe решения из одного Rust source               | [`pipeline-core/README.md`](../../pipeline-core/README.md)                     |
+| `pipeline-core` ABI 4  | Единый separated raster route из одного Rust source                       | [`pipeline-core/README.md`](../../pipeline-core/README.md)                     |
 | `rust/ocr-core`        | Generated browser grammar WASM; production caller сейчас отсутствует      | [`web/src/ocr/grammar-assessment.ts`](../../web/src/ocr/grammar-assessment.ts) |
 | Sparse pipeline        | Отдельный library/debug runtime; публичные routes его не создают          | [Sparse pipeline](../en/sparse-pipeline.md)                                    |
 | External provider path | Gemini/OpenRouter после consent или явно настроенный локальный Ollama URL | [`web/src/ocr/llm-client.ts`](../../web/src/ocr/llm-client.ts)                 |
 
 `rust/ocr-core` и `pipeline-core` — разные crates. Generated wrapper
 `grammar-assessment.ts` вызывает первый, но текущий browser runtime этот wrapper
-не импортирует. `pipeline-core` ABI 3, наоборот, реально собирается из одного
-Rust source в native `.so` и WASM. Python и browser используют одинаковые
-recipe и bounded решения, но исполняют decode, OCR и stage handlers своим
-платформенным кодом.
+не импортирует. `pipeline-core` ABI 4 реально собирается из одного Rust source
+в native `.so` и WASM. Python и browser используют одинаковые stage engine,
+геометрию блоков, порядок сегментов и сборку результата; платформенным остаётся
+только decode/PDF render и вызов OCR adapter.
 
 ## Где узкое место
 
@@ -105,7 +102,8 @@ nginx
      -> Python /v1/convert/stream
   -> upload/PDF guards
   -> convert_service
-  -> Tesseract/EasyOCR + layout/formatting
+  -> native pipeline-core ABI 4
+  -> Rust separated jobs -> Tesseract/EasyOCR adapter -> Rust assembly
   -> page/warning/complete events
   -> gateway result
 ```
@@ -117,13 +115,14 @@ Task API читает multipart или binary upload в `File` до вызова
 
 ## Browser и provider paths
 
-- Lite build показывает `browser`; при `auto` и отсутствии backend candidates
-  он переключается на этот же путь. Backend build скрывает browser source.
-- Browser OCR использует Tesseract.js, PDF/image workers, table/reviewer
-  modules и `pipeline-core` WASM. Документ не отправляется в local gateway.
+- Browser source доступен и в полной, и в Lite-сборке; в Lite `auto` при
+  отсутствии backend candidates переключается на него.
+- Browser OCR использует `pipeline-core` WASM для всех восьми стадий и
+  Tesseract.js только как adapter `ocr-blocks`. Документ не отправляется в
+  local gateway.
 - Browser OCR не является Python engine и не принимает backend profile names.
-- Gemini/OpenRouter требуют явного consent. Их result проходит browser text
-  pipeline как уже предоставленный provider Markdown.
+- Gemini/OpenRouter требуют явного consent. Rust сначала выдаёт им block jobs,
+  затем сам собирает распознанные блоки.
 - Ollama вызывается прямым `fetch` из Web UI через явно настроенный URL, без
   gateway и TaskService. Он не является
   `engine_type=easyocr|tesseract|auto`.

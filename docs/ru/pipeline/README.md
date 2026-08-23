@@ -77,9 +77,9 @@ events и error описаны в [Task API](../../en/task-api.md).
 
 | Значение            | Где работает             | Поведение                                                         |
 | ------------------- | ------------------------ | ----------------------------------------------------------------- |
-| `auto`              | Python backend           | Tesseract-first orchestration по выбранному profile               |
-| `tesseract`         | Python backend           | Локальный Tesseract и backend layout/formatting                   |
-| `easyocr`           | Python backend           | EasyOCR; требует установленного optional runtime                  |
+| `auto`              | Python backend           | Rust block jobs; разрешённый резерв между OCR adapters            |
+| `tesseract`         | Python backend           | Rust block jobs → локальный Tesseract                             |
+| `easyocr`           | Python backend           | Rust block jobs → optional EasyOCR                                |
 | `browser`           | Web Worker во вкладке    | Не принимается local task API и не отправляет файл Python backend |
 | Gemini / OpenRouter | Выбранный внешний API    | Browser path только после пользовательского consent               |
 | Ollama              | Указанный local endpoint | Отдельный browser/provider path, не Python OCR engine             |
@@ -88,7 +88,21 @@ events и error описаны в [Task API](../../en/task-api.md).
 догадку по результату. `auto`, `tesseract`, `easyocr` — единственные engines,
 которые gateway отправляет в Python worker.
 
-## Этапы
+## Этапы production raster
+
+`pipeline-core` ABI 4 исполняет восемь границ:
+
+```text
+preprocess → geometry → topology → find-object → separate-block
+           → ocr-blocks → get-segment → generate-object
+```
+
+Browser загружает WASM, Python — native `.so`; OCR engine является adapter
+только внутри `ocr-blocks`. Поле completion metadata `pipeline_stages`
+содержит этот порядок, а `pipeline` равно `rust_separated_v1` или hybrid с
+`pdf_text_layer`.
+
+## Stream-фазы
 
 Публичный stream сообщает только наблюдаемые фазы:
 

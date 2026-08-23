@@ -138,7 +138,7 @@ def test_readiness():
         "pytesseract",
         "pdf2image",
         "opencv",
-        "pipeline_core_abi3",
+        "pipeline_core_abi4",
     }
 
 
@@ -151,7 +151,7 @@ def test_readiness_rejects_missing_or_incompatible_pipeline_core(monkeypatch):
     response = client.get("/readiness")
 
     assert response.status_code == 200
-    assert response.json()["checks"]["pipeline_core_abi3"] is False
+    assert response.json()["checks"]["pipeline_core_abi4"] is False
     assert response.json()["ready"] is False
 
 
@@ -510,6 +510,7 @@ def test_image_bytes_do_not_use_pdf_temp_directory(monkeypatch):
     monkeypatch.setattr(convert_service.tempfile, "TemporaryDirectory", fail_temp_directory)
 
     image = Image.new("RGB", (100, 30), color="white")
+    image.paste("black", (10, 10, 90, 20))
     content = io.BytesIO()
     image.save(content, format="PNG")
 
@@ -517,3 +518,7 @@ def test_image_bytes_do_not_use_pdf_temp_directory(monkeypatch):
 
     assert markdown == "image text"
     assert meta["pages"] == 1
+    assert meta["pipeline"] == "rust_separated_v1"
+    assert meta["pipeline_stages"] == list(convert_service.SEPARATED_STAGES)
+    assert meta["preprocess_steps"] == ["rust:preprocess"]
+    assert "pipeline_stage:generate-object" in meta["flags"]

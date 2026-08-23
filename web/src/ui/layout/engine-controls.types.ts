@@ -10,7 +10,9 @@ export interface EngineControlsState {
   llmKey: string;
   llmModel: string;
   llmProvider: LlmProvider;
+  isPdfFile: boolean;
   lexicalCorrectionEnabled: boolean;
+  pdfRasterMode: boolean;
   pingUrl: string;
   rememberChoice: boolean;
   selectedSource: SourceType;
@@ -21,6 +23,7 @@ export interface EngineControlsState {
 export interface EngineControlsActions {
   onInstallEasyOcr: () => void;
   onLexicalCorrectionChange: (checked: boolean) => void;
+  onPdfRasterModeChange: (checked: boolean) => void;
   onLlmProviderChange: (provider: LlmProvider) => void;
   onRememberChange: (checked: boolean) => void;
   onSourceSelect: (source: SourceType) => void;

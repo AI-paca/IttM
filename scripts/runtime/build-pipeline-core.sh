@@ -14,6 +14,18 @@ trap 'rm -rf "$build_tmp"' EXIT
 mkdir -p "$output_dir"
 mkdir -p "$cache_dir"
 
+wasm_output="$output_dir/ittm_pipeline_core.wasm"
+newer_source="$(find \
+  "$repo_root/pipeline-core/Cargo.toml" \
+  "$repo_root/pipeline-core/Cargo.lock" \
+  "$repo_root/pipeline-core/src" \
+  -type f -newer "$wasm_output" -print -quit 2>/dev/null || true)"
+if [[ -f "$wasm_output" && -z "$newer_source" ]] \
+  && node "$repo_root/scripts/ci/verify-pipeline-core-wasm.mjs" "$wasm_output" >/dev/null; then
+  printf '%s\n' "$wasm_output"
+  exit 0
+fi
+
 if [[ -z "$arch_rust_host_package" && -d /var/cache/pacman/pkg ]]; then
   arch_rust_host_package="$(
     find /var/cache/pacman/pkg -maxdepth 1 -type f \
@@ -23,14 +35,6 @@ fi
 
 host_sysroot="$(rustc --print sysroot)"
 if [[ -d "$host_sysroot/lib/rustlib/wasm32-unknown-unknown" ]]; then
-  cargo build \
-    --locked \
-    --release \
-    --target wasm32-unknown-unknown \
-    --manifest-path "$repo_root/pipeline-core/Cargo.toml"
-  wasm_source="$repo_root/pipeline-core/target/wasm32-unknown-unknown/release/ittm_pipeline_core.wasm"
-elif command -v rustup >/dev/null 2>&1; then
-  rustup target add wasm32-unknown-unknown
   cargo build \
     --locked \
     --release \
@@ -89,10 +93,10 @@ fi
 
 cp \
   "$wasm_source" \
-  "$output_dir/ittm_pipeline_core.wasm"
+  "$wasm_output"
 
 node \
   "$repo_root/scripts/ci/verify-pipeline-core-wasm.mjs" \
-  "$output_dir/ittm_pipeline_core.wasm"
+  "$wasm_output"
 
-printf '%s\n' "$output_dir/ittm_pipeline_core.wasm"
+printf '%s\n' "$wasm_output"

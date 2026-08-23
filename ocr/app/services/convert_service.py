@@ -27,7 +27,6 @@ from app.chunking.vertical import (
     _parse_numbered_curriculum_index,
     split_by_blank_bands,
     split_vertical,
-    iter_vertical_segments,
     remove_white_borders,
     table_rows_to_markdown,
 )
@@ -68,11 +67,14 @@ from app.pipeline_flags import profile_flags
 from app.pipeline_core import (
     PageSegmentArtifact,
     PdfTextLayerArtifact,
-    RecognizedSegment,
     StructuralRenderArtifact,
-    recognize_segments,
 )
 from app.pipeline_core.native import native_pipeline_core
+from app.pipeline_core.separated import (
+    SEPARATED_STAGES,
+    SeparatedOcrJob,
+    run_native_separated_pipeline,
+)
 from app.preprocessing import OcrPreprocessingPipeline
 from app.recognition.segments import (
     recognize_table_cell_candidate,
@@ -381,7 +383,9 @@ def _parse_pdf_text_layer_bbox_pages(html: str) -> list[_PdfTextLayerPage | None
                 )
             except (KeyError, ValueError):
                 continue
-        pages.append(_PdfTextLayerPage(width=width, height=height, words=tuple(words)) if width > 0 and height > 0 else None)
+        pages.append(
+            _PdfTextLayerPage(width=width, height=height, words=tuple(words)) if width > 0 and height > 0 else None
+        )
     return pages
 
 
@@ -1668,11 +1672,7 @@ def _pdf_fixed_width_competence_name_parts(row: list[_PdfFixedWidthCell]) -> lis
 
 def _looks_like_pdf_fixed_width_header_row(value: str) -> bool:
     compact = re.sub(r"\s+", " ", value).strip().lower()
-    return (
-        "индекс" in compact
-        and "наименование" in compact
-        and ("компетенц" in compact or "формирование" in compact)
-    )
+    return "индекс" in compact and "наименование" in compact and ("компетенц" in compact or "формирование" in compact)
 
 
 def _pdf_fixed_width_compact_text(value: str) -> str:
@@ -1701,8 +1701,7 @@ def _merge_pdf_competence_table_rows(rows: list[list[_PdfFixedWidthCell]]) -> li
     pending_name: list[str] = []
     last_data_row: list[str] | None = None
     has_source_header = any(
-        _looks_like_pdf_fixed_width_header_row(" ".join(_pdf_fixed_width_text_cells(row)))
-        for row in rows
+        _looks_like_pdf_fixed_width_header_row(" ".join(_pdf_fixed_width_text_cells(row))) for row in rows
     )
 
     def next_indexed_row_lacks_name(row_index: int) -> bool:
@@ -1764,10 +1763,7 @@ def _merge_pdf_competence_table_rows(rows: list[list[_PdfFixedWidthCell]]) -> li
 
     if not merged:
         return None
-    original_text = " ".join(
-        " ".join(_pdf_fixed_width_text_cells(row))
-        for row in rows
-    )
+    original_text = " ".join(" ".join(_pdf_fixed_width_text_cells(row)) for row in rows)
     if has_source_header:
         merged = [["Индекс", "Наименование", "Формирование компетенции"], *merged]
     merged_text = " ".join(" ".join(row) for row in merged)
@@ -1780,19 +1776,11 @@ def _merge_pdf_fixed_width_continuation_rows(rows: list[list[_PdfFixedWidthCell]
     competence_rows = _merge_pdf_competence_table_rows(rows)
     if competence_rows is not None:
         return competence_rows
-    return [
-        values
-        for row in rows
-        if (values := _pdf_fixed_width_text_cells(row))
-    ]
+    return [values for row in rows if (values := _pdf_fixed_width_text_cells(row))]
 
 
 def _fixed_width_rows_to_markdown(rows: list[list[str]]) -> str:
-    cleaned_rows = [
-        [_markdown_cell(cell) for cell in row]
-        for row in rows
-        if any(cell.strip() for cell in row)
-    ]
+    cleaned_rows = [[_markdown_cell(cell) for cell in row] for row in rows if any(cell.strip() for cell in row)]
     if not cleaned_rows:
         return ""
     return _markdown_table(cleaned_rows)
@@ -2491,11 +2479,7 @@ def _convert_layout_region(
                 tuple(
                     (
                         source,
-                        [
-                            word
-                            for word in words
-                            if float(word.get("conf", 0)) >= 5
-                        ],
+                        [word for word in words if float(word.get("conf", 0)) >= 5],
                     )
                     for source, words in observed_passes
                 ),
@@ -2534,19 +2518,13 @@ def _convert_layout_region(
                 total_chunks += repeated_identifier_calls
                 if repeated_span_identifier_decisions:
                     table_words = repeated_identifier_words
-                    runtime_flags.add(
-                        "table_repeated_span_identifier_crops:selected"
-                    )
+                    runtime_flags.add("table_repeated_span_identifier_crops:selected")
         if observed_passes:
-            identifier_words, identifier_decisions = (
-                fuse_relational_identifier_candidates(
-                    table_layout,
-                    table_words,
-                    observed_passes,
-                    excluded_rows=frozenset(
-                        decision.row for decision in span_decisions
-                    ),
-                )
+            identifier_words, identifier_decisions = fuse_relational_identifier_candidates(
+                table_layout,
+                table_words,
+                observed_passes,
+                excluded_rows=frozenset(decision.row for decision in span_decisions),
             )
             if identifier_decisions:
                 table_words = identifier_words
@@ -2561,9 +2539,7 @@ def _convert_layout_region(
                 table_layout,
                 table_words,
                 observed_passes,
-                excluded_rows=frozenset(
-                    decision.row for decision in span_decisions
-                ),
+                excluded_rows=frozenset(decision.row for decision in span_decisions),
             )
             total_chunks += segment_crop_calls
             if segment_crop_decisions:
@@ -2733,9 +2709,7 @@ def _convert_layout_region(
                 "runtime_flags": sorted(runtime_flags),
                 "span_candidate_decisions": span_decisions,
                 "cjk_span_crop_decisions": cjk_span_crop_decisions,
-                "repeated_span_identifier_decisions": (
-                    repeated_span_identifier_decisions
-                ),
+                "repeated_span_identifier_decisions": (repeated_span_identifier_decisions),
                 "identifier_candidate_decisions": identifier_decisions,
                 "identifier_segment_crop_decisions": segment_crop_decisions,
             },
@@ -2776,11 +2750,9 @@ def _convert_layout_region(
             psm=region_psm,
             min_conf=0,
         )
-        repaired_text, text_token_decisions = (
-            repair_text_from_aligned_word_candidates(
-                region_parts[0],
-                observed_text_passes,
-            )
+        repaired_text, text_token_decisions = repair_text_from_aligned_word_candidates(
+            region_parts[0],
+            observed_text_passes,
         )
         if text_token_decisions:
             region_parts = [repaired_text]
@@ -5374,252 +5346,6 @@ def _render_layout_journal(
     )
 
 
-def _recognize_layout_segment(
-    region: LayoutRegion,
-    engine,
-    profile: OcrPipelineProfile,
-    layout_parameters: tuple[tuple[str, FeatureValue], ...],
-) -> RecognizedSegment:
-    parts, meta = _convert_layout_region(
-        region,
-        engine,
-        profile,
-        layout_parameters,
-    )
-    metadata = region.metadata or {}
-    is_sparse = (
-        metadata.get("layout_kind") == "recursive_grid_cell"
-        and isinstance(metadata.get("grid_row"), int)
-        and isinstance(metadata.get("grid_col"), int)
-    )
-    content_bbox = metadata.get("content_bbox")
-    content_left = (
-        int(content_bbox[0])
-        if (
-            isinstance(content_bbox, tuple)
-            and len(content_bbox) == 4
-            and isinstance(content_bbox[0], int)
-        )
-        else None
-    )
-    sparse_codes = metadata.get("sparse_codes")
-    counters = tuple(
-        (name, int(meta.get(name, 0)))
-        for name in (
-            "chunks",
-            "cards_found",
-            "tables_found",
-            "table_cells",
-        )
-    )
-    return RecognizedSegment(
-        kind="sparse" if is_sparse else "plain",
-        bbox=region.bbox,
-        parts=tuple(parts),
-        anchor=(
-            (int(metadata["grid_row"]), int(metadata["grid_col"]))
-            if is_sparse
-            else None
-        ),
-        codes=(tuple(sparse_codes) if isinstance(sparse_codes, tuple) else ()),
-        list_marker=bool(metadata.get("list_marker")),
-        content_left=content_left,
-        counters=counters,
-        flags=tuple(meta.get("runtime_flags", ())),
-    )
-
-
-def _convert_page_segment(
-    image: Image.Image,
-    engine,
-    profile: OcrPipelineProfile,
-) -> PageSegmentArtifact:
-    layout_entries: list[_LayoutJournalEntry] = []
-    totals = {
-        "chunks": 0,
-        "cards_found": 0,
-        "tables_found": 0,
-        "table_cells": 0,
-    }
-    runtime_flags: set[str] = set()
-    if _looks_like_edge_to_edge_word(image) or (
-        _is_dewarped_projector_slide(image) and "recursive_grid" not in profile.layout.allowed_stages
-    ):
-        layout_parameters = ()
-        runtime_flags.add("layout_decision:bypass_single_region")
-        regions = [
-            LayoutRegion(
-                kind="image",
-                image=image,
-                bbox=(0, 0, *image.size),
-            )
-        ]
-    elif profile.layout.feature_extractors or "recursive_grid" in profile.layout.allowed_stages:
-        regions, layout_decision = analyze_layout(
-            image,
-            profile.layout,
-            min_confirmed_cell_ratio=profile.grid_min_confirmed_cell_ratio,
-        )
-        runtime_flags.update(_layout_runtime_flags(layout_decision))
-        layout_parameters = layout_decision.stages[0].parameters if layout_decision.stages else ()
-    else:
-        layout_parameters = ()
-        regions = (
-            analyze_document_layout(
-                image,
-                min_confirmed_cell_ratio=profile.grid_min_confirmed_cell_ratio,
-            )
-            if "table_regions" in profile.layout.allowed_stages
-            else [
-                LayoutRegion(
-                    kind="image",
-                    image=image,
-                    bbox=(0, 0, *image.size),
-                )
-            ]
-        )
-        runtime_flags.add(
-            "layout_decision:legacy_table_regions"
-            if "table_regions" in profile.layout.allowed_stages
-            else "layout_decision:unsegmented"
-        )
-
-    with TemporaryStructuralJournal() as layout_journal:
-        with _owned_layout_regions(regions, image) as owned_regions:
-            recognition = recognize_segments(
-                owned_regions,
-                lambda region: _recognize_layout_segment(
-                    region,
-                    engine,
-                    profile,
-                    layout_parameters,
-                ),
-            )
-            for segment in recognition.segments:
-                reference = layout_journal.append(segment.parts)
-                layout_entries.append(
-                    _LayoutJournalEntry(
-                        kind=1 if segment.kind == "sparse" else 0,
-                        reference=reference,
-                        bbox=segment.bbox,
-                        anchor=segment.anchor or (0, 0),
-                        codes=segment.codes,
-                        list_marker=segment.list_marker,
-                        content_left=segment.content_left,
-                        flags=segment.flags,
-                    )
-                )
-            totals = {
-                key: recognition.total(key)
-                for key in totals
-            }
-            runtime_flags.update(recognition.flags)
-            runtime_flags.add("pipeline_stage:recognize_segments:v1")
-
-        structural = _render_layout_journal(
-            layout_journal,
-            layout_entries,
-            structural_output=profile.structural_output,
-            page_table_confirmed=(totals["tables_found"] > 0 and not _looks_like_dark_ui_text_page(image)),
-        )
-        page_parts = list(structural.parts)
-        runtime_flags.update(structural.flags)
-
-    plain_fallback_used = False
-    if (
-        profile.structural_output == "markdown"
-        and structural.bypassed
-        and not structural.confirmed
-        and (totals["tables_found"] == 0 or _looks_like_dark_ui_text_page(image))
-    ):
-        dark_ui_text_page = _looks_like_dark_ui_text_page(image)
-        current_compact_chars = _ocr_compact_char_count("\n\n".join(page_parts))
-        needs_full_page_fallback = (
-            current_compact_chars < 400
-            or dark_ui_text_page
-            or _is_dewarped_projector_slide(image)
-            or structural.lossy_merge_rejected
-        )
-        if needs_full_page_fallback:
-            plain_image = image
-            owns_plain_image = False
-            if profile.dark_ui_text_fallback and dark_ui_text_page:
-                plain_image = _dark_ui_text_image(image)
-                owns_plain_image = True
-                runtime_flags.add("dark_ui_text_fallback:used")
-            try:
-                fallback_parts, fallback_chunks, fallback_cards = _recognize_image_region(
-                    engine,
-                    plain_image,
-                    profile,
-                )
-            finally:
-                if owns_plain_image:
-                    plain_image.close()
-            totals["chunks"] += fallback_chunks
-            totals["cards_found"] += fallback_cards
-            if fallback_parts:
-                page_parts = fallback_parts
-                plain_fallback_used = True
-                runtime_flags.add("structural_plain_fallback:used")
-        else:
-            runtime_flags.add("structural_plain_fallback:skipped_rich_text")
-
-    if (
-        profile.structural_output == "markdown"
-        and structural.lint_pass is not True
-        and _should_append_spatial_full_page_fallback(
-            profile,
-            regions,
-            layout_parameters,
-            page_parts,
-        )
-    ):
-        fallback_parts, fallback_chunks, fallback_cards = _recognize_image_region(
-            engine,
-            image,
-            profile,
-        )
-        totals["chunks"] += fallback_chunks
-        totals["cards_found"] += fallback_cards
-        runtime_flags.add("spatial_full_page_fallback:used")
-        page_parts = dedupe_chunks([part for part in (*page_parts, *fallback_parts) if part.strip()])
-
-    if (
-        profile.structural_output == "markdown"
-        and profile.dark_ui_text_fallback
-        and _looks_like_dark_ui_text_page(image)
-        and not plain_fallback_used
-        and not structural.confirmed
-    ):
-        dark_text_image = _dark_ui_text_image(image)
-        try:
-            fallback_parts, fallback_chunks, fallback_cards = _recognize_image_region(
-                engine,
-                dark_text_image,
-                profile,
-            )
-        finally:
-            dark_text_image.close()
-        totals["chunks"] += fallback_chunks
-        totals["cards_found"] += fallback_cards
-        runtime_flags.add("dark_ui_text_fallback:used")
-        page_parts = dedupe_chunks([part for part in (*page_parts, *fallback_parts) if part.strip()])
-
-    if profile.structural_output == "markdown":
-        page_parts, merged_tables = _merge_adjacent_compatible_table_parts(page_parts)
-        if merged_tables:
-            runtime_flags.add("structural_grammar:merge_table_continuations")
-
-    return PageSegmentArtifact(
-        markdown=_finalize_markdown("\n\n".join(page_parts), profile),
-        counters=tuple((name, int(value)) for name, value in totals.items()),
-        flags=tuple(sorted(runtime_flags)),
-        structural_lint_pass=structural.lint_pass,
-        structural_confirmed=structural.confirmed,
-    )
-
-
 def _apply_static_markdown_repairs(
     markdown: str,
     profile: OcrPipelineProfile,
@@ -5671,371 +5397,57 @@ def _apply_static_markdown_repairs(
     return markdown, runtime_flags
 
 
+def _convert_page_segment(
+    image: Image.Image,
+    engine,
+    profile: OcrPipelineProfile,
+) -> PageSegmentArtifact:
+    """Run the production raster route through the shared Rust stage engine.
+
+    Rust owns preprocessing decisions, geometry, topology, object discovery,
+    block separation, segment order, and final object generation.  The Python
+    engine is deliberately only an OCR adapter for the blocks Rust requests.
+    """
+
+    def recognize_block(crop: Image.Image, _job: SeparatedOcrJob) -> str:
+        return _recognize_text_with_sparse_fallback(
+            engine,
+            crop,
+            profile,
+            mode="text_mode",
+            psm=_text_psm_for_image_region(crop, profile),
+        )
+
+    markdown, jobs, stages = run_native_separated_pipeline(
+        image,
+        recognize_block,
+    )
+    runtime_flags = {
+        "pipeline:rust_separated_v1",
+        *(f"pipeline_stage:{stage}" for stage in stages),
+    }
+    return PageSegmentArtifact(
+        markdown=markdown,
+        counters=(
+            ("chunks", len(jobs)),
+            ("cards_found", 0),
+            ("tables_found", 0),
+            ("table_cells", 0),
+        ),
+        flags=tuple(sorted(runtime_flags)),
+        structural_lint_pass=None,
+        structural_confirmed=False,
+    )
+
+
 def _convert_page(
     main_image: Image.Image,
     engine,
     profile: OcrPipelineProfile,
 ) -> tuple[str, dict]:
-    width, height = main_image.size
-    is_long_screenshot = (
-        height >= LONG_SCREENSHOT_MIN_HEIGHT and height / max(1, width) >= LONG_SCREENSHOT_MIN_ASPECT_RATIO
-    )
-    if not is_long_screenshot:
-        segment_artifact = _convert_page_segment(main_image, engine, profile)
-        if not isinstance(segment_artifact, PageSegmentArtifact):
-            segment_artifact = PageSegmentArtifact.from_legacy_tuple(segment_artifact)
-        markdown = segment_artifact.markdown
-        totals = segment_artifact.metadata()
-        fallback_text = ""
-        fallback_calls = 0
-        projector_slide = _is_dewarped_projector_slide(main_image)
-        primary_compact_chars = _ocr_compact_char_count(markdown)
-        structural_lint_passed = (
-            segment_artifact.structural_confirmed
-            and segment_artifact.structural_lint_pass is True
-        )
-        oversized_sparse_table = totals.get("table_cells", 0) >= 500 and _ocr_compact_char_count(markdown) < max(
-            120, totals.get("table_cells", 0) // 4
-        )
-        short_projector_slide = projector_slide and primary_compact_chars < 180
-        if (
-            profile.structural_output == "markdown"
-            and profile.dense_grid_fallback
-            and (not structural_lint_passed or oversized_sparse_table or short_projector_slide)
-            and not _contains_large_markdown_table([markdown])
-        ):
-            if oversized_sparse_table:
-                totals["runtime_flags"] = sorted(
-                    {
-                        *totals.get("runtime_flags", []),
-                        "dense_grid_recovery:oversized_sparse_table",
-                    }
-                )
-            if short_projector_slide:
-                totals["runtime_flags"] = sorted(
-                    {
-                        *totals.get("runtime_flags", []),
-                        "dense_grid_recovery:short_projector_slide",
-                    }
-                )
-            if projector_slide:
-                fallback_text = _recognize_projector_slide_fallback(
-                    engine,
-                    main_image,
-                    profile,
-                )
-                fallback_calls = 1
-            elif _looks_like_dense_grid_page(main_image):
-                fallback_text, fallback_calls = _recognize_dense_grid_page(
-                    engine,
-                    main_image,
-                    profile,
-                )
-                totals["runtime_flags"] = sorted(
-                    {
-                        *totals.get("runtime_flags", []),
-                        "dense_grid_strategy:bounded_bands_v2",
-                    }
-                )
-            elif _looks_like_sparse_cover_page(main_image):
-                fallback_text, fallback_calls = _recognize_sparse_cover_page(
-                    engine,
-                    main_image,
-                    profile,
-                )
-            totals["chunks"] += fallback_calls
-            if fallback_text.strip():
-                fallback_parts = [part for part in (markdown, fallback_text) if part.strip()]
-                if _should_replace_primary_with_fallback(markdown, fallback_text):
-                    fallback_parts = [fallback_text]
-                    totals["runtime_flags"] = sorted(
-                        {
-                            *totals.get("runtime_flags", []),
-                            "dense_grid_recovery:replace_tiny_primary",
-                        }
-                    )
-                markdown = _finalize_markdown(
-                    "\n\n".join(dedupe_chunks(fallback_parts)),
-                    profile,
-                )
-        if profile.structural_output == "markdown":
-            aligned_markdown, aligned_calls = _recover_aligned_numeric_full_page(
-                markdown,
-                engine,
-                main_image,
-                profile,
-            )
-            totals["chunks"] += aligned_calls
-            if aligned_markdown is not None:
-                markdown = _finalize_markdown(aligned_markdown, profile)
-                totals["runtime_flags"] = sorted(
-                    {
-                        *totals.get("runtime_flags", []),
-                        "aligned_numeric_recovery:full_page",
-                    }
-                )
-            markdown, text_repair_flags = _repair_screen_text_noise(markdown)
-            if text_repair_flags:
-                totals["runtime_flags"] = sorted(
-                    {
-                        *totals.get("runtime_flags", []),
-                        *text_repair_flags,
-                    }
-                )
-            markdown, repaired_tables = _repair_large_markdown_tables(markdown)
-            if repaired_tables:
-                totals["runtime_flags"] = sorted(
-                    {
-                        *totals.get("runtime_flags", []),
-                        "table_repair:large_markdown_shape",
-                    }
-                )
-            markdown, repaired_curriculum_title = _repair_curriculum_title_page_tables(markdown)
-            if repaired_curriculum_title:
-                totals["runtime_flags"] = sorted(
-                    {
-                        *totals.get("runtime_flags", []),
-                        "table_repair:curriculum_title_page",
-                    }
-                )
-            markdown, repaired_curriculum_logical = _repair_curriculum_logical_tables(markdown)
-            if repaired_curriculum_logical:
-                totals["runtime_flags"] = sorted(
-                    {
-                        *totals.get("runtime_flags", []),
-                        "table_repair:curriculum_logical",
-                    }
-                )
-            markdown, repaired_curriculum_controls = _repair_curriculum_summary_control_labels(markdown)
-            if repaired_curriculum_controls:
-                totals["runtime_flags"] = sorted(
-                    {
-                        *totals.get("runtime_flags", []),
-                        "table_repair:curriculum_control_labels",
-                    }
-                )
-            markdown, repaired_curriculum_summary_numeric = _repair_curriculum_summary_numeric_noise(markdown)
-            if repaired_curriculum_summary_numeric:
-                totals["runtime_flags"] = sorted(
-                    {
-                        *totals.get("runtime_flags", []),
-                        "table_repair:curriculum_summary_numeric",
-                    }
-                )
-            markdown, repaired_curriculum_pages = _repair_curriculum_page_headings(markdown)
-            if repaired_curriculum_pages:
-                totals["runtime_flags"] = sorted(
-                    {
-                        *totals.get("runtime_flags", []),
-                        "doc_repair:curriculum_page_headings",
-                    }
-                )
-            markdown, repaired_score_tables = _repair_short_name_score_tables(markdown)
-            if repaired_score_tables:
-                totals["runtime_flags"] = sorted(
-                    {
-                        *totals.get("runtime_flags", []),
-                        "table_repair:short_name_score",
-                    }
-                )
-            markdown, repaired_curriculum_headers = _repair_curriculum_header_excerpt_tables(markdown)
-            if repaired_curriculum_headers:
-                totals["runtime_flags"] = sorted(
-                    {
-                        *totals.get("runtime_flags", []),
-                        "table_repair:curriculum_header_excerpt",
-                    }
-                )
-            markdown, repaired_curriculum_summary = _repair_curriculum_summary_tables(markdown)
-            if repaired_curriculum_summary:
-                totals["runtime_flags"] = sorted(
-                    {
-                        *totals.get("runtime_flags", []),
-                        "table_repair:curriculum_summary",
-                    }
-                )
-            markdown, repaired_headings = _repair_doc_section_headings(markdown)
-            if repaired_headings:
-                totals["runtime_flags"] = sorted(
-                    {
-                        *totals.get("runtime_flags", []),
-                        "doc_repair:section_headings",
-                    }
-                )
-            markdown_blocks = _markdown_blocks(markdown)
-            recovered_screen = _recover_search_results_screen(markdown_blocks)
-            if recovered_screen is not None:
-                result_columns: list[list[list[str]]] = []
-                extra_text = ""
-                if hasattr(engine, "recognize"):
-                    extra_text = engine.recognize(
-                        main_image,
-                        mode="text_mode",
-                        psm=profile.document_region_psm,
-                    )
-                    totals["chunks"] += 1
-                    totals["runtime_flags"] = sorted(
-                        {
-                            *totals.get("runtime_flags", []),
-                            "search_results_recovery:full_page_ocr",
-                        }
-                    )
-                    recovered_screen = (
-                        _recover_search_results_screen(
-                            markdown_blocks,
-                            extra_text=extra_text,
-                        )
-                        or recovered_screen
-                    )
-                if hasattr(engine, "recognize_words"):
-                    result_words = engine.recognize_words(
-                        main_image,
-                        psm=profile.large_table_word_psm,
-                        min_conf=0,
-                    )
-                    result_words_text = " ".join(
-                        str(word.get("text", "")).strip()
-                        for word in result_words
-                        if str(word.get("text", "")).strip()
-                    )
-                    combined_extra_text = "\n".join(
-                        part.strip()
-                        for part in (extra_text, result_words_text)
-                        if part.strip()
-                    )
-                    result_ranges = _search_result_column_ranges(
-                        result_words,
-                        main_image.size,
-                    )
-                    result_details = _search_result_detail_texts(
-                        main_image,
-                        result_ranges,
-                    )
-                    result_columns = _search_result_columns_from_words(
-                        result_words,
-                        main_image.size,
-                        "\n".join((markdown, combined_extra_text)),
-                        detail_texts=result_details,
-                    )
-                    if result_details:
-                        totals["chunks"] += sum(len(detail) for detail in result_details)
-                        totals["runtime_flags"] = sorted(
-                            {
-                                *totals.get("runtime_flags", []),
-                                "search_results_recovery:detail_strips",
-                            }
-                        )
-                    if (
-                        len(result_columns) < 5
-                        and profile.sparse_text_fallback_engine
-                        and _engine_name(engine) != profile.sparse_text_fallback_engine
-                    ):
-                        fallback_engine = _create_sparse_text_fallback_engine(profile)
-                        fallback_recognize_words = (
-                            getattr(fallback_engine, "recognize_words", None) if fallback_engine is not None else None
-                        )
-                        if callable(fallback_recognize_words):
-                            fallback_words = fallback_recognize_words(
-                                main_image,
-                                psm=profile.large_table_word_psm,
-                                min_conf=0,
-                            )
-                            totals["chunks"] += 1
-                            fallback_ranges = _search_result_column_ranges(
-                                fallback_words,
-                                main_image.size,
-                            )
-                            fallback_details = _search_result_detail_texts(
-                                main_image,
-                                fallback_ranges,
-                            )
-                            fallback_columns = _search_result_columns_from_words(
-                                fallback_words,
-                                main_image.size,
-                                "\n".join((markdown, combined_extra_text)),
-                                detail_texts=fallback_details,
-                            )
-                            if len(fallback_columns) > len(result_columns):
-                                result_columns = fallback_columns
-                                if fallback_details:
-                                    totals["chunks"] += sum(len(detail) for detail in fallback_details)
-                                totals["runtime_flags"] = sorted(
-                                    {
-                                        *totals.get("runtime_flags", []),
-                                        "search_results_recovery:fallback_result_grid_words",
-                                        *(["search_results_recovery:detail_strips"] if fallback_details else []),
-                                    }
-                                )
-                    if result_columns:
-                        recovered_screen = (
-                            _recover_search_results_screen(
-                                markdown_blocks,
-                                extra_text=combined_extra_text,
-                                result_columns=result_columns,
-                            )
-                            or recovered_screen
-                        )
-                        totals["runtime_flags"] = sorted(
-                            {
-                                *totals.get("runtime_flags", []),
-                                "search_results_recovery:result_grid_words",
-                            }
-                        )
-                markdown = _finalize_recovered_table_markdown(
-                    recovered_screen,
-                    profile,
-                )
-                totals["runtime_flags"] = sorted(
-                    {
-                        *totals.get("runtime_flags", []),
-                        "search_results_recovery:screen_grid",
-                    }
-                )
-        return markdown, totals
-
-    page_parts = []
-    totals = {
-        "chunks": 0,
-        "cards_found": 0,
-        "tables_found": 0,
-        "table_cells": 0,
-    }
-    runtime_flags: set[str] = set()
-    for segment in iter_vertical_segments(
-        main_image,
-        chunk_height=1600,
-        overlap=120,
-    ):
-        try:
-            markdown, meta = _convert_page_segment(segment, engine, profile)
-            if markdown.strip():
-                page_parts.extend(_markdown_blocks(markdown))
-            for key in totals:
-                totals[key] += meta[key]
-            runtime_flags.update(meta.get("runtime_flags", []))
-        finally:
-            if segment is not main_image:
-                segment.close()
-
-    if profile.structural_output == "markdown":
-        page_parts, merged_tables = _merge_adjacent_compatible_table_parts(page_parts)
-        if merged_tables:
-            runtime_flags.add("structural_grammar:merge_table_continuations")
-        recovered_grid = _recover_long_card_grid_table(page_parts)
-        if recovered_grid is not None:
-            page_parts = [recovered_grid]
-            runtime_flags.add("long_card_grid_recovery:single_table")
-
-    raw_long_markdown = "\n\n".join(page_parts)
-    final_markdown = _finalize_markdown(raw_long_markdown, profile)
-    if profile.structural_output == "markdown":
-        final_markdown, repair_flags = _apply_static_markdown_repairs(
-            final_markdown,
-            profile,
-        )
-        runtime_flags.update(repair_flags)
-
-    return final_markdown, {**totals, "runtime_flags": sorted(runtime_flags)}
+    """Single production raster route; native PDF text is handled upstream."""
+    artifact = _convert_page_segment(main_image, engine, profile)
+    return artifact.markdown, artifact.metadata()
 
 
 def iter_convert_bytes(
@@ -6058,9 +5470,7 @@ def iter_convert_bytes(
     profile = pipeline_profile or resolve_pipeline_profile(engine_type)
     normalized_pdf_mode = normalize_pdf_mode(pdf_mode)
     text_layer_page_candidates = (
-        _extract_pdf_text_layer_page_candidates(content, filename)
-        if normalized_pdf_mode == "auto"
-        else []
+        _extract_pdf_text_layer_page_candidates(content, filename) if normalized_pdf_mode == "auto" else []
     )
     fully_readable_text_layer = bool(text_layer_page_candidates) and all(
         page_text is not None for page_text in text_layer_page_candidates
@@ -6098,7 +5508,9 @@ def iter_convert_bytes(
                 "pages": len(text_layer_page_candidates),
                 "pdf_text_layer_pages": len(text_layer_page_candidates),
                 "empty_pages": [],
-                "pipeline": profile.name,
+                "pipeline": "pdf_text_layer",
+                "pipeline_profile": profile.name,
+                "pipeline_stages": [],
                 "pdf_mode": normalized_pdf_mode,
                 "flags": text_layer_flags,
                 "preprocess_steps": [],
@@ -6108,7 +5520,9 @@ def iter_convert_bytes(
         }
         return
 
-    image_pipeline = OcrPreprocessingPipeline.from_step_names(profile.image_preprocessing)
+    # Decode/orient only. Raster preprocessing and every following structural
+    # decision belong to the shared Rust separated route.
+    image_pipeline = OcrPreprocessingPipeline.from_step_names(())
     engine = _create_engine(engine_type, profile)
     total_chunks = 0
     cards_found = 0
@@ -6200,11 +5614,13 @@ def iter_convert_bytes(
         "pages": page_count,
         "pdf_text_layer_pages": pdf_text_layer_pages,
         "empty_pages": empty_pages,
-        "pipeline": profile.name,
+        "pipeline": ("pdf_text_layer+rust_separated_v1" if pdf_text_layer_pages else "rust_separated_v1"),
+        "pipeline_profile": profile.name,
+        "pipeline_stages": list(SEPARATED_STAGES),
         "pdf_mode": normalized_pdf_mode,
         "flags": sorted(set(profile_flags(profile)) | runtime_flags),
-        "preprocess_steps": list(profile.image_preprocessing),
-        "layout_steps": list(profile.layout.allowed_stages),
+        "preprocess_steps": ["rust:preprocess"],
+        "layout_steps": list(SEPARATED_STAGES[1:]),
         "elapsed_ms": 0,  # to be overwritten in router
     }
     yield {"type": "complete", "meta": meta}

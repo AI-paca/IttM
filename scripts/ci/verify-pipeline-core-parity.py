@@ -11,7 +11,11 @@ OCR_ROOT = REPO_ROOT / "ocr"
 if str(OCR_ROOT) not in sys.path:
     sys.path.insert(0, str(OCR_ROOT))
 
-from app.layout.sparse_codes import SPARSE_CODE_COMPONENTS, SPARSE_SIGNALS, add_sparse_signal
+from app.layout.sparse_codes import (
+    SPARSE_CODE_COMPONENTS,
+    SPARSE_SIGNALS,
+    add_sparse_signal,
+)
 from app.pipeline_core import PipelineCapabilities, recipe_for
 
 STAGE_BITS = {
@@ -77,11 +81,50 @@ def verify(library_path: Path) -> None:
         ctypes.c_uint32,
     )
     library.ittm_should_drop_text_block.restype = ctypes.c_uint32
+    library.ittm_separated_begin.argtypes = (
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+    )
+    library.ittm_separated_begin.restype = ctypes.c_uint32
+    library.ittm_separated_job_count.argtypes = (ctypes.c_uint32,)
+    library.ittm_separated_job_count.restype = ctypes.c_uint32
+    library.ittm_separated_job_field.argtypes = (
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+    )
+    library.ittm_separated_job_field.restype = ctypes.c_int32
+    library.ittm_separated_set_ocr.argtypes = (
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+    )
+    library.ittm_separated_set_ocr.restype = ctypes.c_int32
+    library.ittm_separated_render_length.argtypes = (ctypes.c_uint32,)
+    library.ittm_separated_render_length.restype = ctypes.c_uint32
+    library.ittm_separated_render_copy.argtypes = (
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+    )
+    library.ittm_separated_render_copy.restype = ctypes.c_int32
+    library.ittm_separated_stage_mask.argtypes = (ctypes.c_uint32,)
+    library.ittm_separated_stage_mask.restype = ctypes.c_uint32
+    library.ittm_separated_drop.argtypes = (ctypes.c_uint32,)
+    library.ittm_separated_drop.restype = ctypes.c_int32
 
-    assert library.ittm_pipeline_abi_version() == 3
+    assert library.ittm_pipeline_abi_version() == 4
     for code in SPARSE_CODE_COMPONENTS:
         for signal in SPARSE_SIGNALS:
-            assert library.ittm_sparse_add_signal(code, signal) == add_sparse_signal(code, signal)
+            assert library.ittm_sparse_add_signal(code, signal) == add_sparse_signal(
+                code, signal
+            )
     assert library.ittm_sparse_add_signal(1, 1) == -2
     assert library.ittm_sparse_add_signal(1, SPARSE_SIGNALS[0]) == -1
 
@@ -135,7 +178,9 @@ def verify(library_path: Path) -> None:
             provides_markdown=bool(bits & 4),
             needs_language_retry=bool(bits & 8),
         )
-        assert library.ittm_pipeline_recipe_mask(capability_bits(capabilities)) == recipe_mask(capabilities)
+        assert library.ittm_pipeline_recipe_mask(
+            capability_bits(capabilities)
+        ) == recipe_mask(capabilities)
 
     for primary_chars in (0, 9, 10, 100, 179):
         for fallback_chars in (0, 79, 80, 139, 140, 179, 180, 252):
@@ -192,9 +237,51 @@ def verify(library_path: Path) -> None:
                         == expected
                     )
 
+    width, height = 80, 40
+    pixels = bytearray([255] * (width * height))
+    for top, bottom, left, right in ((7, 11, 8, 55), (24, 28, 12, 70)):
+        for y in range(top, bottom):
+            pixels[y * width + left : y * width + right] = b"\0" * (right - left)
+    pixel_buffer = ctypes.create_string_buffer(bytes(pixels))
+    handle = library.ittm_separated_begin(
+        pixel_buffer,
+        len(pixels),
+        width,
+        height,
+        width,
+        1,
+    )
+    assert handle != 0
+    try:
+        assert library.ittm_separated_stage_mask(handle) == 0b00011111
+        assert library.ittm_separated_job_count(handle) == 2
+        assert tuple(
+            library.ittm_separated_job_field(handle, 0, field) for field in range(4)
+        ) == (
+            6,
+            6,
+            57,
+            12,
+        )
+        for index, value in enumerate((b"first", b"second")):
+            text = ctypes.create_string_buffer(value)
+            assert (
+                library.ittm_separated_set_ocr(handle, index, text, len(value), 900)
+                == 0
+            )
+        length = library.ittm_separated_render_length(handle)
+        output = ctypes.create_string_buffer(length)
+        assert library.ittm_separated_render_copy(handle, output, length) == length
+        assert output.raw[:length] == b"first\n\nsecond"
+        assert library.ittm_separated_stage_mask(handle) == 0b11111111
+    finally:
+        assert library.ittm_separated_drop(handle) == 0
+
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify Python/Rust pipeline core parity.")
+    parser = argparse.ArgumentParser(
+        description="Verify Python/Rust pipeline core parity."
+    )
     parser.add_argument("library", type=Path)
     args = parser.parse_args()
     verify(args.library.resolve())

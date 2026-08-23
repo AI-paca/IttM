@@ -125,19 +125,19 @@
         <mxCell id="rust-shell" value="" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#171A27;strokeColor=#596679;strokeWidth=2;container=1;connectable=0;" vertex="1" parent="1">
           <mxGeometry x="620" y="845" width="620" height="180" as="geometry"/>
         </mxCell>
-        <mxCell id="rust-title" value="ONE RUST SOURCE · two runtime interpretations" style="text;html=1;align=center;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#AAB8C8;" vertex="1" parent="rust-shell">
+        <mxCell id="rust-title" value="ONE RUST SOURCE · native and WASM executors" style="text;html=1;align=center;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#AAB8C8;" vertex="1" parent="rust-shell">
           <mxGeometry x="20" y="10" width="580" height="22" as="geometry"/>
         </mxCell>
-        <mxCell id="rust-source" value="&lt;b&gt;pipeline-core/src/*.rs&lt;/b&gt;&lt;br&gt;recipe · sparse/evidence · dedupe" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#28214A;strokeColor=#9A77E8;strokeWidth=2;fontColor=#F0EAFE;fontSize=10;" vertex="1" parent="rust-shell">
+        <mxCell id="rust-source" value="&lt;b&gt;pipeline-core/src/*.rs&lt;/b&gt;&lt;br&gt;8 stages · block geometry · assembly" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#28214A;strokeColor=#9A77E8;strokeWidth=2;fontColor=#F0EAFE;fontSize=10;" vertex="1" parent="rust-shell">
           <mxGeometry x="25" y="60" width="245" height="70" as="geometry"/>
         </mxCell>
         <mxCell id="compiled-group" value="" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#202A30;strokeColor=#66788A;strokeWidth=2;container=1;connectable=0;" vertex="1" parent="rust-shell">
           <mxGeometry x="300" y="42" width="295" height="115" as="geometry"/>
         </mxCell>
-        <mxCell id="rust-wasm" value="WASM ABI 3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#183C4B;strokeColor=#42A5BD;strokeWidth=2;fontColor=#E5F8FC;fontSize=9;fontStyle=1;" vertex="1" parent="compiled-group">
+        <mxCell id="rust-wasm" value="WASM ABI 4" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#183C4B;strokeColor=#42A5BD;strokeWidth=2;fontColor=#E5F8FC;fontSize=9;fontStyle=1;" vertex="1" parent="compiled-group">
           <mxGeometry x="15" y="35" width="125" height="45" as="geometry"/>
         </mxCell>
-        <mxCell id="rust-native" value="native .so ABI 3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#203B32;strokeColor=#46B37B;strokeWidth=2;fontColor=#D8F4E4;fontSize=9;fontStyle=1;" vertex="1" parent="compiled-group">
+        <mxCell id="rust-native" value="native .so ABI 4" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#203B32;strokeColor=#46B37B;strokeWidth=2;fontColor=#D8F4E4;fontSize=9;fontStyle=1;" vertex="1" parent="compiled-group">
           <mxGeometry x="155" y="35" width="125" height="45" as="geometry"/>
         </mxCell>
 

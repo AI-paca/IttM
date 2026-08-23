@@ -1,4 +1,4 @@
-export const PIPELINE_CORE_ABI_VERSION = 3;
+export const PIPELINE_CORE_ABI_VERSION = 4;
 
 export const PIPELINE_STAGES = [
   "align",
@@ -12,6 +12,27 @@ export const PIPELINE_STAGES = [
 ] as const;
 
 export type PipelineStage = (typeof PIPELINE_STAGES)[number];
+
+export const SEPARATED_PIPELINE_STAGES = [
+  "preprocess",
+  "geometry",
+  "topology",
+  "find-object",
+  "separate-block",
+  "ocr-blocks",
+  "get-segment",
+  "generate-object",
+] as const;
+
+export interface SeparatedOcrJob {
+  index: number;
+  bbox: readonly [number, number, number, number];
+  objectId: number;
+  row: number;
+  column: number;
+  rowSpan: number;
+  columnSpan: number;
+}
 
 export interface PipelineCapabilities {
   trustedText?: boolean;
@@ -51,7 +72,56 @@ interface PipelineCoreExports extends WebAssembly.Exports {
     existingTokens: number,
     similarityMilli: number,
   ): number;
+  memory?: WebAssembly.Memory;
+  ittm_alloc?(length: number): number;
+  ittm_dealloc?(pointer: number, capacity: number): void;
+  ittm_separated_begin?(
+    pointer: number,
+    byteLength: number,
+    width: number,
+    height: number,
+    stride: number,
+    format: number,
+  ): number;
+  ittm_separated_job_count?(handle: number): number;
+  ittm_separated_job_field?(
+    handle: number,
+    index: number,
+    field: number,
+  ): number;
+  ittm_separated_set_ocr?(
+    handle: number,
+    index: number,
+    pointer: number,
+    byteLength: number,
+    confidenceMilli: number,
+  ): number;
+  ittm_separated_render_length?(handle: number): number;
+  ittm_separated_render_copy?(
+    handle: number,
+    pointer: number,
+    capacity: number,
+  ): number;
+  ittm_separated_stage_mask?(handle: number): number;
+  ittm_separated_drop?(handle: number): number;
 }
+
+type SeparatedExports = Required<
+  Pick<
+    PipelineCoreExports,
+    | "memory"
+    | "ittm_alloc"
+    | "ittm_dealloc"
+    | "ittm_separated_begin"
+    | "ittm_separated_job_count"
+    | "ittm_separated_job_field"
+    | "ittm_separated_set_ocr"
+    | "ittm_separated_render_length"
+    | "ittm_separated_render_copy"
+    | "ittm_separated_stage_mask"
+    | "ittm_separated_drop"
+  >
+>;
 
 function assertNonNegativeIntegers(values: readonly number[], label: string) {
   if (values.some((value) => !Number.isInteger(value) || value < 0)) {
@@ -85,6 +155,45 @@ export class BrowserPipelineCore {
     return new Set(
       PIPELINE_STAGES.filter((_stage, index) => mask & (1 << index)),
     );
+  }
+
+  beginSeparated(options: {
+    pixels: Uint8Array | Uint8ClampedArray;
+    width: number;
+    height: number;
+    stride?: number;
+    format?: 1 | 3 | 4;
+  }): BrowserSeparatedSession {
+    const separated = separatedExports(this.exports);
+    const format = options.format ?? 4;
+    const stride = options.stride ?? options.width * format;
+    const expectedLength = stride * options.height;
+    if (
+      !Number.isInteger(options.width) ||
+      !Number.isInteger(options.height) ||
+      options.width <= 0 ||
+      options.height <= 0 ||
+      options.pixels.byteLength !== expectedLength
+    ) {
+      throw new Error("Invalid separated pipeline raster plane");
+    }
+    const pointer = copyIntoWasm(separated, options.pixels);
+    let handle: number;
+    try {
+      handle = separated.ittm_separated_begin(
+        pointer,
+        options.pixels.byteLength,
+        options.width,
+        options.height,
+        stride,
+        format,
+      );
+    } finally {
+      separated.ittm_dealloc(pointer, options.pixels.byteLength);
+    }
+    if (!handle)
+      throw new Error("Separated pipeline rejected the raster plane");
+    return new BrowserSeparatedSession(separated, handle);
   }
 
   addSparseSignal(code: number, signal: number): number {
@@ -187,6 +296,148 @@ export class BrowserPipelineCore {
         options.similarityMilli,
       ),
     );
+  }
+}
+
+function separatedExports(exports: PipelineCoreExports): SeparatedExports {
+  const required = [
+    "memory",
+    "ittm_alloc",
+    "ittm_dealloc",
+    "ittm_separated_begin",
+    "ittm_separated_job_count",
+    "ittm_separated_job_field",
+    "ittm_separated_set_ocr",
+    "ittm_separated_render_length",
+    "ittm_separated_render_copy",
+    "ittm_separated_stage_mask",
+    "ittm_separated_drop",
+  ] as const;
+  for (const name of required) {
+    if (!exports[name]) {
+      throw new Error(
+        `Pipeline core ABI ${PIPELINE_CORE_ABI_VERSION} misses ${name}`,
+      );
+    }
+  }
+  return exports as SeparatedExports;
+}
+
+function copyIntoWasm(
+  exports: SeparatedExports,
+  bytes: Uint8Array | Uint8ClampedArray,
+): number {
+  if (bytes.byteLength === 0) return 0;
+  const pointer = exports.ittm_alloc(bytes.byteLength);
+  if (!pointer) throw new Error("Pipeline core could not allocate WASM memory");
+  new Uint8Array(exports.memory.buffer, pointer, bytes.byteLength).set(bytes);
+  return pointer;
+}
+
+export class BrowserSeparatedSession {
+  private closed = false;
+
+  constructor(
+    private readonly exports: SeparatedExports,
+    private readonly handle: number,
+  ) {}
+
+  jobs(): readonly SeparatedOcrJob[] {
+    this.assertOpen();
+    const count = this.exports.ittm_separated_job_count(this.handle);
+    const field = (index: number, fieldIndex: number) => {
+      const value = this.exports.ittm_separated_job_field(
+        this.handle,
+        index,
+        fieldIndex,
+      );
+      if (value < 0) {
+        throw new Error(
+          `Invalid separated OCR job field: ${index}:${fieldIndex}`,
+        );
+      }
+      return value;
+    };
+    return Array.from({ length: count }, (_unused, index) => ({
+      index,
+      bbox: [
+        field(index, 0),
+        field(index, 1),
+        field(index, 2),
+        field(index, 3),
+      ] as const,
+      objectId: field(index, 4),
+      row: field(index, 5),
+      column: field(index, 6),
+      rowSpan: field(index, 7),
+      columnSpan: field(index, 8),
+    }));
+  }
+
+  completedStages(): readonly (typeof SEPARATED_PIPELINE_STAGES)[number][] {
+    this.assertOpen();
+    const mask = this.exports.ittm_separated_stage_mask(this.handle);
+    return SEPARATED_PIPELINE_STAGES.filter((_stage, index) =>
+      Boolean(mask & (1 << index)),
+    );
+  }
+
+  setOcr(index: number, text: string, confidenceMilli = 0): void {
+    this.assertOpen();
+    const encoded = new TextEncoder().encode(text);
+    const pointer = copyIntoWasm(this.exports, encoded);
+    try {
+      const status = this.exports.ittm_separated_set_ocr(
+        this.handle,
+        index,
+        pointer,
+        encoded.byteLength,
+        Math.max(0, Math.min(1_000, Math.floor(confidenceMilli))),
+      );
+      if (status !== 0) {
+        throw new Error(`Separated OCR handoff failed with status ${status}`);
+      }
+    } finally {
+      if (pointer) this.exports.ittm_dealloc(pointer, encoded.byteLength);
+    }
+  }
+
+  render(): string {
+    this.assertOpen();
+    const length = this.exports.ittm_separated_render_length(this.handle);
+    if (!length) return "";
+    const pointer = this.exports.ittm_alloc(length);
+    if (!pointer)
+      throw new Error("Pipeline core could not allocate render buffer");
+    try {
+      const copied = this.exports.ittm_separated_render_copy(
+        this.handle,
+        pointer,
+        length,
+      );
+      if (copied !== length) {
+        throw new Error(
+          `Separated renderer copied ${copied} bytes; expected ${length}`,
+        );
+      }
+      return new TextDecoder().decode(
+        new Uint8Array(this.exports.memory.buffer, pointer, length),
+      );
+    } finally {
+      this.exports.ittm_dealloc(pointer, length);
+    }
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    if (this.exports.ittm_separated_drop(this.handle) !== 0) {
+      throw new Error(`Unknown separated pipeline handle: ${this.handle}`);
+    }
+  }
+
+  private assertOpen(): void {
+    if (this.closed) throw new Error("Separated pipeline session is closed");
   }
 }
 

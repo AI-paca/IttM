@@ -7,6 +7,11 @@ Public conversion routes call `ocr/app/services/convert_service.py`.
 `ocr/app/sparse_pipeline` is a separate opt-in runtime and is not wired into
 those routes.
 
+Every raster page runs the native ABI 4 route `preprocess → geometry →
+topology → find-object → separate-block → ocr-blocks → get-segment →
+generate-object`. Python engines only implement `ocr-blocks`. A trustworthy
+native PDF text layer is the only shortcut; `pdf_mode=raster` disables it.
+
 ![Current public and diagnostic OCR pipelines](../assets/ocr-pipeline.svg)
 
 Editable source: [`ocr-pipeline.drawio`](../assets/ocr-pipeline.drawio).
@@ -37,6 +42,10 @@ Editable source: [`ocr-pipeline.drawio`](../assets/ocr-pipeline.drawio).
 Unknown explicit profile names return HTTP 400. `OCR_PIPELINE_PROFILES` in
 `ocr/app/pipeline_config.py` is authoritative; this short list is checked by
 `npm run test:pipeline-docs`.
+
+Profiles may configure the selected OCR adapter (languages, retry and PSM), but
+they do not select a second layout route: Rust owns raster segmentation and
+assembly for every profile.
 
 ## Request controls
 

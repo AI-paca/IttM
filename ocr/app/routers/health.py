@@ -24,7 +24,7 @@ def readiness_endpoint():
         "pytesseract": _module_available("pytesseract"),
         "pdf2image": _module_available("pdf2image"),
         "opencv": _module_available("cv2"),
-        "pipeline_core_abi3": _pipeline_core_available(),
+        "pipeline_core_abi4": _pipeline_core_available(),
     }
 
     return {"ready": all(checks.values()), "checks": checks}

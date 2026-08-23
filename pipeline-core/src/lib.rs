@@ -1,8 +1,9 @@
 mod candidates;
+mod separated;
 
 pub use candidates::{SpanEvidence, score_span_evidence};
 
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 4;
 
 pub const MERGE_UP_CODE: u8 = 3;
 pub const MERGE_LEFT_CODE: u8 = 5;
@@ -549,7 +550,7 @@ mod tests {
 
     #[test]
     fn abi_exposes_the_new_deterministic_decisions() {
-        assert_eq!(ittm_pipeline_abi_version(), 3);
+        assert_eq!(ittm_pipeline_abi_version(), 4);
         assert_eq!(ittm_should_replace_primary(100, 180, 5, 4), 1);
         assert_eq!(ittm_should_replace_primary(100, 180, 5, 3), 0);
         assert_eq!(ittm_should_drop_text_block(32, 32, 17, 20, 20, 0), 1);

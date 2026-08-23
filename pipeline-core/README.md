@@ -1,16 +1,17 @@
 # IttM pipeline core
 
-`pipeline-core` is the single Rust source for the logical stage recipe and
+`pipeline-core` is the single Rust source for the separated raster route and
 bounded deterministic decisions shared by the Python backend and browser. The
 same crate is compiled to `libittm_pipeline_core.so` for Python and
 `ittm_pipeline_core.wasm` for the browser; there is no second copy of those
 Rust decisions.
 
-This does not mean that all OCR code is one Rust implementation. Image/PDF
-decoding, Tesseract/EasyOCR/Tesseract.js, workers, and stage handlers remain
-platform-specific executors behind the shared contract.
+Image/PDF decoding and the OCR engines remain platform-specific adapters. Rust
+owns the production raster stages, block geometry/order, and final assembly.
+The only production bypass is a trustworthy native PDF text layer unless the
+caller forces raster mode.
 
-## ABI v3
+## ABI v4
 
 The C/WASM ABI exports:
 
@@ -20,10 +21,17 @@ The C/WASM ABI exports:
 - `ittm_is_isolated_heading`;
 - `ittm_span_evidence_score`;
 - `ittm_should_replace_primary`;
-- `ittm_should_drop_text_block`.
+- `ittm_should_drop_text_block`;
+- `ittm_alloc` / `ittm_dealloc`;
+- `ittm_separated_begin` / `ittm_separated_drop`;
+- `ittm_separated_job_count` / `ittm_separated_job_field`;
+- `ittm_separated_set_ocr`;
+- `ittm_separated_render_length` / `ittm_separated_render_copy`;
+- `ittm_separated_stage_mask`.
 
-The functions operate on capabilities, bounded numeric evidence, and sparse
-codes. Text and platform handles do not cross the raw ABI.
+The separated session executes `preprocess → geometry → topology → find-object
+→ separate-block → ocr-blocks → get-segment → generate-object`. Raster bytes
+and UTF-8 OCR results cross the ABI; platform engine objects do not.
 
 Python loads the native library through `ocr/app/pipeline_core/native.py`.
 Browser code loads the WASM module through
@@ -52,9 +60,9 @@ Generated native files under `pipeline-core/target` and
 and copy the native library into the runtime image; Lite builds generate the
 WASM module.
 
-Python `/readiness` reports `pipeline_core_abi3`. A missing or incompatible
-native library makes readiness fail even though some Python helpers retain
-fallback implementations for development and tests.
+Python `/readiness` reports `pipeline_core_abi4`. A missing or incompatible
+native library makes readiness fail; production raster conversion does not
+silently fall back to the old Python layout route.
 
 When changing ABI behavior, update the Rust tests, native wrapper, browser
 wrapper, parity verifier, WASM verifier, and this document together.

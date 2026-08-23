@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "npm run build:web && npm run build:server",
+    "build": "npm run build:pipeline-core && npm run build:web && npm run build:server",
     "build:pipeline-core": "npm run build:pipeline-core:native && npm run build:pipeline-core:wasm",
     "build:pipeline-core:native": "bash scripts/runtime/build-pipeline-core-native.sh",
     "build:pipeline-core:wasm": "bash scripts/runtime/build-pipeline-core.sh",

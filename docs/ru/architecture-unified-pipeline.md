@@ -4,16 +4,17 @@
 [Debug sample](../../debug/EXAMPLE.md) |
 [Текущие flags](./architecture-current-flags.md)
 
-Один логический pipeline задаёт порядок:
+Один исполняемый raster pipeline задаёт порядок из
+`debug-all-separated.sh`:
 
 ```text
-align → segment → project_sparse → recognize_segments
-      → select_language_candidate → lexical_correction
-      → group_structures → render_markdown
+preprocess → geometry → topology → find-object → separate-block
+           → ocr-blocks → get-segment → generate-object
 ```
 
-Capabilities входного artifact выбирают нужное подмножество этапов. Например,
-trusted Markdown не проходит layout, retry, correction и повторный render.
+Raster-документ проходит все восемь этапов. Надёжный native PDF text layer —
+единственный shortcut; `PDF как изображение` принудительно возвращает его в
+raster pipeline.
 
 ![Внутренние этапы единого pipeline](../assets/ocr-pipeline.svg)
 
@@ -24,24 +25,15 @@ entry routes, очереди и output adapters здесь намеренно н
 
 Entry routes заканчиваются на artifact contract. Они определяют способ
 доставки и доступный runtime, но не являются владельцами OCR engine.
-Четыре внешние рамки на схеме — фазы, блоки внутри них — stage contracts.
-Runtime adapters вложены только в свою recognition stage. Tesseract.js либо
-Python Tesseract/EasyOCR вызываются из `recognize_segments`: сплошная стрелка
-показывает call, штриховая — return. После возврата стадия выпускает image-free
-`RecognizedSegment[]`; он продолжает pipeline до structural grouping и Markdown
-render.
+Runtime adapters вложены только в `ocr-blocks`. Tesseract.js либо Python
+Tesseract/EasyOCR получают crop jobs от Rust и возвращают UTF-8; Rust сохраняет
+source order и выполняет `get-segment`/`generate-object`.
 
-Текущая реализация не притворяется одним центральным controller. Browser
-alignment/segmentation происходят до `runTextPipeline`, language retry в обоих
-runtime пока связан с recognition adapter, а dedicated browser handler
-`project_sparse` не зарегистрирован.
-
-| Stage contracts        | Browser runtime                  | Python runtime                      |
-| ---------------------- | -------------------------------- | ----------------------------------- |
-| align, segment         | До `runTextPipeline`             | Page decode и layout analysis       |
-| project_sparse         | Dedicated handler отсутствует    | Sparse codes; полная matrix — debug |
-| recognize, language    | Tesseract.js worker и reviewer   | OCR adapter и language agenda       |
-| lexical, group, render | Зарегистрированные text handlers | Formatting и structural journal     |
+| Stage contracts                           | Browser runtime        | Python runtime          |
+| ----------------------------------------- | ---------------------- | ----------------------- |
+| preprocess … separate-block               | `pipeline-core` WASM   | native `pipeline-core`  |
+| ocr-blocks                                | Tesseract.js/provider  | Tesseract/EasyOCR       |
+| get-segment, generate-object              | `pipeline-core` WASM   | native `pipeline-core`  |
 
 ## Что действительно общее
 
@@ -51,19 +43,19 @@ runtime пока связан с recognition adapter, а dedicated browser handl
 - `libittm_pipeline_core.so`, который загружает Python;
 - `ittm_pipeline_core.wasm`, который загружает browser runtime.
 
-Общими являются recipe mask, sparse codes, evidence score, primary replacement
-и text-block deduplication. Сборка проверяет Rust tests, Python/Rust parity и
-WASM ABI.
+Общими являются stage controller, raster block geometry, source order и
+сборка результата, а также bounded recipe/evidence helpers. Сборка проверяет
+Rust tests, Python/Rust parity и WASM ABI 4.
 
 ## Что остаётся платформенным
 
 | Runtime  | Исполнитель                                                   |
 | -------- | ------------------------------------------------------------- |
-| Browser  | PDF.js/image tiles, Tesseract.js, TypeScript handlers         |
-| Backend  | PDF/image decode, Tesseract/EasyOCR, Python layout и handlers |
-| Provider | trusted Markdown artifact после consent/configuration         |
+| Browser  | PDF.js/image decode и Tesseract.js/provider adapter            |
+| Backend  | PDF/image decode и Tesseract/EasyOCR adapter                   |
+| Provider | Сетевой OCR adapter после consent/configuration                |
 
-Это один контракт и одна Rust decision-логика, но не один общий OCR engine.
+OCR engine платформенный, но маршрут до/после его вызова один и реализован Rust.
 
 ## Текущие и будущие входы
 

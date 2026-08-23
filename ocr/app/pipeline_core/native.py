@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 
 PIPELINE_CORE_LIBRARY_ENV = "ITTM_PIPELINE_CORE_LIB"
-PIPELINE_CORE_ABI_VERSION = 3
+PIPELINE_CORE_ABI_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -55,11 +55,46 @@ class NativePipelineCore:
             ctypes.c_uint32,
         )
         library.ittm_should_drop_text_block.restype = ctypes.c_uint32
+        library.ittm_separated_begin.argtypes = (
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_begin.restype = ctypes.c_uint32
+        library.ittm_separated_job_count.argtypes = (ctypes.c_uint32,)
+        library.ittm_separated_job_count.restype = ctypes.c_uint32
+        library.ittm_separated_job_field.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_job_field.restype = ctypes.c_int32
+        library.ittm_separated_set_ocr.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_set_ocr.restype = ctypes.c_int32
+        library.ittm_separated_render_length.argtypes = (ctypes.c_uint32,)
+        library.ittm_separated_render_length.restype = ctypes.c_uint32
+        library.ittm_separated_render_copy.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_render_copy.restype = ctypes.c_int32
+        library.ittm_separated_stage_mask.argtypes = (ctypes.c_uint32,)
+        library.ittm_separated_stage_mask.restype = ctypes.c_uint32
+        library.ittm_separated_drop.argtypes = (ctypes.c_uint32,)
+        library.ittm_separated_drop.restype = ctypes.c_int32
         version = int(library.ittm_pipeline_abi_version())
         if version != PIPELINE_CORE_ABI_VERSION:
-            raise RuntimeError(
-                f"Unsupported pipeline core ABI {version}; expected {PIPELINE_CORE_ABI_VERSION}"
-            )
+            raise RuntimeError(f"Unsupported pipeline core ABI {version}; expected {PIPELINE_CORE_ABI_VERSION}")
         return cls(path=resolved, _library=library)
 
     def recipe_mask(self, capability_bits: int) -> int:
@@ -148,6 +183,78 @@ class NativePipelineCore:
             raise ValueError("Text block deduplication values must be non-negative")
         return bool(self._library.ittm_should_drop_text_block(*values))
 
+    def separated_begin(
+        self,
+        pixels: bytes,
+        width: int,
+        height: int,
+        stride: int,
+        pixel_format: int,
+    ) -> int:
+        if not pixels:
+            raise ValueError("Separated pipeline pixels must not be empty")
+        source = ctypes.create_string_buffer(pixels)
+        handle = int(
+            self._library.ittm_separated_begin(
+                source,
+                len(pixels),
+                width,
+                height,
+                stride,
+                pixel_format,
+            )
+        )
+        if handle == 0:
+            raise ValueError("Separated pipeline rejected the raster plane")
+        return handle
+
+    def separated_job_count(self, handle: int) -> int:
+        return int(self._library.ittm_separated_job_count(handle))
+
+    def separated_job_field(self, handle: int, index: int, field: int) -> int:
+        value = int(self._library.ittm_separated_job_field(handle, index, field))
+        if value < 0:
+            raise ValueError(f"Invalid separated OCR job field: {index}:{field}")
+        return value
+
+    def separated_set_ocr(
+        self,
+        handle: int,
+        index: int,
+        text: str,
+        confidence_milli: int = 0,
+    ) -> None:
+        encoded = text.encode("utf-8")
+        source = ctypes.create_string_buffer(encoded) if encoded else None
+        status = int(
+            self._library.ittm_separated_set_ocr(
+                handle,
+                index,
+                source,
+                len(encoded),
+                confidence_milli,
+            )
+        )
+        if status != 0:
+            raise ValueError(f"Separated OCR handoff failed with status {status}")
+
+    def separated_render(self, handle: int) -> str:
+        length = int(self._library.ittm_separated_render_length(handle))
+        if length == 0:
+            return ""
+        output = ctypes.create_string_buffer(length)
+        copied = int(self._library.ittm_separated_render_copy(handle, output, length))
+        if copied != length:
+            raise RuntimeError(f"Separated renderer copied {copied} bytes; expected {length}")
+        return bytes(output.raw[:length]).decode("utf-8")
+
+    def separated_stage_mask(self, handle: int) -> int:
+        return int(self._library.ittm_separated_stage_mask(handle))
+
+    def separated_drop(self, handle: int) -> None:
+        if int(self._library.ittm_separated_drop(handle)) != 0:
+            raise ValueError(f"Unknown separated pipeline handle: {handle}")
+
 
 def _library_candidates() -> tuple[Path, ...]:
     repo_root = Path(__file__).resolve().parents[3]
@@ -164,9 +271,7 @@ def native_pipeline_core() -> NativePipelineCore | None:
     if configured:
         configured_path = Path(configured)
         if not configured_path.is_file():
-            raise RuntimeError(
-                f"Configured pipeline core does not exist: {configured_path}"
-            )
+            raise RuntimeError(f"Configured pipeline core does not exist: {configured_path}")
         return NativePipelineCore.load(configured_path)
     for candidate in _library_candidates():
         if candidate.is_file():

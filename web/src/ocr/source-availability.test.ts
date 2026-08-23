@@ -1,8 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hasAvailableLocalBackend } from "./source-availability";
+import {
+  hasAvailableLocalBackend,
+  shouldIncludeLocalBackend,
+} from "./source-availability";
 
-test("auto OCR waits for backend diagnostics before uploading", () => {
+test("reports backend availability from diagnostics", () => {
   assert.equal(hasAvailableLocalBackend(null), false);
   assert.equal(
     hasAvailableLocalBackend({
@@ -22,5 +25,24 @@ test("auto OCR waits for backend diagnostics before uploading", () => {
       backend: null,
     }),
     false,
+  );
+});
+
+test("full runtime always tries its same-origin gateway", () => {
+  assert.equal(shouldIncludeLocalBackend(null, false), true);
+  assert.equal(
+    shouldIncludeLocalBackend(
+      { backend: null, error: "diagnostics are still unavailable" },
+      false,
+    ),
+    true,
+  );
+});
+
+test("lite runtime only adds a confirmed backend gateway", () => {
+  assert.equal(shouldIncludeLocalBackend(null, true), false);
+  assert.equal(
+    shouldIncludeLocalBackend({ backend: { engine: "tesseract" } }, true),
+    true,
   );
 });

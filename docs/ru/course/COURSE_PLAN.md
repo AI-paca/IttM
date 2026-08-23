@@ -12,7 +12,7 @@
 ![История, текущая работа и планы IttM](../../assets/roadmap.svg)
 
 - Реализованное и проверенное: browser/backend OCR, Task API/CLI, recursive
-  contracts, ABI 3, sparse opt-in runtime, SAST/SCA/SBOM gates.
+  contracts, ABI 4 separated runtime, sparse opt-in runtime, SAST/SCA/SBOM gates.
 - Текущая работа: документация сопровождения и проверяемые debug artifacts.
 - Ближайшее развитие: lifecycle исходного `File`, versioned sparse artifacts,
   multilingual diagnostics и native/WASM parity.

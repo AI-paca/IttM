@@ -32,6 +32,7 @@ else
     web/src
     edge/cloudflare-worker.ts
     ocr/app
+    pipeline-core/src
     scripts/ci
     scripts/runtime
     scripts/cli

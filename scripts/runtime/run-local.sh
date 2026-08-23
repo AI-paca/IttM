@@ -202,6 +202,16 @@ ensure_bun_env() {
     fi
 }
 
+ensure_pipeline_cores() {
+    if [ "${SKIP_PYTHON:-0}" != "1" ]; then
+        echo "[RUNNER] Building and verifying native Rust pipeline core..."
+        bash "$SCRIPT_DIR/build-pipeline-core-native.sh"
+    fi
+
+    echo "[RUNNER] Ensuring compatible browser Rust/WASM pipeline core..."
+    bash "$SCRIPT_DIR/build-pipeline-core.sh"
+}
+
 ensure_host_python() {
     if [ -z "$HOST_PYTHON" ]; then
         if command -v python3 >/dev/null 2>&1; then
@@ -234,6 +244,7 @@ GW_PORT="$(select_port PORT "$GW_PORT" "$GW_PORT_LOCKED")"
 
 ensure_bun_env
 ensure_system_tools
+ensure_pipeline_cores
 
 # 1. Start Python Service
 if ensure_python_env; then

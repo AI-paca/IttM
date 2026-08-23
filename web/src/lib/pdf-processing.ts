@@ -6,6 +6,7 @@ export interface PdfProcessingOptions {
   maxPagePixels?: number;
   maxDimension?: number;
   cropMode?: "auto" | "none";
+  forceRaster?: boolean;
   shouldContinue?: () => boolean;
 }
 
@@ -68,8 +69,9 @@ export async function processPreparedPages(
     });
     const prepared = await preparePage(pageNumber);
     assertActive(options);
-    const nativeMarkdown =
-      prepared.nativeOracle?.assembled.markdown.trim() ?? "";
+    const nativeMarkdown = options.forceRaster
+      ? ""
+      : (prepared.nativeOracle?.assembled.markdown.trim() ?? "");
     onProgress(
       nativeMarkdown
         ? `Сборка native-сегментов страницы ${pageNumber}...`
@@ -93,7 +95,9 @@ export async function processPreparedPages(
         totalPages,
       );
       assertActive(options);
-      pageText = mergeNativeAndOcrText(prepared.nativeText, ocrText);
+      pageText = options.forceRaster
+        ? ocrText
+        : mergeNativeAndOcrText(prepared.nativeText, ocrText);
     }
 
     if (pageText.trim()) {

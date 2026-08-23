@@ -1,4 +1,32 @@
 rules:
+  - id: rust-pipeline-core-process-execution
+    languages: [rust]
+    severity: ERROR
+    message: The shared native/WASM pipeline core must not spawn processes.
+    metadata:
+      category: security
+      cwe: CWE-78
+    paths:
+      include:
+        - /pipeline-core/src/**
+    pattern-either:
+      - pattern: std::process::Command::new(...)
+      - pattern: Command::new(...)
+
+  - id: rust-unchecked-utf8-at-ffi-boundary
+    languages: [rust]
+    severity: ERROR
+    message: FFI text must be validated as UTF-8 before it enters the shared pipeline core.
+    metadata:
+      category: security
+      cwe: CWE-20
+    paths:
+      include:
+        - /pipeline-core/src/**
+    pattern-either:
+      - pattern: std::str::from_utf8_unchecked(...)
+      - pattern: str::from_utf8_unchecked(...)
+
   - id: python-fastapi-wildcard-cors
     languages: [python]
     severity: ERROR

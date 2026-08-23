@@ -147,7 +147,25 @@ for (const asset of requiredPdfJsWasmAssets) {
 await assertNonEmpty(pipelineCorePath);
 const pipelineCoreBytes = await readFile(pipelineCorePath);
 const pipelineCore = await WebAssembly.instantiate(pipelineCoreBytes, {});
-assert.equal(pipelineCore.instance.exports.ittm_pipeline_abi_version(), 3);
+assert.equal(pipelineCore.instance.exports.ittm_pipeline_abi_version(), 4);
+for (const name of [
+  "memory",
+  "ittm_alloc",
+  "ittm_dealloc",
+  "ittm_separated_begin",
+  "ittm_separated_job_count",
+  "ittm_separated_job_field",
+  "ittm_separated_set_ocr",
+  "ittm_separated_render_length",
+  "ittm_separated_render_copy",
+  "ittm_separated_stage_mask",
+  "ittm_separated_drop",
+]) {
+  assert.ok(
+    pipelineCore.instance.exports[name],
+    `Pages pipeline core misses ABI 4 export ${name}`,
+  );
+}
 await assertNonEmpty(path.join(textReviewerModelRoot, "config.json"));
 await assertFileSize(
   path.join(textReviewerModelRoot, "onnx", "model_quantized.onnx"),

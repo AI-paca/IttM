@@ -54,7 +54,9 @@ export function createBrowserOcrProfile(
   if ((memory !== null && memory <= 2) || (cores !== null && cores <= 2)) {
     return {
       languages: profile.languages || STRICT_LANGUAGES,
-      cacheWorker: false,
+      // Reuse the bounded worker; rebuilding it for every PDF page costs more
+      // memory and time than keeping its already-loaded language data alive.
+      cacheWorker: true,
       maxImagePixels: 4_000_000,
       maxDimension: 2200,
       pdfRenderScale: 1,

@@ -901,6 +901,59 @@ test("cached worker updates progress callback between sequential leases", async 
   await pool.releaseCached();
 });
 
+test("separated blocks reuse one multilingual worker without language reinitialization", async () => {
+  let createdWorkers = 0;
+  let recognitions = 0;
+  let reinitializations = 0;
+  const parameters: Record<string, string>[] = [];
+  const pool = new BrowserOcrWorkerPool(async () => {
+    createdWorkers += 1;
+    return {
+      async setParameters(params) {
+        parameters.push(params);
+      },
+      async reinitialize() {
+        reinitializations += 1;
+      },
+      async recognize() {
+        recognitions += 1;
+        return { data: { text: `segment-${recognitions}` } };
+      },
+      async terminate() {},
+    };
+  });
+  const t9Profile: BrowserOcrProfile = {
+    ...profile(),
+    languages: "rus+eng+chi_sim",
+    lexicalCorrection: "t9_small",
+    ocrLanguageRetry: "t9_small",
+  };
+
+  const firstLease = await pool.acquire(t9Profile, () => {});
+  assert.equal(
+    await firstLease.recognizeSeparatedBlock(new Blob(["first"]), "7"),
+    "segment-1",
+  );
+  await firstLease.release();
+
+  const secondLease = await pool.acquire(t9Profile, () => {});
+  assert.equal(
+    await secondLease.recognizeSeparatedBlock(new Blob(["second"]), "7"),
+    "segment-2",
+  );
+  await secondLease.release();
+
+  assert.equal(createdWorkers, 1);
+  assert.equal(recognitions, 2);
+  assert.equal(reinitializations, 0);
+  assert.deepEqual(parameters, [
+    { tessedit_pageseg_mode: "7" },
+    { tessedit_pageseg_mode: "7" },
+  ]);
+
+  await pool.releaseCached();
+});
+
 test("worker cache key differentiates tiny reviewer table settings", async () => {
   let createdWorkers = 0;
   const workerFactory = async () => {

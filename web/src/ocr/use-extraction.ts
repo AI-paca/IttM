@@ -142,10 +142,11 @@ export function useOcrExtraction({
   useEffect(() => {
     if (previousFileRef.current === file) return;
 
+    // Keep the idle browser worker warm for the next file. Explicit
+    // cancellation still releases it through cancelExtraction().
     previousFileRef.current = file;
     activeExtractRef.current.current = false;
     setIsExtracting(false);
-    void releaseBrowserOcrCache();
   }, [file, setIsExtracting]);
 
   useEffect(() => {

@@ -742,6 +742,34 @@ class BrowserOcrWorkerSession {
     return this.recognizePage(input, pageSegmentationMode, true);
   }
 
+  async recognizeSeparatedBlock(
+    input: File | Blob,
+    pageSegmentationMode: string,
+  ): Promise<string> {
+    // Rust has already bounded the block. Re-running language and image
+    // candidates here would reinitialize Tesseract for every segment.
+    this.busy = true;
+    try {
+      const worker = await this.workerPromise;
+      const recognizeInput = await toTesseractRecognizeInput(input);
+      await worker.setParameters?.({
+        tessedit_pageseg_mode: pageSegmentationMode,
+      });
+      const result = await this.recognizeWithOutput(
+        worker,
+        recognizeInput,
+        false,
+      );
+      this.languageProbabilities = updateLanguageProbabilities(
+        this.languageProbabilities,
+        result.text,
+      );
+      return result.text;
+    } finally {
+      this.busy = false;
+    }
+  }
+
   private async recognizePage(
     input: File | Blob,
     pageSegmentationMode: string | undefined,
@@ -1003,6 +1031,13 @@ export class BrowserOcrWorkerLease {
     pageSegmentationMode?: string,
   ): Promise<BrowserOcrDetailedResult> {
     return this.session.recognizeDetailed(input, pageSegmentationMode);
+  }
+
+  recognizeSeparatedBlock(
+    input: File | Blob,
+    pageSegmentationMode: string,
+  ): Promise<string> {
+    return this.session.recognizeSeparatedBlock(input, pageSegmentationMode);
   }
 
   async release(): Promise<void> {

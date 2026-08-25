@@ -50,7 +50,9 @@ async function decodeRaster(input: Blob) {
   const canvas = createRasterCanvas(bitmap.width, bitmap.height);
   const context = context2d(canvas);
   context.drawImage(bitmap, 0, 0);
-  bitmap.close();
+  // Real browsers return ImageBitmap, while the local Node canvas adapter
+  // intentionally exposes only the drawable width/height surface.
+  bitmap.close?.();
   return { canvas, context, width: canvas.width, height: canvas.height };
 }
 

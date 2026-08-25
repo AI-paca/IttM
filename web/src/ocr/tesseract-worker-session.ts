@@ -1,5 +1,6 @@
 import { createWorker } from "tesseract.js";
 import type { BrowserOcrProfile } from "./browser-profile";
+import { denseGridLineIndexes } from "./browser-dense-grid";
 import { scoreMathLanguage } from "./math-language";
 import {
   loadBrowserPipelineCore,
@@ -278,6 +279,57 @@ async function buildImageVariants(
   });
 
   return variants;
+}
+
+async function buildDenseGridBlockVariant(
+  input: Blob,
+  maxPixels: number,
+): Promise<Blob | null> {
+  const image = await loadBrowserImage(input);
+  if (!image) return null;
+  const { width, height } = image;
+  if (width <= 1 || height <= 1 || width * height > maxPixels) {
+    if ("close" in image && typeof image.close === "function") image.close();
+    return null;
+  }
+  const canvas = createCanvas(width, height);
+  const context = canvas?.getContext("2d");
+  if (!canvas || !context) {
+    if ("close" in image && typeof image.close === "function") image.close();
+    return null;
+  }
+  context.fillStyle = "white";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+  if ("close" in image && typeof image.close === "function") image.close();
+
+  const imageData = context.getImageData(0, 0, width, height);
+  const { rows, columns } = denseGridLineIndexes(
+    imageData.data,
+    width,
+    height,
+  );
+  if (!rows.size && !columns.size) return null;
+  for (const y of rows) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4;
+      imageData.data[offset] = 255;
+      imageData.data[offset + 1] = 255;
+      imageData.data[offset + 2] = 255;
+      imageData.data[offset + 3] = 255;
+    }
+  }
+  for (const x of columns) {
+    for (let y = 0; y < height; y += 1) {
+      const offset = (y * width + x) * 4;
+      imageData.data[offset] = 255;
+      imageData.data[offset + 1] = 255;
+      imageData.data[offset + 2] = 255;
+      imageData.data[offset + 3] = 255;
+    }
+  }
+  context.putImageData(imageData, 0, 0);
+  return await canvasToImageBlob(canvas);
 }
 
 function ocrGarbageRatio(text: string): number {
@@ -760,11 +812,41 @@ class BrowserOcrWorkerSession {
         recognizeInput,
         false,
       );
+      const observed: ObservedOcrCandidate[] = [
+        { result, languages: this.profile.languages },
+      ];
+      if (!isStrongImageCandidate(result)) {
+        const gridVariant =
+          input instanceof Blob && input.type.startsWith("image/")
+            ? await buildDenseGridBlockVariant(
+                input,
+                this.profile.maxImagePixels,
+              )
+            : null;
+        if (gridVariant) {
+          observed.push({
+            result: await this.recognizeWithOutput(
+              worker,
+              await toTesseractRecognizeInput(gridVariant),
+              false,
+            ),
+            languages: this.profile.languages,
+          });
+        }
+      }
+      const core = await this.corePromise;
+      const selected = scoreObservedCandidates(
+        core,
+        observed,
+        this.languageProbabilities,
+      ).reduce((best, candidate) =>
+        candidate.score > best.score ? candidate : best,
+      );
       this.languageProbabilities = updateLanguageProbabilities(
         this.languageProbabilities,
-        result.text,
+        selected.result.text,
       );
-      return result.text;
+      return selected.result.text;
     } finally {
       this.busy = false;
     }

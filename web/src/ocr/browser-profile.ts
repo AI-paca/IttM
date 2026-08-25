@@ -49,7 +49,6 @@ export function createBrowserOcrProfile(
   const profile = normalizeBrowserPipelineProfile(pipelineProfile);
   const memory = numberOrNull(diagnostics?.browser.memory);
   const cores = numberOrNull(diagnostics?.browser.cores);
-  const backendOffline = !diagnostics?.backend || Boolean(diagnostics?.error);
 
   if ((memory !== null && memory <= 2) || (cores !== null && cores <= 2)) {
     return {
@@ -83,7 +82,7 @@ export function createBrowserOcrProfile(
     };
   }
 
-  if (backendOffline || (memory !== null && memory <= 4)) {
+  if (memory !== null && memory <= 4) {
     return {
       languages: profile.languages || STRICT_LANGUAGES,
       cacheWorker: true,

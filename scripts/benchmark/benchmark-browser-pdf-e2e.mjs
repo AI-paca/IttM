@@ -1,11 +1,29 @@
 import { writeFile } from "node:fs/promises";
 import { chromium } from "playwright";
 
-const [url, pdfPath, outputPath, timeoutArg = "1200"] = process.argv.slice(2);
+const [
+  url,
+  pdfPath,
+  outputPath,
+  timeoutArg = "1200",
+  sourceArg = "browser",
+] = process.argv.slice(2);
 if (!url || !pdfPath || !outputPath) {
   console.error(
-    "Usage: benchmark-browser-pdf-e2e.mjs URL PDF OUTPUT_JSON [TIMEOUT_SECONDS]",
+    "Usage: benchmark-browser-pdf-e2e.mjs URL PDF OUTPUT_JSON [TIMEOUT_SECONDS] [browser|auto|local_tess|local_easy]",
   );
+  process.exit(2);
+}
+
+const sourceLabels = {
+  browser: "Browser Engine",
+  auto: "Auto (Fallback)",
+  local_tess: "Local Tesseract",
+  local_easy: "Local EasyOCR",
+};
+const sourceLabel = sourceLabels[sourceArg];
+if (!sourceLabel) {
+  console.error(`Invalid source: ${sourceArg}`);
   process.exit(2);
 }
 
@@ -64,18 +82,24 @@ let outcome = "unknown";
 try {
   await page.goto(url, { waitUntil: "networkidle", timeout: 30_000 });
   await page.locator('input[type="file"]').setInputFiles(pdfPath);
-  const browserButton = page.getByRole("button", {
-    name: "Browser",
-    exact: true,
-  });
-  if (await browserButton.isVisible().catch(() => false)) {
-    await browserButton.click();
-  } else if (
-    !(await page.locator("body").innerText()).includes("Auto (Fallback)")
-  ) {
-    throw new Error(
-      "Neither the Browser engine selector nor Auto (Fallback) is visible.",
-    );
+  const sourceCard = page.getByText(sourceLabel, { exact: true });
+  if (!(await sourceCard.isVisible().catch(() => false))) {
+    const settingsButton = page.getByRole("button", {
+      name: "Настройки",
+      exact: true,
+    });
+    if (await settingsButton.isVisible().catch(() => false)) {
+      await settingsButton.click();
+      await sourceCard.waitFor({ state: "visible", timeout: 5_000 });
+    }
+  }
+  if (!(await sourceCard.isVisible().catch(() => false))) {
+    throw new Error(`Requested source is unavailable: ${sourceLabel}`);
+  }
+  await sourceCard.click();
+  const settingsOverlay = page.locator("div.fixed.inset-0.bg-overlay").first();
+  if (await settingsOverlay.isVisible().catch(() => false)) {
+    await settingsOverlay.click({ position: { x: 8, y: 8 } });
   }
   await page.getByRole("button", { name: "Получить текст" }).click();
 
@@ -162,6 +186,8 @@ await writeFile(
     {
       url,
       pdf: pdfPath,
+      requested_source: sourceArg,
+      requested_source_label: sourceLabel,
       outcome,
       progress,
       current_page: currentPage,

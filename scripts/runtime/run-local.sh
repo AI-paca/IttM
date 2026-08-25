@@ -246,6 +246,14 @@ ensure_bun_env
 ensure_system_tools
 ensure_pipeline_cores
 
+LOCAL_TESSDATA_DIR="${ITTM_TESSDATA_DIR:-$PROJECT_ROOT/.cache/tessdata}"
+if [ -z "${TESSDATA_PREFIX:-}" ] &&
+    [ -f "$LOCAL_TESSDATA_DIR/eng.traineddata" ] &&
+    [ -f "$LOCAL_TESSDATA_DIR/rus.traineddata" ]; then
+    export TESSDATA_PREFIX="$LOCAL_TESSDATA_DIR"
+    echo "[RUNNER] Native Tesseract languages: $TESSDATA_PREFIX"
+fi
+
 # 1. Start Python Service
 if ensure_python_env; then
     echo "[RUNNER] Python venv: $PYTHON_ENV_DIR"

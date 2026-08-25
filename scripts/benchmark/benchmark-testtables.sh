@@ -159,6 +159,17 @@ if [[ ! -d "$source_root/ocr/app" ]]; then
   exit 2
 fi
 
+source_pipeline_core=""
+if [[ -x "$source_root/scripts/runtime/build-pipeline-core-native.sh" &&
+  -f "$source_root/pipeline-core/Cargo.toml" ]]; then
+  source_pipeline_core="$($source_root/scripts/runtime/build-pipeline-core-native.sh | tail -n 1)"
+  source_pipeline_core="$(realpath "$source_pipeline_core")"
+  if [[ ! -f "$source_pipeline_core" ]]; then
+    echo "Native pipeline core build did not produce a library: $source_pipeline_core" >&2
+    exit 2
+  fi
+fi
+
 mapfile -t fixtures < <(
   find "$fixtures_root" -maxdepth 1 -type f \
     \( -iname '*.pdf' -o -iname '*.png' -o -iname '*.jpg' \
@@ -475,6 +486,13 @@ start_container() {
     -e EASY_INSTALL_TARGET=/opt/ittm-python-packages \
     -e EASYOCR_MODULE_PATH=/models/easyocr
   )
+  source_pipeline_core_args=()
+  if [[ -n "$source_pipeline_core" ]]; then
+    docker_env+=(-e ITTM_PIPELINE_CORE_LIB=/opt/ittm-source-pipeline-core/libittm_pipeline_core.so)
+    source_pipeline_core_args+=(
+      -v "$source_pipeline_core:/opt/ittm-source-pipeline-core/libittm_pipeline_core.so:ro"
+    )
+  fi
   if [[ "$gpu_enabled" -eq 1 ]]; then
     docker_env+=(
       -e NVIDIA_VISIBLE_DEVICES=all
@@ -488,11 +506,12 @@ start_container() {
     "${docker_env[@]}" \
     -p 127.0.0.1::8000 \
     -v "$source_root/ocr:/app:ro" \
+    "${source_pipeline_core_args[@]}" \
     -v "$python_packages_volume:/opt/ittm-python-packages" \
     -v "$models_volume:/models/easyocr" \
     -w /app \
     "$runtime_image" \
-    uvicorn app.main:app --host 0.0.0.0 --port 8000 \
+    sh -lc 'python -c "from app.pipeline_core.native import native_pipeline_core; core = native_pipeline_core(); assert core is not None; print(f\"pipeline-core ABI 4: {core.path}\")" && exec uvicorn app.main:app --host 0.0.0.0 --port 8000' \
     >/dev/null
 
   port="$(docker port "$container_name" 8000/tcp | sed 's/.*://')"
@@ -523,6 +542,7 @@ cat >"$manifest" <<EOF
 - pipeline-core tree: \`$pipeline_core_tree\`
 - runtime image: \`$runtime_image_id\`
 - runtime image source: \`$runtime_image_source\`
+- native pipeline core: \`${source_pipeline_core:-runtime image}\`
 - engines: \`$engines_csv\`
 - pipeline profile: \`${pipeline_profile:-per-engine default}\`
 - engine profile overrides: \`${engine_profile_rules[*]:-none}\`

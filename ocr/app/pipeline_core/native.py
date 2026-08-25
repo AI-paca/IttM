@@ -19,6 +19,36 @@ class NativePipelineCore:
     def load(cls, path: Path) -> "NativePipelineCore":
         resolved = path.expanduser().resolve()
         library = ctypes.CDLL(str(resolved))
+        try:
+            abi_version = library.ittm_pipeline_abi_version
+        except AttributeError as error:
+            raise RuntimeError(f"Pipeline core has no ABI marker: {resolved}") from error
+        abi_version.restype = ctypes.c_uint32
+        version = int(abi_version())
+        if version != PIPELINE_CORE_ABI_VERSION:
+            raise RuntimeError(f"Unsupported pipeline core ABI {version}; expected {PIPELINE_CORE_ABI_VERSION}")
+        required_exports = (
+            "ittm_pipeline_recipe_mask",
+            "ittm_sparse_add_signal",
+            "ittm_is_isolated_heading",
+            "ittm_span_evidence_score",
+            "ittm_should_replace_primary",
+            "ittm_should_drop_text_block",
+            "ittm_separated_begin",
+            "ittm_separated_job_count",
+            "ittm_separated_job_field",
+            "ittm_separated_set_ocr",
+            "ittm_separated_render_length",
+            "ittm_separated_render_copy",
+            "ittm_separated_stage_mask",
+            "ittm_separated_drop",
+        )
+        missing_exports = [name for name in required_exports if not hasattr(library, name)]
+        if missing_exports:
+            raise RuntimeError(
+                f"Pipeline core ABI {version} is incomplete at {resolved}: "
+                + ", ".join(missing_exports)
+            )
         library.ittm_pipeline_abi_version.restype = ctypes.c_uint32
         library.ittm_pipeline_recipe_mask.argtypes = (ctypes.c_uint32,)
         library.ittm_pipeline_recipe_mask.restype = ctypes.c_uint32
@@ -92,9 +122,6 @@ class NativePipelineCore:
         library.ittm_separated_stage_mask.restype = ctypes.c_uint32
         library.ittm_separated_drop.argtypes = (ctypes.c_uint32,)
         library.ittm_separated_drop.restype = ctypes.c_int32
-        version = int(library.ittm_pipeline_abi_version())
-        if version != PIPELINE_CORE_ABI_VERSION:
-            raise RuntimeError(f"Unsupported pipeline core ABI {version}; expected {PIPELINE_CORE_ABI_VERSION}")
         return cls(path=resolved, _library=library)
 
     def recipe_mask(self, capability_bits: int) -> int:

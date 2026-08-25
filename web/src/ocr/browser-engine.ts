@@ -32,8 +32,18 @@ export async function runBrowserOcrLowMemory(
   try {
     const result = await runBrowserSeparatedPipeline(
       file,
-      async (block) =>
-        await workerLease.recognizeSeparatedBlock(block, profile.textRegionPsm),
+      async (block, job) => {
+        const pageSegmentationMode =
+          job.recognitionMode === 2
+            ? "11"
+            : job.recognitionMode === 1
+              ? "3"
+              : profile.textRegionPsm;
+        return await workerLease.recognizeSeparatedBlock(
+          block,
+          pageSegmentationMode,
+        );
+      },
       onProgress,
       (text) => {
         if (text.trim()) onChunkExtracted?.(`${text.trim()}\n`);

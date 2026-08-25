@@ -23,15 +23,69 @@ struct OcrJob {
     column: u32,
     row_span: u32,
     column_span: u32,
+    recognition_mode: u32,
+}
+
+#[derive(Debug)]
+struct JobRaster {
+    width: u32,
+    height: u32,
+    stride: u32,
+    pixels: Vec<u8>,
 }
 
 #[derive(Debug)]
 struct Session {
     jobs: Vec<OcrJob>,
+    job_rasters: Vec<JobRaster>,
     text: Vec<Option<String>>,
     confidence_milli: Vec<u32>,
     rendered: Option<Vec<u8>>,
     stage_mask: u32,
+}
+
+fn render_job_raster(
+    pixels: &[u8],
+    stride: usize,
+    channels: usize,
+    rect: Rect,
+) -> JobRaster {
+    let crop_width = (rect.right - rect.left) as usize;
+    let crop_height = (rect.bottom - rect.top) as usize;
+    let border = (crop_width.max(crop_height) / 80).clamp(8, 64);
+    let width = crop_width + border * 2;
+    let height = crop_height + border * 2;
+    let output_stride = width * 3;
+    let mut output = vec![255_u8; output_stride * height];
+
+    for source_y in rect.top as usize..rect.bottom as usize {
+        for source_x in rect.left as usize..rect.right as usize {
+            let source = source_y * stride + source_x * channels;
+            let target_x = source_x - rect.left as usize + border;
+            let target_y = source_y - rect.top as usize + border;
+            let target = target_y * output_stride + target_x * 3;
+            match channels {
+                1 => output[target..target + 3].fill(pixels[source]),
+                3 => output[target..target + 3].copy_from_slice(&pixels[source..source + 3]),
+                4 => {
+                    let alpha = u16::from(pixels[source + 3]);
+                    for channel in 0..3 {
+                        let value = u16::from(pixels[source + channel]);
+                        output[target + channel] =
+                            ((value * alpha + 255 * (255 - alpha)) / 255) as u8;
+                    }
+                }
+                _ => unreachable!("pixel format was validated"),
+            }
+        }
+    }
+
+    JobRaster {
+        width: width as u32,
+        height: height as u32,
+        stride: output_stride as u32,
+        pixels: output,
+    }
 }
 
 #[derive(Default)]
@@ -64,43 +118,90 @@ fn luminance(pixels: &[u8], offset: usize, channels: usize) -> u8 {
     ((red * 299 + green * 587 + blue * 114) / 1_000) as u8
 }
 
-fn background_luminance(
+fn channel_distance(
+    pixels: &[u8],
+    first: usize,
+    second: usize,
+    channels: usize,
+) -> u8 {
+    if channels == 1 {
+        return pixels[first].abs_diff(pixels[second]);
+    }
+    (0..3)
+        .map(|channel| pixels[first + channel].abs_diff(pixels[second + channel]))
+        .max()
+        .unwrap_or(0)
+}
+
+fn local_contrast_mask(
     pixels: &[u8],
     width: usize,
     height: usize,
     stride: usize,
     channels: usize,
-) -> u8 {
-    let mut samples = Vec::new();
-    let x_step = (width / 256).max(1);
-    let y_step = (height / 256).max(1);
-    for x in (0..width).step_by(x_step) {
-        samples.push(luminance(pixels, x * channels, channels));
-        samples.push(luminance(
-            pixels,
-            (height - 1) * stride + x * channels,
-            channels,
-        ));
+) -> Vec<bool> {
+    const EDGE_DELTA: u8 = 28;
+    let mut mask = vec![false; width * height];
+    if width < 3 || height < 3 {
+        return mask;
     }
-    for y in (0..height).step_by(y_step) {
-        samples.push(luminance(pixels, y * stride, channels));
-        samples.push(luminance(
-            pixels,
-            y * stride + (width - 1) * channels,
-            channels,
-        ));
-    }
-    samples.sort_unstable();
-    samples[samples.len() / 2]
-}
 
-fn is_ink(value: u8, background: u8) -> bool {
-    const DELTA: u8 = 24;
-    if background >= 128 {
-        value.saturating_add(DELTA) < background
-    } else {
-        value > background.saturating_add(DELTA)
+    for y in 1..height - 1 {
+        let row = y * stride;
+        let previous_row = (y - 1) * stride;
+        let next_row = (y + 1) * stride;
+        for x in 1..width - 1 {
+            let center = row + x * channels;
+            let horizontal = channel_distance(
+                pixels,
+                row + (x - 1) * channels,
+                row + (x + 1) * channels,
+                channels,
+            );
+            let vertical = channel_distance(
+                pixels,
+                previous_row + x * channels,
+                next_row + x * channels,
+                channels,
+            );
+            let luminance_delta = luminance(pixels, center, channels)
+                .abs_diff(luminance(pixels, row + (x - 1) * channels, channels))
+                .max(
+                    luminance(pixels, center, channels)
+                        .abs_diff(luminance(pixels, previous_row + x * channels, channels)),
+                );
+            mask[y * width + x] =
+                horizontal.max(vertical).max(luminance_delta) >= EDGE_DELTA;
+        }
     }
+
+    // Long table rules are topology evidence, not text. If they remain in
+    // the foreground mask, every row of a ruled or coloured table becomes a
+    // single page-sized OCR block.
+    let mut column_counts = vec![0_usize; width];
+    for row in mask.chunks_exact(width) {
+        for (x, active) in row.iter().copied().enumerate() {
+            column_counts[x] += usize::from(active);
+        }
+    }
+    let rule_threshold = (height / 3).max(8);
+    let mut rule_columns = vec![false; width];
+    for (x, count) in column_counts.into_iter().enumerate() {
+        if count < rule_threshold {
+            continue;
+        }
+        let first = x.saturating_sub(1);
+        let last = (x + 1).min(width - 1);
+        rule_columns[first..=last].fill(true);
+    }
+    for row in mask.chunks_exact_mut(width) {
+        for (x, active) in row.iter_mut().enumerate() {
+            if rule_columns[x] {
+                *active = false;
+            }
+        }
+    }
+    mask
 }
 
 fn row_bands(active: &[bool], bridge_gap: usize) -> Vec<(usize, usize)> {
@@ -131,90 +232,128 @@ fn plan_jobs(
     stride: usize,
     channels: usize,
 ) -> Vec<OcrJob> {
-    let background = background_luminance(pixels, width, height, stride, channels);
-    let minimum_row_ink = (width / 400).max(2);
+    let foreground = local_contrast_mask(pixels, width, height, stride, channels);
+    let minimum_row_ink = (width / 700).max(3);
+    let maximum_row_ink = (width * 3 / 5).max(minimum_row_ink + 1);
     let mut active_rows = vec![false; height];
-
     for (y, active) in active_rows.iter_mut().enumerate() {
-        let mut count = 0;
-        let row_offset = y * stride;
-        for x in 0..width {
-            if is_ink(
-                luminance(pixels, row_offset + x * channels, channels),
-                background,
-            ) {
-                count += 1;
-                if count >= minimum_row_ink {
-                    *active = true;
-                    break;
-                }
-            }
-        }
+        let count = foreground[y * width..(y + 1) * width]
+            .iter()
+            .filter(|value| **value)
+            .count();
+        *active = count >= minimum_row_ink && count <= maximum_row_ink;
     }
 
-    let bridge_gap = (height / 900).clamp(1, 8);
+    let bridge_gap = (height / 1_200).clamp(1, 4);
     let mut bands = row_bands(&active_rows, bridge_gap);
-    if bands.len() > MAX_JOBS {
-        let group_size = bands.len().div_ceil(MAX_JOBS);
-        bands = bands
-            .chunks(group_size)
-            .map(|chunk| (chunk[0].0, chunk[chunk.len() - 1].1))
-            .collect();
-    }
+    bands.retain(|(top, bottom)| bottom.saturating_sub(*top) >= 2);
     if bands.is_empty() {
         return Vec::new();
     }
 
-    let median_height = {
+    let raw_median_height = {
         let mut heights: Vec<usize> = bands.iter().map(|(top, bottom)| bottom - top).collect();
         heights.sort_unstable();
         heights[heights.len() / 2].max(1)
     };
-    let object_gap = (median_height * 2).max(8);
+    let glyph_gap = (raw_median_height / 3).clamp(1, 5);
+    let mut lines: Vec<(usize, usize)> = Vec::with_capacity(bands.len());
+    for (top, bottom) in bands {
+        if let Some(previous) = lines.last_mut()
+            && top.saturating_sub(previous.1) <= glyph_gap
+        {
+            previous.1 = bottom;
+        } else {
+            lines.push((top, bottom));
+        }
+    }
+    let median_height = {
+        let mut heights: Vec<usize> = lines.iter().map(|(top, bottom)| bottom - top).collect();
+        heights.sort_unstable();
+        heights[heights.len() / 2].max(1)
+    };
+    let object_gap = (median_height * 3).max(12);
     let x_padding = (width / 800).clamp(2, 12);
     let y_padding = (height / 1200).clamp(1, 6);
-    let mut object_id = 0_u32;
-    let mut previous_bottom = None;
-    let mut jobs = Vec::with_capacity(bands.len());
-
-    for (row, (band_top, band_bottom)) in bands.into_iter().enumerate() {
-        if previous_bottom.is_some_and(|bottom| band_top.saturating_sub(bottom) > object_gap) {
-            object_id += 1;
+    let mut objects: Vec<Vec<(usize, usize)>> = Vec::new();
+    for line in lines {
+        let begins_object = objects.last().is_none_or(|object| {
+            line.0
+                .saturating_sub(object.last().expect("object is non-empty").1)
+                > object_gap
+        });
+        if begins_object {
+            objects.push(Vec::new());
         }
-        previous_bottom = Some(band_bottom);
+        objects.last_mut().expect("object was inserted").push(line);
+    }
 
-        let mut left = width;
-        let mut right = 0;
-        for y in band_top..band_bottom {
-            let row_offset = y * stride;
-            for x in 0..width {
-                if is_ink(
-                    luminance(pixels, row_offset + x * channels, channels),
-                    background,
-                ) {
-                    left = left.min(x);
-                    right = right.max(x + 1);
+    const MAX_CONTEXT_LINES: usize = 16;
+    let estimated_jobs = objects
+        .iter()
+        .map(|object| object.len().div_ceil(MAX_CONTEXT_LINES))
+        .sum::<usize>();
+    let mut jobs = Vec::with_capacity(estimated_jobs.min(MAX_JOBS));
+    let mut source_row = 0_u32;
+    for (object_id, object) in objects.iter().enumerate() {
+        for chunk in object.chunks(MAX_CONTEXT_LINES) {
+            let band_top = chunk[0].0;
+            let band_bottom = chunk[chunk.len() - 1].1;
+            let mut left = width;
+            let mut right = 0;
+            for y in band_top..band_bottom {
+                for x in 0..width {
+                    if foreground[y * width + x] {
+                        left = left.min(x);
+                        right = right.max(x + 1);
+                    }
                 }
             }
+            if left >= right {
+                source_row += chunk.len() as u32;
+                continue;
+            }
+            jobs.push(OcrJob {
+                rect: Rect {
+                    left: left.saturating_sub(x_padding) as u32,
+                    top: band_top.saturating_sub(y_padding) as u32,
+                    right: (right + x_padding).min(width) as u32,
+                    bottom: (band_bottom + y_padding).min(height) as u32,
+                },
+                object_id: object_id as u32,
+                row: source_row,
+                column: 0,
+                row_span: chunk.len() as u32,
+                column_span: 1,
+                recognition_mode: recognition_mode_for_rect(Rect {
+                    left: left.saturating_sub(x_padding) as u32,
+                    top: band_top.saturating_sub(y_padding) as u32,
+                    right: (right + x_padding).min(width) as u32,
+                    bottom: (band_bottom + y_padding).min(height) as u32,
+                }),
+            });
+            source_row += chunk.len() as u32;
+            if jobs.len() == MAX_JOBS {
+                return jobs;
+            }
         }
-        if left >= right {
-            continue;
-        }
-        jobs.push(OcrJob {
-            rect: Rect {
-                left: left.saturating_sub(x_padding) as u32,
-                top: band_top.saturating_sub(y_padding) as u32,
-                right: (right + x_padding).min(width) as u32,
-                bottom: (band_bottom + y_padding).min(height) as u32,
-            },
-            object_id,
-            row: row as u32,
-            column: 0,
-            row_span: 1,
-            column_span: 1,
-        });
     }
     jobs
+}
+
+fn recognition_mode_for_rect(rect: Rect) -> u32 {
+    let width = rect.right - rect.left;
+    let height = rect.bottom - rect.top;
+    if width >= 2_200
+        && height >= 1_500
+        && u64::from(height) * 10 <= u64::from(width) * 9
+    {
+        2 // sparse text
+    } else if width >= 1_600 && height >= 1_000 {
+        1 // document
+    } else {
+        0 // ordinary text region
+    }
 }
 
 fn render_session(session: &Session) -> Vec<u8> {
@@ -297,9 +436,14 @@ pub unsafe extern "C" fn ittm_separated_begin(
         stride as usize,
         channel_count,
     );
+    let job_rasters = jobs
+        .iter()
+        .map(|job| render_job_raster(input, stride as usize, channel_count, job.rect))
+        .collect();
     let job_count = jobs.len();
     let session = Session {
         jobs,
+        job_rasters,
         text: vec![None; job_count],
         confidence_milli: vec![0; job_count],
         rendered: None,
@@ -312,6 +456,82 @@ pub unsafe extern "C" fn ittm_separated_begin(
     let handle = registry.next_handle;
     registry.sessions.insert(handle, session);
     handle
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_job_raster_field(
+    handle: u32,
+    index: u32,
+    field: u32,
+) -> i32 {
+    let Ok(registry) = registry().lock() else {
+        return -1;
+    };
+    let Some(raster) = registry
+        .sessions
+        .get(&handle)
+        .and_then(|session| session.job_rasters.get(index as usize))
+    else {
+        return -1;
+    };
+    match field {
+        0 => raster.width as i32,
+        1 => raster.height as i32,
+        2 => raster.stride as i32,
+        3 => 3,
+        _ => -1,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_job_raster_length(handle: u32, index: u32) -> u32 {
+    registry()
+        .lock()
+        .ok()
+        .and_then(|registry| {
+            registry
+                .sessions
+                .get(&handle)
+                .and_then(|session| session.job_rasters.get(index as usize))
+                .map(|raster| raster.pixels.len() as u32)
+        })
+        .unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ittm_separated_job_raster_copy(
+    handle: u32,
+    index: u32,
+    output: *mut u8,
+    capacity: u32,
+) -> i32 {
+    if output.is_null() && capacity > 0 {
+        return -1;
+    }
+    let Ok(registry) = registry().lock() else {
+        return -2;
+    };
+    let Some(raster) = registry
+        .sessions
+        .get(&handle)
+        .and_then(|session| session.job_rasters.get(index as usize))
+    else {
+        return -3;
+    };
+    if (capacity as usize) < raster.pixels.len() {
+        return -4;
+    }
+    if !raster.pixels.is_empty() {
+        // SAFETY: capacity was validated and the source/destination do not overlap.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                raster.pixels.as_ptr(),
+                output,
+                raster.pixels.len(),
+            )
+        };
+    }
+    raster.pixels.len() as i32
 }
 
 #[unsafe(no_mangle)]
@@ -350,6 +570,7 @@ pub extern "C" fn ittm_separated_job_field(handle: u32, index: u32, field: u32) 
         6 => job.column as i32,
         7 => job.row_span as i32,
         8 => job.column_span as i32,
+        9 => job.recognition_mode as i32,
         _ => -1,
     }
 }
@@ -482,17 +703,21 @@ mod tests {
     fn plans_the_same_explicit_stage_boundary_for_raster_lines() {
         let (pixels, width, height) = white_page_with_two_lines();
         let jobs = plan_jobs(&pixels, width as usize, height as usize, width as usize, 1);
-        assert_eq!(jobs.len(), 2);
-        assert_eq!(
+        assert_eq!(jobs.len(), 1);
+        assert!(jobs[0].rect.left <= 8);
+        assert!(jobs[0].rect.top <= 7);
+        assert!(jobs[0].rect.right >= 70);
+        assert!(jobs[0].rect.bottom >= 28);
+        assert_ne!(
             jobs[0].rect,
             Rect {
-                left: 6,
-                top: 6,
-                right: 57,
-                bottom: 12
+                left: 0,
+                top: 0,
+                right: width,
+                bottom: height,
             }
         );
-        assert_eq!(jobs[1].row, 1);
+        assert_eq!(jobs[0].row_span, 2);
     }
 
     #[test]
@@ -510,23 +735,16 @@ mod tests {
             )
         };
         assert_ne!(handle, 0);
-        assert_eq!(ittm_separated_job_count(handle), 2);
+        assert_eq!(ittm_separated_job_count(handle), 1);
         assert_eq!(ittm_separated_stage_mask(handle), PLANNED_STAGE_MASK);
-        for (index, text) in ["first", "second"].into_iter().enumerate() {
-            // SAFETY: each string remains alive for the call.
-            assert_eq!(
-                unsafe {
-                    ittm_separated_set_ocr(
-                        handle,
-                        index as u32,
-                        text.as_ptr(),
-                        text.len() as u32,
-                        900,
-                    )
-                },
-                0,
-            );
-        }
+        let text = "first\nsecond";
+        // SAFETY: the string remains alive for the call.
+        assert_eq!(
+            unsafe {
+                ittm_separated_set_ocr(handle, 0, text.as_ptr(), text.len() as u32, 900)
+            },
+            0,
+        );
         let length = ittm_separated_render_length(handle);
         let mut output = vec![0_u8; length as usize];
         // SAFETY: output owns exactly the reported capacity.
@@ -534,7 +752,7 @@ mod tests {
             unsafe { ittm_separated_render_copy(handle, output.as_mut_ptr(), length) },
             length as i32,
         );
-        assert_eq!(String::from_utf8(output).unwrap(), "first\n\nsecond");
+        assert_eq!(String::from_utf8(output).unwrap(), "first\nsecond");
         assert_eq!(ittm_separated_stage_mask(handle), ALL_STAGE_MASK);
         assert_eq!(ittm_separated_drop(handle), 0);
     }

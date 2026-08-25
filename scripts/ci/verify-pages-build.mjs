@@ -163,7 +163,7 @@ for (const name of [
 ]) {
   assert.ok(
     pipelineCore.instance.exports[name],
-    `Pages pipeline core misses ABI 4 export ${name}`,
+    `Pages pipeline core misses ABI 5 export ${name}`,
   );
 }
 await assertNonEmpty(path.join(textReviewerModelRoot, "config.json"));

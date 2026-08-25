@@ -3,7 +3,7 @@ mod separated;
 
 pub use candidates::{SpanEvidence, score_span_evidence};
 
-pub const ABI_VERSION: u32 = 4;
+pub const ABI_VERSION: u32 = 5;
 
 pub const MERGE_UP_CODE: u8 = 3;
 pub const MERGE_LEFT_CODE: u8 = 5;
@@ -188,6 +188,15 @@ pub const fn should_replace_primary(
     retained_primary_tokens: u32,
 ) -> bool {
     if primary_chars < 10 {
+        if primary_chars > 0
+            && primary_chars <= 3
+            && primary_tokens <= 1
+            && retained_primary_tokens == 0
+            && fallback_chars >= 6
+            && (fallback_chars as u64) >= (primary_chars as u64) * 3
+        {
+            return true;
+        }
         return fallback_chars >= 80;
     }
 
@@ -499,6 +508,9 @@ mod tests {
         assert!(!should_replace_primary(0, 79, 0, 0));
         assert!(should_replace_primary(0, 80, 0, 0));
         assert!(should_replace_primary(9, 80, 0, u32::MAX));
+        assert!(should_replace_primary(1, 6, 1, 0));
+        assert!(!should_replace_primary(1, 3, 1, 0));
+        assert!(!should_replace_primary(3, 9, 1, 1));
     }
 
     #[test]
@@ -550,7 +562,7 @@ mod tests {
 
     #[test]
     fn abi_exposes_the_new_deterministic_decisions() {
-        assert_eq!(ittm_pipeline_abi_version(), 4);
+        assert_eq!(ittm_pipeline_abi_version(), 5);
         assert_eq!(ittm_should_replace_primary(100, 180, 5, 4), 1);
         assert_eq!(ittm_should_replace_primary(100, 180, 5, 3), 0);
         assert_eq!(ittm_should_drop_text_block(32, 32, 17, 20, 20, 0), 1);

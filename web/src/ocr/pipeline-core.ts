@@ -1,4 +1,4 @@
-export const PIPELINE_CORE_ABI_VERSION = 4;
+export const PIPELINE_CORE_ABI_VERSION = 5;
 
 export const PIPELINE_STAGES = [
   "align",
@@ -32,6 +32,15 @@ export interface SeparatedOcrJob {
   column: number;
   rowSpan: number;
   columnSpan: number;
+  recognitionMode: number;
+}
+
+export interface SeparatedOcrRaster {
+  pixels: Uint8Array;
+  width: number;
+  height: number;
+  stride: number;
+  format: 3;
 }
 
 export interface PipelineCapabilities {
@@ -89,6 +98,18 @@ interface PipelineCoreExports extends WebAssembly.Exports {
     index: number,
     field: number,
   ): number;
+  ittm_separated_job_raster_field?(
+    handle: number,
+    index: number,
+    field: number,
+  ): number;
+  ittm_separated_job_raster_length?(handle: number, index: number): number;
+  ittm_separated_job_raster_copy?(
+    handle: number,
+    index: number,
+    pointer: number,
+    capacity: number,
+  ): number;
   ittm_separated_set_ocr?(
     handle: number,
     index: number,
@@ -115,6 +136,9 @@ type SeparatedExports = Required<
     | "ittm_separated_begin"
     | "ittm_separated_job_count"
     | "ittm_separated_job_field"
+    | "ittm_separated_job_raster_field"
+    | "ittm_separated_job_raster_length"
+    | "ittm_separated_job_raster_copy"
     | "ittm_separated_set_ocr"
     | "ittm_separated_render_length"
     | "ittm_separated_render_copy"
@@ -307,6 +331,9 @@ function separatedExports(exports: PipelineCoreExports): SeparatedExports {
     "ittm_separated_begin",
     "ittm_separated_job_count",
     "ittm_separated_job_field",
+    "ittm_separated_job_raster_field",
+    "ittm_separated_job_raster_length",
+    "ittm_separated_job_raster_copy",
     "ittm_separated_set_ocr",
     "ittm_separated_render_length",
     "ittm_separated_render_copy",
@@ -371,7 +398,67 @@ export class BrowserSeparatedSession {
       column: field(index, 6),
       rowSpan: field(index, 7),
       columnSpan: field(index, 8),
+      recognitionMode: field(index, 9),
     }));
+  }
+
+  raster(index: number): SeparatedOcrRaster {
+    this.assertOpen();
+    const field = (fieldIndex: number) => {
+      const value = this.exports.ittm_separated_job_raster_field(
+        this.handle,
+        index,
+        fieldIndex,
+      );
+      if (value <= 0) {
+        throw new Error(
+          `Invalid separated OCR raster field: ${index}:${fieldIndex}`,
+        );
+      }
+      return value;
+    };
+    const width = field(0);
+    const height = field(1);
+    const stride = field(2);
+    const format = field(3);
+    if (format !== 3 || stride !== width * format) {
+      throw new Error("Separated OCR raster is not packed RGB");
+    }
+    const length = this.exports.ittm_separated_job_raster_length(
+      this.handle,
+      index,
+    );
+    if (length !== stride * height) {
+      throw new Error("Separated OCR raster length disagrees with its dimensions");
+    }
+    const pointer = this.exports.ittm_alloc(length);
+    if (!pointer) throw new Error("Pipeline core could not allocate raster buffer");
+    try {
+      const copied = this.exports.ittm_separated_job_raster_copy(
+        this.handle,
+        index,
+        pointer,
+        length,
+      );
+      if (copied !== length) {
+        throw new Error(
+          `Separated OCR raster copied ${copied} bytes; expected ${length}`,
+        );
+      }
+      return {
+        pixels: new Uint8Array(
+          this.exports.memory.buffer,
+          pointer,
+          length,
+        ).slice(),
+        width,
+        height,
+        stride,
+        format: 3,
+      };
+    } finally {
+      this.exports.ittm_dealloc(pointer, length);
+    }
   }
 
   completedStages(): readonly (typeof SEPARATED_PIPELINE_STAGES)[number][] {

@@ -30,6 +30,7 @@ class SeparatedOcrJob:
     column: int
     row_span: int
     column_span: int
+    recognition_mode: int
 
 
 RecognitionResult: TypeAlias = str | tuple[str, int]
@@ -67,6 +68,7 @@ class NativeSeparatedSession:
                 column=fields(self._handle, index, 6),
                 row_span=fields(self._handle, index, 7),
                 column_span=fields(self._handle, index, 8),
+                recognition_mode=fields(self._handle, index, 9),
             )
             for index in range(self._core.separated_job_count(self._handle))
         )
@@ -83,6 +85,15 @@ class NativeSeparatedSession:
             text,
             confidence_milli,
         )
+
+    def raster(self, job: SeparatedOcrJob) -> Image.Image:
+        pixels, width, height, stride, pixel_format = self._core.separated_job_raster(
+            self._handle,
+            job.index,
+        )
+        if pixel_format != 3 or stride != width * 3:
+            raise RuntimeError("Separated OCR raster is not packed RGB")
+        return Image.frombytes("RGB", (width, height), pixels)
 
     def render(self) -> str:
         return self._core.separated_render(self._handle)
@@ -107,7 +118,7 @@ def run_native_separated_pipeline(
     with NativeSeparatedSession(image) as session:
         jobs = session.jobs
         for job in jobs:
-            crop = image.crop(job.bbox)
+            crop = session.raster(job)
             try:
                 result = recognize(crop, job)
             finally:

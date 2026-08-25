@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 
 PIPELINE_CORE_LIBRARY_ENV = "ITTM_PIPELINE_CORE_LIB"
-PIPELINE_CORE_ABI_VERSION = 4
+PIPELINE_CORE_ABI_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -37,6 +37,9 @@ class NativePipelineCore:
             "ittm_separated_begin",
             "ittm_separated_job_count",
             "ittm_separated_job_field",
+            "ittm_separated_job_raster_field",
+            "ittm_separated_job_raster_length",
+            "ittm_separated_job_raster_copy",
             "ittm_separated_set_ocr",
             "ittm_separated_render_length",
             "ittm_separated_render_copy",
@@ -102,6 +105,24 @@ class NativePipelineCore:
             ctypes.c_uint32,
         )
         library.ittm_separated_job_field.restype = ctypes.c_int32
+        library.ittm_separated_job_raster_field.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_job_raster_field.restype = ctypes.c_int32
+        library.ittm_separated_job_raster_length.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_job_raster_length.restype = ctypes.c_uint32
+        library.ittm_separated_job_raster_copy.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_job_raster_copy.restype = ctypes.c_int32
         library.ittm_separated_set_ocr.argtypes = (
             ctypes.c_uint32,
             ctypes.c_uint32,
@@ -243,6 +264,38 @@ class NativePipelineCore:
         if value < 0:
             raise ValueError(f"Invalid separated OCR job field: {index}:{field}")
         return value
+
+    def separated_job_raster(
+        self,
+        handle: int,
+        index: int,
+    ) -> tuple[bytes, int, int, int, int]:
+        fields = tuple(
+            int(self._library.ittm_separated_job_raster_field(handle, index, field))
+            for field in range(4)
+        )
+        if any(value <= 0 for value in fields):
+            raise ValueError(f"Invalid separated OCR raster fields: {index}:{fields}")
+        width, height, stride, pixel_format = fields
+        length = int(self._library.ittm_separated_job_raster_length(handle, index))
+        if length != stride * height:
+            raise RuntimeError(
+                f"Separated OCR raster length {length} disagrees with {stride}x{height}"
+            )
+        output = ctypes.create_string_buffer(length)
+        copied = int(
+            self._library.ittm_separated_job_raster_copy(
+                handle,
+                index,
+                output,
+                length,
+            )
+        )
+        if copied != length:
+            raise RuntimeError(
+                f"Separated OCR raster copied {copied} bytes; expected {length}"
+            )
+        return bytes(output.raw[:length]), width, height, stride, pixel_format
 
     def separated_set_ocr(
         self,

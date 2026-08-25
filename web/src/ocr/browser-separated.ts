@@ -2,6 +2,7 @@ import {
   loadBrowserPipelineCore,
   SEPARATED_PIPELINE_STAGES,
   type SeparatedOcrJob,
+  type SeparatedOcrRaster,
 } from "./pipeline-core";
 import type { ProgressSink } from "./types";
 
@@ -72,26 +73,22 @@ async function canvasBlob(canvas: RasterCanvas): Promise<Blob> {
   });
 }
 
-async function cropJob(
-  source: RasterCanvas,
-  job: SeparatedOcrJob,
-): Promise<Blob> {
-  const [left, top, right, bottom] = job.bbox;
-  const width = Math.max(1, right - left);
-  const height = Math.max(1, bottom - top);
-  const crop = createRasterCanvas(width, height);
-  context2d(crop).drawImage(
-    source,
-    left,
-    top,
-    width,
-    height,
-    0,
-    0,
-    width,
-    height,
-  );
-  return await canvasBlob(crop);
+async function rasterBlob(raster: SeparatedOcrRaster): Promise<Blob> {
+  const canvas = createRasterCanvas(raster.width, raster.height);
+  const context = context2d(canvas);
+  const image = context.createImageData(raster.width, raster.height);
+  for (
+    let source = 0, target = 0;
+    source < raster.pixels.length;
+    source += 3, target += 4
+  ) {
+    image.data[target] = raster.pixels[source];
+    image.data[target + 1] = raster.pixels[source + 1];
+    image.data[target + 2] = raster.pixels[source + 2];
+    image.data[target + 3] = 255;
+  }
+  context.putImageData(image, 0, 0);
+  return await canvasBlob(canvas);
 }
 
 export async function runBrowserSeparatedPipeline(
@@ -121,7 +118,7 @@ export async function runBrowserSeparatedPipeline(
     const jobs = session.jobs();
     for (const job of jobs) {
       onProgress?.(`ocr-blocks ${job.index + 1}/${jobs.length}...`);
-      const block = await cropJob(raster.canvas, job);
+      const block = await rasterBlob(session.raster(job.index));
       const result = await recognize(block, job);
       const text = typeof result === "string" ? result : result.text;
       const confidenceMilli =

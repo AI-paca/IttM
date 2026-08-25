@@ -816,6 +816,18 @@ class BrowserOcrWorkerSession {
         { result, languages: this.profile.languages },
       ];
       if (!isStrongImageCandidate(result)) {
+        const languageSelection = await this.recognizeWithLanguageCandidates(
+          worker,
+          recognizeInput,
+          false,
+        );
+        if (
+          languageSelection.languages !== this.profile.languages ||
+          normalizedCandidateText(languageSelection.result.text) !==
+            normalizedCandidateText(result.text)
+        ) {
+          observed.push(languageSelection);
+        }
         const gridVariant =
           input instanceof Blob && input.type.startsWith("image/")
             ? await buildDenseGridBlockVariant(

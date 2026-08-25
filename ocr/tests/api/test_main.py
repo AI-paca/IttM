@@ -138,7 +138,7 @@ def test_readiness():
         "pytesseract",
         "pdf2image",
         "opencv",
-        "pipeline_core_abi4",
+        "pipeline_core_abi5",
     }
 
 
@@ -151,7 +151,7 @@ def test_readiness_rejects_missing_or_incompatible_pipeline_core(monkeypatch):
     response = client.get("/readiness")
 
     assert response.status_code == 200
-    assert response.json()["checks"]["pipeline_core_abi4"] is False
+    assert response.json()["checks"]["pipeline_core_abi5"] is False
     assert response.json()["ready"] is False
 
 

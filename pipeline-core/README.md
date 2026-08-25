@@ -60,7 +60,7 @@ Generated native files under `pipeline-core/target` and
 and copy the native library into the runtime image; Lite builds generate the
 WASM module.
 
-Python `/readiness` reports `pipeline_core_abi4`. A missing or incompatible
+Python `/readiness` reports `pipeline_core_abi5`. A missing or incompatible
 native library makes readiness fail; production raster conversion does not
 silently fall back to the old Python layout route.
 

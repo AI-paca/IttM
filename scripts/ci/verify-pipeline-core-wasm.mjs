@@ -15,6 +15,9 @@ const separatedExports = [
   "ittm_separated_begin",
   "ittm_separated_job_count",
   "ittm_separated_job_field",
+  "ittm_separated_job_raster_field",
+  "ittm_separated_job_raster_length",
+  "ittm_separated_job_raster_copy",
   "ittm_separated_set_ocr",
   "ittm_separated_render_length",
   "ittm_separated_render_copy",
@@ -22,10 +25,10 @@ const separatedExports = [
   "ittm_separated_drop",
 ];
 for (const name of separatedExports) {
-  if (!exports[name]) throw new Error(`WASM ABI 4 misses ${name}`);
+  if (!exports[name]) throw new Error(`WASM ABI 5 misses ${name}`);
 }
 
-if (exports.ittm_pipeline_abi_version() !== 4) {
+if (exports.ittm_pipeline_abi_version() !== 5) {
   throw new Error("Unexpected pipeline core ABI version");
 }
 if (exports.ittm_span_evidence_score(800, 900, 700, 2, 0) !== 71500) {
@@ -94,31 +97,38 @@ try {
   if (exports.ittm_separated_stage_mask(handle) !== 0b00011111) {
     throw new Error("WASM separated planning stage mask failed");
   }
-  if (exports.ittm_separated_job_count(handle) !== 2) {
+  if (exports.ittm_separated_job_count(handle) !== 1) {
     throw new Error("WASM separated job count parity failed");
   }
   const firstBox = Array.from({ length: 4 }, (_unused, field) =>
     exports.ittm_separated_job_field(handle, 0, field),
   );
-  if (firstBox.join(",") !== "6,6,57,12") {
+  if (
+    firstBox[0] > 8 ||
+    firstBox[1] > 7 ||
+    firstBox[2] < 70 ||
+    firstBox[3] < 28 ||
+    firstBox.join(",") === `0,0,${width},${height}`
+  ) {
     throw new Error(`WASM separated geometry parity failed: ${firstBox}`);
   }
-  for (const [index, value] of ["first", "second"].entries()) {
-    const encoded = new TextEncoder().encode(value);
-    const pointer = exports.ittm_alloc(encoded.byteLength);
-    new Uint8Array(exports.memory.buffer, pointer, encoded.byteLength).set(
-      encoded,
-    );
-    const status = exports.ittm_separated_set_ocr(
-      handle,
-      index,
-      pointer,
-      encoded.byteLength,
-      900,
-    );
-    exports.ittm_dealloc(pointer, encoded.byteLength);
-    if (status !== 0) throw new Error(`WASM OCR handoff failed: ${status}`);
+  if (exports.ittm_separated_job_field(handle, 0, 7) !== 2) {
+    throw new Error("WASM separated context span parity failed");
   }
+  const encoded = new TextEncoder().encode("first\nsecond");
+  const pointer = exports.ittm_alloc(encoded.byteLength);
+  new Uint8Array(exports.memory.buffer, pointer, encoded.byteLength).set(
+    encoded,
+  );
+  const status = exports.ittm_separated_set_ocr(
+    handle,
+    0,
+    pointer,
+    encoded.byteLength,
+    900,
+  );
+  exports.ittm_dealloc(pointer, encoded.byteLength);
+  if (status !== 0) throw new Error(`WASM OCR handoff failed: ${status}`);
   const length = exports.ittm_separated_render_length(handle);
   const outputPointer = exports.ittm_alloc(length);
   const copied = exports.ittm_separated_render_copy(
@@ -130,7 +140,7 @@ try {
     new Uint8Array(exports.memory.buffer, outputPointer, length),
   );
   exports.ittm_dealloc(outputPointer, length);
-  if (copied !== length || output !== "first\n\nsecond") {
+  if (copied !== length || output !== "first\nsecond") {
     throw new Error("WASM separated assembly parity failed");
   }
   if (exports.ittm_separated_stage_mask(handle) !== 0b11111111) {

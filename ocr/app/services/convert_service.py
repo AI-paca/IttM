@@ -1066,6 +1066,8 @@ def _recognize_text_with_sparse_fallback(
         return primary_text
     if not primary_text.strip():
         return fallback_text
+    if _should_replace_primary_with_fallback(primary_text, fallback_text):
+        return fallback_text
     return "\n\n".join(dedupe_chunks([primary_text, fallback_text]))
 
 
@@ -5409,13 +5411,23 @@ def _convert_page_segment(
     engine is deliberately only an OCR adapter for the blocks Rust requests.
     """
 
-    def recognize_block(crop: Image.Image, _job: SeparatedOcrJob) -> str:
+    def recognize_block(crop: Image.Image, job: SeparatedOcrJob) -> str:
+        psm_by_mode = {
+            0: profile.text_region_psm,
+            1: profile.document_region_psm,
+            2: profile.wide_text_region_psm,
+        }
         return _recognize_text_with_sparse_fallback(
             engine,
             crop,
             profile,
             mode="text_mode",
-            psm=_text_psm_for_image_region(crop, profile),
+            psm=psm_by_mode.get(job.recognition_mode, profile.text_region_psm),
+            min_fallback_tokens=(
+                profile.edge_word_fallback_min_tokens
+                if job.recognition_mode == 2
+                else None
+            ),
         )
 
     markdown, jobs, stages = run_native_separated_pipeline(

@@ -47,7 +47,11 @@ fixture_page_limit_rules=()
 timeout_seconds=300
 fixture_patterns=()
 resume=0
-runtime_image="${OCR_BENCHMARK_IMAGE:-ittm-ocr}"
+runtime_image_override="${OCR_BENCHMARK_IMAGE:-}"
+runtime_image_base="${OCR_BENCHMARK_BASE_IMAGE:-ittm-ocr}"
+runtime_image=""
+runtime_image_owned=0
+runtime_image_source=""
 python_packages_volume="${OCR_PYTHON_PACKAGES_VOLUME:-ittm_ocr-python-packages}"
 models_volume="${OCR_EASYOCR_MODELS_VOLUME:-ittm_ocr-easyocr-models}"
 
@@ -265,6 +269,33 @@ IFS=',' read -r -a engines <<< "$engines_csv"
 commit="$(git -C "$source_root" rev-parse HEAD)"
 subject="$(git -C "$source_root" show -s --format=%s HEAD)"
 ocr_tree="$(git -C "$source_root" rev-parse HEAD:ocr)"
+pipeline_core_tree="$(git -C "$source_root" rev-parse HEAD:pipeline-core)"
+if [[ -n "$runtime_image_override" ]]; then
+  runtime_image="$runtime_image_override"
+  runtime_image_source="explicit override"
+else
+  runtime_image="ittm-ocr-benchmark:${commit:0:12}-$$"
+  docker image inspect "$runtime_image_base" >/dev/null
+  docker build \
+    --build-arg "BASE_IMAGE=$runtime_image_base" \
+    --build-arg "RUST_BUILD_IMAGE=rust@sha256:1f0dbad1df66647807e6952d1db85d0b2bda7606cb2139d82517e4f009967376" \
+    -f - \
+    -t "$runtime_image" \
+    "$source_root" <<'DOCKERFILE'
+ARG RUST_BUILD_IMAGE
+ARG BASE_IMAGE
+FROM ${RUST_BUILD_IMAGE} AS pipeline-core-builder
+WORKDIR /core
+COPY pipeline-core/Cargo.toml pipeline-core/Cargo.lock ./
+COPY pipeline-core/src ./src
+RUN cargo test --locked && cargo build --locked --release
+
+FROM ${BASE_IMAGE}
+COPY --from=pipeline-core-builder /core/target/release/libittm_pipeline_core.so /opt/ittm-pipeline-core/libittm_pipeline_core.so
+DOCKERFILE
+  runtime_image_owned=1
+  runtime_image_source="pipeline-core overlay built from --source on $runtime_image_base"
+fi
 runtime_image_id="$(docker image inspect --format '{{.Id}}' "$runtime_image")"
 container_name="ittm-benchmark-${commit:0:8}-$$"
 server_log="$output_root/server.log"
@@ -339,6 +370,9 @@ cleanup() {
   stop_container
   if [[ -n "$page_limited_dir" ]]; then
     rm -rf "$page_limited_dir"
+  fi
+  if [[ "$runtime_image_owned" -eq 1 ]]; then
+    docker image rm "$runtime_image" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
@@ -486,7 +520,9 @@ cat >"$manifest" <<EOF
 - commit: \`$commit\`
 - subject: $subject
 - OCR tree: \`$ocr_tree\`
+- pipeline-core tree: \`$pipeline_core_tree\`
 - runtime image: \`$runtime_image_id\`
+- runtime image source: \`$runtime_image_source\`
 - engines: \`$engines_csv\`
 - pipeline profile: \`${pipeline_profile:-per-engine default}\`
 - engine profile overrides: \`${engine_profile_rules[*]:-none}\`
@@ -729,8 +765,6 @@ PY
   done
 done
 
-cleanup
-trap - EXIT
 python3 "$script_dir/../debug/debug_report.py" \
   --summary "$summary" \
   --output-root "$output_root" \
@@ -738,4 +772,6 @@ python3 "$script_dir/../debug/debug_report.py" \
   --markdown "$output_root/comparison.md" \
   --tables-root "$output_root/tables" \
   --csv "$output_root/comparison.csv"
+cleanup
+trap - EXIT
 printf 'Benchmark complete: %s\n' "$output_root"

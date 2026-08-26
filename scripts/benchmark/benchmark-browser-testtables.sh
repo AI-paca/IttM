@@ -114,6 +114,11 @@ manifest="$output_root/manifest.md"
 lang_path="${BROWSER_OCR_LANG_PATH:-$source_root/.cache/tessdata}"
 profile_json="$output_root/profile.json"
 
+(
+  cd "$source_root"
+  npm run build:pipeline-core:wasm
+)
+
 mkdir -p "$lang_path"
 for lang in eng rus chi_sim; do
   if [[ -s "$lang_path/$lang.traineddata" ]]; then

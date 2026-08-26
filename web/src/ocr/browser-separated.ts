@@ -15,6 +15,21 @@ export interface BrowserSeparatedResult {
   markdown: string;
   jobs: readonly SeparatedOcrJob[];
   stages: readonly (typeof SEPARATED_PIPELINE_STAGES)[number][];
+  routeId: number;
+}
+
+export interface BrowserSeparatedDebugObserver {
+  input?(input: Blob): void | Promise<void>;
+  planned?(
+    jobs: readonly SeparatedOcrJob[],
+    routeId: number,
+  ): void | Promise<void>;
+  block?(image: Blob, job: SeparatedOcrJob): void | Promise<void>;
+  recognized?(
+    text: string,
+    confidenceMilli: number,
+    job: SeparatedOcrJob,
+  ): void | Promise<void>;
 }
 
 type BrowserSeparatedRecognizer = (
@@ -96,8 +111,11 @@ export async function runBrowserSeparatedPipeline(
   recognize: BrowserSeparatedRecognizer,
   onProgress?: ProgressSink,
   onSegment?: (text: string, job: SeparatedOcrJob) => void,
+  debugObserver?: BrowserSeparatedDebugObserver,
 ): Promise<BrowserSeparatedResult> {
   const core = await loadBrowserPipelineCore();
+  const routeId = core.routeId();
+  await debugObserver?.input?.(input);
   onProgress?.(
     "preprocess → geometry → topology → find-object → separate-block...",
   );
@@ -116,14 +134,17 @@ export async function runBrowserSeparatedPipeline(
   });
   try {
     const jobs = session.jobs();
+    await debugObserver?.planned?.(jobs, routeId);
     for (const job of jobs) {
       onProgress?.(`ocr-blocks ${job.index + 1}/${jobs.length}...`);
       const block = await rasterBlob(session.raster(job.index));
+      await debugObserver?.block?.(block, job);
       const result = await recognize(block, job);
       const text = typeof result === "string" ? result : result.text;
       const confidenceMilli =
         typeof result === "string" ? 0 : (result.confidenceMilli ?? 0);
       session.setOcr(job.index, text, confidenceMilli);
+      await debugObserver?.recognized?.(text, confidenceMilli, job);
       onSegment?.(text, job);
     }
     onProgress?.("get-segment → generate-object...");
@@ -137,7 +158,7 @@ export async function runBrowserSeparatedPipeline(
         `Separated browser pipeline stopped after: ${stages.join(", ")}`,
       );
     }
-    return { markdown, jobs, stages };
+    return { markdown, jobs, stages, routeId };
   } finally {
     session.close();
   }

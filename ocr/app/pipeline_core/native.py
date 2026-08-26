@@ -28,6 +28,7 @@ class NativePipelineCore:
         if version != PIPELINE_CORE_ABI_VERSION:
             raise RuntimeError(f"Unsupported pipeline core ABI {version}; expected {PIPELINE_CORE_ABI_VERSION}")
         required_exports = (
+            "ittm_pipeline_route_id",
             "ittm_pipeline_recipe_mask",
             "ittm_sparse_add_signal",
             "ittm_is_isolated_heading",
@@ -53,6 +54,7 @@ class NativePipelineCore:
                 + ", ".join(missing_exports)
             )
         library.ittm_pipeline_abi_version.restype = ctypes.c_uint32
+        library.ittm_pipeline_route_id.restype = ctypes.c_uint32
         library.ittm_pipeline_recipe_mask.argtypes = (ctypes.c_uint32,)
         library.ittm_pipeline_recipe_mask.restype = ctypes.c_uint32
         library.ittm_sparse_add_signal.argtypes = (ctypes.c_uint32, ctypes.c_uint32)
@@ -144,6 +146,9 @@ class NativePipelineCore:
         library.ittm_separated_drop.argtypes = (ctypes.c_uint32,)
         library.ittm_separated_drop.restype = ctypes.c_int32
         return cls(path=resolved, _library=library)
+
+    def route_id(self) -> int:
+        return int(self._library.ittm_pipeline_route_id())
 
     def recipe_mask(self, capability_bits: int) -> int:
         return int(self._library.ittm_pipeline_recipe_mask(capability_bits))

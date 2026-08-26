@@ -64,7 +64,9 @@ function cleanUiOcrLine(line: string, preferEuro: boolean): string {
     value = value.split(" -¥", 1)[0].trimEnd();
   }
   value = cleanCommerceOcrConfusables(value, preferEuro);
-  return value.replaceAll(" jun ", " Jun ");
+  return value
+    .replaceAll(" jun ", " Jun ")
+    .replace(/([\u3400-\u9fff])\s+(?=[\u3400-\u9fff])/gu, "$1");
 }
 
 export function applyBrowserLexicalCorrection(

@@ -6,6 +6,9 @@ use std::sync::{Mutex, OnceLock};
 const ALL_STAGE_MASK: u32 = (1 << 8) - 1;
 const PLANNED_STAGE_MASK: u32 = (1 << 5) - 1;
 const MAX_JOBS: usize = 512;
+const OBJECT_PARAGRAPH: u32 = 0;
+const OBJECT_LIST: u32 = 1;
+const OBJECT_TABLE: u32 = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct Rect {
@@ -24,6 +27,37 @@ struct OcrJob {
     row_span: u32,
     column_span: u32,
     recognition_mode: u32,
+    object_kind: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DetectedLine {
+    left: usize,
+    top: usize,
+    right: usize,
+    bottom: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct DetectedObject {
+    kind: u32,
+    lines: Vec<DetectedLine>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct EdgeRule {
+    position_start: usize,
+    position_end: usize,
+    span_start: usize,
+    span_end: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TableRegion {
+    left: usize,
+    top: usize,
+    right: usize,
+    bottom: usize,
 }
 
 #[derive(Debug)]
@@ -225,6 +259,562 @@ fn row_bands(active: &[bool], bridge_gap: usize) -> Vec<(usize, usize)> {
     bands
 }
 
+fn longest_dense_span(active: &[bool], maximum_gap: usize) -> Option<(usize, usize)> {
+    let mut best = None;
+    let mut start = None;
+    let mut last_active = 0;
+    for (index, value) in active.iter().copied().enumerate() {
+        if value {
+            start.get_or_insert(index);
+            last_active = index;
+        } else if let Some(first) = start
+            && index.saturating_sub(last_active) > maximum_gap
+        {
+            let candidate = (first, last_active + 1);
+            if best.is_none_or(|current: (usize, usize)| {
+                candidate.1 - candidate.0 > current.1 - current.0
+            }) {
+                best = Some(candidate);
+            }
+            start = None;
+        }
+    }
+    if let Some(first) = start {
+        let candidate = (first, last_active + 1);
+        if best.is_none_or(|current: (usize, usize)| {
+            candidate.1 - candidate.0 > current.1 - current.0
+        }) {
+            best = Some(candidate);
+        }
+    }
+    best
+}
+
+fn horizontal_edge_rules(
+    pixels: &[u8],
+    width: usize,
+    height: usize,
+    stride: usize,
+    channels: usize,
+) -> Vec<EdgeRule> {
+    const RULE_DELTA: u8 = 18;
+    let mut rows: Vec<EdgeRule> = Vec::new();
+    for y in 1..height.saturating_sub(1) {
+        let mut active = vec![false; width];
+        for (x, value) in active.iter_mut().enumerate() {
+            let center = y * stride + x * channels;
+            let previous = (y - 1) * stride + x * channels;
+            let next = (y + 1) * stride + x * channels;
+            *value = channel_distance(pixels, center, previous, channels)
+                .max(channel_distance(pixels, center, next, channels))
+                >= RULE_DELTA;
+        }
+        let Some((left, right)) = longest_dense_span(&active, 2) else {
+            continue;
+        };
+        if (right - left) * 100 < width * 45 {
+            continue;
+        }
+        if let Some(previous) = rows.last_mut()
+            && y <= previous.position_end + 1
+            && right.min(previous.span_end).saturating_sub(left.max(previous.span_start)) * 100
+                >= (right - left).min(previous.span_end - previous.span_start) * 80
+        {
+            previous.position_end = y + 1;
+            previous.span_start = previous.span_start.min(left);
+            previous.span_end = previous.span_end.max(right);
+        } else {
+            rows.push(EdgeRule {
+                position_start: y,
+                position_end: y + 1,
+                span_start: left,
+                span_end: right,
+            });
+        }
+    }
+    rows
+}
+
+fn vertical_edge_rules(
+    pixels: &[u8],
+    width: usize,
+    height: usize,
+    stride: usize,
+    channels: usize,
+) -> Vec<EdgeRule> {
+    const RULE_DELTA: u8 = 18;
+    let mut columns: Vec<EdgeRule> = Vec::new();
+    for x in 1..width.saturating_sub(1) {
+        let mut active = vec![false; height];
+        for (y, value) in active.iter_mut().enumerate() {
+            let center = y * stride + x * channels;
+            let previous = y * stride + (x - 1) * channels;
+            let next = y * stride + (x + 1) * channels;
+            *value = channel_distance(pixels, center, previous, channels)
+                .max(channel_distance(pixels, center, next, channels))
+                >= RULE_DELTA;
+        }
+        let Some((top, bottom)) = longest_dense_span(&active, 2) else {
+            continue;
+        };
+        if (bottom - top) * 100 < height * 25 {
+            continue;
+        }
+        if let Some(previous) = columns.last_mut()
+            && x <= previous.position_end + 1
+            && bottom.min(previous.span_end).saturating_sub(top.max(previous.span_start)) * 100
+                >= (bottom - top).min(previous.span_end - previous.span_start) * 80
+        {
+            previous.position_end = x + 1;
+            previous.span_start = previous.span_start.min(top);
+            previous.span_end = previous.span_end.max(bottom);
+        } else {
+            columns.push(EdgeRule {
+                position_start: x,
+                position_end: x + 1,
+                span_start: top,
+                span_end: bottom,
+            });
+        }
+    }
+    columns
+}
+
+fn table_regions(
+    pixels: &[u8],
+    width: usize,
+    height: usize,
+    stride: usize,
+    channels: usize,
+) -> Vec<TableRegion> {
+    let horizontal = horizontal_edge_rules(pixels, width, height, stride, channels);
+    let vertical = vertical_edge_rules(pixels, width, height, stride, channels);
+    let maximum_gap = (height / 8).max(48);
+    let mut groups: Vec<Vec<EdgeRule>> = Vec::new();
+    for rule in horizontal {
+        let joins_previous = groups.last().and_then(|group| group.last()).is_some_and(|previous| {
+            let overlap = rule.span_end.min(previous.span_end)
+                .saturating_sub(rule.span_start.max(previous.span_start));
+            let minimum_width = (rule.span_end - rule.span_start)
+                .min(previous.span_end - previous.span_start);
+            rule.position_start.saturating_sub(previous.position_end) <= maximum_gap
+                && overlap * 100 >= minimum_width * 80
+        });
+        if joins_previous {
+            groups.last_mut().expect("group exists").push(rule);
+        } else {
+            groups.push(vec![rule]);
+        }
+    }
+
+    let mut regions = Vec::new();
+    for group in groups.into_iter().filter(|group| group.len() >= 3) {
+        let first = group.first().expect("group is non-empty");
+        let last = group.last().expect("group is non-empty");
+        let left = group.iter().map(|rule| rule.span_start).min().unwrap_or(0);
+        let right = group.iter().map(|rule| rule.span_end).max().unwrap_or(width);
+        let horizontal_top = first.position_start;
+        let horizontal_bottom = last.position_end;
+        let matching_vertical: Vec<EdgeRule> = vertical
+            .iter()
+            .copied()
+            .filter(|rule| {
+                let x = (rule.position_start + rule.position_end) / 2;
+                let overlap = rule.span_end.min(horizontal_bottom)
+                    .saturating_sub(rule.span_start.max(horizontal_top));
+                left <= x
+                    && x <= right
+                    && overlap * 100
+                        >= horizontal_bottom.saturating_sub(horizontal_top) * 60
+            })
+            .collect();
+        let (top, bottom) = if matching_vertical.len() >= 2 {
+            (
+                matching_vertical
+                    .iter()
+                    .map(|rule| rule.span_start)
+                    .min()
+                    .unwrap_or(horizontal_top),
+                matching_vertical
+                    .iter()
+                    .map(|rule| rule.span_end)
+                    .max()
+                    .unwrap_or(horizontal_bottom),
+            )
+        } else {
+            let mut steps: Vec<usize> = group
+                .windows(2)
+                .map(|pair| pair[1].position_start.saturating_sub(pair[0].position_start))
+                .filter(|step| *step > 0)
+                .collect();
+            steps.sort_unstable();
+            let cadence = steps.get(steps.len() / 2).copied().unwrap_or(0);
+            (
+                horizontal_top.saturating_sub(cadence),
+                (horizontal_bottom + cadence).min(height),
+            )
+        };
+        regions.push(TableRegion {
+            left,
+            top,
+            right,
+            bottom,
+        });
+    }
+    regions.sort_by_key(|region| (region.top, region.left));
+    let mut merged: Vec<TableRegion> = Vec::new();
+    for region in regions {
+        if let Some(previous) = merged.last_mut()
+            && region.top <= previous.bottom
+            && region.left.max(previous.left) < region.right.min(previous.right)
+        {
+            previous.left = previous.left.min(region.left);
+            previous.top = previous.top.min(region.top);
+            previous.right = previous.right.max(region.right);
+            previous.bottom = previous.bottom.max(region.bottom);
+        } else {
+            merged.push(region);
+        }
+    }
+    merged
+}
+
+fn detected_line(
+    foreground: &[bool],
+    width: usize,
+    top: usize,
+    bottom: usize,
+) -> Option<DetectedLine> {
+    let mut left = width;
+    let mut right = 0;
+    for y in top..bottom {
+        for x in 0..width {
+            if foreground[y * width + x] {
+                left = left.min(x);
+                right = right.max(x + 1);
+            }
+        }
+    }
+    (left < right).then_some(DetectedLine {
+        left,
+        top,
+        right,
+        bottom,
+    })
+}
+
+fn line_has_list_marker(line: DetectedLine, foreground: &[bool], width: usize) -> bool {
+    let mut active_columns = vec![false; line.right - line.left];
+    for y in line.top..line.bottom {
+        for x in line.left..line.right {
+            active_columns[x - line.left] |= foreground[y * width + x];
+        }
+    }
+    let mut runs = Vec::new();
+    let mut start = None;
+    for (index, active) in active_columns.iter().copied().enumerate() {
+        if active {
+            start.get_or_insert(index);
+        } else if let Some(first) = start.take() {
+            runs.push((first, index));
+        }
+    }
+    if let Some(first) = start {
+        runs.push((first, active_columns.len()));
+    }
+    let height = line.bottom - line.top;
+    runs.windows(2).any(|pair| {
+        pair[0].1 - pair[0].0 <= height * 2
+            && pair[1].0.saturating_sub(pair[0].1) >= height.max(4)
+    })
+}
+
+fn remove_page_edge_artifacts(
+    lines: &mut Vec<DetectedLine>,
+    regions: &[TableRegion],
+    foreground: &[bool],
+    width: usize,
+    height: usize,
+) {
+    const MIN_REPEATED_EDGE_COMPONENTS: usize = 6;
+    let edge_slack = (width / 20).max(2);
+    let narrow_edge_width = (width / 8).max(1);
+    let near_left = |line: &DetectedLine| {
+        line.left <= edge_slack && line.right.saturating_sub(line.left) <= narrow_edge_width
+    };
+    let near_right = |line: &DetectedLine| {
+        line.right.saturating_add(edge_slack) >= width
+            && line.right.saturating_sub(line.left) <= narrow_edge_width
+    };
+    let repeated_left = lines.iter().filter(|line| near_left(line)).count()
+        >= MIN_REPEATED_EDGE_COMPONENTS;
+    let repeated_right = lines.iter().filter(|line| near_right(line)).count()
+        >= MIN_REPEATED_EDGE_COMPONENTS;
+    let frame_margin = (height / 8).max(2);
+    let maximum_frame_height = (height / 80).max(8);
+    let maximum_structure_height = (height / 20).max(8);
+
+    lines.retain(|line| {
+        let inside_table = line_in_table_region(*line, regions);
+        let line_width = line.right.saturating_sub(line.left);
+        let line_height = line.bottom.saturating_sub(line.top);
+        let covered_columns = line_covered_columns(*line, foreground, width);
+        let repeated_binding = !inside_table
+            && ((repeated_left && near_left(line))
+                || (repeated_right && near_right(line)));
+        let horizontal_structure = !inside_table
+            && line_height <= maximum_structure_height
+            && line_width * 2 >= width
+            && line_width >= line_height.saturating_mul(20)
+            && covered_columns * 100 >= line_width * 85
+            && line_component_count(*line, foreground, width, 4) <= 4;
+        let horizontal_page_frame = horizontal_structure
+            || (!inside_table
+                && line_height <= maximum_frame_height
+                && line_width * 2 >= width
+                && line_width >= line_height.saturating_mul(50)
+                && (line.top <= frame_margin
+                    || line.bottom.saturating_add(frame_margin) >= height));
+        !repeated_binding && !horizontal_page_frame
+    });
+}
+
+fn line_in_table_region(line: DetectedLine, regions: &[TableRegion]) -> bool {
+    let center_x = (line.left + line.right) / 2;
+    let center_y = (line.top + line.bottom) / 2;
+    regions.iter().any(|region| {
+        region.left <= center_x
+            && center_x <= region.right
+            && region.top <= center_y
+            && center_y <= region.bottom
+    })
+}
+
+fn line_ink_count(line: DetectedLine, foreground: &[bool], width: usize) -> usize {
+    (line.top..line.bottom)
+        .map(|y| {
+            foreground[y * width + line.left..y * width + line.right]
+                .iter()
+                .filter(|value| **value)
+                .count()
+        })
+        .sum()
+}
+
+fn line_covered_columns(line: DetectedLine, foreground: &[bool], width: usize) -> usize {
+    (line.left..line.right)
+        .filter(|x| {
+            (line.top..line.bottom).any(|y| foreground[y * width + *x])
+        })
+        .count()
+}
+
+fn line_component_count(
+    line: DetectedLine,
+    foreground: &[bool],
+    width: usize,
+    stop_after: usize,
+) -> usize {
+    let local_width = line.right - line.left;
+    let local_height = line.bottom - line.top;
+    let mut visited = vec![false; local_width * local_height];
+    let mut stack = Vec::new();
+    let mut components = 0;
+
+    for local_y in 0..local_height {
+        for local_x in 0..local_width {
+            let local_index = local_y * local_width + local_x;
+            let source_index = (line.top + local_y) * width + line.left + local_x;
+            if visited[local_index] || !foreground[source_index] {
+                continue;
+            }
+            components += 1;
+            if components > stop_after {
+                return components;
+            }
+            visited[local_index] = true;
+            stack.push((local_x, local_y));
+            while let Some((x, y)) = stack.pop() {
+                if x > 0 {
+                    let next = y * local_width + x - 1;
+                    let source = (line.top + y) * width + line.left + x - 1;
+                    if !visited[next] && foreground[source] {
+                        visited[next] = true;
+                        stack.push((x - 1, y));
+                    }
+                }
+                if x + 1 < local_width {
+                    let next = y * local_width + x + 1;
+                    let source = (line.top + y) * width + line.left + x + 1;
+                    if !visited[next] && foreground[source] {
+                        visited[next] = true;
+                        stack.push((x + 1, y));
+                    }
+                }
+                if y > 0 {
+                    let next = (y - 1) * local_width + x;
+                    let source = (line.top + y - 1) * width + line.left + x;
+                    if !visited[next] && foreground[source] {
+                        visited[next] = true;
+                        stack.push((x, y - 1));
+                    }
+                }
+                if y + 1 < local_height {
+                    let next = (y + 1) * local_width + x;
+                    let source = (line.top + y + 1) * width + line.left + x;
+                    if !visited[next] && foreground[source] {
+                        visited[next] = true;
+                        stack.push((x, y + 1));
+                    }
+                }
+            }
+        }
+    }
+    components
+}
+
+fn remove_repeated_edge_foreground(
+    foreground: &mut [bool],
+    regions: &[TableRegion],
+    width: usize,
+    height: usize,
+) {
+    const MIN_REPEATED_EDGE_COMPONENTS: usize = 6;
+    let strip_width = (width / 16).clamp(4, width / 2);
+    let maximum_component_height = (height / 20).max(8);
+    let mut repeated = [false; 2];
+
+    for (side, repeated_side) in repeated.iter_mut().enumerate() {
+        let (outer_start, outer_end, inner_start, inner_end) = if side == 0 {
+            (0, strip_width, strip_width, strip_width * 2)
+        } else {
+            (
+                width - strip_width,
+                width,
+                width.saturating_sub(strip_width * 2),
+                width - strip_width,
+            )
+        };
+        let detached_rows: Vec<bool> = foreground
+            .chunks_exact(width)
+            .map(|row| {
+                row[outer_start..outer_end].iter().any(|value| *value)
+                    && !row[inner_start..inner_end].iter().any(|value| *value)
+            })
+            .collect();
+        *repeated_side = row_bands(&detached_rows, 2)
+            .into_iter()
+            .filter(|(top, bottom)| {
+                let component_height = bottom - top;
+                component_height >= 2 && component_height <= maximum_component_height
+            })
+            .count()
+            >= MIN_REPEATED_EDGE_COMPONENTS;
+    }
+
+    let protected_left = regions.iter().any(|region| {
+        region.left < strip_width && region.right > strip_width
+    });
+    let protected_right = regions.iter().any(|region| {
+        region.left < width - strip_width && region.right > width - strip_width
+    });
+    if (repeated[0] && !protected_left) || (repeated[1] && !protected_right) {
+        for row in foreground.chunks_exact_mut(width) {
+            if repeated[0] && !protected_left {
+                row[..strip_width].fill(false);
+            }
+            if repeated[1] && !protected_right {
+                row[width - strip_width..].fill(false);
+            }
+        }
+    }
+}
+
+fn detect_objects(
+    lines: &[DetectedLine],
+    regions: &[TableRegion],
+    foreground: &[bool],
+    width: usize,
+) -> Vec<DetectedObject> {
+    let mut claimed = vec![false; lines.len()];
+    let mut objects = Vec::new();
+    for region in regions {
+        let members: Vec<DetectedLine> = lines
+            .iter()
+            .copied()
+            .enumerate()
+            .filter_map(|(index, line)| {
+                let center_x = (line.left + line.right) / 2;
+                let center_y = (line.top + line.bottom) / 2;
+                if region.left <= center_x
+                    && center_x <= region.right
+                    && region.top <= center_y
+                    && center_y <= region.bottom
+                {
+                    claimed[index] = true;
+                    Some(line)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if !members.is_empty() {
+            objects.push(DetectedObject {
+                kind: OBJECT_TABLE,
+                lines: members,
+            });
+        }
+    }
+
+    let remaining: Vec<DetectedLine> = lines
+        .iter()
+        .copied()
+        .enumerate()
+        .filter_map(|(index, line)| (!claimed[index]).then_some(line))
+        .collect();
+    if !remaining.is_empty() {
+        let mut heights: Vec<usize> = remaining
+            .iter()
+            .map(|line| line.bottom - line.top)
+            .collect();
+        heights.sort_unstable();
+        let typical_height = heights[(heights.len() - 1) / 2].max(1);
+        let object_gap = typical_height.max(8);
+        let mut groups: Vec<Vec<DetectedLine>> = Vec::new();
+        for line in remaining {
+            let begins_object = groups.last().and_then(|group| group.last()).is_some_and(|previous| {
+                line.top.saturating_sub(previous.bottom) > object_gap
+            }) || groups.is_empty();
+            if begins_object {
+                groups.push(Vec::new());
+            }
+            groups.last_mut().expect("group exists").push(line);
+        }
+        objects.extend(groups.into_iter().map(|group| {
+            let marker_lines = group
+                .iter()
+                .copied()
+                .filter(|line| line_has_list_marker(*line, foreground, width))
+                .count();
+            let group_height = group.last().expect("group is non-empty").bottom
+                - group.first().expect("group is non-empty").top;
+            DetectedObject {
+                kind: if marker_lines >= 2 && group_height >= typical_height * 3 {
+                    OBJECT_LIST
+                } else {
+                    OBJECT_PARAGRAPH
+                },
+                lines: group,
+            }
+        }));
+    }
+    objects.sort_by_key(|object| {
+        let first = object.lines.first().expect("object is non-empty");
+        (first.top, first.left)
+    });
+    objects
+}
+
 fn plan_jobs(
     pixels: &[u8],
     width: usize,
@@ -232,7 +822,9 @@ fn plan_jobs(
     stride: usize,
     channels: usize,
 ) -> Vec<OcrJob> {
-    let foreground = local_contrast_mask(pixels, width, height, stride, channels);
+    let regions = table_regions(pixels, width, height, stride, channels);
+    let mut foreground = local_contrast_mask(pixels, width, height, stride, channels);
+    remove_repeated_edge_foreground(&mut foreground, &regions, width, height);
     let minimum_row_ink = (width / 700).max(3);
     let maximum_row_ink = (width * 3 / 5).max(minimum_row_ink + 1);
     let mut active_rows = vec![false; height];
@@ -257,58 +849,52 @@ fn plan_jobs(
         heights[heights.len() / 2].max(1)
     };
     let glyph_gap = (raw_median_height / 3).clamp(1, 5);
-    let mut lines: Vec<(usize, usize)> = Vec::with_capacity(bands.len());
+    let mut merged_lines: Vec<(usize, usize)> = Vec::with_capacity(bands.len());
     for (top, bottom) in bands {
-        if let Some(previous) = lines.last_mut()
+        if let Some(previous) = merged_lines.last_mut()
             && top.saturating_sub(previous.1) <= glyph_gap
         {
             previous.1 = bottom;
         } else {
-            lines.push((top, bottom));
+            merged_lines.push((top, bottom));
         }
     }
-    let median_height = {
-        let mut heights: Vec<usize> = lines.iter().map(|(top, bottom)| bottom - top).collect();
-        heights.sort_unstable();
-        heights[heights.len() / 2].max(1)
-    };
-    let object_gap = (median_height * 3).max(12);
+    let mut lines: Vec<DetectedLine> = merged_lines
+        .iter()
+        .filter_map(|(top, bottom)| detected_line(&foreground, width, *top, *bottom))
+        .collect();
+    let minimum_line_ink = (width / 100).max(12);
+    lines.retain(|line| {
+        let inside_table = line_in_table_region(*line, &regions);
+        let line_width = line.right.saturating_sub(line.left);
+        let line_height = line.bottom.saturating_sub(line.top);
+        let isolated_micro_component = line_width <= (width / 100).max(12)
+            && line_height <= (height / 200).max(12);
+        inside_table
+            || (!isolated_micro_component
+                && line_ink_count(*line, &foreground, width) >= minimum_line_ink)
+    });
+    remove_page_edge_artifacts(&mut lines, &regions, &foreground, width, height);
+    if lines.is_empty() {
+        return Vec::new();
+    }
     let x_padding = (width / 800).clamp(2, 12);
     let y_padding = (height / 1200).clamp(1, 6);
-    let mut objects: Vec<Vec<(usize, usize)>> = Vec::new();
-    for line in lines {
-        let begins_object = objects.last().is_none_or(|object| {
-            line.0
-                .saturating_sub(object.last().expect("object is non-empty").1)
-                > object_gap
-        });
-        if begins_object {
-            objects.push(Vec::new());
-        }
-        objects.last_mut().expect("object was inserted").push(line);
-    }
+    let objects = detect_objects(&lines, &regions, &foreground, width);
 
     const MAX_CONTEXT_LINES: usize = 16;
     let estimated_jobs = objects
         .iter()
-        .map(|object| object.len().div_ceil(MAX_CONTEXT_LINES))
+        .map(|object| object.lines.len().div_ceil(MAX_CONTEXT_LINES))
         .sum::<usize>();
     let mut jobs = Vec::with_capacity(estimated_jobs.min(MAX_JOBS));
     let mut source_row = 0_u32;
     for (object_id, object) in objects.iter().enumerate() {
-        for chunk in object.chunks(MAX_CONTEXT_LINES) {
-            let band_top = chunk[0].0;
-            let band_bottom = chunk[chunk.len() - 1].1;
-            let mut left = width;
-            let mut right = 0;
-            for y in band_top..band_bottom {
-                for x in 0..width {
-                    if foreground[y * width + x] {
-                        left = left.min(x);
-                        right = right.max(x + 1);
-                    }
-                }
-            }
+        for chunk in object.lines.chunks(MAX_CONTEXT_LINES) {
+            let band_top = chunk[0].top;
+            let band_bottom = chunk[chunk.len() - 1].bottom;
+            let left = chunk.iter().map(|line| line.left).min().unwrap_or(width);
+            let right = chunk.iter().map(|line| line.right).max().unwrap_or(0);
             if left >= right {
                 source_row += chunk.len() as u32;
                 continue;
@@ -331,6 +917,7 @@ fn plan_jobs(
                     right: (right + x_padding).min(width) as u32,
                     bottom: (band_bottom + y_padding).min(height) as u32,
                 }),
+                object_kind: object.kind,
             });
             source_row += chunk.len() as u32;
             if jobs.len() == MAX_JOBS {
@@ -571,6 +1158,7 @@ pub extern "C" fn ittm_separated_job_field(handle: u32, index: u32, field: u32) 
         7 => job.row_span as i32,
         8 => job.column_span as i32,
         9 => job.recognition_mode as i32,
+        10 => job.object_kind as i32,
         _ => -1,
     }
 }
@@ -706,7 +1294,7 @@ mod tests {
         assert_eq!(jobs.len(), 1);
         assert!(jobs[0].rect.left <= 8);
         assert!(jobs[0].rect.top <= 7);
-        assert!(jobs[0].rect.right >= 70);
+        assert!(jobs[0].rect.right >= 70, "planned jobs: {jobs:?}");
         assert!(jobs[0].rect.bottom >= 28);
         assert_ne!(
             jobs[0].rect,

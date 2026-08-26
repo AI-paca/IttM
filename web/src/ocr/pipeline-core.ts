@@ -33,6 +33,7 @@ export interface SeparatedOcrJob {
   rowSpan: number;
   columnSpan: number;
   recognitionMode: number;
+  objectKind: number;
 }
 
 export interface SeparatedOcrRaster {
@@ -52,6 +53,7 @@ export interface PipelineCapabilities {
 
 interface PipelineCoreExports extends WebAssembly.Exports {
   ittm_pipeline_abi_version(): number;
+  ittm_pipeline_route_id(): number;
   ittm_pipeline_recipe_mask(capabilityBits: number): number;
   ittm_sparse_add_signal(code: number, signal: number): number;
   ittm_is_isolated_heading(
@@ -170,6 +172,15 @@ export class BrowserPipelineCore {
         `Unsupported pipeline core ABI ${version}; expected ${PIPELINE_CORE_ABI_VERSION}`,
       );
     }
+    if (typeof exports.ittm_pipeline_route_id !== "function") {
+      throw new Error(
+        `Pipeline core ABI ${PIPELINE_CORE_ABI_VERSION} misses ittm_pipeline_route_id`,
+      );
+    }
+  }
+
+  routeId(): number {
+    return this.exports.ittm_pipeline_route_id() >>> 0;
   }
 
   recipe(capabilities: PipelineCapabilities): ReadonlySet<PipelineStage> {
@@ -399,6 +410,7 @@ export class BrowserSeparatedSession {
       rowSpan: field(index, 7),
       columnSpan: field(index, 8),
       recognitionMode: field(index, 9),
+      objectKind: field(index, 10),
     }));
   }
 

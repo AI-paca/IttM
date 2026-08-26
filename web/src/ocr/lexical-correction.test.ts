@@ -46,3 +46,13 @@ test("browser t9 small splits compact display resolutions without product-id rew
     "HP Laptop 15440021s FHD Display 1920x1080 and panel 1024x768",
   );
 });
+
+test("browser t9 small removes OCR spacing only between adjacent CJK characters", () => {
+  assert.equal(
+    applyBrowserLexicalCorrection(
+      "CHINESE: \u4e2d \u6587 \u6d4b\u8bd5\nMIXED LATIN Д 12345 中 \u6587",
+      "t9_small",
+    ),
+    "CHINESE: \u4e2d\u6587\u6d4b\u8bd5\nMIXED LATIN Д 12345 中\u6587",
+  );
+});

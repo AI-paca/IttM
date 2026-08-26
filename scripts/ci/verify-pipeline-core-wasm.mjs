@@ -10,6 +10,7 @@ const exports = instance.exports;
 
 const separatedExports = [
   "memory",
+  "ittm_pipeline_route_id",
   "ittm_alloc",
   "ittm_dealloc",
   "ittm_separated_begin",
@@ -30,6 +31,9 @@ for (const name of separatedExports) {
 
 if (exports.ittm_pipeline_abi_version() !== 5) {
   throw new Error("Unexpected pipeline core ABI version");
+}
+if (exports.ittm_pipeline_route_id() !== 0x52530002) {
+  throw new Error("Unexpected separated route id");
 }
 if (exports.ittm_span_evidence_score(800, 900, 700, 2, 0) !== 71500) {
   throw new Error("WASM span evidence parity failed");

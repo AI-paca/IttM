@@ -4,6 +4,7 @@ mod separated;
 pub use candidates::{SpanEvidence, score_span_evidence};
 
 pub const ABI_VERSION: u32 = 5;
+pub const SEPARATED_ROUTE_ID: u32 = 0x5253_0002;
 
 pub const MERGE_UP_CODE: u8 = 3;
 pub const MERGE_LEFT_CODE: u8 = 5;
@@ -346,6 +347,11 @@ pub struct StructuralRenderArtifact {
 #[unsafe(no_mangle)]
 pub extern "C" fn ittm_pipeline_abi_version() -> u32 {
     ABI_VERSION
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_pipeline_route_id() -> u32 {
+    SEPARATED_ROUTE_ID
 }
 
 #[unsafe(no_mangle)]

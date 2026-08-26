@@ -22,6 +22,9 @@ const requiredTesseractAssets = [
   "tesseract-core-lstm.wasm.js",
   "tesseract-core-simd-lstm.wasm.js",
   "tesseract-core-relaxedsimd-lstm.wasm.js",
+  "lang/eng.traineddata",
+  "lang/rus.traineddata",
+  "lang/chi_sim.traineddata",
 ];
 const requiredPdfJsWasmAssets = [
   "jbig2.wasm",
@@ -147,7 +150,7 @@ for (const asset of requiredPdfJsWasmAssets) {
 await assertNonEmpty(pipelineCorePath);
 const pipelineCoreBytes = await readFile(pipelineCorePath);
 const pipelineCore = await WebAssembly.instantiate(pipelineCoreBytes, {});
-assert.equal(pipelineCore.instance.exports.ittm_pipeline_abi_version(), 4);
+assert.equal(pipelineCore.instance.exports.ittm_pipeline_abi_version(), 5);
 for (const name of [
   "memory",
   "ittm_alloc",

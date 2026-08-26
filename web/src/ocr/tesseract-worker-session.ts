@@ -340,13 +340,10 @@ function ocrGarbageRatio(text: string): number {
     (character) =>
       !/[\p{L}\p{N}]/u.test(character) && !allowedSymbols.includes(character),
   ).length;
-  const tokens = text.match(/[\p{L}\p{N}_]+(?:[.+:/-][\p{L}\p{N}_]+)*/gu) ?? [];
-  const shortTokens = tokens.filter(
-    (token) => Array.from(token).length <= 1,
-  ).length;
-  const shortTokenRatio =
-    tokens.length >= 6 ? shortTokens / Math.max(1, tokens.length) : 0;
-  return Math.max(weird / characters.length, shortTokenRatio);
+  // Single-character tokens are valid table cells and are also normal in CJK
+  // OCR output. Treating them as garbage forced clean blocks into language
+  // retries, where a lower-confidence single-language result could win.
+  return weird / characters.length;
 }
 
 function isStrongImageCandidate(result: BrowserOcrDetailedResult): boolean {
@@ -419,6 +416,9 @@ const compiledTesseractAssetRoot = `${
 const compiledTesseractWorkerUrl = `${
   import.meta.env?.BASE_URL ?? "/"
 }vendor/tesseract/worker.min.js`;
+const compiledTesseractLangPath = `${
+  import.meta.env?.BASE_URL ?? "/"
+}vendor/tesseract/lang`;
 
 export function normalizeAppBaseUrl(base: string | undefined): string {
   if (!base || base === "./") return "/";
@@ -431,6 +431,8 @@ function browserTesseractOptions(): Partial<TesseractWorkerOptions> {
   }
 
   return {
+    langPath: compiledTesseractLangPath,
+    gzip: false,
     workerPath: compiledTesseractWorkerUrl,
     corePath: compiledTesseractAssetRoot,
     workerBlobURL: false,
@@ -815,7 +817,10 @@ class BrowserOcrWorkerSession {
       const observed: ObservedOcrCandidate[] = [
         { result, languages: this.profile.languages },
       ];
-      if (!isStrongImageCandidate(result)) {
+      if (
+        result.confidence !== undefined &&
+        !isStrongImageCandidate(result)
+      ) {
         const languageSelection = await this.recognizeWithLanguageCandidates(
           worker,
           recognizeInput,

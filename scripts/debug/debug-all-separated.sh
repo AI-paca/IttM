@@ -69,6 +69,8 @@ Examples:
     --input separate-block=/path/to/good-run/items/{item}/03-find-object
 
 Execution:
+  --runtime RUNTIME          legacy-python (reference only), rust-native, or
+                             rust-wasm-node (WASM browser adapter under Node).
   --continue-on-failure       Intentionally run downstream on failed input.
                               Without it, one file stops at its first BAD.
   --diagnostic-batch          Run every stage for every file even after BAD,
@@ -108,6 +110,7 @@ diagnostic_batch=0
 resume_from_last_good=0
 replace_stage=0
 notify_terminal=0
+runtime="legacy-python"
 list_stages=0
 fixture_patterns=()
 explicit_sources=()
@@ -241,6 +244,10 @@ while [[ $# -gt 0 ]]; do
       notify_terminal=1
       shift
       ;;
+    --runtime)
+      runtime="$2"
+      shift 2
+      ;;
     --list-stages)
       list_stages=1
       shift
@@ -256,6 +263,14 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+case "$runtime" in
+  legacy-python|rust-native|rust-wasm-node) ;;
+  *)
+    echo "--runtime must be legacy-python, rust-native, or rust-wasm-node" >&2
+    exit 2
+    ;;
+esac
 
 if [[ "$list_stages" -eq 1 ]]; then
   printf '%s\n' "${STAGES[@]}"
@@ -297,7 +312,8 @@ if [[ "$tesseract_psm" != "4" && "$tesseract_psm" != "6" ]]; then
 fi
 
 ocr_index="$(stage_index ocr-blocks)"
-if (( from_index <= ocr_index && ocr_index <= to_index )); then
+if (( from_index <= ocr_index && ocr_index <= to_index )) &&
+  [[ "$runtime" != "rust-wasm-node" ]]; then
   if ! command -v tesseract >/dev/null 2>&1; then
     echo "Tesseract is required when the selected range includes ocr-blocks" >&2
     exit 2
@@ -433,12 +449,13 @@ else
   python3 -c '
 import json, pathlib, sys
 pathlib.Path(sys.argv[1]).write_text(json.dumps({
-  "schema": "debug-separated-run-v2",
+  "schema": "debug-separated-run-v3",
   "commit": sys.argv[2],
   "dirty": sys.argv[3] == "true",
   "stages": sys.argv[4].split(","),
+  "runtime": sys.argv[5],
 }, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-' "$run_dir/run.json" "$commit" "$dirty" "$(IFS=,; echo "${STAGES[*]}")"
+' "$run_dir/run.json" "$commit" "$dirty" "$(IFS=,; echo "${STAGES[*]}")" "$runtime"
 fi
 
 if [[ ${#ITEM_IDS[@]} -eq 0 ]]; then
@@ -710,6 +727,105 @@ run_object_stage() {
 }
 
 overall_failed=0
+  if [[ "$runtime" != "legacy-python" ]]; then
+  if [[ ${#INPUT_OVERRIDES[@]} -ne 0 ]]; then
+    echo "$runtime does not support stage input injection yet; use legacy-python for injected artifacts." >&2
+    exit 2
+  fi
+  if [[ "$from_stage" != "preprocess" && "$resume_from_last_good" -ne 1 ]]; then
+    echo "$runtime can start after preprocess only with --resume-from-last-good; an incomplete item is recomputed from its raster." >&2
+    exit 2
+  fi
+  if [[ "$runtime" == "rust-wasm-node" && "$to_stage" != "generate-object" ]]; then
+    echo "rust-wasm-node currently supports only a complete run; use rust-native for planning-only corpus diagnostics." >&2
+    exit 2
+  fi
+  if [[ "$runtime" == "rust-native" &&
+    "$to_stage" != "find-object" &&
+    "$to_stage" != "separate-block" &&
+    "$to_stage" != "generate-object" ]]; then
+    echo "rust-native supports --to-stage find-object, separate-block, or generate-object" >&2
+    exit 2
+  fi
+  if [[ "$runtime" == "rust-native" ]]; then
+    bash scripts/runtime/build-pipeline-core-native.sh >/dev/null
+  else
+    bash scripts/runtime/build-pipeline-core.sh >/dev/null
+  fi
+  printf 'RUN %s commit=%s runtime=%s items=%s\n' \
+    "$run_dir" "$(git rev-parse --short HEAD)" "$runtime" "${#ITEM_IDS[@]}"
+  for item_id in "${ITEM_IDS[@]}"; do
+    item_dir="$run_dir/items/$item_id"
+    mkdir -p "$item_dir/logs"
+    target_status="$item_dir/${STAGE_DIR[$to_stage]}/.runner-status"
+    if [[ "$resume_from_last_good" -eq 1 && -f "$target_status" &&
+      "$(cat "$target_status")" == "COMPLETE" ]]; then
+      printf '  %s REUSED through %s\n' "$item_id" "$to_stage"
+      continue
+    fi
+    if [[ "$runtime" == "rust-native" ]]; then
+      command=(
+        python3 scripts/debug/debug-rust-separated.py
+        "${ITEM_SOURCE[$item_id]}" --output "$item_dir" --engine tesseract
+        --to-stage "$to_stage"
+      )
+    else
+      browser_lang_path="${BROWSER_OCR_LANG_PATH:-}"
+      if [[ -z "$browser_lang_path" ]]; then
+        common_git_dir="$(realpath "$(git rev-parse --git-common-dir)")"
+        workspace_parent="$(dirname "$(dirname "$common_git_dir")")"
+        while IFS= read -r candidate; do
+          if [[ -f "$candidate/rus.traineddata" &&
+            -f "$candidate/eng.traineddata" &&
+            -f "$candidate/chi_sim.traineddata" ]]; then
+            browser_lang_path="$candidate"
+            break
+          fi
+        done < <(
+          printf '%s\n' "$PWD/.cache/tessdata" /usr/share/tessdata
+          find "$workspace_parent" -maxdepth 5 -type f \
+            -path '*/.cache/tessdata/rus.traineddata' -printf '%h\n' \
+            2>/dev/null | sort -u
+        )
+      fi
+      if [[ -z "$browser_lang_path" ]]; then
+        echo "Could not resolve browser tessdata with rus, eng, and chi_sim models" >"$item_dir/logs/runtime.log"
+        overall_failed=1
+        printf '  %s FAILED; browser tessdata is unavailable\n' "$item_id"
+        continue
+      fi
+      command=(
+        env BROWSER_OCR_LANG_PATH="$browser_lang_path"
+        node --import tsx scripts/benchmark/benchmark-browser-ocr.ts
+        --artifacts "$item_dir" "${ITEM_SOURCE[$item_id]}"
+      )
+    fi
+    if "${command[@]}" >"$item_dir/logs/runtime.log" 2>&1; then
+      for ((index=0; index<=to_index; index++)); do
+        stage="${STAGES[$index]}"
+        stage_status="COMPLETE"
+        if [[ "$stage" == "geometry" || "$stage" == "topology" ]]; then
+          stage_status="OPAQUE"
+        fi
+        printf '%s\n' "$stage_status" >"$item_dir/${STAGE_DIR[$stage]}/.runner-status"
+        printf '%s\t%s\t%s\t%s\t%s\tfalse\t0\n' \
+          "$(date --iso-8601=seconds)" "$item_id" "$stage" \
+          "$stage_status" "${ITEM_SOURCE[$item_id]}" >>"$status_file"
+      done
+      printf '  %s COMPLETE\n' "$item_id"
+    else
+      overall_failed=1
+      printf '  %s FAILED; see %s\n' "$item_id" "$item_dir/logs/runtime.log"
+    fi
+  done
+  if [[ "$overall_failed" -eq 0 ]]; then
+    printf 'COMPLETE\n' >"$run_dir/run.status"
+    exit 0
+  fi
+  printf 'FAILED\n' >"$run_dir/run.status"
+  exit 3
+fi
+
 printf 'RUN %s commit=%s stages=%s..%s items=%s\n' \
   "$run_dir" "$(git rev-parse --short HEAD)" "$from_stage" "$to_stage" "${#ITEM_IDS[@]}"
 

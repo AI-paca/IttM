@@ -46,6 +46,7 @@ def recipe_mask(capabilities: PipelineCapabilities) -> int:
 def verify(library_path: Path) -> None:
     library = ctypes.CDLL(str(library_path))
     library.ittm_pipeline_abi_version.restype = ctypes.c_uint32
+    library.ittm_pipeline_route_id.restype = ctypes.c_uint32
     library.ittm_pipeline_recipe_mask.argtypes = (ctypes.c_uint32,)
     library.ittm_pipeline_recipe_mask.restype = ctypes.c_uint32
     library.ittm_sparse_add_signal.argtypes = (ctypes.c_uint32, ctypes.c_uint32)
@@ -120,6 +121,7 @@ def verify(library_path: Path) -> None:
     library.ittm_separated_drop.restype = ctypes.c_int32
 
     assert library.ittm_pipeline_abi_version() == 5
+    assert library.ittm_pipeline_route_id() == 0x52530002
     for code in SPARSE_CODE_COMPONENTS:
         for signal in SPARSE_SIGNALS:
             assert library.ittm_sparse_add_signal(code, signal) == add_sparse_signal(

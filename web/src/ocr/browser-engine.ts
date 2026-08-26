@@ -3,10 +3,12 @@ import {
   type BrowserOcrProfile,
 } from "./browser-profile";
 import { runBrowserSeparatedPipeline } from "./browser-separated";
+import type { BrowserSeparatedDebugObserver } from "./browser-separated";
 import {
   acquireBrowserOcrWorker,
   releaseBrowserOcrWorkers,
 } from "./tesseract-worker-session";
+import { applyBrowserLexicalCorrection } from "./lexical-correction";
 import type { OcrResult, ProgressSink } from "./types";
 import { releaseBrowserTextReviewer } from "./text-reviewer";
 
@@ -23,6 +25,7 @@ export async function runBrowserOcrLowMemory(
   onProgress: ProgressSink,
   onChunkExtracted?: (text: string) => void,
   profile: BrowserOcrProfile = createBrowserOcrProfile(null),
+  debugObserver?: BrowserSeparatedDebugObserver,
 ): Promise<OcrResult> {
   onProgress(`Загрузка OCR (${profile.languages}, ${profile.reason})...`);
 
@@ -39,15 +42,17 @@ export async function runBrowserOcrLowMemory(
             : job.recognitionMode === 1
               ? "3"
               : profile.textRegionPsm;
-        return await workerLease.recognizeSeparatedBlock(
+        const text = await workerLease.recognizeSeparatedBlock(
           block,
           pageSegmentationMode,
         );
+        return applyBrowserLexicalCorrection(text, profile.lexicalCorrection);
       },
       onProgress,
       (text) => {
         if (text.trim()) onChunkExtracted?.(`${text.trim()}\n`);
       },
+      debugObserver,
     );
     return {
       markdown: result.markdown,
@@ -55,6 +60,7 @@ export async function runBrowserOcrLowMemory(
         pipeline: "rust_separated_v1",
         pipeline_stages: result.stages,
         segments: result.jobs.length,
+        pipeline_route_id: result.routeId,
       },
     };
   } finally {

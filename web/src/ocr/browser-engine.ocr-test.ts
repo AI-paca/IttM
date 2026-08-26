@@ -1,16 +1,38 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import {
+  createCanvas,
+  DOMMatrix,
+  DOMPoint,
+  ImageData,
+  loadImage,
+} from "@napi-rs/canvas";
 import {
   releaseBrowserOcrCache,
   runBrowserOcrLowMemory,
 } from "./browser-engine";
 import { BROWSER_PIPELINE_PROFILES } from "./pipeline-config";
+import { createBrowserOcrProfile } from "./browser-profile";
 import { configureBrowserPipelineCoreUrl } from "./pipeline-core";
 
 const fixtureRoot = resolve("ocr/tests/fixtures");
+const globalRecord = globalThis as unknown as Record<string, unknown>;
+globalRecord.document = {
+  createElement(tagName: string) {
+    if (tagName !== "canvas") {
+      throw new Error(`Unsupported test DOM element: ${tagName}`);
+    }
+    return createCanvas(1, 1);
+  },
+};
+globalRecord.DOMMatrix = DOMMatrix;
+globalRecord.DOMPoint = DOMPoint;
+globalRecord.ImageData = ImageData;
+globalRecord.createImageBitmap = async (blob: Blob) =>
+  await loadImage(Buffer.from(await blob.arrayBuffer()));
 const expectedTokens = [
   "ABCXYZ",
   "abcxyz",
@@ -25,8 +47,40 @@ const expectedTokens = [
 ];
 
 function resolveTessdataPath(): string {
+  let sharedWorktreeCache: string | undefined;
+  try {
+    const commonGitDir = execFileSync(
+      "git",
+      ["rev-parse", "--git-common-dir"],
+      { encoding: "utf8" },
+    ).trim();
+    sharedWorktreeCache = resolve(
+      dirname(resolve(commonGitDir)),
+      ".cache/tessdata",
+    );
+  } catch {
+    sharedWorktreeCache = undefined;
+  }
+  const siblingCaches: string[] = [];
+  try {
+    const workspaceParents = new Set([
+      dirname(process.cwd()),
+      dirname(dirname(process.cwd())),
+    ]);
+    for (const parent of workspaceParents) {
+      for (const entry of readdirSync(parent, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          siblingCaches.push(resolve(parent, entry.name, ".cache/tessdata"));
+        }
+      }
+    }
+  } catch {
+    // Explicit, shared-worktree and system paths below remain available.
+  }
   const candidates = [
     process.env.BROWSER_OCR_LANG_PATH,
+    sharedWorktreeCache,
+    ...siblingCaches,
     "/usr/share/tesseract-ocr/5/tessdata",
     "/usr/share/tesseract-ocr/4.00/tessdata",
     resolve(".cache/tessdata"),
@@ -109,30 +163,12 @@ test(
           (message) => messages.push(message),
           undefined,
           {
-            languages: "rus+eng+chi_sim",
+            ...createBrowserOcrProfile(
+              null,
+              BROWSER_PIPELINE_PROFILES.browser_tesseract_dewarp,
+            ),
+            reason: "ci-production-multilingual",
             cacheWorker: false,
-            maxImagePixels: 20_000_000,
-            maxDimension: 5000,
-            pdfRenderScale: 1.5,
-            reason: "ci-strict-multilingual",
-            preprocessingProfile: "browser_tesseract_raw",
-            imagePreprocessing: ["browser_resize", "ocr_border"],
-            textRegionPsm: "6",
-            denseGridFallback: true,
-            spatialFullPageFallback: false,
-            darkUiTextFallback: false,
-            contextualMarkdownGrammar: false,
-            denseGridTargetWidth: 3300,
-            ocrBorderPixels: 10,
-            edgeWordFallbackPsm: "7",
-            edgeWordFallbackMinTokens: 1,
-            lexicalCorrection: "off",
-            ocrLanguageRetry: "off",
-            tableSlotBuilder: "off",
-            tableSlotMaxColumns: 4,
-            recursiveTableCellOcr: "auto",
-            recursiveTableCellOcrBatchPixels: 8_000_000,
-            layout: BROWSER_PIPELINE_PROFILES.browser_tesseract_raw.layout,
             langPath: tessdataPath,
             cachePath: resolve(".cache/tesseract-js"),
             gzip: false,

@@ -31,6 +31,7 @@ class SeparatedOcrJob:
     row_span: int
     column_span: int
     recognition_mode: int
+    object_kind: int
 
 
 RecognitionResult: TypeAlias = str | tuple[str, int]
@@ -57,6 +58,10 @@ class NativeSeparatedSession:
         self._closed = False
 
     @property
+    def route_id(self) -> int:
+        return self._core.route_id()
+
+    @property
     def jobs(self) -> tuple[SeparatedOcrJob, ...]:
         fields = self._core.separated_job_field
         return tuple(
@@ -69,6 +74,7 @@ class NativeSeparatedSession:
                 row_span=fields(self._handle, index, 7),
                 column_span=fields(self._handle, index, 8),
                 recognition_mode=fields(self._handle, index, 9),
+                object_kind=fields(self._handle, index, 10),
             )
             for index in range(self._core.separated_job_count(self._handle))
         )

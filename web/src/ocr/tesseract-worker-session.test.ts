@@ -189,6 +189,8 @@ test("worker pool uses local Tesseract worker and core assets", async () => {
     | {
         workerPath?: string;
         corePath?: string;
+        langPath?: string;
+        gzip?: boolean;
         workerBlobURL?: boolean;
         logger?: (message: { status?: string; progress?: number }) => void;
       }
@@ -200,6 +202,8 @@ test("worker pool uses local Tesseract worker and core assets", async () => {
     options: {
       workerPath?: string;
       corePath?: string;
+      langPath?: string;
+      gzip?: boolean;
       workerBlobURL?: boolean;
       logger?: (message: { status?: string; progress?: number }) => void;
     },
@@ -222,6 +226,8 @@ test("worker pool uses local Tesseract worker and core assets", async () => {
       "/vendor/tesseract/worker.min.js",
     );
     assert.equal(capturedOptions?.corePath, "/vendor/tesseract/");
+    assert.equal(capturedOptions?.langPath, "/vendor/tesseract/lang");
+    assert.equal(capturedOptions?.gzip, false);
     assert.equal(capturedOptions?.workerBlobURL, false);
 
     await lease.release();
@@ -412,6 +418,44 @@ test("small reviewer language retry ranks browser candidates from prior text", a
     recognizedLanguages.slice(secondPrimary, secondPrimary + 4),
     ["rus+eng+chi_sim", "eng", "rus", "chi_sim"],
   );
+
+  await lease.release();
+  await pool.releaseCached();
+});
+
+test("separated block keeps a confident mixed-script primary candidate", async () => {
+  let activeLanguages = "rus+eng+chi_sim";
+  const recognizedLanguages: string[] = [];
+  const pool = new BrowserOcrWorkerPool(async () => ({
+    async setParameters() {},
+    async reinitialize(languages) {
+      activeLanguages = languages;
+    },
+    async recognize() {
+      recognizedLanguages.push(activeLanguages);
+      return {
+        data: {
+          text: "MIXED LATIN Д 12345 中 \u6587",
+          confidence: activeLanguages === "rus+eng+chi_sim" ? 93 : 75,
+        },
+      };
+    },
+    async terminate() {},
+  }));
+  const t9Profile: BrowserOcrProfile = {
+    ...profile(),
+    languages: "rus+eng+chi_sim",
+    lexicalCorrection: "t9_small",
+    ocrLanguageRetry: "t9_small",
+  };
+
+  const lease = await pool.acquire(t9Profile, () => {});
+
+  assert.equal(
+    await lease.recognizeSeparatedBlock(new Blob(["mixed"]), "6"),
+    "MIXED LATIN Д 12345 中 \u6587",
+  );
+  assert.deepEqual(recognizedLanguages, ["rus+eng+chi_sim"]);
 
   await lease.release();
   await pool.releaseCached();

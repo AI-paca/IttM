@@ -11,11 +11,12 @@ owns the production raster stages, block geometry/order, and final assembly.
 The only production bypass is a trustworthy native PDF text layer unless the
 caller forces raster mode.
 
-## ABI v4
+## ABI v5
 
 The C/WASM ABI exports:
 
 - `ittm_pipeline_abi_version`;
+- `ittm_pipeline_route_id` (the same deterministic route marker in native and WASM builds);
 - `ittm_pipeline_recipe_mask`;
 - `ittm_sparse_add_signal`;
 - `ittm_is_isolated_heading`;

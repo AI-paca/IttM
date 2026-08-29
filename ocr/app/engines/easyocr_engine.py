@@ -46,6 +46,116 @@ class EasyOcrEngine(OcrEngine):
                 self._available = False
         return self._reader
 
+    @staticmethod
+    def _is_dense_ocr_slot(image) -> bool:
+        import numpy as np
+
+        if image.ndim < 2 or image.shape[0] == 0 or image.shape[1] == 0:
+            return False
+
+        if image.ndim == 2:
+            grayscale = image.astype(np.float32)
+        else:
+            grayscale = image[..., :3].astype(np.float32).mean(axis=2)
+        border = np.concatenate(
+            (grayscale[0], grayscale[-1], grayscale[:, 0], grayscale[:, -1])
+        )
+        background = float(np.median(border))
+        foreground = np.abs(grayscale - background) >= 24.0
+        ys, xs = np.nonzero(foreground)
+        if len(xs) == 0:
+            return False
+
+        height, width = grayscale.shape
+        foreground_width = int(xs.max() - xs.min() + 1)
+        foreground_height = int(ys.max() - ys.min() + 1)
+        row_density = float(
+            np.median(foreground[ys.min() : ys.max() + 1].mean(axis=1))
+        )
+        foreground_density = float(foreground.mean())
+        return (
+            foreground_width >= width * 0.70
+            and foreground_height >= height * 0.70
+            and row_density >= 0.15
+            and 0.08 <= foreground_density <= 0.80
+        )
+
+    @staticmethod
+    def _recognize_dense_slot(reader, image):
+        import cv2
+        import numpy as np
+
+        height, width = image.shape[:2]
+        pad_y = max(8, round(height * 0.05))
+        pad_x = max(8, round(width * 0.05))
+
+        if image.ndim == 2:
+            border = np.concatenate(
+                (image[0], image[-1], image[:, 0], image[:, -1])
+            )
+            padded = np.empty(
+                (height + 2 * pad_y, width + 2 * pad_x), dtype=image.dtype
+            )
+        else:
+            border = np.concatenate(
+                (image[0], image[-1], image[:, 0], image[:, -1]), axis=0
+            )
+            padded = np.empty(
+                (height + 2 * pad_y, width + 2 * pad_x, image.shape[2]),
+                dtype=image.dtype,
+            )
+        padded[...] = np.median(border, axis=0)
+        padded[pad_y : pad_y + height, pad_x : pad_x + width] = image
+
+        best = None
+        for horizontal_scale in (1.0, 2.0):
+            candidate = (
+                padded
+                if horizontal_scale == 1.0
+                else cv2.resize(
+                    padded,
+                    None,
+                    fx=horizontal_scale,
+                    fy=1.0,
+                    interpolation=cv2.INTER_LINEAR,
+                )
+            )
+            candidate_height, candidate_width = candidate.shape[:2]
+            rows = reader.recognize(
+                candidate,
+                horizontal_list=[[0, candidate_width, 0, candidate_height]],
+                free_list=[],
+                decoder="greedy",
+                reformat=True,
+            )
+            for _, text, confidence in rows:
+                normalized = text.strip()
+                if normalized and (best is None or float(confidence) > best[1]):
+                    best = (normalized, float(confidence))
+
+        if best is None:
+            return []
+        box = [[0, 0], [width, 0], [width, height], [0, height]]
+        return [(box, best[0], best[1])]
+
+    def _readtext(self, reader, image):
+        direct = (
+            self._recognize_dense_slot(reader, image)
+            if self._is_dense_ocr_slot(image)
+            else []
+        )
+        if direct and direct[0][2] >= 0.97:
+            return direct
+
+        detected = reader.readtext(image)
+        if direct and len(detected) <= 1:
+            detected_confidence = max(
+                (float(row[2]) for row in detected), default=0.0
+            )
+            if direct[0][2] >= detected_confidence + 0.10:
+                return direct
+        return detected
+
     def recognize(self, image, mode: str = "text_mode", psm: int = 6) -> str:
         """
         Recognize text in image using EasyOCR.
@@ -69,7 +179,7 @@ class EasyOcrEngine(OcrEngine):
             img_array = np.array(image)
 
             # EasyOCR readtext returns list of (bbox, text, confidence)
-            result = reader.readtext(img_array)
+            result = self._readtext(reader, img_array)
 
             # Filter by confidence and build text
             min_conf = 0.3 if mode == "receipt_mode" else 0.4
@@ -115,7 +225,8 @@ class EasyOcrEngine(OcrEngine):
             import numpy as np
 
             min_conf_ratio = min_conf / 100
-            result = reader.readtext(np.array(image))
+            image_width, image_height = image.size
+            result = self._readtext(reader, np.array(image))
             words = []
             for bbox, text, conf in result:
                 if conf < min_conf_ratio or not text.strip():
@@ -123,10 +234,16 @@ class EasyOcrEngine(OcrEngine):
 
                 xs = [point[0] for point in bbox]
                 ys = [point[1] for point in bbox]
+                left = max(0, min(image_width, int(min(xs))))
+                top = max(0, min(image_height, int(min(ys))))
+                right = max(0, min(image_width, int(max(xs))))
+                bottom = max(0, min(image_height, int(max(ys))))
+                if right <= left or bottom <= top:
+                    continue
                 words.append(
                     {
                         "text": text.strip(),
-                        "bbox": (int(min(xs)), int(min(ys)), int(max(xs)), int(max(ys))),
+                        "bbox": (left, top, right, bottom),
                         "conf": float(conf * 100),
                     }
                 )

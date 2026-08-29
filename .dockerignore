@@ -35,6 +35,9 @@ scripts
 !scripts/
 !scripts/ci/
 !scripts/ci/ocr-smoke-stub.mjs
+!scripts/models/
+!scripts/models/download-browser-tessdata.sh
+!scripts/models/download-browser-text-validator.sh
 testtables/
 debug/
 .env

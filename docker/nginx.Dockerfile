@@ -16,6 +16,15 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=10000 --fetch-retry-maxtimeout=120000 --fetch-timeout=120000
 
+COPY scripts/models/download-browser-tessdata.sh \
+  scripts/models/download-browser-text-validator.sh \
+  ./scripts/models/
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && bash scripts/models/download-browser-tessdata.sh \
+    && bash scripts/models/download-browser-text-validator.sh \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY web ./web
 COPY --from=pipeline-core-wasm-builder \
   /core/target/wasm32-unknown-unknown/release/ittm_pipeline_core.wasm \
@@ -24,7 +33,9 @@ RUN VITE_BASE_PATH=/ npm run build:web
 
 FROM ${NGINX_IMAGE}
 
-RUN apk upgrade --no-cache
+ARG SECURITY_REFRESH=manual
+RUN echo "$SECURITY_REFRESH" >/dev/null \
+    && apk upgrade --no-cache
 
 ENV NGINX_LISTEN_PORT=80
 ENV GATEWAY_HOSTNAME=gateway

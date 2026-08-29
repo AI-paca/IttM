@@ -11,6 +11,7 @@ gateway_image="${SCA_GATEWAY_IMAGE:-ittm-gateway-sca:local}"
 nginx_image="${SCA_NGINX_IMAGE:-ittm-nginx-sca:local}"
 ocr_image="${SCA_OCR_IMAGE:-ittm-ocr-sca:local}"
 ocr_ci_image="${SCA_OCR_CI_IMAGE:-ittm-ocr-ci-sca:local}"
+security_refresh="${SCA_SECURITY_REFRESH:-$(date -u +%Y-%m-%d)}"
 
 if [[ "$output" = /* || "$output" == *".."* ]]; then
   echo "SCA_OUTPUT_DIR must be a repository-relative path without '..'." >&2
@@ -90,19 +91,23 @@ verify_accepted_risk() {
 
 if [[ "${SCA_SKIP_BUILD:-0}" != "1" ]]; then
   docker build --pull --network "$network" \
+    --build-arg "SECURITY_REFRESH=$security_refresh" \
     -f "$repo_root/docker/gateway.Dockerfile" \
     -t "$gateway_image" \
     "$repo_root"
   docker build --pull --network "$network" \
+    --build-arg "SECURITY_REFRESH=$security_refresh" \
     -f "$repo_root/docker/nginx.Dockerfile" \
     -t "$nginx_image" \
     "$repo_root"
   docker build --pull --network "$network" \
+    --build-arg "SECURITY_REFRESH=$security_refresh" \
     -f "$repo_root/docker/ocr.Dockerfile" \
     -t "$ocr_image" \
     "$repo_root"
   docker build --pull --network "$network" \
     --target test \
+    --build-arg "SECURITY_REFRESH=$security_refresh" \
     --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt \
     -f "$repo_root/docker/ocr.Dockerfile" \
     -t "$ocr_ci_image" \

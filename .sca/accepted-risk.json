@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "reviewed_at": "2026-07-30",
+  "reviewed_at": "2026-08-29",
   "source": "Trivy image reports for OCR production and OCR CI images",
   "policy": "Only vulnerabilities without FixedVersion may be accepted here. Fixable MEDIUM/HIGH/CRITICAL image findings remain blocked by scripts/ci/run-sca.sh.",
   "reason": "The listed Debian package families currently have no FixedVersion in the vendor feed. They are tracked as accepted risk until Debian publishes a fix or the package leaves the OCR images.",
@@ -66,6 +66,14 @@
     "libsqlite3-0",
     "libssh2-1t64",
     "libsystemd0",
+    {
+      "package": "libtesseract5",
+      "vulnerabilities": [
+        "CVE-2026-73066",
+        "CVE-2026-73067"
+      ],
+      "reason": "Debian 13 has no FixedVersion. Both findings require crafted .traineddata, while runtime models are operator-controlled pinned assets and are not accepted from document uploads."
+    },
     "libtiff6",
     "libtinfo6",
     "libudev1",
@@ -81,6 +89,14 @@
     "poppler-utils",
     "sysvinit-utils",
     "tar",
+    {
+      "package": "tesseract-ocr",
+      "vulnerabilities": [
+        "CVE-2026-73066",
+        "CVE-2026-73067"
+      ],
+      "reason": "Debian 13 has no FixedVersion. Both findings require crafted .traineddata, while runtime models are operator-controlled pinned assets and are not accepted from document uploads."
+    },
     "util-linux",
     "zlib1g"
   ]

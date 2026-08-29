@@ -21,8 +21,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     ITTM_PIPELINE_CORE_LIB=/opt/ittm-pipeline-core/libittm_pipeline_core.so
 
 ARG OCR_INSTALL_CJK_FONTS=0
+ARG SECURITY_REFRESH=manual
 
 RUN set -eux; \
+    echo "$SECURITY_REFRESH" >/dev/null; \
     apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=10 -o Acquire::https::Timeout=10 update; \
     apt-get upgrade -y --no-install-recommends; \
     apt-get install -y --no-install-recommends \

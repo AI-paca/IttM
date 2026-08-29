@@ -303,9 +303,10 @@ RUN cargo test --locked && cargo build --locked --release
 
 FROM ${BASE_IMAGE}
 COPY --from=pipeline-core-builder /core/target/release/libittm_pipeline_core.so /opt/ittm-pipeline-core/libittm_pipeline_core.so
+COPY ocr/app /app/app
 DOCKERFILE
   runtime_image_owned=1
-  runtime_image_source="pipeline-core overlay built from --source on $runtime_image_base"
+  runtime_image_source="pipeline-core and Python app overlay built from --source on $runtime_image_base"
 fi
 runtime_image_id="$(docker image inspect --format '{{.Id}}' "$runtime_image")"
 container_name="ittm-benchmark-${commit:0:8}-$$"

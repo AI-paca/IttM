@@ -11,7 +11,7 @@ owns the production raster stages, block geometry/order, and final assembly.
 The only production bypass is a trustworthy native PDF text layer unless the
 caller forces raster mode.
 
-## ABI v5
+## ABI v6
 
 The C/WASM ABI exports:
 
@@ -27,6 +27,7 @@ The C/WASM ABI exports:
 - `ittm_separated_begin` / `ittm_separated_drop`;
 - `ittm_separated_job_count` / `ittm_separated_job_field`;
 - `ittm_separated_set_ocr`;
+- `ittm_separated_add_ocr_word`;
 - `ittm_separated_render_length` / `ittm_separated_render_copy`;
 - `ittm_separated_stage_mask`.
 

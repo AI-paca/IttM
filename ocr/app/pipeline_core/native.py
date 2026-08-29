@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 
 PIPELINE_CORE_LIBRARY_ENV = "ITTM_PIPELINE_CORE_LIB"
-PIPELINE_CORE_ABI_VERSION = 5
+PIPELINE_CORE_ABI_VERSION = 6
 
 
 @dataclass(frozen=True)
@@ -35,9 +35,30 @@ class NativePipelineCore:
             "ittm_span_evidence_score",
             "ittm_should_replace_primary",
             "ittm_should_drop_text_block",
+            "ittm_assembler_begin",
+            "ittm_assembler_add_layout",
+            "ittm_assembler_add_segment",
+            "ittm_assembler_render_length",
+            "ittm_assembler_render_copy",
+            "ittm_assembler_drop",
             "ittm_separated_begin",
             "ittm_separated_job_count",
             "ittm_separated_job_field",
+            "ittm_separated_job_segment_count",
+            "ittm_separated_job_segment_field",
+            "ittm_separated_object_count",
+            "ittm_separated_object_field",
+            "ittm_separated_object_segment",
+            "ittm_separated_block_count",
+            "ittm_separated_block_field",
+            "ittm_separated_block_segment",
+            "ittm_separated_block_raster_field",
+            "ittm_separated_block_raster_length",
+            "ittm_separated_block_raster_copy",
+            "ittm_separated_topology_row_count",
+            "ittm_separated_topology_row_field",
+            "ittm_separated_topology_source_row",
+            "ittm_separated_topology_slot_field",
             "ittm_separated_job_raster_field",
             "ittm_separated_job_raster_length",
             "ittm_separated_job_raster_copy",
@@ -90,6 +111,42 @@ class NativePipelineCore:
             ctypes.c_uint32,
         )
         library.ittm_should_drop_text_block.restype = ctypes.c_uint32
+        library.ittm_assembler_begin.argtypes = (ctypes.c_uint32,)
+        library.ittm_assembler_begin.restype = ctypes.c_uint32
+        library.ittm_assembler_add_layout.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_assembler_add_layout.restype = ctypes.c_int32
+        library.ittm_assembler_add_segment.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+        )
+        library.ittm_assembler_add_segment.restype = ctypes.c_int32
+        library.ittm_assembler_render_length.argtypes = (ctypes.c_uint32,)
+        library.ittm_assembler_render_length.restype = ctypes.c_uint32
+        library.ittm_assembler_render_copy.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+        )
+        library.ittm_assembler_render_copy.restype = ctypes.c_int32
+        library.ittm_assembler_drop.argtypes = (ctypes.c_uint32,)
+        library.ittm_assembler_drop.restype = ctypes.c_int32
         library.ittm_separated_begin.argtypes = (
             ctypes.c_void_p,
             ctypes.c_uint32,
@@ -107,6 +164,85 @@ class NativePipelineCore:
             ctypes.c_uint32,
         )
         library.ittm_separated_job_field.restype = ctypes.c_int32
+        library.ittm_separated_job_segment_count.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_job_segment_count.restype = ctypes.c_uint32
+        library.ittm_separated_job_segment_field.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_job_segment_field.restype = ctypes.c_int32
+        library.ittm_separated_object_count.argtypes = (ctypes.c_uint32,)
+        library.ittm_separated_object_count.restype = ctypes.c_uint32
+        library.ittm_separated_object_field.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_object_field.restype = ctypes.c_int32
+        library.ittm_separated_object_segment.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_object_segment.restype = ctypes.c_int32
+        library.ittm_separated_block_count.argtypes = (ctypes.c_uint32,)
+        library.ittm_separated_block_count.restype = ctypes.c_uint32
+        library.ittm_separated_block_field.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_block_field.restype = ctypes.c_int32
+        library.ittm_separated_block_segment.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_block_segment.restype = ctypes.c_int32
+        library.ittm_separated_block_raster_field.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_block_raster_field.restype = ctypes.c_int32
+        library.ittm_separated_block_raster_length.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_block_raster_length.restype = ctypes.c_uint32
+        library.ittm_separated_block_raster_copy.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_block_raster_copy.restype = ctypes.c_int32
+        library.ittm_separated_topology_row_count.argtypes = (ctypes.c_uint32,)
+        library.ittm_separated_topology_row_count.restype = ctypes.c_uint32
+        library.ittm_separated_topology_row_field.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_topology_row_field.restype = ctypes.c_int32
+        library.ittm_separated_topology_source_row.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_topology_source_row.restype = ctypes.c_int32
+        library.ittm_separated_topology_slot_field.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_topology_slot_field.restype = ctypes.c_int32
         library.ittm_separated_job_raster_field.argtypes = (
             ctypes.c_uint32,
             ctypes.c_uint32,
@@ -133,6 +269,18 @@ class NativePipelineCore:
             ctypes.c_uint32,
         )
         library.ittm_separated_set_ocr.restype = ctypes.c_int32
+        library.ittm_separated_add_ocr_word.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_add_ocr_word.restype = ctypes.c_int32
         library.ittm_separated_render_length.argtypes = (ctypes.c_uint32,)
         library.ittm_separated_render_length.restype = ctypes.c_uint32
         library.ittm_separated_render_copy.argtypes = (
@@ -236,6 +384,87 @@ class NativePipelineCore:
             raise ValueError("Text block deduplication values must be non-negative")
         return bool(self._library.ittm_should_drop_text_block(*values))
 
+    def assemble_topology(
+        self,
+        source: int,
+        layouts: list[tuple[str, int, int, int]],
+        segments: list[tuple[str, str, int, int, int, int, int, str]],
+    ) -> str:
+        handle = int(self._library.ittm_assembler_begin(source))
+        if handle == 0:
+            raise ValueError(f"Topology assembler rejected source {source}")
+        try:
+            for object_id, object_kind, row_count, column_count in layouts:
+                encoded_id = object_id.encode("utf-8")
+                id_buffer = ctypes.create_string_buffer(encoded_id)
+                status = int(
+                    self._library.ittm_assembler_add_layout(
+                        handle,
+                        id_buffer,
+                        len(encoded_id),
+                        object_kind,
+                        row_count,
+                        column_count,
+                    )
+                )
+                if status != 0:
+                    raise ValueError(
+                        f"Topology layout handoff failed with status {status}"
+                    )
+            for (
+                segment_id,
+                object_id,
+                object_kind,
+                row,
+                column,
+                row_span,
+                column_span,
+                text,
+            ) in segments:
+                encoded_segment_id = segment_id.encode("utf-8")
+                encoded_object_id = object_id.encode("utf-8")
+                encoded_text = text.encode("utf-8")
+                segment_buffer = ctypes.create_string_buffer(encoded_segment_id)
+                object_buffer = ctypes.create_string_buffer(encoded_object_id)
+                text_buffer = (
+                    ctypes.create_string_buffer(encoded_text) if encoded_text else None
+                )
+                status = int(
+                    self._library.ittm_assembler_add_segment(
+                        handle,
+                        segment_buffer,
+                        len(encoded_segment_id),
+                        object_buffer,
+                        len(encoded_object_id),
+                        object_kind,
+                        row,
+                        column,
+                        row_span,
+                        column_span,
+                        text_buffer,
+                        len(encoded_text),
+                    )
+                )
+                if status != 0:
+                    raise ValueError(
+                        f"Topology segment handoff failed with status {status}"
+                    )
+            length = int(self._library.ittm_assembler_render_length(handle))
+            if length == 0:
+                return ""
+            output = ctypes.create_string_buffer(length)
+            copied = int(
+                self._library.ittm_assembler_render_copy(handle, output, length)
+            )
+            if copied != length:
+                raise RuntimeError(
+                    f"Topology assembler copied {copied} bytes; expected {length}"
+                )
+            return bytes(output.raw[:length]).decode("utf-8")
+        finally:
+            if int(self._library.ittm_assembler_drop(handle)) != 0:
+                raise ValueError(f"Unknown topology assembler handle: {handle}")
+
     def separated_begin(
         self,
         pixels: bytes,
@@ -268,6 +497,118 @@ class NativePipelineCore:
         value = int(self._library.ittm_separated_job_field(handle, index, field))
         if value < 0:
             raise ValueError(f"Invalid separated OCR job field: {index}:{field}")
+        return value
+
+    def separated_job_segment_count(self, handle: int, index: int) -> int:
+        return int(self._library.ittm_separated_job_segment_count(handle, index))
+
+    def separated_job_segment_field(
+        self,
+        handle: int,
+        index: int,
+        segment_index: int,
+        field: int,
+    ) -> int:
+        return int(
+            self._library.ittm_separated_job_segment_field(
+                handle,
+                index,
+                segment_index,
+                field,
+            )
+        )
+
+    def separated_object_count(self, handle: int) -> int:
+        return int(self._library.ittm_separated_object_count(handle))
+
+    def separated_object_field(self, handle: int, index: int, field: int) -> int:
+        value = int(self._library.ittm_separated_object_field(handle, index, field))
+        if value < 0:
+            raise ValueError(f"Invalid separated object field: {index}:{field}")
+        return value
+
+    def separated_object_segment(self, handle: int, object_index: int, index: int) -> int:
+        value = int(
+            self._library.ittm_separated_object_segment(handle, object_index, index)
+        )
+        if value < 0:
+            raise ValueError(f"Invalid separated object segment: {object_index}:{index}")
+        return value
+
+    def separated_block_count(self, handle: int) -> int:
+        return int(self._library.ittm_separated_block_count(handle))
+
+    def separated_block_field(self, handle: int, index: int, field: int) -> int:
+        value = int(self._library.ittm_separated_block_field(handle, index, field))
+        if value < 0:
+            raise ValueError(f"Invalid separated block field: {index}:{field}")
+        return value
+
+    def separated_block_segment(self, handle: int, block_index: int, index: int) -> int:
+        value = int(self._library.ittm_separated_block_segment(handle, block_index, index))
+        if value < 0:
+            raise ValueError(f"Invalid separated block segment: {block_index}:{index}")
+        return value
+
+    def separated_block_raster(
+        self,
+        handle: int,
+        index: int,
+    ) -> tuple[bytes, int, int, int, int]:
+        fields = tuple(
+            int(self._library.ittm_separated_block_raster_field(handle, index, field))
+            for field in range(4)
+        )
+        if any(value <= 0 for value in fields):
+            raise ValueError(f"Invalid separated block raster fields: {index}:{fields}")
+        width, height, stride, pixel_format = fields
+        length = int(self._library.ittm_separated_block_raster_length(handle, index))
+        if length != stride * height:
+            raise RuntimeError(
+                f"Separated block raster length {length} disagrees with {stride}x{height}"
+            )
+        output = ctypes.create_string_buffer(length)
+        copied = int(
+            self._library.ittm_separated_block_raster_copy(
+                handle,
+                index,
+                output,
+                length,
+            )
+        )
+        if copied != length:
+            raise RuntimeError(
+                f"Separated block raster copied {copied} bytes; expected {length}"
+            )
+        return bytes(output.raw[:length]), width, height, stride, pixel_format
+
+    def separated_topology_row_count(self, handle: int) -> int:
+        return int(self._library.ittm_separated_topology_row_count(handle))
+
+    def separated_topology_row_field(self, handle: int, index: int, field: int) -> int:
+        value = int(self._library.ittm_separated_topology_row_field(handle, index, field))
+        if value < 0:
+            raise ValueError(f"Invalid separated topology row field: {index}:{field}")
+        return value
+
+    def separated_topology_source_row(self, handle: int, row: int, index: int) -> int:
+        value = int(self._library.ittm_separated_topology_source_row(handle, row, index))
+        if value < 0:
+            raise ValueError(f"Invalid separated topology source row: {row}:{index}")
+        return value
+
+    def separated_topology_slot_field(
+        self,
+        handle: int,
+        row: int,
+        slot: int,
+        field: int,
+    ) -> int:
+        value = int(
+            self._library.ittm_separated_topology_slot_field(handle, row, slot, field)
+        )
+        if value < 0:
+            raise ValueError(f"Invalid separated topology slot field: {row}:{slot}:{field}")
         return value
 
     def separated_job_raster(
@@ -323,6 +664,29 @@ class NativePipelineCore:
         if status != 0:
             raise ValueError(f"Separated OCR handoff failed with status {status}")
 
+    def separated_add_ocr_word(
+        self,
+        handle: int,
+        index: int,
+        text: str,
+        bbox: tuple[int, int, int, int],
+        confidence_milli: int,
+    ) -> None:
+        encoded = text.encode("utf-8")
+        source = ctypes.create_string_buffer(encoded)
+        status = int(
+            self._library.ittm_separated_add_ocr_word(
+                handle,
+                index,
+                source,
+                len(encoded),
+                *bbox,
+                confidence_milli,
+            )
+        )
+        if status != 0:
+            raise ValueError(f"Separated OCR word handoff failed with status {status}")
+
     def separated_render(self, handle: int) -> str:
         length = int(self._library.ittm_separated_render_length(handle))
         if length == 0:
@@ -344,9 +708,9 @@ class NativePipelineCore:
 def _library_candidates() -> tuple[Path, ...]:
     repo_root = Path(__file__).resolve().parents[3]
     return (
-        Path(__file__).with_name("libittm_pipeline_core.so"),
         repo_root / "pipeline-core" / "target" / "release" / "libittm_pipeline_core.so",
         repo_root / "pipeline-core" / "target" / "debug" / "libittm_pipeline_core.so",
+        Path(__file__).with_name("libittm_pipeline_core.so"),
     )
 
 

@@ -19,12 +19,17 @@ const textReviewerModelRoot = path.join(
 const textReviewerOnnxBytes = 137147981;
 const requiredTesseractAssets = [
   "worker.min.js",
+  "tesseract-core.wasm.js",
+  "tesseract-core-simd.wasm.js",
+  "tesseract-core-relaxedsimd.wasm.js",
   "tesseract-core-lstm.wasm.js",
   "tesseract-core-simd-lstm.wasm.js",
   "tesseract-core-relaxedsimd-lstm.wasm.js",
   "lang/eng.traineddata",
   "lang/rus.traineddata",
   "lang/chi_sim.traineddata",
+  "lang/ell.traineddata",
+  "lang/equ.traineddata",
 ];
 const requiredPdfJsWasmAssets = [
   "jbig2.wasm",
@@ -150,7 +155,7 @@ for (const asset of requiredPdfJsWasmAssets) {
 await assertNonEmpty(pipelineCorePath);
 const pipelineCoreBytes = await readFile(pipelineCorePath);
 const pipelineCore = await WebAssembly.instantiate(pipelineCoreBytes, {});
-assert.equal(pipelineCore.instance.exports.ittm_pipeline_abi_version(), 5);
+assert.equal(pipelineCore.instance.exports.ittm_pipeline_abi_version(), 6);
 for (const name of [
   "memory",
   "ittm_alloc",
@@ -159,6 +164,7 @@ for (const name of [
   "ittm_separated_job_count",
   "ittm_separated_job_field",
   "ittm_separated_set_ocr",
+  "ittm_separated_add_ocr_word",
   "ittm_separated_render_length",
   "ittm_separated_render_copy",
   "ittm_separated_stage_mask",
@@ -166,7 +172,7 @@ for (const name of [
 ]) {
   assert.ok(
     pipelineCore.instance.exports[name],
-    `Pages pipeline core misses ABI 5 export ${name}`,
+    `Pages pipeline core misses ABI 6 export ${name}`,
   );
 }
 await assertNonEmpty(path.join(textReviewerModelRoot, "config.json"));

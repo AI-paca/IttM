@@ -1,5 +1,4 @@
 import {
-  assembleSegmentTopologyHandoff,
   SEGMENT_TOPOLOGY_HANDOFF_SCHEMA,
   type SegmentTopologyHandoff,
   type StructuralObjectKind,
@@ -62,6 +61,10 @@ export interface NativePdfOracle {
   nativeSegmentExtraction: { segments: NativeExtractedSegment[] };
   assemblerHandoff: SegmentTopologyHandoff;
   assembled: StructuralRenderArtifact;
+}
+
+export interface NativePdfTopologyAssembler {
+  assembleTopology(handoff: SegmentTopologyHandoff): StructuralRenderArtifact;
 }
 
 function candidateFromItem(
@@ -562,6 +565,7 @@ function adaptNativeSegmentsToAssembler(
 
 export function buildNativePdfOracle(
   items: readonly PdfTextGeometryItem[],
+  assembler: NativePdfTopologyAssembler,
 ): NativePdfOracle | null {
   const candidates = items
     .map(candidateFromItem)
@@ -577,7 +581,7 @@ export function buildNativePdfOracle(
     nativeFindObject: { objects },
     nativeSegmentExtraction: { segments },
     assemblerHandoff,
-    assembled: assembleSegmentTopologyHandoff(assemblerHandoff),
+    assembled: assembler.assembleTopology(assemblerHandoff),
   };
 }
 

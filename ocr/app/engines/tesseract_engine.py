@@ -563,15 +563,52 @@ class TesseractEngine(OcrEngine):
         psm: int = 6,
         min_conf: int = 20,
     ) -> list[dict]:
-        if language not in self.installed_languages():
+        requested = tuple(item for item in language.split("+") if item)
+        installed = frozenset(self.installed_languages())
+        if not requested or any(item not in installed for item in requested):
             return []
         data = self.recognize_with_psm(
             image,
             psm=psm,
             mode="table",
-            lang=language,
+            lang="+".join(requested),
         )
-        return self._words_from_data(data, min_conf)
+        words = self._words_from_data(data, min_conf)
+        if (
+            words
+            or psm in self.edge_word_fallback_psms
+            or not self._edge_ink_touches_all_sides(image)
+        ):
+            return words
+
+        bordered = self._add_ocr_border(image)
+        try:
+            candidates = []
+            for fallback_psm in self.edge_word_fallback_psms:
+                fallback_data = self.recognize_with_psm(
+                    bordered,
+                    psm=fallback_psm,
+                    mode="table",
+                    lang="+".join(requested),
+                )
+                fallback_words = self._words_from_data(fallback_data, min_conf)
+                projected = []
+                for word in fallback_words:
+                    left, top, right, bottom = word["bbox"]
+                    left = max(0, left - self.ocr_border_pixels)
+                    top = max(0, top - self.ocr_border_pixels)
+                    right = min(image.width, right - self.ocr_border_pixels)
+                    bottom = min(image.height, bottom - self.ocr_border_pixels)
+                    if right <= left or bottom <= top:
+                        continue
+                    projected.append({**word, "bbox": (left, top, right, bottom)})
+                if projected:
+                    candidates.append(projected)
+            if candidates:
+                return max(candidates, key=self._word_candidate_quality)
+        finally:
+            bordered.close()
+        return []
 
     def recognize_word_candidate_passes(
         self,

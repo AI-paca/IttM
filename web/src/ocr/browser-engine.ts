@@ -42,18 +42,37 @@ export async function runBrowserOcrLowMemory(
             : job.recognitionMode === 1
               ? "3"
               : profile.textRegionPsm;
-        const text = await workerLease.recognizeSeparatedBlock(
+        const recognized = await workerLease.recognizeSeparatedBlockDetailed(
           block,
           pageSegmentationMode,
+          job.languages,
         );
-        return applyBrowserLexicalCorrection(text, profile.lexicalCorrection);
+        const text = applyBrowserLexicalCorrection(
+          recognized.text,
+          profile.lexicalCorrection,
+        );
+        return {
+          text,
+          confidenceMilli: 0,
+          words: recognized.words.map((word) => ({
+            text: word.text,
+            bbox: [
+              word.bbox.x0,
+              word.bbox.y0,
+              word.bbox.x1,
+              word.bbox.y1,
+            ] as const,
+            confidenceMilli: Math.round((word.confidence ?? 0) * 10),
+          })),
+        };
       },
       onProgress,
-      (text) => {
-        if (text.trim()) onChunkExtracted?.(`${text.trim()}\n`);
-      },
+      undefined,
       debugObserver,
     );
+    if (result.markdown.trim()) {
+      onChunkExtracted?.(result.markdown);
+    }
     return {
       markdown: result.markdown,
       meta: {

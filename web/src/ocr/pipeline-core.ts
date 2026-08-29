@@ -1,4 +1,13 @@
-export const PIPELINE_CORE_ABI_VERSION = 5;
+import {
+  STRUCTURAL_RENDER_ARTIFACT_SCHEMA,
+  type SegmentTopologyHandoff,
+  type StructuralCell,
+  type StructuralObject,
+  type StructuralObjectKind,
+  type StructuralRenderArtifact,
+} from "./segment-assembler";
+
+export const PIPELINE_CORE_ABI_VERSION = 6;
 
 export const PIPELINE_STAGES = [
   "align",
@@ -24,6 +33,16 @@ export const SEPARATED_PIPELINE_STAGES = [
   "generate-object",
 ] as const;
 
+const SEPARATED_LANGUAGE_PROFILES = [
+  "rus+eng",
+  "rus",
+  "eng",
+  "chi_sim",
+  "ell",
+  "equ",
+] as const;
+const SEPARATED_TRANSFORMS = ["raw", "gamma-dark"] as const;
+
 export interface SeparatedOcrJob {
   index: number;
   bbox: readonly [number, number, number, number];
@@ -34,6 +53,13 @@ export interface SeparatedOcrJob {
   columnSpan: number;
   recognitionMode: number;
   objectKind: number;
+  languages: string;
+  transform: string;
+  depth: number;
+  logicalRowCount: number;
+  logicalColumnCount: number;
+  grammarMilli: number;
+  superseded: boolean;
 }
 
 export interface SeparatedOcrRaster {
@@ -42,6 +68,12 @@ export interface SeparatedOcrRaster {
   height: number;
   stride: number;
   format: 3;
+}
+
+export interface SeparatedOcrWord {
+  text: string;
+  bbox: readonly [number, number, number, number];
+  confidenceMilli: number;
 }
 
 export interface PipelineCapabilities {
@@ -86,6 +118,91 @@ interface PipelineCoreExports extends WebAssembly.Exports {
   memory?: WebAssembly.Memory;
   ittm_alloc?(length: number): number;
   ittm_dealloc?(pointer: number, capacity: number): void;
+  ittm_assembler_begin?(source: number): number;
+  ittm_assembler_add_layout?(
+    handle: number,
+    objectId: number,
+    objectIdLength: number,
+    objectKind: number,
+    logicalRowCount: number,
+    logicalColumnCount: number,
+  ): number;
+  ittm_assembler_add_segment?(
+    handle: number,
+    segmentId: number,
+    segmentIdLength: number,
+    objectId: number,
+    objectIdLength: number,
+    objectKind: number,
+    row: number,
+    column: number,
+    rowSpan: number,
+    columnSpan: number,
+    text: number,
+    textLength: number,
+  ): number;
+  ittm_assembler_render_length?(handle: number): number;
+  ittm_assembler_render_copy?(
+    handle: number,
+    pointer: number,
+    capacity: number,
+  ): number;
+  ittm_assembler_object_count?(handle: number): number;
+  ittm_assembler_object_field?(
+    handle: number,
+    object: number,
+    field: number,
+  ): number;
+  ittm_assembler_object_id_length?(handle: number, object: number): number;
+  ittm_assembler_object_id_copy?(
+    handle: number,
+    object: number,
+    pointer: number,
+    capacity: number,
+  ): number;
+  ittm_assembler_object_markdown_length?(
+    handle: number,
+    object: number,
+  ): number;
+  ittm_assembler_object_markdown_copy?(
+    handle: number,
+    object: number,
+    pointer: number,
+    capacity: number,
+  ): number;
+  ittm_assembler_cell_field?(
+    handle: number,
+    object: number,
+    cell: number,
+    field: number,
+  ): number;
+  ittm_assembler_cell_text_length?(
+    handle: number,
+    object: number,
+    cell: number,
+  ): number;
+  ittm_assembler_cell_text_copy?(
+    handle: number,
+    object: number,
+    cell: number,
+    pointer: number,
+    capacity: number,
+  ): number;
+  ittm_assembler_cell_segment_id_length?(
+    handle: number,
+    object: number,
+    cell: number,
+    segment: number,
+  ): number;
+  ittm_assembler_cell_segment_id_copy?(
+    handle: number,
+    object: number,
+    cell: number,
+    segment: number,
+    pointer: number,
+    capacity: number,
+  ): number;
+  ittm_assembler_drop?(handle: number): number;
   ittm_separated_begin?(
     pointer: number,
     byteLength: number,
@@ -119,6 +236,17 @@ interface PipelineCoreExports extends WebAssembly.Exports {
     byteLength: number,
     confidenceMilli: number,
   ): number;
+  ittm_separated_add_ocr_word?(
+    handle: number,
+    index: number,
+    pointer: number,
+    byteLength: number,
+    left: number,
+    top: number,
+    right: number,
+    bottom: number,
+    confidenceMilli: number,
+  ): number;
   ittm_separated_render_length?(handle: number): number;
   ittm_separated_render_copy?(
     handle: number,
@@ -142,10 +270,37 @@ type SeparatedExports = Required<
     | "ittm_separated_job_raster_length"
     | "ittm_separated_job_raster_copy"
     | "ittm_separated_set_ocr"
+    | "ittm_separated_add_ocr_word"
     | "ittm_separated_render_length"
     | "ittm_separated_render_copy"
     | "ittm_separated_stage_mask"
     | "ittm_separated_drop"
+  >
+>;
+
+type AssemblerExports = Required<
+  Pick<
+    PipelineCoreExports,
+    | "memory"
+    | "ittm_alloc"
+    | "ittm_dealloc"
+    | "ittm_assembler_begin"
+    | "ittm_assembler_add_layout"
+    | "ittm_assembler_add_segment"
+    | "ittm_assembler_render_length"
+    | "ittm_assembler_render_copy"
+    | "ittm_assembler_object_count"
+    | "ittm_assembler_object_field"
+    | "ittm_assembler_object_id_length"
+    | "ittm_assembler_object_id_copy"
+    | "ittm_assembler_object_markdown_length"
+    | "ittm_assembler_object_markdown_copy"
+    | "ittm_assembler_cell_field"
+    | "ittm_assembler_cell_text_length"
+    | "ittm_assembler_cell_text_copy"
+    | "ittm_assembler_cell_segment_id_length"
+    | "ittm_assembler_cell_segment_id_copy"
+    | "ittm_assembler_drop"
   >
 >;
 
@@ -229,6 +384,200 @@ export class BrowserPipelineCore {
     if (!handle)
       throw new Error("Separated pipeline rejected the raster plane");
     return new BrowserSeparatedSession(separated, handle);
+  }
+
+  assembleTopology(handoff: SegmentTopologyHandoff): StructuralRenderArtifact {
+    const assembler = assemblerExports(this.exports);
+    const source = handoff.source === "trusted_pdf_text_layer" ? 0 : 1;
+    const kindCode = (kind: StructuralObjectKind) =>
+      ({ paragraph: 0, table: 1, small_table: 2 })[kind];
+    const kindName = (kind: number): StructuralObjectKind => {
+      const value = (["paragraph", "table", "small_table"] as const)[kind];
+      if (!value) throw new Error(`Rust assembler returned object kind ${kind}`);
+      return value;
+    };
+    const encoder = new TextEncoder();
+    const handle = assembler.ittm_assembler_begin(source);
+    if (!handle) throw new Error("Rust topology assembler rejected its source");
+    try {
+      for (const layout of handoff.object_layouts ?? []) {
+        const objectId = encoder.encode(layout.object_id);
+        const objectPointer = copyIntoWasm(assembler, objectId);
+        try {
+          const status = assembler.ittm_assembler_add_layout(
+            handle,
+            objectPointer,
+            objectId.byteLength,
+            kindCode(layout.object_kind),
+            layout.logical_row_count,
+            layout.logical_column_count,
+          );
+          if (status !== 0) {
+            throw new Error(`Rust topology layout handoff failed with status ${status}`);
+          }
+        } finally {
+          if (objectPointer)
+            assembler.ittm_dealloc(objectPointer, objectId.byteLength);
+        }
+      }
+      for (const segment of handoff.segments) {
+        const segmentId = encoder.encode(segment.segment_id);
+        const objectId = encoder.encode(segment.topology.object_id);
+        const text = encoder.encode(segment.text);
+        const segmentPointer = copyIntoWasm(assembler, segmentId);
+        const objectPointer = copyIntoWasm(assembler, objectId);
+        const textPointer = copyIntoWasm(assembler, text);
+        try {
+          const status = assembler.ittm_assembler_add_segment(
+            handle,
+            segmentPointer,
+            segmentId.byteLength,
+            objectPointer,
+            objectId.byteLength,
+            kindCode(segment.topology.object_kind),
+            segment.topology.row,
+            segment.topology.column,
+            segment.topology.row_span,
+            segment.topology.column_span,
+            textPointer,
+            text.byteLength,
+          );
+          if (status !== 0) {
+            throw new Error(`Rust topology segment handoff failed with status ${status}`);
+          }
+        } finally {
+          if (segmentPointer)
+            assembler.ittm_dealloc(segmentPointer, segmentId.byteLength);
+          if (objectPointer)
+            assembler.ittm_dealloc(objectPointer, objectId.byteLength);
+          if (textPointer) assembler.ittm_dealloc(textPointer, text.byteLength);
+        }
+      }
+
+      const markdownLength = assembler.ittm_assembler_render_length(handle);
+      const markdown = readAssemblerText(
+        assembler,
+        markdownLength,
+        (pointer, capacity) =>
+          assembler.ittm_assembler_render_copy(handle, pointer, capacity),
+      );
+      const objects: StructuralObject[] = [];
+      const objectCount = assembler.ittm_assembler_object_count(handle);
+      for (let objectIndex = 0; objectIndex < objectCount; objectIndex += 1) {
+        const field = (index: number) => {
+          const value = assembler.ittm_assembler_object_field(
+            handle,
+            objectIndex,
+            index,
+          );
+          if (value < 0)
+            throw new Error(`Rust topology object field failed with status ${value}`);
+          return value;
+        };
+        const objectId = readAssemblerText(
+          assembler,
+          assembler.ittm_assembler_object_id_length(handle, objectIndex),
+          (pointer, capacity) =>
+            assembler.ittm_assembler_object_id_copy(
+              handle,
+              objectIndex,
+              pointer,
+              capacity,
+            ),
+        );
+        const objectMarkdown = readAssemblerText(
+          assembler,
+          assembler.ittm_assembler_object_markdown_length(
+            handle,
+            objectIndex,
+          ),
+          (pointer, capacity) =>
+            assembler.ittm_assembler_object_markdown_copy(
+              handle,
+              objectIndex,
+              pointer,
+              capacity,
+            ),
+        );
+        const cells: StructuralCell[] = [];
+        const cellCount = field(3);
+        for (let cellIndex = 0; cellIndex < cellCount; cellIndex += 1) {
+          const cellField = (index: number) => {
+            const value = assembler.ittm_assembler_cell_field(
+              handle,
+              objectIndex,
+              cellIndex,
+              index,
+            );
+            if (value < 0)
+              throw new Error(`Rust topology cell field failed with status ${value}`);
+            return value;
+          };
+          const segmentIds = Array.from(
+            { length: cellField(4) },
+            (_unused, segmentIndex) =>
+              readAssemblerText(
+                assembler,
+                assembler.ittm_assembler_cell_segment_id_length(
+                  handle,
+                  objectIndex,
+                  cellIndex,
+                  segmentIndex,
+                ),
+                (pointer, capacity) =>
+                  assembler.ittm_assembler_cell_segment_id_copy(
+                    handle,
+                    objectIndex,
+                    cellIndex,
+                    segmentIndex,
+                    pointer,
+                    capacity,
+                  ),
+              ),
+          );
+          cells.push({
+            row: cellField(0),
+            column: cellField(1),
+            row_span: cellField(2),
+            column_span: cellField(3),
+            segment_ids: segmentIds,
+            text: readAssemblerText(
+              assembler,
+              assembler.ittm_assembler_cell_text_length(
+                handle,
+                objectIndex,
+                cellIndex,
+              ),
+              (pointer, capacity) =>
+                assembler.ittm_assembler_cell_text_copy(
+                  handle,
+                  objectIndex,
+                  cellIndex,
+                  pointer,
+                  capacity,
+                ),
+            ),
+          });
+        }
+        objects.push({
+          object_id: objectId,
+          kind: kindName(field(0)),
+          logical_row_count: field(1),
+          logical_column_count: field(2),
+          cells,
+          markdown: objectMarkdown,
+        });
+      }
+      return {
+        schema: STRUCTURAL_RENDER_ARTIFACT_SCHEMA,
+        objects,
+        markdown,
+      };
+    } finally {
+      if (assembler.ittm_assembler_drop(handle) !== 0) {
+        throw new Error(`Unknown Rust topology assembler handle: ${handle}`);
+      }
+    }
   }
 
   addSparseSignal(code: number, signal: number): number {
@@ -346,6 +695,7 @@ function separatedExports(exports: PipelineCoreExports): SeparatedExports {
     "ittm_separated_job_raster_length",
     "ittm_separated_job_raster_copy",
     "ittm_separated_set_ocr",
+    "ittm_separated_add_ocr_word",
     "ittm_separated_render_length",
     "ittm_separated_render_copy",
     "ittm_separated_stage_mask",
@@ -361,8 +711,41 @@ function separatedExports(exports: PipelineCoreExports): SeparatedExports {
   return exports as SeparatedExports;
 }
 
+function assemblerExports(exports: PipelineCoreExports): AssemblerExports {
+  const required = [
+    "memory",
+    "ittm_alloc",
+    "ittm_dealloc",
+    "ittm_assembler_begin",
+    "ittm_assembler_add_layout",
+    "ittm_assembler_add_segment",
+    "ittm_assembler_render_length",
+    "ittm_assembler_render_copy",
+    "ittm_assembler_object_count",
+    "ittm_assembler_object_field",
+    "ittm_assembler_object_id_length",
+    "ittm_assembler_object_id_copy",
+    "ittm_assembler_object_markdown_length",
+    "ittm_assembler_object_markdown_copy",
+    "ittm_assembler_cell_field",
+    "ittm_assembler_cell_text_length",
+    "ittm_assembler_cell_text_copy",
+    "ittm_assembler_cell_segment_id_length",
+    "ittm_assembler_cell_segment_id_copy",
+    "ittm_assembler_drop",
+  ] as const;
+  for (const name of required) {
+    if (!exports[name]) {
+      throw new Error(
+        `Pipeline core ABI ${PIPELINE_CORE_ABI_VERSION} misses ${name}`,
+      );
+    }
+  }
+  return exports as AssemblerExports;
+}
+
 function copyIntoWasm(
-  exports: SeparatedExports,
+  exports: Pick<SeparatedExports, "memory" | "ittm_alloc">,
   bytes: Uint8Array | Uint8ClampedArray,
 ): number {
   if (bytes.byteLength === 0) return 0;
@@ -370,6 +753,27 @@ function copyIntoWasm(
   if (!pointer) throw new Error("Pipeline core could not allocate WASM memory");
   new Uint8Array(exports.memory.buffer, pointer, bytes.byteLength).set(bytes);
   return pointer;
+}
+
+function readAssemblerText(
+  exports: AssemblerExports,
+  length: number,
+  copy: (pointer: number, capacity: number) => number,
+): string {
+  if (!length) return "";
+  const pointer = exports.ittm_alloc(length);
+  if (!pointer) throw new Error("Pipeline core could not allocate assembler output");
+  try {
+    const copied = copy(pointer, length);
+    if (copied !== length) {
+      throw new Error(`Rust topology assembler copied ${copied} bytes; expected ${length}`);
+    }
+    return new TextDecoder().decode(
+      new Uint8Array(exports.memory.buffer, pointer, length),
+    );
+  } finally {
+    exports.ittm_dealloc(pointer, length);
+  }
 }
 
 export class BrowserSeparatedSession {
@@ -380,9 +784,13 @@ export class BrowserSeparatedSession {
     private readonly handle: number,
   ) {}
 
-  jobs(): readonly SeparatedOcrJob[] {
+  jobCount(): number {
     this.assertOpen();
-    const count = this.exports.ittm_separated_job_count(this.handle);
+    return this.exports.ittm_separated_job_count(this.handle);
+  }
+
+  job(index: number): SeparatedOcrJob {
+    this.assertOpen();
     const field = (index: number, fieldIndex: number) => {
       const value = this.exports.ittm_separated_job_field(
         this.handle,
@@ -396,7 +804,7 @@ export class BrowserSeparatedSession {
       }
       return value;
     };
-    return Array.from({ length: count }, (_unused, index) => ({
+    return {
       index,
       bbox: [
         field(index, 0),
@@ -411,7 +819,20 @@ export class BrowserSeparatedSession {
       columnSpan: field(index, 8),
       recognitionMode: field(index, 9),
       objectKind: field(index, 10),
-    }));
+      languages: SEPARATED_LANGUAGE_PROFILES[field(index, 11)] ?? "rus+eng",
+      transform: SEPARATED_TRANSFORMS[field(index, 12)] ?? "raw",
+      depth: field(index, 13),
+      logicalRowCount: field(index, 14),
+      logicalColumnCount: field(index, 15),
+      grammarMilli: field(index, 16),
+      superseded: Boolean(field(index, 17)),
+    };
+  }
+
+  jobs(): readonly SeparatedOcrJob[] {
+    return Array.from({ length: this.jobCount() }, (_unused, index) =>
+      this.job(index),
+    );
   }
 
   raster(index: number): SeparatedOcrRaster {
@@ -495,6 +916,27 @@ export class BrowserSeparatedSession {
       );
       if (status !== 0) {
         throw new Error(`Separated OCR handoff failed with status ${status}`);
+      }
+    } finally {
+      if (pointer) this.exports.ittm_dealloc(pointer, encoded.byteLength);
+    }
+  }
+
+  addOcrWord(index: number, word: SeparatedOcrWord): void {
+    this.assertOpen();
+    const encoded = new TextEncoder().encode(word.text);
+    const pointer = copyIntoWasm(this.exports, encoded);
+    try {
+      const status = this.exports.ittm_separated_add_ocr_word(
+        this.handle,
+        index,
+        pointer,
+        encoded.byteLength,
+        ...word.bbox,
+        Math.max(0, Math.min(1_000, Math.floor(word.confidenceMilli))),
+      );
+      if (status !== 0) {
+        throw new Error(`Separated OCR word handoff failed with status ${status}`);
       }
     } finally {
       if (pointer) this.exports.ittm_dealloc(pointer, encoded.byteLength);

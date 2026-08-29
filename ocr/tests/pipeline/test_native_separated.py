@@ -3,6 +3,8 @@ from PIL import Image, ImageDraw
 from app.pipeline_core.separated import (
     SEPARATED_STAGES,
     NativeSeparatedSession,
+    SeparatedOcrWord,
+    SeparatedRecognition,
     run_native_separated_pipeline,
 )
 
@@ -19,11 +21,23 @@ def test_native_session_exposes_the_complete_separated_contract():
     image = _two_line_image()
     try:
         with NativeSeparatedSession(image) as session:
-            jobs = session.jobs
-            assert len(jobs) == 2
+            assert len(session.jobs) == 1
             assert session.completed_stages == SEPARATED_STAGES[:5]
-            session.set_ocr(0, "first")
-            session.set_ocr(1, "second")
+            index = 0
+            while index < len(session.jobs):
+                text = ("first", "second")[index]
+                with session.raster(session.job(index)) as crop:
+                    session.add_ocr_word(
+                        index,
+                        SeparatedOcrWord(
+                            text=text,
+                            bbox=(0, 0, crop.width, crop.height),
+                            confidence_milli=1000,
+                        ),
+                    )
+                session.set_ocr(index, text, 1000)
+                index += 1
+            assert len(session.jobs) == 2
             assert session.render() == "first\n\nsecond"
             assert session.completed_stages == SEPARATED_STAGES
     finally:
@@ -36,7 +50,18 @@ def test_native_runner_keeps_ocr_as_a_host_adapter():
 
     def recognize(crop, job):
         seen.append((job.index, crop.size))
-        return f"segment-{job.index}", 900
+        text = f"segment-{job.index}"
+        return SeparatedRecognition(
+            text=text,
+            confidence_milli=1000,
+            words=(
+                SeparatedOcrWord(
+                    text=text,
+                    bbox=(0, 0, crop.width, crop.height),
+                    confidence_milli=1000,
+                ),
+            ),
+        )
 
     try:
         markdown, jobs, stages = run_native_separated_pipeline(image, recognize)

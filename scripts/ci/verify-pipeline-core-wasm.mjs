@@ -20,19 +20,20 @@ const separatedExports = [
   "ittm_separated_job_raster_length",
   "ittm_separated_job_raster_copy",
   "ittm_separated_set_ocr",
+  "ittm_separated_add_ocr_word",
   "ittm_separated_render_length",
   "ittm_separated_render_copy",
   "ittm_separated_stage_mask",
   "ittm_separated_drop",
 ];
 for (const name of separatedExports) {
-  if (!exports[name]) throw new Error(`WASM ABI 5 misses ${name}`);
+  if (!exports[name]) throw new Error(`WASM ABI 6 misses ${name}`);
 }
 
-if (exports.ittm_pipeline_abi_version() !== 5) {
+if (exports.ittm_pipeline_abi_version() !== 6) {
   throw new Error("Unexpected pipeline core ABI version");
 }
-if (exports.ittm_pipeline_route_id() !== 0x52530002) {
+if (exports.ittm_pipeline_route_id() !== 0x52530003) {
   throw new Error("Unexpected separated route id");
 }
 if (exports.ittm_span_evidence_score(800, 900, 700, 2, 0) !== 71500) {
@@ -110,29 +111,62 @@ try {
   if (
     firstBox[0] > 8 ||
     firstBox[1] > 7 ||
-    firstBox[2] < 70 ||
-    firstBox[3] < 28 ||
+    firstBox[2] < 55 ||
+    firstBox[3] < 11 ||
     firstBox.join(",") === `0,0,${width},${height}`
   ) {
     throw new Error(`WASM separated geometry parity failed: ${firstBox}`);
   }
-  if (exports.ittm_separated_job_field(handle, 0, 7) !== 2) {
+  if (exports.ittm_separated_job_field(handle, 0, 7) !== 1) {
     throw new Error("WASM separated context span parity failed");
   }
-  const encoded = new TextEncoder().encode("first\nsecond");
-  const pointer = exports.ittm_alloc(encoded.byteLength);
-  new Uint8Array(exports.memory.buffer, pointer, encoded.byteLength).set(
-    encoded,
+  const setOcr = (index, text) => {
+    const encoded = new TextEncoder().encode(text);
+    const pointer = exports.ittm_alloc(encoded.byteLength);
+    new Uint8Array(exports.memory.buffer, pointer, encoded.byteLength).set(
+      encoded,
+    );
+    const wordStatus = exports.ittm_separated_add_ocr_word(
+      handle,
+      index,
+      pointer,
+      encoded.byteLength,
+      0,
+      0,
+      1,
+      1,
+      1000,
+    );
+    const textStatus = exports.ittm_separated_set_ocr(
+      handle,
+      index,
+      pointer,
+      encoded.byteLength,
+      0,
+    );
+    exports.ittm_dealloc(pointer, encoded.byteLength);
+    if (wordStatus !== 0 || textStatus !== 0) {
+      throw new Error(
+        `WASM OCR handoff failed: word=${wordStatus}, text=${textStatus}`,
+      );
+    }
+  };
+  setOcr(0, "first");
+  if (exports.ittm_separated_job_count(handle) !== 2) {
+    throw new Error("WASM recursive job expansion parity failed");
+  }
+  const secondBox = Array.from({ length: 4 }, (_unused, field) =>
+    exports.ittm_separated_job_field(handle, 1, field),
   );
-  const status = exports.ittm_separated_set_ocr(
-    handle,
-    0,
-    pointer,
-    encoded.byteLength,
-    900,
-  );
-  exports.ittm_dealloc(pointer, encoded.byteLength);
-  if (status !== 0) throw new Error(`WASM OCR handoff failed: ${status}`);
+  if (
+    secondBox[0] > 12 ||
+    secondBox[1] > 24 ||
+    secondBox[2] < 70 ||
+    secondBox[3] < 28
+  ) {
+    throw new Error(`WASM recursive geometry parity failed: ${secondBox}`);
+  }
+  setOcr(1, "second");
   const length = exports.ittm_separated_render_length(handle);
   const outputPointer = exports.ittm_alloc(length);
   const copied = exports.ittm_separated_render_copy(
@@ -144,7 +178,7 @@ try {
     new Uint8Array(exports.memory.buffer, outputPointer, length),
   );
   exports.ittm_dealloc(outputPointer, length);
-  if (copied !== length || output !== "first\nsecond") {
+  if (copied !== length || output !== "first\n\nsecond") {
     throw new Error("WASM separated assembly parity failed");
   }
   if (exports.ittm_separated_stage_mask(handle) !== 0b11111111) {

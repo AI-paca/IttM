@@ -10,7 +10,7 @@
     "build:pipeline-core:native": "bash scripts/runtime/build-pipeline-core-native.sh",
     "build:pipeline-core:wasm": "bash scripts/runtime/build-pipeline-core.sh",
     "build:web": "vite build --config web/vite.config.ts",
-    "build:web:lite": "npm run model:browser-tessdata && npm run build:pipeline-core:wasm && VITE_RUNTIME_MODE=lite vite build --config web/vite.config.ts",
+    "build:web:lite": "npm run model:browser-tessdata && npm run model:browser-reviewer && npm run build:pipeline-core:wasm && VITE_RUNTIME_MODE=lite vite build --config web/vite.config.ts",
     "build:pages": "VITE_BASE_PATH=/IttM/ npm run build:web:lite",
     "build:server": "esbuild server.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.js",
     "build:server:standalone": "esbuild server.ts --bundle --platform=node --format=cjs --define:process.env.NODE_ENV='\"production\"' --log-override:empty-import-meta=silent --outfile=dist/server.cjs",

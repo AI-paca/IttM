@@ -1,4 +1,4 @@
-import { createWorker } from "tesseract.js";
+import { createWorker, OEM, PSM } from "tesseract.js";
 import type { BrowserOcrProfile } from "./browser-profile";
 import { denseGridLineIndexes } from "./browser-dense-grid";
 import { scoreMathLanguage } from "./math-language";
@@ -151,6 +151,116 @@ async function canvasToImageBlob(
   return await new Promise<Blob | null>((resolve) => {
     canvas.toBlob((blob) => resolve(blob), "image/png");
   });
+}
+
+interface EdgeFallbackInput {
+  input: Blob;
+  border: number;
+  width: number;
+  height: number;
+}
+
+async function buildEdgeFallbackInput(
+  input: Blob,
+  borderPixels: number,
+): Promise<EdgeFallbackInput | null> {
+  const image = await loadBrowserImage(input);
+  if (!image) return null;
+  const { width, height } = image;
+  const source = createCanvas(width, height);
+  const context = source?.getContext("2d", { willReadFrequently: true });
+  if (!source || !context) {
+    if ("close" in image && typeof image.close === "function") image.close();
+    return null;
+  }
+  context.fillStyle = "white";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+  if ("close" in image && typeof image.close === "function") image.close();
+  if (width < 80 || height < 40) return null;
+
+  const pixels = context.getImageData(0, 0, width, height).data;
+  const edge = Math.max(2, Math.min(12, Math.floor(Math.min(width, height) / 80)));
+  const inkRatio = (left: number, top: number, right: number, bottom: number) => {
+    let ink = 0;
+    let total = 0;
+    for (let y = top; y < bottom; y += 1) {
+      for (let x = left; x < right; x += 1) {
+        const offset = (y * width + x) * 4;
+        const gray = Math.round(
+          pixels[offset] * 0.299 +
+            pixels[offset + 1] * 0.587 +
+            pixels[offset + 2] * 0.114,
+        );
+        ink += Number(gray < 220);
+        total += 1;
+      }
+    }
+    return total > 0 ? ink / total : 0;
+  };
+  if (
+    [
+      inkRatio(0, 0, width, edge),
+      inkRatio(0, height - edge, width, height),
+      inkRatio(0, 0, edge, height),
+      inkRatio(width - edge, 0, width, height),
+    ].some((ratio) => ratio < 0.02)
+  ) {
+    return null;
+  }
+
+  const border = Math.max(0, Math.floor(borderPixels));
+  if (!border) return null;
+  const expanded = createCanvas(width + border * 2, height + border * 2);
+  const expandedContext = expanded?.getContext("2d");
+  if (!expanded || !expandedContext) return null;
+  expandedContext.fillStyle = "white";
+  expandedContext.fillRect(0, 0, expanded.width, expanded.height);
+  expandedContext.drawImage(source, border, border);
+  const blob = await canvasToImageBlob(expanded);
+  return blob ? { input: blob, border, width, height } : null;
+}
+
+function projectEdgeFallback(
+  result: BrowserOcrDetailedResult,
+  fallback: EdgeFallbackInput,
+): BrowserOcrDetailedResult {
+  const words = result.words.flatMap((word) => {
+    const bbox = {
+      x0: Math.max(0, word.bbox.x0 - fallback.border),
+      y0: Math.max(0, word.bbox.y0 - fallback.border),
+      x1: Math.min(fallback.width, word.bbox.x1 - fallback.border),
+      y1: Math.min(fallback.height, word.bbox.y1 - fallback.border),
+    };
+    return bbox.x1 > bbox.x0 && bbox.y1 > bbox.y0 ? [{ ...word, bbox }] : [];
+  });
+  return { ...result, words };
+}
+
+function edgeFallbackScore(result: BrowserOcrDetailedResult): readonly number[] {
+  const confidence = result.words.reduce(
+    (sum, word) => sum + (word.confidence ?? 0),
+    0,
+  );
+  return [
+    Number(result.words.length > 0),
+    result.words.length ? confidence / result.words.length : 0,
+    result.text.replace(/\s+/g, "").length,
+  ];
+}
+
+function strongerEdgeFallback(
+  left: BrowserOcrDetailedResult,
+  right: BrowserOcrDetailedResult,
+): BrowserOcrDetailedResult {
+  const leftScore = edgeFallbackScore(left);
+  const rightScore = edgeFallbackScore(right);
+  for (let index = 0; index < leftScore.length; index += 1) {
+    if (rightScore[index] !== leftScore[index]) {
+      return rightScore[index] > leftScore[index] ? right : left;
+    }
+  }
+  return left;
 }
 
 async function buildImageVariants(
@@ -366,6 +476,8 @@ interface TesseractWorkerOptions {
   workerPath?: string;
   corePath?: string;
   workerBlobURL?: boolean;
+  legacyCore?: boolean;
+  legacyLang?: boolean;
   logger?: (message: TesseractLoggerMessage) => void;
 }
 
@@ -436,6 +548,8 @@ function browserTesseractOptions(): Partial<TesseractWorkerOptions> {
     workerPath: compiledTesseractWorkerUrl,
     corePath: compiledTesseractAssetRoot,
     workerBlobURL: false,
+    legacyCore: true,
+    legacyLang: true,
   };
 }
 
@@ -733,6 +847,7 @@ class BrowserOcrWorkerSession {
   private readonly profile: BrowserOcrProfile;
   private readonly workerPromise: Promise<TesseractWorkerLike>;
   private languageProbabilities: Record<string, number>;
+  private separatedLanguages: string;
   private progressSink: ProgressSink;
   private busy = false;
 
@@ -748,6 +863,7 @@ class BrowserOcrWorkerSession {
       profile.languages,
       profile.availableLanguages,
     );
+    this.separatedLanguages = profile.languages;
     this.progressSink = onProgress;
     const workerOptions: TesseractWorkerOptions = {
       ...browserTesseractOptions(),
@@ -758,7 +874,7 @@ class BrowserOcrWorkerSession {
     };
     this.workerPromise = createWorkerFn(
       profile.languages,
-      1,
+      OEM.DEFAULT,
       workerOptions,
     ).catch((error) => {
       throw normalizeWorkerError(error, workerOptions.workerPath);
@@ -800,70 +916,62 @@ class BrowserOcrWorkerSession {
     input: File | Blob,
     pageSegmentationMode: string,
   ): Promise<string> {
+    return (
+      await this.recognizeSeparatedBlockDetailed(input, pageSegmentationMode)
+    ).text;
+  }
+
+  async recognizeSeparatedBlockDetailed(
+    input: File | Blob,
+    pageSegmentationMode: string,
+    languages: string = this.profile.languages,
+  ): Promise<BrowserOcrDetailedResult> {
     // Rust has already bounded the block. Re-running language and image
     // candidates here would reinitialize Tesseract for every segment.
     this.busy = true;
     try {
       const worker = await this.workerPromise;
+      if (languages !== this.separatedLanguages) {
+        if (!worker.reinitialize) {
+          return { text: "", words: [], confidence: 0 };
+        }
+        await worker.reinitialize(languages);
+        this.separatedLanguages = languages;
+      }
       const recognizeInput = await toTesseractRecognizeInput(input);
       await worker.setParameters?.({
         tessedit_pageseg_mode: pageSegmentationMode,
       });
-      const result = await this.recognizeWithOutput(
+      const primary = await this.recognizeWithOutput(
         worker,
         recognizeInput,
-        false,
+        true,
       );
-      const observed: ObservedOcrCandidate[] = [
-        { result, languages: this.profile.languages },
-      ];
       if (
-        result.confidence !== undefined &&
-        !isStrongImageCandidate(result)
+        primary.words.length > 0 ||
+        pageSegmentationMode === PSM.SINGLE_WORD ||
+        pageSegmentationMode === PSM.RAW_LINE
       ) {
-        const languageSelection = await this.recognizeWithLanguageCandidates(
-          worker,
-          recognizeInput,
-          false,
-        );
-        if (
-          languageSelection.languages !== this.profile.languages ||
-          normalizedCandidateText(languageSelection.result.text) !==
-            normalizedCandidateText(result.text)
-        ) {
-          observed.push(languageSelection);
-        }
-        const gridVariant =
-          input instanceof Blob && input.type.startsWith("image/")
-            ? await buildDenseGridBlockVariant(
-                input,
-                this.profile.maxImagePixels,
-              )
-            : null;
-        if (gridVariant) {
-          observed.push({
-            result: await this.recognizeWithOutput(
-              worker,
-              await toTesseractRecognizeInput(gridVariant),
-              false,
-            ),
-            languages: this.profile.languages,
-          });
-        }
+        return primary;
       }
-      const core = await this.corePromise;
-      const selected = scoreObservedCandidates(
-        core,
-        observed,
-        this.languageProbabilities,
-      ).reduce((best, candidate) =>
-        candidate.score > best.score ? candidate : best,
+      const edgeFallback = await buildEdgeFallbackInput(
+        input,
+        this.profile.ocrBorderPixels,
       );
-      this.languageProbabilities = updateLanguageProbabilities(
-        this.languageProbabilities,
-        selected.result.text,
-      );
-      return selected.result.text;
+      if (!edgeFallback) return primary;
+      const fallbackInput = await toTesseractRecognizeInput(edgeFallback.input);
+      let selected = primary;
+      for (const fallbackPsm of [PSM.SINGLE_WORD, PSM.RAW_LINE]) {
+        await worker.setParameters?.({ tessedit_pageseg_mode: fallbackPsm });
+        selected = strongerEdgeFallback(
+          selected,
+          projectEdgeFallback(
+            await this.recognizeWithOutput(worker, fallbackInput, true),
+            edgeFallback,
+          ),
+        );
+      }
+      return selected;
     } finally {
       this.busy = false;
     }
@@ -1137,6 +1245,18 @@ export class BrowserOcrWorkerLease {
     pageSegmentationMode: string,
   ): Promise<string> {
     return this.session.recognizeSeparatedBlock(input, pageSegmentationMode);
+  }
+
+  recognizeSeparatedBlockDetailed(
+    input: File | Blob,
+    pageSegmentationMode: string,
+    languages?: string,
+  ): Promise<BrowserOcrDetailedResult> {
+    return this.session.recognizeSeparatedBlockDetailed(
+      input,
+      pageSegmentationMode,
+      languages,
+    );
   }
 
   async release(): Promise<void> {

@@ -752,32 +752,47 @@ overall_failed=0
   else
     bash scripts/runtime/build-pipeline-core.sh >/dev/null
   fi
+  runtime_lang_path="${ITTM_OCR_LANG_PATH:-${BROWSER_OCR_LANG_PATH:-$PWD/.cache/tessdata}}"
+  if [[ ! -f "$runtime_lang_path/rus.traineddata" ||
+    ! -f "$runtime_lang_path/eng.traineddata" ||
+    ! -f "$runtime_lang_path/chi_sim.traineddata" ||
+    ! -f "$runtime_lang_path/ell.traineddata" ||
+    ! -f "$runtime_lang_path/equ.traineddata" ]]; then
+    BROWSER_OCR_LANG_PATH="$runtime_lang_path" \
+      bash scripts/models/download-browser-tessdata.sh >/dev/null
+  fi
   printf 'RUN %s commit=%s runtime=%s items=%s\n' \
     "$run_dir" "$(git rev-parse --short HEAD)" "$runtime" "${#ITEM_IDS[@]}"
   for item_id in "${ITEM_IDS[@]}"; do
     item_dir="$run_dir/items/$item_id"
     mkdir -p "$item_dir/logs"
     target_status="$item_dir/${STAGE_DIR[$to_stage]}/.runner-status"
-    if [[ "$resume_from_last_good" -eq 1 && -f "$target_status" &&
+    if [[ "$resume_from_last_good" -eq 1 && "$replace_stage" -eq 0 &&
+      -f "$target_status" &&
       "$(cat "$target_status")" == "COMPLETE" ]]; then
       printf '  %s REUSED through %s\n' "$item_id" "$to_stage"
       continue
     fi
     if [[ "$runtime" == "rust-native" ]]; then
       command=(
+        env
+        "ITTM_PIPELINE_CORE_LIB=$PWD/pipeline-core/target/release/libittm_pipeline_core.so"
+        "TESSDATA_PREFIX=$runtime_lang_path"
         python3 scripts/debug/debug-rust-separated.py
         "${ITEM_SOURCE[$item_id]}" --output "$item_dir" --engine tesseract
         --to-stage "$to_stage"
       )
     else
-      browser_lang_path="${BROWSER_OCR_LANG_PATH:-}"
+      browser_lang_path="$runtime_lang_path"
       if [[ -z "$browser_lang_path" ]]; then
         common_git_dir="$(realpath "$(git rev-parse --git-common-dir)")"
         workspace_parent="$(dirname "$(dirname "$common_git_dir")")"
         while IFS= read -r candidate; do
           if [[ -f "$candidate/rus.traineddata" &&
             -f "$candidate/eng.traineddata" &&
-            -f "$candidate/chi_sim.traineddata" ]]; then
+            -f "$candidate/chi_sim.traineddata" &&
+            -f "$candidate/ell.traineddata" &&
+            -f "$candidate/equ.traineddata" ]]; then
             browser_lang_path="$candidate"
             break
           fi
@@ -789,7 +804,7 @@ overall_failed=0
         )
       fi
       if [[ -z "$browser_lang_path" ]]; then
-        echo "Could not resolve browser tessdata with rus, eng, and chi_sim models" >"$item_dir/logs/runtime.log"
+        echo "Could not resolve browser tessdata with rus, eng, chi_sim, ell, and equ models" >"$item_dir/logs/runtime.log"
         overall_failed=1
         printf '  %s FAILED; browser tessdata is unavailable\n' "$item_id"
         continue
@@ -857,7 +872,7 @@ for item_id in "${ITEM_IDS[@]}"; do
     fi
 
     if [[ -e "$stage_dir" ]]; then
-      if [[ "$resume_from_last_good" -eq 1 ]] &&
+      if [[ "$resume_from_last_good" -eq 1 && "$replace_stage" -eq 0 ]] &&
         [[ -f "$stage_dir/.runner-status" ]] &&
         [[ "$(<"$stage_dir/.runner-status")" == "COMPLETE" ]]; then
         printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \

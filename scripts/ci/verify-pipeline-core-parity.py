@@ -99,6 +99,18 @@ def verify(library_path: Path) -> None:
         ctypes.c_uint32,
     )
     library.ittm_separated_job_field.restype = ctypes.c_int32
+    library.ittm_separated_add_ocr_word.argtypes = (
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+    )
+    library.ittm_separated_add_ocr_word.restype = ctypes.c_int32
     library.ittm_separated_set_ocr.argtypes = (
         ctypes.c_uint32,
         ctypes.c_uint32,
@@ -120,8 +132,8 @@ def verify(library_path: Path) -> None:
     library.ittm_separated_drop.argtypes = (ctypes.c_uint32,)
     library.ittm_separated_drop.restype = ctypes.c_int32
 
-    assert library.ittm_pipeline_abi_version() == 5
-    assert library.ittm_pipeline_route_id() == 0x52530002
+    assert library.ittm_pipeline_abi_version() == 6
+    assert library.ittm_pipeline_route_id() == 0x52530003
     for code in SPARSE_CODE_COMPONENTS:
         for signal in SPARSE_SIGNALS:
             assert library.ittm_sparse_add_signal(code, signal) == add_sparse_signal(
@@ -262,17 +274,38 @@ def verify(library_path: Path) -> None:
         )
         assert first_box[0] <= 8
         assert first_box[1] <= 7
-        assert first_box[2] >= 70
-        assert first_box[3] >= 28
+        assert first_box[2] >= 55
+        assert first_box[3] >= 11
         assert first_box != (0, 0, width, height)
-        assert library.ittm_separated_job_field(handle, 0, 7) == 2
-        value = b"first\nsecond"
-        text = ctypes.create_string_buffer(value)
-        assert library.ittm_separated_set_ocr(handle, 0, text, len(value), 900) == 0
+        assert library.ittm_separated_job_field(handle, 0, 7) == 1
+        first = b"first"
+        first_text = ctypes.create_string_buffer(first)
+        assert library.ittm_separated_add_ocr_word(
+            handle, 0, first_text, len(first), 0, 0, 1, 1, 1000
+        ) == 0
+        assert library.ittm_separated_set_ocr(
+            handle, 0, first_text, len(first), 0
+        ) == 0
+        assert library.ittm_separated_job_count(handle) == 2
+        second_box = tuple(
+            library.ittm_separated_job_field(handle, 1, field) for field in range(4)
+        )
+        assert second_box[0] <= 12
+        assert second_box[1] <= 24
+        assert second_box[2] >= 70
+        assert second_box[3] >= 28
+        second = b"second"
+        second_text = ctypes.create_string_buffer(second)
+        assert library.ittm_separated_add_ocr_word(
+            handle, 1, second_text, len(second), 0, 0, 1, 1, 1000
+        ) == 0
+        assert library.ittm_separated_set_ocr(
+            handle, 1, second_text, len(second), 0
+        ) == 0
         length = library.ittm_separated_render_length(handle)
         output = ctypes.create_string_buffer(length)
         assert library.ittm_separated_render_copy(handle, output, length) == length
-        assert output.raw[:length] == b"first\nsecond"
+        assert output.raw[:length] == b"first\n\nsecond"
         assert library.ittm_separated_stage_mask(handle) == 0b11111111
     finally:
         assert library.ittm_separated_drop(handle) == 0

@@ -16,11 +16,14 @@ const browserModelVendorRoute = "vendor/models";
 const browserModelRoot = path.resolve(repoRoot, ".models/browser");
 const browserModelIds = ["HuggingFaceTB/SmolLM2-135M-Instruct"];
 const tesseractCoreFiles = [
+  "tesseract-core.wasm.js",
+  "tesseract-core-simd.wasm.js",
+  "tesseract-core-relaxedsimd.wasm.js",
   "tesseract-core-lstm.wasm.js",
   "tesseract-core-simd-lstm.wasm.js",
   "tesseract-core-relaxedsimd-lstm.wasm.js",
 ];
-const tesseractLanguageFiles = ["eng", "rus", "chi_sim"];
+const tesseractLanguageFiles = ["eng", "rus", "chi_sim", "ell", "equ"];
 const pdfJsWasmFileNames = [
   "jbig2.wasm",
   "jbig2_nowasm_fallback.js",

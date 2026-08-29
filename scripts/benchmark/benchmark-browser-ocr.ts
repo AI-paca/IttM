@@ -169,18 +169,23 @@ async function prepareArtifactRoot() {
     stage: "geometry",
     status: "opaque",
     issue:
-      "Rust core marks this stage complete but ABI v5 does not export its geometry state.",
+      "Rust core marks this stage complete but ABI v6 does not export its geometry state.",
   });
   await writeJson(join(artifactRoot, "02-topology", "manifest.json"), {
     stage: "topology",
     status: "opaque",
     issue:
-      "Rust core marks this stage complete but ABI v5 does not export its topology state.",
+      "Rust core marks this stage complete but ABI v6 does not export its topology state.",
   });
 }
 
 async function finishArtifacts(markdown: string) {
   if (!artifactRoot) return;
+  await writeJson(join(artifactRoot, "04-separate-block", "manifest.json"), {
+    stage: "separate-block",
+    route_id: debugRouteId,
+    jobs: debugJobs,
+  });
   const sourceImage = await loadImage(bytes);
   const objectIds = [...new Set(debugJobs.map((job) => job.objectId))].sort(
     (a, b) => a - b,
@@ -287,10 +292,18 @@ try {
             );
           },
           async block(image, job) {
+            if (!debugJobs.some((value) => value.index === job.index)) {
+              debugJobs.push({ ...job });
+            }
             const stem = `block-${String(job.index + 1).padStart(3, "0")}`;
+            const blockBytes = Buffer.from(await image.arrayBuffer());
             await writeFile(
               join(artifactRoot, "04-separate-block", `${stem}.png`),
-              Buffer.from(await image.arrayBuffer()),
+              blockBytes,
+            );
+            await writeFile(
+              join(artifactRoot, "05-ocr-blocks", `${stem}.png`),
+              blockBytes,
             );
           },
           async recognized(text, confidenceMilli, job) {

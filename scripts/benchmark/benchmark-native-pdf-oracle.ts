@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 
+import { BrowserPipelineCore } from "../../web/src/ocr/pipeline-core";
 import {
   buildNativePdfOracle,
   type NativePdfOracle,
@@ -23,6 +24,17 @@ if (!pdfArg || !outputArg) {
 const pdfPath = resolve(pdfArg);
 const outputPath = resolve(outputArg);
 const svgPath = outputPath.replace(/\.json$/i, ".svg");
+const wasmPath = resolve(
+  process.env.ITTM_PIPELINE_CORE_WASM ??
+    "web/public/wasm/ittm_pipeline_core.wasm",
+);
+const { instance: pipelineCoreInstance } = await WebAssembly.instantiate(
+  new Uint8Array(await readFile(wasmPath)),
+  {},
+);
+const pipelineCore = new BrowserPipelineCore(
+  pipelineCoreInstance.exports as never,
+);
 const startedAt = performance.now();
 const data = new Uint8Array(await readFile(pdfPath));
 const task = getDocument({ data, useSystemFonts: false });
@@ -49,6 +61,7 @@ try {
         route: "trusted_native_text_bypass" as const,
         oracle: buildNativePdfOracle(
           content.items as unknown as PdfTextGeometryItem[],
+          pipelineCore,
         ),
       });
     } finally {

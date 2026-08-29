@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, ReactNode } from "react";
 import { useMotionValueEvent, useScroll } from "motion/react";
+import { IS_LITE_RUNTIME } from "../runtime-mode";
 import { noticeFromError, requestApiJson } from "./api-client";
 import { getBrowserDiagnostics, isSupportedOcrFile } from "./file-utils";
 import { EXTERNAL_LLM_CONSENT_ERROR } from "./llm-consent";
@@ -177,6 +178,10 @@ export function OcrProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const browserInfo = getBrowserDiagnostics();
+    if (IS_LITE_RUNTIME) {
+      setDiagnostics({ backend: null, browser: browserInfo });
+      return;
+    }
 
     requestApiJson<BackendDiagnostics>("/api/diagnostics", "Diagnostics")
       .then((data) => {

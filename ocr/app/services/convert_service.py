@@ -75,6 +75,7 @@ from app.pipeline_core.separated import (
     SeparatedOcrJob,
     run_native_separated_pipeline,
 )
+from app.pipeline_core.separated_recognition import recognize_separated_block
 from app.preprocessing import OcrPreprocessingPipeline
 from app.recognition.segments import (
     recognize_table_cell_candidate,
@@ -142,6 +143,11 @@ class _PdfFixedWidthCell(NamedTuple):
     text: str
     start: int
     end: int
+
+
+class _PdfFixedWidthObject(NamedTuple):
+    kind: int
+    rows: tuple[tuple[str, ...], ...]
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -1781,25 +1787,26 @@ def _merge_pdf_fixed_width_continuation_rows(rows: list[list[_PdfFixedWidthCell]
     return [values for row in rows if (values := _pdf_fixed_width_text_cells(row))]
 
 
-def _fixed_width_rows_to_markdown(rows: list[list[str]]) -> str:
-    cleaned_rows = [[_markdown_cell(cell) for cell in row] for row in rows if any(cell.strip() for cell in row)]
-    if not cleaned_rows:
-        return ""
-    return _markdown_table(cleaned_rows)
-
-
-def _pdf_text_layer_fixed_width_markdown(text: str) -> tuple[str, int]:
+def _pdf_text_layer_fixed_width_objects(text: str) -> tuple[list[_PdfFixedWidthObject], int]:
     lines = text.replace("\f", "").splitlines()
-    parts: list[str] = []
+    objects: list[_PdfFixedWidthObject] = []
+    pending_plain: list[str] = []
     table_count = 0
     index = 0
+
+    def flush_plain() -> None:
+        nonlocal pending_plain
+        rows = tuple((line,) for line in pending_plain if line)
+        if rows:
+            objects.append(_PdfFixedWidthObject(kind=0, rows=rows))
+        pending_plain = []
 
     def append_plain(value: str) -> None:
         stripped = value.strip()
         if stripped:
-            parts.append(stripped)
-        elif parts and parts[-1] != "":
-            parts.append("")
+            pending_plain.append(stripped)
+        else:
+            flush_plain()
 
     while index < len(lines):
         if not _looks_like_pdf_text_layer_table_line(lines[index]):
@@ -1845,18 +1852,53 @@ def _pdf_text_layer_fixed_width_markdown(text: str) -> tuple[str, int]:
         max_width = max((len(row) for row in merged_run), default=0)
         table_like_rows = sum(1 for row in merged_run if len(row) >= 3)
         if len(run) >= 2 and max_width >= 3 and table_like_rows >= max(1, len(run) // 3):
-            table_markdown = _fixed_width_rows_to_markdown(merged_run)
-            if table_markdown:
-                parts.append(table_markdown)
+            rows = tuple(
+                tuple(_markdown_cell(cell) for cell in row)
+                for row in merged_run
+                if any(cell.strip() for cell in row)
+            )
+            if rows:
+                flush_plain()
+                objects.append(_PdfFixedWidthObject(kind=1, rows=rows))
                 table_count += 1
                 continue
 
         for line in lines[start:index]:
             append_plain(line)
 
-    markdown = "\n".join(parts).strip()
-    markdown = re.sub(r"\n{3,}", "\n\n", markdown)
-    return markdown, table_count
+    flush_plain()
+    return objects, table_count
+
+
+def _pdf_text_layer_fixed_width_markdown(text: str) -> tuple[str, int]:
+    objects, table_count = _pdf_text_layer_fixed_width_objects(text)
+    layouts: list[tuple[str, int, int, int]] = []
+    segments: list[tuple[str, str, int, int, int, int, int, str]] = []
+    for object_index, item in enumerate(objects):
+        object_id = f"pdf-object-{object_index:06d}"
+        row_count = len(item.rows)
+        column_count = max((len(row) for row in item.rows), default=0)
+        if row_count == 0 or column_count == 0:
+            continue
+        layouts.append((object_id, item.kind, row_count, column_count))
+        for row_index, row in enumerate(item.rows):
+            for column_index, value in enumerate(row):
+                segments.append(
+                    (
+                        f"pdf-segment-{object_index:06d}-{row_index:06d}-{column_index:06d}",
+                        object_id,
+                        item.kind,
+                        row_index,
+                        column_index,
+                        1,
+                        1,
+                        value,
+                    )
+                )
+    core = native_pipeline_core()
+    if core is None:
+        raise RuntimeError("Native PDF topology assembly requires the Rust pipeline core")
+    return core.assemble_topology(0, layouts, segments), table_count
 
 
 def _render_pdf_text_layer_table_region(
@@ -2044,7 +2086,13 @@ def _convert_pdf_text_layer_page_markdown(
             return fixed_markdown, {
                 **totals,
                 "tables_found": max(totals["tables_found"], fixed_tables),
-                "runtime_flags": sorted(runtime_flags | {"pdf_text_layer:fixed_width_markdown"}),
+                "runtime_flags": sorted(
+                    runtime_flags
+                    | {
+                        "pdf_text_layer:fixed_width_markdown",
+                        "pipeline:rust_topology_assembler_v1",
+                    }
+                ),
             }
         return page_text, {
             **totals,
@@ -2087,7 +2135,10 @@ def _render_pdf_text_layer_markdown_pages(
         return PdfTextLayerArtifact(
             pages=tuple(fixed_width_pages),
             counters=(("tables_found", fixed_width_tables), ("table_cells", 0)),
-            flags=("pdf_text_layer:fixed_width_markdown",),
+            flags=(
+                "pdf_text_layer:fixed_width_markdown",
+                "pipeline:rust_topology_assembler_v1",
+            ),
             layout_step="pdf_text_layer_fixed_width",
         )
 
@@ -2096,7 +2147,11 @@ def _render_pdf_text_layer_markdown_pages(
         return PdfTextLayerArtifact(
             pages=tuple(fixed_width_pages),
             counters=(("tables_found", fixed_width_tables), ("table_cells", 0)),
-            flags=("pdf_text_layer:bbox_unavailable", "pdf_text_layer:fixed_width_markdown"),
+            flags=(
+                "pdf_text_layer:bbox_unavailable",
+                "pdf_text_layer:fixed_width_markdown",
+                "pipeline:rust_topology_assembler_v1",
+            ),
             layout_step="pdf_text_layer_fixed_width",
         )
 
@@ -5411,23 +5466,16 @@ def _convert_page_segment(
     engine is deliberately only an OCR adapter for the blocks Rust requests.
     """
 
-    def recognize_block(crop: Image.Image, job: SeparatedOcrJob) -> str:
-        psm_by_mode = {
-            0: profile.text_region_psm,
-            1: profile.document_region_psm,
-            2: profile.wide_text_region_psm,
-        }
-        return _recognize_text_with_sparse_fallback(
-            engine,
+    def recognize_block(
+        crop: Image.Image,
+        job: SeparatedOcrJob,
+    ) -> tuple[str, int]:
+        return recognize_separated_block(
             crop,
+            job,
+            engine,
             profile,
-            mode="text_mode",
-            psm=psm_by_mode.get(job.recognition_mode, profile.text_region_psm),
-            min_fallback_tokens=(
-                profile.edge_word_fallback_min_tokens
-                if job.recognition_mode == 2
-                else None
-            ),
+            _recognize_text_with_sparse_fallback,
         )
 
     markdown, jobs, stages = run_native_separated_pipeline(

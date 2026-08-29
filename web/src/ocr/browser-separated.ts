@@ -3,12 +3,14 @@ import {
   SEPARATED_PIPELINE_STAGES,
   type SeparatedOcrJob,
   type SeparatedOcrRaster,
+  type SeparatedOcrWord,
 } from "./pipeline-core";
 import type { ProgressSink } from "./types";
 
 export interface BrowserSeparatedRecognition {
   text: string;
   confidenceMilli?: number;
+  words?: readonly SeparatedOcrWord[];
 }
 
 export interface BrowserSeparatedResult {
@@ -133,19 +135,30 @@ export async function runBrowserSeparatedPipeline(
     format: 4,
   });
   try {
-    const jobs = session.jobs();
-    await debugObserver?.planned?.(jobs, routeId);
-    for (const job of jobs) {
-      onProgress?.(`ocr-blocks ${job.index + 1}/${jobs.length}...`);
+    const jobs: SeparatedOcrJob[] = [];
+    await debugObserver?.planned?.(session.jobs(), routeId);
+    let index = 0;
+    while (index < session.jobCount()) {
+      const job = session.job(index);
+      jobs.push(job);
+      onProgress?.(
+        `ocr-blocks ${job.index + 1}/${session.jobCount()}...`,
+      );
       const block = await rasterBlob(session.raster(job.index));
       await debugObserver?.block?.(block, job);
       const result = await recognize(block, job);
       const text = typeof result === "string" ? result : result.text;
       const confidenceMilli =
         typeof result === "string" ? 0 : (result.confidenceMilli ?? 0);
+      if (typeof result !== "string") {
+        for (const word of result.words ?? []) {
+          session.addOcrWord(job.index, word);
+        }
+      }
       session.setOcr(job.index, text, confidenceMilli);
       await debugObserver?.recognized?.(text, confidenceMilli, job);
       onSegment?.(text, job);
+      index += 1;
     }
     onProgress?.("get-segment → generate-object...");
     const markdown = session.render();

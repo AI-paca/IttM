@@ -2,10 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  buildNativePdfOracle,
+  buildNativePdfOracle as buildNativePdfOracleWithAssembler,
   deserializeNativePdfOracle,
   serializeNativePdfOracle,
 } from "./pdf-native-oracle";
+import { assembleSegmentTopologyHandoff } from "../ocr/segment-assembler";
+
+const referenceAssembler = {
+  assembleTopology: assembleSegmentTopologyHandoff,
+};
+const buildNativePdfOracle = (
+  items: Parameters<typeof buildNativePdfOracleWithAssembler>[0],
+) => buildNativePdfOracleWithAssembler(items, referenceAssembler);
 
 test("native adapter owns bbox object detection and segment extraction", () => {
   const oracle = buildNativePdfOracle([

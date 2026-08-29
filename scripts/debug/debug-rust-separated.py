@@ -15,7 +15,12 @@ if str(OCR_ROOT) not in sys.path:
     sys.path.insert(0, str(OCR_ROOT))
 
 from app.pipeline_config import resolve_pipeline_profile
-from app.pipeline_core.separated import NativeSeparatedSession, SeparatedOcrJob
+from app.pipeline_core.separated import (
+    NativeSeparatedSession,
+    SeparatedOcrJob,
+    SeparatedOcrWord,
+)
+from app.pipeline_core.separated_recognition import recognize_separated_block
 from app.services.convert_service import _create_engine, _recognize_text_with_sparse_fallback
 
 
@@ -50,6 +55,13 @@ def job_payload(job: SeparatedOcrJob, text: str = "") -> dict[str, object]:
         "column_span": job.column_span,
         "recognition_mode": job.recognition_mode,
         "object_kind": job.object_kind,
+        "languages": job.languages,
+        "transform": job.transform,
+        "depth": job.depth,
+        "logical_row_count": job.logical_row_count,
+        "logical_column_count": job.logical_column_count,
+        "grammar_milli": job.grammar_milli,
+        "superseded": job.superseded,
         "text": text,
     }
 
@@ -90,53 +102,105 @@ def main() -> int:
     profile = resolve_pipeline_profile(args.engine) if run_ocr else None
     engine = _create_engine(args.engine, profile) if run_ocr else None
     texts: dict[int, str] = {}
+    words_by_job: dict[int, list[dict[str, object]]] = {}
     with NativeSeparatedSession(image) as session:
         route_id = session.route_id
-        jobs = session.jobs
-        for job in jobs:
-            if not run_blocks:
-                continue
+        topology = session.topology
+        objects = session.objects
+        blocks = session.blocks
+        if run_blocks:
+            for block in blocks:
+                block_raster = session.block_raster(block)
+                try:
+                    block_raster.save(
+                        output
+                        / "04-separate-block"
+                        / f"block-{block.index + 1:03d}.png"
+                    )
+                finally:
+                    block_raster.close()
+        jobs = []
+        index = 0
+        while index < session.job_count:
+            job = session.job(index)
+            jobs.append(job)
             crop = session.raster(job)
             try:
-                crop.save(
-                    output
-                    / "04-separate-block"
-                    / f"block-{job.index + 1:03d}.png"
-                )
                 if run_ocr:
                     assert profile is not None and engine is not None
-                    psm = {
-                        0: profile.text_region_psm,
-                        1: profile.document_region_psm,
-                        2: profile.wide_text_region_psm,
-                    }.get(job.recognition_mode, profile.text_region_psm)
-                    text = _recognize_text_with_sparse_fallback(
-                        engine,
+                    result = recognize_separated_block(
                         crop,
+                        job,
+                        engine,
                         profile,
-                        mode="text_mode",
-                        psm=psm,
-                        min_fallback_tokens=(
-                            profile.edge_word_fallback_min_tokens
-                            if job.recognition_mode == 2
-                            else None
+                        _recognize_text_with_sparse_fallback,
+                    )
+                    text = result.text
+                    confidence_milli = result.confidence_milli
+                    words = result.words
+                else:
+                    text = "accepted"
+                    confidence_milli = 0
+                    words = (
+                        SeparatedOcrWord(
+                            text=text,
+                            bbox=(
+                                0,
+                                0,
+                                max(1, min(10, crop.width)),
+                                max(1, min(10, crop.height)),
+                            ),
+                            confidence_milli=1_000,
                         ),
                     )
-                else:
-                    text = ""
+                if run_ocr:
+                    crop.save(
+                        output
+                        / "05-ocr-blocks"
+                        / f"block-{job.index + 1:03d}.png"
+                    )
             finally:
                 crop.close()
-            if not run_ocr:
-                continue
-            texts[job.index] = text
-            session.set_ocr(job.index, text)
-            (output / "05-ocr-blocks" / f"block-{job.index + 1:03d}.txt").write_text(
-                text.rstrip() + "\n", encoding="utf-8"
-            )
-            (output / "06-get-segment" / f"segment-{job.index + 1:03d}.txt").write_text(
-                text.rstrip() + "\n", encoding="utf-8"
-            )
+            for word in words:
+                session.add_ocr_word(job.index, word)
+            words_by_job[job.index] = [
+                {
+                    "text": word.text,
+                    "bbox": word.bbox,
+                    "confidence_milli": word.confidence_milli,
+                }
+                for word in words
+            ]
+            session.set_ocr(job.index, text, confidence_milli)
+            if run_ocr:
+                texts[job.index] = text
+                (output / "05-ocr-blocks" / f"block-{job.index + 1:03d}.txt").write_text(
+                    text.rstrip() + "\n", encoding="utf-8"
+                )
+            index += 1
         markdown = session.render() if run_ocr else ""
+        jobs = [session.job(index) for index in range(session.job_count)]
+        segment_records = [
+            {
+                "job_index": job.index,
+                "object_id": job.object_id,
+                "object_kind": job.object_kind,
+                "block_bbox": job.bbox,
+                "text": texts.get(job.index, ""),
+                "segments": [
+                    {
+                        "index": segment.index,
+                        "source_bbox": segment.source_bbox,
+                        "cell": segment.cell,
+                        "crop_bbox": segment.crop_bbox,
+                        "placement_source_bbox": segment.placement_source_bbox,
+                    }
+                    for segment in session.job_segments(job.index)
+                ],
+            }
+            for job in jobs
+            if not job.superseded
+        ]
         target_index = STAGE_NAMES.index(args.to_stage)
         completed_stages = tuple(
             stage
@@ -144,21 +208,20 @@ def main() -> int:
             if STAGE_NAMES.index(stage) <= target_index
         )
 
+    structural_jobs = tuple(job for job in jobs if job.depth == 0)
     grouped: dict[int, list[SeparatedOcrJob]] = defaultdict(list)
     for job in jobs:
+        if job.superseded:
+            continue
         grouped[job.object_id].append(job)
     object_kind_names = {0: "paragraph", 1: "list", 2: "table"}
-    for object_id, object_jobs in sorted(grouped.items()):
-        left = min(job.bbox[0] for job in object_jobs)
-        top = min(job.bbox[1] for job in object_jobs)
-        right = max(job.bbox[2] for job in object_jobs)
-        bottom = max(job.bbox[3] for job in object_jobs)
-        object_image = image.crop((left, top, right, bottom))
+    for object_value in objects:
+        object_image = image.crop(object_value.bbox)
         try:
             object_image.save(
                 output
                 / "03-find-object"
-                / f"object-{object_id + 1:03d}-{object_kind_names.get(object_jobs[0].object_kind, 'unknown')}.png"
+                / f"object-{object_value.index + 1:03d}-{object_kind_names.get(object_value.object_kind, 'unknown')}.png"
             )
         finally:
             object_image.close()
@@ -166,9 +229,9 @@ def main() -> int:
     if run_blocks:
         overlay = image.copy()
         draw = ImageDraw.Draw(overlay)
-        for job in jobs:
+        for block in blocks:
             draw.rectangle(
-                job.bbox,
+                block.bbox,
                 outline="red",
                 width=max(2, image.width // 700),
             )
@@ -181,17 +244,63 @@ def main() -> int:
         overlay.close()
     image.close()
 
-    opaque_issue = (
-        "Rust core marks this stage complete but ABI v5 does not export its "
-        "intermediate state."
-    )
+    opaque_issue = "Rust core marks this stage complete but does not export its intermediate state."
     write_json(
         output / "01-geometry" / "manifest.json",
         {"stage": "geometry", "status": "opaque", "issue": opaque_issue},
     )
     write_json(
         output / "02-topology" / "manifest.json",
-        {"stage": "topology", "status": "opaque", "issue": opaque_issue},
+        {
+            "stage": "physical-sparse-topology",
+            "codes": {
+                "nothing": 0,
+                "merge_up": 3,
+                "merge_left": 5,
+                "empty": 7,
+                "merge_both": 8,
+                "empty_merge_up": 10,
+            },
+            "rows": [
+                {
+                    "row": row.index,
+                    "y": row.y,
+                    "source_matrix_rows": row.source_matrix_rows,
+                    "segments": [
+                        {
+                            "column": column,
+                            "x": slot.x,
+                            "state": "empty" if slot.empty else "payload",
+                            "code": slot.code,
+                        }
+                        for column, slot in enumerate(row.slots)
+                    ],
+                    "compressed_codes": [*[slot.code for slot in row.slots], None],
+                }
+                for row in topology
+            ],
+        },
+    )
+    write_json(
+        output / "03-find-object" / "manifest.json",
+        {
+            "stage": "recursive-topology-object-partition",
+            "route_id": route_id,
+            "objects": [
+                {
+                    "object_id": value.index,
+                    "bbox": value.bbox,
+                    "object_kind": value.object_kind,
+                    "segment_indexes": value.segment_indexes,
+                    "reading_index": value.reading_index,
+                    "row_start": value.row_start,
+                    "row_stop": value.row_stop,
+                    "column_start": value.column_start,
+                    "column_stop": value.column_stop,
+                }
+                for value in objects
+            ],
+        },
     )
     if run_blocks:
         write_json(
@@ -199,10 +308,29 @@ def main() -> int:
             {
                 "stage": "separate-block",
                 "route_id": route_id,
-                "jobs": [job_payload(job) for job in jobs],
+                "blocks": [
+                    {
+                        "index": block.index,
+                        "object_id": block.object_id,
+                        "bbox": block.bbox,
+                        "segment_indexes": block.segment_indexes,
+                        "dyadic_mask": block.dyadic_mask,
+                        "matrix_window": block.matrix_window,
+                        "logical_scope_shape": block.logical_scope_shape,
+                    }
+                    for block in blocks
+                ],
+                "jobs": [job_payload(job) for job in structural_jobs],
             },
         )
     if run_ocr:
+        write_json(
+            output / "06-get-segment" / "segments.json",
+            {
+                "stage": "get-segment",
+                "records": segment_records,
+            },
+        )
         (output / "07-generate-object" / "result.md").write_text(
             markdown.rstrip() + "\n", encoding="utf-8"
         )
@@ -217,11 +345,37 @@ def main() -> int:
             "to_stage": args.to_stage,
             "completed_stages": completed_stages,
             "jobs": [
-                job_payload(job, texts.get(job.index, "")) for job in jobs
+                {
+                    **job_payload(job, texts.get(job.index, "")),
+                    "grammar_milli": job.grammar_milli,
+                    "words": words_by_job.get(job.index, []),
+                }
+                for job in jobs
+            ],
+            "objects": [
+                {
+                    "object_id": value.index,
+                    "bbox": value.bbox,
+                    "object_kind": value.object_kind,
+                    "segment_indexes": value.segment_indexes,
+                }
+                for value in objects
+            ],
+            "blocks": [
+                {
+                    "index": block.index,
+                    "object_id": block.object_id,
+                    "bbox": block.bbox,
+                    "segment_indexes": block.segment_indexes,
+                    "dyadic_mask": block.dyadic_mask,
+                    "matrix_window": block.matrix_window,
+                    "logical_scope_shape": block.logical_scope_shape,
+                }
+                for block in blocks
             ],
             "limitations": [
-                "geometry and topology are opaque in ABI v5",
-                "get-segment currently maps one OCR job to one segment",
+                "geometry is opaque in the native diagnostic ABI",
+                "get-segment exports terminal jobs with source, compact, and logical cell geometry",
             ],
         },
     )
@@ -260,17 +414,31 @@ def main() -> int:
                 "",
             ]
         )
+        if run_blocks:
+            for block in (item for item in blocks if item.object_id == object_id):
+                report.extend(
+                    [
+                        f"### Separate block {block.index + 1}",
+                        "",
+                        (
+                            '<img src="04-separate-block/'
+                            f'block-{block.index + 1:03d}.png" width="1200" '
+                            f'alt="Separate block {block.index + 1}">'
+                        ),
+                        "",
+                    ]
+                )
         for job in object_jobs:
-            if not run_blocks:
+            if not run_ocr:
                 continue
             report.extend(
                 [
-                    f"### OCR block {job.index + 1}",
+                    f"### OCR job {job.index + 1} (depth {job.depth})",
                     "",
                     (
-                        '<img src="04-separate-block/'
+                        '<img src="05-ocr-blocks/'
                         f'block-{job.index + 1:03d}.png" width="1200" '
-                        f'alt="OCR block {job.index + 1}">'
+                        f'alt="OCR job {job.index + 1}">'
                     ),
                     "",
                     "~~~text",

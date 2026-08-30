@@ -757,13 +757,11 @@ fn split_active_context(
         return false;
     };
     let unit_count = recursive_raster_placements(&context.job, &context.raster).len();
-    let chunk_size = if unit_count > 16 {
-        16
-    } else if missing_native_profile.is_some() && unit_count > 4 {
-        4
-    } else if missing_native_profile.is_some() && unit_count > 1 {
-        1
-    } else {
+    let Some(chunk_size) = recursive_chunk_size(
+        context.job.depth,
+        unit_count,
+        missing_native_profile.is_some(),
+    ) else {
         return false;
     };
     let Some(children) = compact_context_children(
@@ -784,6 +782,25 @@ fn split_active_context(
         session.pending_contexts.push_front(child);
     }
     true
+}
+
+fn recursive_chunk_size(depth: u32, unit_count: usize, missing_native: bool) -> Option<usize> {
+    if unit_count <= 1 {
+        return None;
+    }
+    if depth == 0 {
+        return Some(unit_count.min(64));
+    }
+    if unit_count > 16 {
+        return Some(16);
+    }
+    if missing_native && unit_count > 4 {
+        return Some(4);
+    }
+    if missing_native {
+        return Some(1);
+    }
+    None
 }
 
 fn render_exact_rect_raster(
@@ -1492,17 +1509,7 @@ pub unsafe extern "C" fn ittm_separated_begin(
     let block_rasters = job_rasters.clone();
     let mut pending_contexts = VecDeque::new();
     for (job, raster) in jobs.into_iter().zip(job_rasters) {
-        let context = PendingContext { job, raster };
-        let initial = if context.job.object_kind == OBJECT_TABLE {
-            compact_context_children(&context.job, &context.raster, 64, context.job.depth)
-        } else {
-            None
-        };
-        if let Some(children) = initial.filter(|children| !children.is_empty()) {
-            pending_contexts.extend(children);
-        } else {
-            pending_contexts.push_back(context);
-        }
+        pending_contexts.push_back(PendingContext { job, raster });
     }
     let mut session = Session {
         objects,
@@ -2283,6 +2290,17 @@ mod tests {
             }
         }
         (pixels, width, height)
+    }
+
+    #[test]
+    fn table_recursion_matches_the_python_full_64_16_4_1_descent() {
+        assert_eq!(recursive_chunk_size(0, 236, false), Some(64));
+        assert_eq!(recursive_chunk_size(0, 59, false), Some(59));
+        assert_eq!(recursive_chunk_size(1, 64, false), Some(16));
+        assert_eq!(recursive_chunk_size(2, 16, false), None);
+        assert_eq!(recursive_chunk_size(2, 16, true), Some(4));
+        assert_eq!(recursive_chunk_size(3, 4, true), Some(1));
+        assert_eq!(recursive_chunk_size(4, 1, true), None);
     }
 
     #[test]

@@ -566,7 +566,12 @@ fn dyadic_table_masks(
     if unit_count == 1 && scope_segments.len() == 1 {
         return None;
     }
-    if unit_count > 16 {
+    // A single 16x16 OCR block can preserve the table's intrinsic row/column
+    // algebra.  Only tables that exceed that physical block limit need the
+    // bounded locality signature family; applying it to smaller tables
+    // discards useful table geometry and turns ordinary cells into a sparse
+    // polar atlas.
+    if unit_count > MAX_LOCAL_BLOCK_MEMBERS {
         let unit_masks = locality_preserving_signature_family(unit_count)?;
         let masks = unit_masks
             .into_iter()
@@ -1118,7 +1123,7 @@ pub fn plan_blocks_with_topology(
             continue;
         };
         all_table_units_at_most_16 &= unit_count <= 16;
-        let locality_packed = unit_count > 16;
+        let locality_packed = unit_count > MAX_LOCAL_BLOCK_MEMBERS;
         for members in masks {
             let bbox = bbox_union(members.iter().map(|index| segments[*index].bbox))?;
             let window = [

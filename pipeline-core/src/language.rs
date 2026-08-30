@@ -518,17 +518,19 @@ impl LanguageAgenda {
         }
         let primary = state.locked_profile.unwrap_or(LanguageProfileId::RusEng);
         let mut profiles = vec![primary];
-        if local_membership {
-            if primary != LanguageProfileId::RusEng {
-                profiles.push(LanguageProfileId::RusEng);
-            }
-            for profile in state.ordered_profiles() {
-                if evidenced_profiles.contains(&profile) && !profiles.contains(&profile) {
-                    profiles.push(profile);
-                }
-            }
-        } else if primary != LanguageProfileId::RusEng {
+        if primary != LanguageProfileId::RusEng {
             profiles.push(LanguageProfileId::RusEng);
+        }
+        let ordered = state.ordered_profiles();
+        for profile in &ordered {
+            if evidenced_profiles.contains(profile) && !profiles.contains(profile) {
+                profiles.push(*profile);
+            }
+        }
+        for profile in ordered {
+            if !profiles.contains(&profile) {
+                profiles.push(profile);
+            }
         }
         Self {
             bootstrap,
@@ -841,10 +843,11 @@ mod tests {
     }
 
     #[test]
-    fn locked_whole_context_uses_only_primary_and_mixed_fallback() {
+    fn locked_whole_context_splays_after_primary_and_mixed_fallback() {
         let mut state = LanguageSplayState::default();
         state.locked_profile = Some(LanguageProfileId::Eng);
-        let mut agenda = LanguageAgenda::begin_for_context(&state, false);
+        let mut agenda =
+            LanguageAgenda::begin_for_context_with_fallbacks(&state, false, &[]);
         assert_eq!(agenda.request().profile, LanguageProfileId::Eng);
         assert_eq!(agenda.request().transform, OcrTransform::Raw);
         assert!(matches!(
@@ -863,8 +866,22 @@ mod tests {
         ));
         assert!(matches!(
             agenda.observe(&mut state, score(79)),
-            LanguageAgendaResult::Exhausted {
-                winner_profile: LanguageProfileId::Eng,
+            LanguageAgendaResult::Request(LanguageRequest {
+                profile: LanguageProfileId::Rus,
+                transform: OcrTransform::Raw,
+            })
+        ));
+        assert!(matches!(
+            agenda.observe(&mut state, score(70)),
+            LanguageAgendaResult::Request(LanguageRequest {
+                profile: LanguageProfileId::ChiSim,
+                transform: OcrTransform::Raw,
+            })
+        ));
+        assert!(matches!(
+            agenda.observe(&mut state, score(100)),
+            LanguageAgendaResult::Complete {
+                winner_profile: LanguageProfileId::ChiSim,
                 ..
             }
         ));

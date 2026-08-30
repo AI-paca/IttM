@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -77,6 +78,11 @@ def parser() -> argparse.ArgumentParser:
         default="tesseract",
     )
     value.add_argument(
+        "--tessdata",
+        type=Path,
+        help="Tesseract traineddata directory (defaults to .cache/tessdata when present)",
+    )
+    value.add_argument(
         "--to-stage",
         choices=STAGE_NAMES,
         default="generate-object",
@@ -101,6 +107,21 @@ def main() -> int:
     run_ocr = target_index >= STAGE_NAMES.index("ocr-blocks")
     run_get_segment = target_index >= STAGE_NAMES.index("get-segment")
     run_generate = target_index >= STAGE_NAMES.index("generate-object")
+    tessdata = args.tessdata
+    if (
+        run_ocr
+        and args.engine in {"auto", "tesseract"}
+        and tessdata is None
+        and "TESSDATA_PREFIX" not in os.environ
+    ):
+        candidate = REPO_ROOT / ".cache" / "tessdata"
+        if candidate.is_dir():
+            tessdata = candidate
+    if tessdata is not None:
+        tessdata = tessdata.resolve(strict=True)
+        if not tessdata.is_dir():
+            raise NotADirectoryError(tessdata)
+        os.environ["TESSDATA_PREFIX"] = str(tessdata)
     profile = resolve_pipeline_profile(args.engine) if run_ocr else None
     engine = _create_engine(args.engine, profile) if run_ocr else None
     texts: dict[int, str] = {}
@@ -328,6 +349,7 @@ def main() -> int:
             "route_id": route_id,
             "source": str(source),
             "engine": args.engine,
+            "tessdata": str(tessdata) if tessdata is not None else None,
             "to_stage": args.to_stage,
             "completed_stages": completed_stages,
             "jobs": [

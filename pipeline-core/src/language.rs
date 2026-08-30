@@ -430,6 +430,7 @@ pub enum LanguageAgendaResult {
 #[derive(Clone, Debug)]
 pub struct LanguageAgenda {
     bootstrap: bool,
+    specialized_transform_retry: bool,
     profiles: Vec<LanguageProfileId>,
     profile_index: usize,
     pending: LanguageRequest,
@@ -495,6 +496,7 @@ impl LanguageAgenda {
         }
         Self {
             bootstrap,
+            specialized_transform_retry: !local_membership,
             profiles,
             profile_index: 0,
             pending: LanguageRequest {
@@ -534,6 +536,7 @@ impl LanguageAgenda {
         }
         Self {
             bootstrap,
+            specialized_transform_retry: !local_membership,
             profiles,
             profile_index: 0,
             pending: LanguageRequest {
@@ -594,9 +597,14 @@ impl LanguageAgenda {
         let request = self.pending;
         self.retain_candidate(request, observation);
 
+        let specialized_retry = matches!(
+            request.profile,
+            LanguageProfileId::ChiSim | LanguageProfileId::Ell | LanguageProfileId::Equ
+        ) && self.specialized_transform_retry
+            && observation.grammar_percent > 0;
         if request.transform == OcrTransform::Raw
             && observation.grammar_percent < LOCK_GRAMMAR_PERCENT
-            && self.profile_index == 0
+            && (self.profile_index == 0 || specialized_retry)
         {
             self.pending.transform = OcrTransform::GammaDark;
             return LanguageAgendaResult::Request(self.pending);
@@ -772,6 +780,39 @@ mod tests {
         ));
         assert_eq!(state.locked_profile, Some(LanguageProfileId::ChiSim));
         assert!(state.lock_is_provisional);
+    }
+
+    #[test]
+    fn mixed_text_retries_a_specialized_profile_with_gamma() {
+        let mut state = LanguageSplayState::default();
+        let mut agenda = LanguageAgenda::begin_for_context(&state, false);
+        let expected = [
+            LanguageRequest {
+                profile: LanguageProfileId::RusEng,
+                transform: OcrTransform::GammaDark,
+            },
+            LanguageRequest {
+                profile: LanguageProfileId::Rus,
+                transform: OcrTransform::Raw,
+            },
+            LanguageRequest {
+                profile: LanguageProfileId::Eng,
+                transform: OcrTransform::Raw,
+            },
+            LanguageRequest {
+                profile: LanguageProfileId::ChiSim,
+                transform: OcrTransform::Raw,
+            },
+            LanguageRequest {
+                profile: LanguageProfileId::ChiSim,
+                transform: OcrTransform::GammaDark,
+            },
+        ];
+        let mut result = agenda.observe(&mut state, score(50));
+        for request in expected {
+            assert_eq!(result, LanguageAgendaResult::Request(request));
+            result = agenda.observe(&mut state, score(50));
+        }
     }
 
     #[test]

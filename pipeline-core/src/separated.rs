@@ -18,6 +18,9 @@ const OBJECT_TABLE: u32 = 2;
 const OBJECT_UNKNOWN: u32 = 3;
 const SPLIT_CALIBRATION_SAMPLES: usize = 3;
 const SPLIT_CALIBRATION_MIN_SUCCESSES: usize = 2;
+const OCR_UPSCALE_MIN_HEIGHT: usize = 320;
+const OCR_UPSCALE_MAX_FACTOR: usize = 4;
+const OCR_UPSCALE_MAX_PIXELS: usize = 16_000_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct Rect {
@@ -134,16 +137,17 @@ struct Session {
     stage_mask: u32,
 }
 
-fn raster_for_request(raw: &JobRaster, request: LanguageRequest) -> JobRaster {
+fn raster_for_request(
+    raw: &JobRaster,
+    request: LanguageRequest,
+    object_kind: u32,
+) -> JobRaster {
     let normalized = if request.transform == OcrTransform::Raw {
         normalize_dark_small_text_rgb(&raw.pixels, raw.width as usize, raw.height as usize)
     } else {
         gamma_dark_rgb(&raw.pixels, 3)
     };
-    if normalized.is_none() {
-        raw.clone()
-    } else {
-        let gray = normalized.unwrap_or_default();
+    if let Some(gray) = normalized {
         let mut pixels = Vec::with_capacity(gray.len().saturating_mul(3));
         for value in gray {
             pixels.extend_from_slice(&[value, value, value]);
@@ -155,6 +159,47 @@ fn raster_for_request(raw: &JobRaster, request: LanguageRequest) -> JobRaster {
             pixels,
             placements: raw.placements.clone(),
         }
+    } else if request.transform == OcrTransform::Raw && object_kind != OBJECT_TABLE {
+        let width = raw.width as usize;
+        let height = raw.height as usize;
+        let mut scale = OCR_UPSCALE_MIN_HEIGHT
+            .div_ceil(height.max(1))
+            .clamp(1, OCR_UPSCALE_MAX_FACTOR);
+        while scale > 1
+            && width
+                .checked_mul(height)
+                .and_then(|pixels| pixels.checked_mul(scale))
+                .and_then(|pixels| pixels.checked_mul(scale))
+                .is_none_or(|pixels| pixels > OCR_UPSCALE_MAX_PIXELS)
+        {
+            scale -= 1;
+        }
+        if scale == 1 {
+            return raw.clone();
+        }
+        let scale_u32 = scale as u32;
+        JobRaster {
+            width: raw.width.saturating_mul(scale_u32),
+            height: raw.height.saturating_mul(scale_u32),
+            stride: raw.stride.saturating_mul(scale_u32),
+            pixels: compact::resize_lanczos(&raw.pixels, width, height, scale),
+            placements: raw
+                .placements
+                .iter()
+                .map(|placement| RasterPlacement {
+                    segment_indexes: placement.segment_indexes.clone(),
+                    source_rect: placement.source_rect,
+                    crop_rect: Rect {
+                        left: placement.crop_rect.left.saturating_mul(scale_u32),
+                        top: placement.crop_rect.top.saturating_mul(scale_u32),
+                        right: placement.crop_rect.right.saturating_mul(scale_u32),
+                        bottom: placement.crop_rect.bottom.saturating_mul(scale_u32),
+                    },
+                })
+                .collect(),
+        }
+    } else {
+        raw.clone()
     }
 }
 
@@ -168,7 +213,7 @@ fn append_attempt(session: &mut Session, request: LanguageRequest) -> bool {
     let mut job = context.job.clone();
     job.language_profile = request.profile;
     job.transform = request.transform;
-    let raster = raster_for_request(&context.raster, request);
+    let raster = raster_for_request(&context.raster, request, job.object_kind);
     let index = session.jobs.len();
     session.jobs.push(job);
     session.job_rasters.push(raster);
@@ -735,6 +780,26 @@ fn native_only_word(text: &str, profile: LanguageProfileId) -> bool {
     native
 }
 
+fn word_source_projection(word: &OcrWordEvidence, raster: &JobRaster) -> Option<(usize, Rect)> {
+    let (placement_index, area) = raster
+        .placements
+        .iter()
+        .enumerate()
+        .map(|(index, placement)| {
+            (
+                index,
+                rect_intersection_area(word.rect, placement.crop_rect),
+            )
+        })
+        .max_by_key(|(index, area)| (*area, std::cmp::Reverse(*index)))?;
+    (area > 0).then(|| {
+        (
+            placement_index,
+            project_crop_rect_to_source(word.rect, &raster.placements[placement_index]),
+        )
+    })
+}
+
 fn patch_missing_native_units(
     session: &mut Session,
     winner_request: LanguageRequest,
@@ -752,41 +817,32 @@ fn patch_missing_native_units(
     }) else {
         return false;
     };
-    let Some(placements) = session
-        .active_context
-        .as_ref()
-        .map(|context| context.raster.placements.clone())
-        .filter(|placements| !placements.is_empty())
-    else {
+    let Some(winner_raster) = session.job_rasters.get(winner_index).cloned() else {
+        return false;
+    };
+    let Some(native_raster) = session.job_rasters.get(native_index).cloned() else {
         return false;
     };
 
-    let mut replacements = BTreeMap::<usize, Vec<OcrWordEvidence>>::new();
+    let mut replacements = BTreeMap::<usize, Vec<(OcrWordEvidence, Rect)>>::new();
     for word in session.words[native_index].iter().cloned() {
         if !native_only_word(&word.text, native_request.profile) {
             continue;
         }
-        let Some((placement_index, area)) = placements
-            .iter()
-            .enumerate()
-            .map(|(index, placement)| {
-                (
-                    index,
-                    rect_intersection_area(word.rect, placement.crop_rect),
-                )
-            })
-            .max_by_key(|(index, area)| (*area, std::cmp::Reverse(*index)))
+        let Some((placement_index, source_rect)) =
+            word_source_projection(&word, &native_raster)
         else {
             continue;
         };
-        if area > 0 {
-            replacements.entry(placement_index).or_default().push(word);
-        }
+        replacements
+            .entry(placement_index)
+            .or_default()
+            .push((word, source_rect));
     }
     replacements.retain(|_, words| {
         words
             .iter()
-            .flat_map(|word| word.text.chars())
+            .flat_map(|(word, _)| word.text.chars())
             .filter(|character| character.is_alphanumeric())
             .count()
             >= 2
@@ -796,32 +852,22 @@ fn patch_missing_native_units(
     }
 
     let winner_words = session.words[winner_index].clone();
-    let winner_targets = winner_words
+    let winner_sources = winner_words
         .iter()
-        .map(|word| {
-            replacements
-                .keys()
-                .copied()
-                .map(|index| {
-                    (
-                        index,
-                        rect_intersection_area(word.rect, placements[index].crop_rect),
-                    )
-                })
-                .max_by_key(|(index, area)| (*area, std::cmp::Reverse(*index)))
-                .and_then(|(index, area)| (area > 0).then_some(index))
-        })
+        .map(|word| word_source_projection(word, &winner_raster))
         .collect::<Vec<_>>();
-    let mut patched_native_words = Vec::new();
+    let mut patched_native_words = Vec::<(OcrWordEvidence, Rect, usize)>::new();
     for (placement_index, replacement_words) in replacements {
-        for native in replacement_words {
-            let matched = winner_words
+        for (native, native_source_rect) in replacement_words {
+            let matched = winner_sources
                 .iter()
-                .enumerate()
-                .filter(|(index, _)| winner_targets[*index] == Some(placement_index))
-                .any(|(_index, word)| rect_intersection_area(native.rect, word.rect) > 0);
+                .flatten()
+                .any(|(winner_placement, winner_source_rect)| {
+                    *winner_placement == placement_index
+                        && rect_intersection_area(native_source_rect, *winner_source_rect) > 0
+                });
             if matched {
-                patched_native_words.push(native);
+                patched_native_words.push((native, native_source_rect, placement_index));
             }
         }
     }
@@ -830,22 +876,37 @@ fn patch_missing_native_units(
     }
     let mut words = winner_words
         .into_iter()
-        .filter(|word| {
+        .zip(winner_sources)
+        .filter(|(_, winner_source)| {
+            let Some((winner_placement, winner_source_rect)) = winner_source else {
+                return true;
+            };
             !patched_native_words
                 .iter()
-                .any(|native| rect_intersection_area(word.rect, native.rect) > 0)
+                .any(|(_, native_source_rect, native_placement)| {
+                    native_placement == winner_placement
+                        && rect_intersection_area(*winner_source_rect, *native_source_rect) > 0
+                })
         })
+        .map(|(word, _)| word)
         .collect::<Vec<_>>();
     let mut seen = BTreeSet::new();
-    words.extend(patched_native_words.into_iter().filter(|native| {
-        seen.insert((
-            native.text.clone(),
-            native.rect.left,
-            native.rect.top,
-            native.rect.right,
-            native.rect.bottom,
-        ))
-    }));
+    words.extend(
+        patched_native_words
+            .into_iter()
+            .filter_map(|(mut native, source_rect, placement_index)| {
+                let placement = winner_raster.placements.get(placement_index)?;
+                native.rect = project_source_rect_to_crop(source_rect, placement);
+                seen.insert((
+                    native.text.clone(),
+                    native.rect.left,
+                    native.rect.top,
+                    native.rect.right,
+                    native.rect.bottom,
+                ))
+                .then_some(native)
+            }),
+    );
     words.sort_by(|first, second| rect_reading_order(first.rect, second.rect));
     let text = words
         .iter()
@@ -2352,11 +2413,11 @@ pub unsafe extern "C" fn ittm_separated_set_ocr(
                 winner_request
             };
             select_active_winner(session, selected_request);
-            let recursive = session
+            let table_context = session
                 .active_context
                 .as_ref()
                 .is_some_and(|context| context.job.object_kind == OBJECT_TABLE);
-            if recursive {
+            if table_context {
                 let _ =
                     split_active_context(session, unresolved_native.map(|request| request.profile));
                 session.table_profile_discovery_complete = true;
@@ -2608,7 +2669,8 @@ mod tests {
             0,
         );
         assert_eq!(ittm_separated_job_count(handle), 2);
-        for index in 1..7_u32 {
+        let mut index = 1_u32;
+        while index < ittm_separated_job_count(handle) {
             assert_eq!(ittm_separated_job_field(handle, index, 13), 0);
             assert_eq!(
                 unsafe {
@@ -2616,12 +2678,14 @@ mod tests {
                 },
                 0,
             );
+            index += 1;
         }
-        assert_eq!(ittm_separated_job_count(handle), 7);
+        assert!(index >= 7);
+        assert_eq!(ittm_separated_job_count(handle), index);
         assert_eq!(ittm_separated_job_field(handle, 0, 11), 0);
         assert_eq!(ittm_separated_job_field(handle, 1, 12), 1);
         assert_eq!(
-            (0..7)
+            (0..index)
                 .filter(|candidate| ittm_separated_job_field(handle, *candidate, 17) == 0)
                 .count(),
             1
@@ -2666,10 +2730,10 @@ mod tests {
             );
             index += 1;
         }
-        assert_eq!(index, 7);
-        assert_eq!(ittm_separated_job_count(handle), 7);
+        assert!(index >= 7);
+        assert_eq!(ittm_separated_job_count(handle), index);
         assert_eq!(
-            (0..7)
+            (0..index)
                 .filter(|candidate| ittm_separated_job_field(handle, *candidate, 17) == 0)
                 .count(),
             1

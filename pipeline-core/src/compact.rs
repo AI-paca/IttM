@@ -316,75 +316,140 @@ pub(crate) fn resize_lanczos(pixels: &[u8], width: usize, height: usize, scale: 
     output
 }
 
-fn pack_tiles(tiles: &[Tile]) -> Option<CompactedBlock> {
+fn canonical_packed_shape(block: &crate::blocks::RecognitionBlock) -> Option<[usize; 2]> {
+    let shape = block.logical_scope_shape?;
+    if shape[0] == 0 || shape[1] == 0 || shape[0] > 16 || shape[1] > 16 {
+        return None;
+    }
+    block
+        .logical_segment_spans
+        .iter()
+        .enumerate()
+        .all(|(position, span)| {
+            let row = position / shape[1];
+            let column = position % shape[1];
+            *span == [row, row + 1, column, column + 1]
+        })
+        .then_some(shape)
+}
+
+fn pack_tiles(tiles: &[Tile], canonical_shape: Option<[usize; 2]>) -> Option<CompactedBlock> {
     let gap = 8_usize;
-    let total_tile_pixels = tiles
-        .iter()
-        .map(|tile| tile.width * tile.height)
-        .sum::<usize>();
-    let target_width = tiles
-        .iter()
-        .map(|tile| tile.width)
-        .max()?
-        .max(ceil_sqrt(total_tile_pixels));
-    let mut rows = Vec::<Vec<usize>>::new();
-    let mut current = Vec::<usize>::new();
-    let mut current_width = 0_usize;
-    for (index, tile) in tiles.iter().enumerate() {
-        let projected = if current.is_empty() {
-            tile.width
-        } else {
-            current_width + gap + tile.width
-        };
-        if !current.is_empty() && projected > target_width {
-            rows.push(std::mem::take(&mut current));
-            current_width = 0;
+    let (atlas_width, atlas_height, positions) = if canonical_shape.is_some() {
+        if tiles.len() > 256 {
+            return None;
         }
-        current.push(index);
-        current_width = if current.len() > 1 {
-            current_width + gap + tile.width
-        } else {
-            tile.width
-        };
-    }
-    if !current.is_empty() {
-        rows.push(current);
-    }
-    let row_heights: Vec<usize> = rows
-        .iter()
-        .map(|row| {
-            row.iter()
-                .map(|index| tiles[*index].height)
-                .max()
-                .unwrap_or(0)
-        })
-        .collect();
-    let row_widths: Vec<usize> = rows
-        .iter()
-        .map(|row| {
-            row.iter().map(|index| tiles[*index].width).sum::<usize>()
-                + gap * row.len().saturating_sub(1)
-        })
-        .collect();
-    let atlas_width = *row_widths.iter().max()?;
-    let atlas_height = row_heights.iter().sum::<usize>() + gap * rows.len().saturating_sub(1);
-    let mut atlas = vec![255_u8; atlas_width * atlas_height * 3];
-    let mut positions = Vec::<(usize, usize, usize)>::new();
-    let mut top = 0_usize;
-    for (row, row_height) in rows.iter().zip(&row_heights) {
+        let columns = ceil_sqrt(tiles.len()).clamp(1, 16);
+        let rows = tiles.len().div_ceil(columns);
+        if rows > 16 {
+            return None;
+        }
+        let mut column_widths = vec![0_usize; columns];
+        let mut row_heights = vec![0_usize; rows];
+        for (index, tile) in tiles.iter().enumerate() {
+            column_widths[index % columns] = column_widths[index % columns].max(tile.width);
+            row_heights[index / columns] = row_heights[index / columns].max(tile.height);
+        }
+        let mut column_lefts = Vec::with_capacity(columns);
         let mut left = 0_usize;
-        for index in row {
-            let tile = &tiles[*index];
-            positions.push((*index, left, top));
-            for y in 0..tile.height {
-                let source = y * tile.width * 3;
-                let target = ((top + y) * atlas_width + left) * 3;
-                atlas[target..target + tile.width * 3]
-                    .copy_from_slice(&tile.pixels[source..source + tile.width * 3]);
-            }
-            left += tile.width + gap;
+        for width in &column_widths {
+            column_lefts.push(left);
+            left += width + gap;
         }
-        top += row_height + gap;
+        let atlas_width = left.saturating_sub(gap);
+        let mut row_tops = Vec::with_capacity(rows);
+        let mut top = 0_usize;
+        for height in &row_heights {
+            row_tops.push(top);
+            top += height + gap;
+        }
+        let atlas_height = top.saturating_sub(gap);
+        let positions = tiles
+            .iter()
+            .enumerate()
+            .map(|(index, tile)| {
+                let row = index / columns;
+                let column = index % columns;
+                (
+                    index,
+                    column_lefts[column] + (column_widths[column] - tile.width) / 2,
+                    row_tops[row] + (row_heights[row] - tile.height) / 2,
+                )
+            })
+            .collect();
+        (atlas_width, atlas_height, positions)
+    } else {
+        let total_tile_pixels = tiles
+            .iter()
+            .map(|tile| tile.width * tile.height)
+            .sum::<usize>();
+        let target_width = tiles
+            .iter()
+            .map(|tile| tile.width)
+            .max()?
+            .max(ceil_sqrt(total_tile_pixels));
+        let mut rows = Vec::<Vec<usize>>::new();
+        let mut current = Vec::<usize>::new();
+        let mut current_width = 0_usize;
+        for (index, tile) in tiles.iter().enumerate() {
+            let projected = if current.is_empty() {
+                tile.width
+            } else {
+                current_width + gap + tile.width
+            };
+            if !current.is_empty() && projected > target_width {
+                rows.push(std::mem::take(&mut current));
+                current_width = 0;
+            }
+            current.push(index);
+            current_width = if current.len() > 1 {
+                current_width + gap + tile.width
+            } else {
+                tile.width
+            };
+        }
+        if !current.is_empty() {
+            rows.push(current);
+        }
+        let row_heights: Vec<usize> = rows
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|index| tiles[*index].height)
+                    .max()
+                    .unwrap_or(0)
+            })
+            .collect();
+        let row_widths: Vec<usize> = rows
+            .iter()
+            .map(|row| {
+                row.iter().map(|index| tiles[*index].width).sum::<usize>()
+                    + gap * row.len().saturating_sub(1)
+            })
+            .collect();
+        let atlas_width = *row_widths.iter().max()?;
+        let atlas_height = row_heights.iter().sum::<usize>() + gap * rows.len().saturating_sub(1);
+        let mut positions = Vec::<(usize, usize, usize)>::new();
+        let mut top = 0_usize;
+        for (row, row_height) in rows.iter().zip(&row_heights) {
+            let mut left = 0_usize;
+            for index in row {
+                positions.push((*index, left, top));
+                left += tiles[*index].width + gap;
+            }
+            top += row_height + gap;
+        }
+        (atlas_width, atlas_height, positions)
+    };
+    let mut atlas = vec![255_u8; atlas_width * atlas_height * 3];
+    for (index, left, top) in &positions {
+        let tile = &tiles[*index];
+        for y in 0..tile.height {
+            let source = y * tile.width * 3;
+            let target = ((*top + y) * atlas_width + *left) * 3;
+            atlas[target..target + tile.width * 3]
+                .copy_from_slice(&tile.pixels[source..source + tile.width * 3]);
+        }
     }
     let mut line_heights = Vec::<usize>::new();
     for tile in tiles {
@@ -677,7 +742,7 @@ pub fn compact_blocks(
                 packed_canvas_pixels: crop_width * crop_height,
             }
         } else {
-            pack_tiles(&tiles)?
+            pack_tiles(&tiles, canonical_packed_shape(block))?
         };
         let mut unique_omitted = Vec::new();
         for unit in omitted {

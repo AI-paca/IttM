@@ -149,6 +149,266 @@ fn dense_shape(member_count: usize) -> Option<[usize; 2]> {
     (rows <= 16).then_some([rows, columns])
 }
 
+const MAX_LOCAL_BLOCK_MEMBERS: usize = 256;
+const MAX_BALANCED_SIGNATURE_BLOCKS: usize = 60;
+
+fn packed_shape(member_count: usize) -> Option<[usize; 2]> {
+    if !(2..=MAX_LOCAL_BLOCK_MEMBERS).contains(&member_count) {
+        return None;
+    }
+    let rows = member_count.div_ceil(16).min(16);
+    let columns = member_count.div_ceil(rows).min(16);
+    (rows * columns >= member_count).then_some([rows, columns])
+}
+
+fn signature_family_is_identifying(family: &[Vec<usize>], source_count: usize) -> bool {
+    if source_count == 0 {
+        return false;
+    }
+    let mut signatures = vec![Vec::<usize>::new(); source_count];
+    for (block_index, members) in family.iter().enumerate() {
+        for member in members {
+            if *member >= source_count {
+                return false;
+            }
+            signatures[*member].push(block_index);
+        }
+    }
+    let mut seen = BTreeSet::<Vec<usize>>::new();
+    signatures
+        .into_iter()
+        .all(|signature| !signature.is_empty() && seen.insert(signature))
+}
+
+fn combinations(bit_count: usize, weight: usize) -> Vec<Vec<usize>> {
+    fn append(
+        start: usize,
+        remaining: usize,
+        bit_count: usize,
+        current: &mut Vec<usize>,
+        output: &mut Vec<Vec<usize>>,
+    ) {
+        if remaining == 0 {
+            output.push(current.clone());
+            return;
+        }
+        let stop = bit_count - remaining;
+        for bit in start..=stop {
+            current.push(bit);
+            append(bit + 1, remaining - 1, bit_count, current, output);
+            current.pop();
+        }
+    }
+
+    let mut output = Vec::new();
+    if weight <= bit_count {
+        append(0, weight, bit_count, &mut Vec::new(), &mut output);
+    }
+    output
+}
+
+fn combination_count(bit_count: usize, weight: usize) -> usize {
+    let weight = weight.min(bit_count.saturating_sub(weight));
+    let mut value = 1_u128;
+    for offset in 0..weight {
+        value = value * (bit_count - offset) as u128 / (offset + 1) as u128;
+    }
+    value.min(usize::MAX as u128) as usize
+}
+
+fn balanced_sparse_signature_family(source_count: usize) -> Option<Vec<Vec<usize>>> {
+    if source_count < 3 || source_count > MAX_LOCAL_BLOCK_MEMBERS {
+        return None;
+    }
+    let first_bit_count = bit_length(source_count).max(2);
+    for bit_count in first_bit_count..=MAX_BALANCED_SIGNATURE_BLOCKS {
+        for minimum_weight in [1_usize, 2] {
+            let mut remaining = source_count;
+            let mut minimum_memberships = 0_usize;
+            for weight in minimum_weight..=bit_count {
+                let take = remaining.min(combination_count(bit_count, weight));
+                minimum_memberships = minimum_memberships.saturating_add(take * weight);
+                remaining -= take;
+                if remaining == 0 {
+                    break;
+                }
+            }
+            if remaining != 0 || minimum_memberships > bit_count * MAX_LOCAL_BLOCK_MEMBERS {
+                continue;
+            }
+
+            let mut codes = Vec::<Vec<usize>>::new();
+            let mut loads = vec![0_usize; bit_count];
+            remaining = source_count;
+            let mut feasible = true;
+            for weight in minimum_weight..=bit_count {
+                if remaining == 0 {
+                    break;
+                }
+                let mut available = combinations(bit_count, weight);
+                if remaining >= available.len() {
+                    if (0..bit_count).any(|bit| {
+                        loads[bit] + available.iter().filter(|code| code.contains(&bit)).count()
+                            > MAX_LOCAL_BLOCK_MEMBERS
+                    }) {
+                        feasible = false;
+                        break;
+                    }
+                    remaining -= available.len();
+                    for code in &available {
+                        for bit in code {
+                            loads[*bit] += 1;
+                        }
+                    }
+                    codes.append(&mut available);
+                    continue;
+                }
+
+                for _selection in 0..remaining {
+                    let best = available
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, code)| {
+                            code.iter().all(|bit| loads[*bit] < MAX_LOCAL_BLOCK_MEMBERS)
+                        })
+                        .min_by_key(|(_, code)| {
+                            let mut ordered_loads: Vec<usize> =
+                                code.iter().map(|bit| loads[*bit]).collect();
+                            ordered_loads.sort_unstable();
+                            (
+                                code.iter().map(|bit| loads[*bit] + 1).max().unwrap_or(0),
+                                code.iter().map(|bit| loads[*bit]).sum::<usize>(),
+                                ordered_loads,
+                                (*code).clone(),
+                            )
+                        })
+                        .map(|(index, _)| index);
+                    let Some(best) = best else {
+                        feasible = false;
+                        break;
+                    };
+                    let code = available.remove(best);
+                    for bit in &code {
+                        loads[*bit] += 1;
+                    }
+                    codes.push(code);
+                }
+                remaining = 0;
+                break;
+            }
+            if !feasible || remaining != 0 || codes.len() != source_count {
+                continue;
+            }
+            let family: Vec<Vec<usize>> = (0..bit_count)
+                .map(|bit| {
+                    codes
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(source, code)| code.contains(&bit).then_some(source))
+                        .collect()
+                })
+                .collect();
+            if family
+                .iter()
+                .all(|members| (2..=MAX_LOCAL_BLOCK_MEMBERS).contains(&members.len()))
+                && signature_family_is_identifying(&family, source_count)
+            {
+                return Some(family);
+            }
+        }
+    }
+    None
+}
+
+fn locality_preserving_regions(source_count: usize) -> Option<Vec<Vec<usize>>> {
+    if source_count < 3 {
+        return None;
+    }
+    let region_count = source_count.div_ceil(MAX_LOCAL_BLOCK_MEMBERS);
+    let base_size = source_count / region_count;
+    let larger_regions = source_count % region_count;
+    let mut offset = 0_usize;
+    let mut regions = Vec::with_capacity(region_count);
+    for region_index in 0..region_count {
+        let size = base_size + usize::from(region_index < larger_regions);
+        if !(2..=MAX_LOCAL_BLOCK_MEMBERS).contains(&size) {
+            return None;
+        }
+        regions.push((offset..offset + size).collect());
+        offset += size;
+    }
+    (offset == source_count).then_some(regions)
+}
+
+fn locality_region_codes(regions: &[Vec<usize>]) -> Option<Vec<Vec<usize>>> {
+    let maximum_size = regions.iter().map(Vec::len).max()?;
+    let bit_count = bit_length(maximum_size.saturating_sub(1)).max(1);
+    let mut output = Vec::with_capacity(regions.len());
+    for region in regions {
+        let mut codes: Vec<usize> = (0..region.len()).collect();
+        let mut used: BTreeSet<usize> = codes.iter().copied().collect();
+        for bit in 0..bit_count {
+            let mask = 1_usize << bit;
+            if codes.iter().filter(|code| **code & mask != 0).count() != 1 {
+                continue;
+            }
+            let replacement_index = codes
+                .iter()
+                .position(|code| *code & mask == 0 && !used.contains(&(*code | mask)))?;
+            let original = codes[replacement_index];
+            let replacement = original | mask;
+            used.remove(&original);
+            used.insert(replacement);
+            codes[replacement_index] = replacement;
+        }
+        if codes.iter().copied().collect::<BTreeSet<_>>().len() != codes.len() {
+            return None;
+        }
+        output.push(codes);
+    }
+    Some(output)
+}
+
+fn locality_preserving_signature_family(source_count: usize) -> Option<Vec<Vec<usize>>> {
+    let regions = locality_preserving_regions(source_count)?;
+    let mut family = regions.clone();
+    if regions.len() == 1 {
+        for members in balanced_sparse_signature_family(source_count)? {
+            if !family.contains(&members) {
+                family.push(members);
+            }
+        }
+    } else {
+        let codes = locality_region_codes(&regions)?;
+        let bit_count = bit_length(regions.iter().map(Vec::len).max()?.saturating_sub(1)).max(1);
+        for bit in 0..bit_count {
+            let mut pending = Vec::<usize>::new();
+            for (region, region_codes) in regions.iter().zip(&codes) {
+                let island: Vec<usize> = region
+                    .iter()
+                    .zip(region_codes)
+                    .filter_map(|(source, code)| ((code >> bit) & 1 != 0).then_some(*source))
+                    .collect();
+                if island.is_empty() {
+                    continue;
+                }
+                if !pending.is_empty() && pending.len() + island.len() > MAX_LOCAL_BLOCK_MEMBERS {
+                    family.push(std::mem::take(&mut pending));
+                }
+                pending.extend(island);
+            }
+            if !pending.is_empty() {
+                family.push(pending);
+            }
+        }
+    }
+    (family
+        .iter()
+        .all(|members| (2..=MAX_LOCAL_BLOCK_MEMBERS).contains(&members.len()))
+        && signature_family_is_identifying(&family, source_count))
+    .then_some(family)
+}
+
 fn normalized_fallback_spans(
     segment_indexes: &[usize],
     fallback: &[MaterializedSegmentSpan],
@@ -305,6 +565,19 @@ fn dyadic_table_masks(
     let unit_count = ordered_units.len();
     if unit_count == 1 && scope_segments.len() == 1 {
         return None;
+    }
+    if unit_count > 16 {
+        let unit_masks = locality_preserving_signature_family(unit_count)?;
+        let masks = unit_masks
+            .into_iter()
+            .map(|unit_indexes| {
+                unit_indexes
+                    .into_iter()
+                    .flat_map(|index| ordered_units[index].1.iter().copied())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        return Some((masks, unit_count));
     }
     let mut masks = Vec::<Vec<usize>>::new();
     let mut seen = BTreeSet::<Vec<usize>>::new();
@@ -845,6 +1118,7 @@ pub fn plan_blocks_with_topology(
             continue;
         };
         all_table_units_at_most_16 &= unit_count <= 16;
+        let locality_packed = unit_count > 16;
         for members in masks {
             let bbox = bbox_union(members.iter().map(|index| segments[*index].bbox))?;
             let window = [
@@ -865,19 +1139,35 @@ pub fn plan_blocks_with_topology(
                     .map(|index| table_spans[*index].column_stop)
                     .max()?,
             ];
-            let shape = dense_shape(members.len())?;
-            let logical_spans = members
-                .iter()
-                .map(|index| {
-                    let span = table_spans[*index];
-                    [
-                        span.row_start,
-                        span.row_stop,
-                        span.column_start,
-                        span.column_stop,
-                    ]
-                })
-                .collect();
+            let shape = if locality_packed {
+                packed_shape(members.len())?
+            } else {
+                dense_shape(members.len())?
+            };
+            let logical_spans = if locality_packed {
+                members
+                    .iter()
+                    .enumerate()
+                    .map(|(position, _index)| {
+                        let row = position / shape[1];
+                        let column = position % shape[1];
+                        [row, row + 1, column, column + 1]
+                    })
+                    .collect()
+            } else {
+                members
+                    .iter()
+                    .map(|index| {
+                        let span = table_spans[*index];
+                        [
+                            span.row_start,
+                            span.row_stop,
+                            span.column_start,
+                            span.column_stop,
+                        ]
+                    })
+                    .collect()
+            };
             candidates.push(Candidate {
                 members,
                 scope_index,
@@ -886,7 +1176,11 @@ pub fn plan_blocks_with_topology(
                 dyadic_mask: true,
                 segment_shape: Some(shape),
                 logical_spans: Some(logical_spans),
-                logical_scope_shape: Some(logical_scope_shape),
+                logical_scope_shape: Some(if locality_packed {
+                    shape
+                } else {
+                    logical_scope_shape
+                }),
             });
         }
     }
@@ -1002,4 +1296,51 @@ pub fn plan_blocks_with_topology(
         algebra,
         membership_units,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        MAX_LOCAL_BLOCK_MEMBERS, locality_preserving_signature_family, packed_shape,
+        signature_family_is_identifying,
+    };
+
+    fn assert_python_locality_parity(source_count: usize, expected_blocks: usize) {
+        let family = locality_preserving_signature_family(source_count)
+            .expect("Python locality/signature family must be constructible");
+        assert_eq!(family.len(), expected_blocks);
+        assert!(
+            family
+                .iter()
+                .all(|members| (2..=MAX_LOCAL_BLOCK_MEMBERS).contains(&members.len()))
+        );
+        assert!(signature_family_is_identifying(&family, source_count));
+        let maximum_memberships = (0..source_count)
+            .map(|source| {
+                family
+                    .iter()
+                    .filter(|members| members.contains(&source))
+                    .count()
+            })
+            .max()
+            .unwrap_or(0);
+        assert_eq!(maximum_memberships, 8);
+    }
+
+    #[test]
+    fn python_locality_family_has_fifty_blocks_for_2427_segments() {
+        assert_python_locality_parity(2427, 50);
+    }
+
+    #[test]
+    fn current_rust_object_has_bounded_family_for_2596_segments() {
+        assert_python_locality_parity(2596, 59);
+    }
+
+    #[test]
+    fn packed_shapes_never_create_more_than_a_sixteen_by_sixteen_slot() {
+        assert_eq!(packed_shape(228), Some([15, 16]));
+        assert_eq!(packed_shape(243), Some([16, 16]));
+        assert_eq!(packed_shape(256), Some([16, 16]));
+    }
 }

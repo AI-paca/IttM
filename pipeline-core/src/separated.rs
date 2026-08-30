@@ -16,6 +16,8 @@ const OBJECT_PARAGRAPH: u32 = 0;
 const OBJECT_LIST: u32 = 1;
 const OBJECT_TABLE: u32 = 2;
 const OBJECT_UNKNOWN: u32 = 3;
+const SPLIT_CALIBRATION_SAMPLES: usize = 3;
+const SPLIT_CALIBRATION_MIN_SUCCESSES: usize = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct Rect {
@@ -58,6 +60,7 @@ struct OcrJob {
     transform: OcrTransform,
     logical_row_count: u32,
     logical_column_count: u32,
+    ocr_required: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -82,6 +85,28 @@ struct PendingContext {
     raster: JobRaster,
 }
 
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct SplitStrategyKey {
+    locked_profile: Option<LanguageProfileId>,
+    evidenced_profiles: Vec<LanguageProfileId>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct SplitCalibration {
+    samples: usize,
+    successes: usize,
+    ineffective: bool,
+}
+
+#[derive(Debug)]
+struct TableSplitProbe {
+    calibration_key: Option<SplitStrategyKey>,
+    root_winner: usize,
+    descendant_start: usize,
+    baseline_grammar_milli: u32,
+    baseline_mean_confidence_milli: u32,
+}
+
 #[derive(Debug)]
 struct Session {
     objects: Vec<objects::DocumentObject>,
@@ -91,6 +116,7 @@ struct Session {
     job_rasters: Vec<JobRaster>,
     text: Vec<Option<String>>,
     confidence_milli: Vec<u32>,
+    mean_word_confidence_milli: Vec<u32>,
     words: Vec<Vec<OcrWordEvidence>>,
     superseded: Vec<bool>,
     selected: Vec<bool>,
@@ -101,6 +127,8 @@ struct Session {
     language_state: LanguageSplayState,
     evidenced_native_profiles: BTreeSet<LanguageProfileId>,
     table_profile_discovery_complete: bool,
+    split_calibrations: BTreeMap<SplitStrategyKey, SplitCalibration>,
+    active_split_probe: Option<TableSplitProbe>,
     topology: topology::PhysicalTopology,
     rendered: Option<Vec<u8>>,
     stage_mask: u32,
@@ -146,6 +174,7 @@ fn append_attempt(session: &mut Session, request: LanguageRequest) -> bool {
     session.job_rasters.push(raster);
     session.text.push(None);
     session.confidence_milli.push(0);
+    session.mean_word_confidence_milli.push(0);
     session.words.push(Vec::new());
     session.superseded.push(false);
     session.selected.push(false);
@@ -153,7 +182,96 @@ fn append_attempt(session: &mut Session, request: LanguageRequest) -> bool {
     true
 }
 
+fn finalize_table_split_probe(session: &mut Session) {
+    let Some(probe) = session.active_split_probe.take() else {
+        return;
+    };
+    let retained = (probe.descendant_start..session.jobs.len())
+        .filter(|index| session.selected[*index] && !session.superseded[*index])
+        .collect::<Vec<_>>();
+    let total_characters = retained
+        .iter()
+        .map(|index| {
+            session.text[*index]
+                .as_deref()
+                .unwrap_or_default()
+                .chars()
+                .count()
+                .max(1)
+        })
+        .sum::<usize>();
+    let composite_grammar_milli = if total_characters == 0 {
+        0
+    } else {
+        retained
+            .iter()
+            .map(|index| {
+                session.confidence_milli[*index] as usize
+                    * session.text[*index]
+                        .as_deref()
+                        .unwrap_or_default()
+                        .chars()
+                        .count()
+                        .max(1)
+            })
+            .sum::<usize>()
+            .div_ceil(total_characters) as u32
+    };
+    let word_count = retained
+        .iter()
+        .map(|index| session.words[*index].len())
+        .sum::<usize>();
+    let composite_mean_confidence_milli = if word_count == 0 {
+        0
+    } else {
+        retained
+            .iter()
+            .flat_map(|index| session.words[*index].iter())
+            .map(|word| word.confidence_milli as usize)
+            .sum::<usize>()
+            .div_ceil(word_count) as u32
+    };
+    let has_text = retained.iter().any(|index| {
+        session.text[*index]
+            .as_deref()
+            .is_some_and(|text| !text.trim().is_empty())
+    });
+    let acceptable = has_text
+        && (composite_grammar_milli >= 970 || composite_mean_confidence_milli >= 850);
+    let improved = acceptable
+        && (composite_grammar_milli, composite_mean_confidence_milli)
+            > (
+                probe.baseline_grammar_milli,
+                probe.baseline_mean_confidence_milli,
+            );
+    if !improved {
+        for index in probe.descendant_start..session.jobs.len() {
+            session.superseded[index] = true;
+        }
+        session.superseded[probe.root_winner] = false;
+        session.selected[probe.root_winner] = true;
+    }
+    if let Some(key) = probe.calibration_key {
+        let calibration = session.split_calibrations.entry(key).or_default();
+        calibration.samples += 1;
+        calibration.successes += usize::from(improved);
+        if calibration.samples >= SPLIT_CALIBRATION_SAMPLES
+            && calibration.successes < SPLIT_CALIBRATION_MIN_SUCCESSES
+        {
+            calibration.ineffective = true;
+        }
+    }
+}
+
 fn start_next_context(session: &mut Session) {
+    if session.active_split_probe.is_some()
+        && session
+            .pending_contexts
+            .front()
+            .is_none_or(|context| context.job.depth == 0)
+    {
+        finalize_table_split_probe(session);
+    }
     let Some(context) = session.pending_contexts.pop_front() else {
         session.active_context = None;
         session.active_agenda = None;
@@ -775,6 +893,45 @@ fn split_active_context(
     if children.is_empty() || session.jobs.len().saturating_add(children.len()) > MAX_JOBS {
         return false;
     }
+    let root_winner = session
+        .active_attempts
+        .iter()
+        .copied()
+        .find(|index| session.selected[*index]);
+    let calibration_key = (context.job.depth == 0
+        && context.job.object_kind == OBJECT_TABLE
+        && missing_native_profile.is_none()
+        && session.evidenced_native_profiles.is_empty())
+    .then(|| SplitStrategyKey {
+        locked_profile: session.language_state.locked_profile,
+        evidenced_profiles: session
+            .evidenced_native_profiles
+            .iter()
+            .copied()
+            .collect(),
+    });
+    if calibration_key.as_ref().is_some_and(|key| {
+        session
+            .split_calibrations
+            .get(key)
+            .is_some_and(|calibration| calibration.ineffective)
+    }) {
+        return false;
+    }
+    if let (Some(root_winner), Some(key)) = (root_winner, calibration_key) {
+        let calibration = session
+            .split_calibrations
+            .get(&key)
+            .copied()
+            .unwrap_or_default();
+        session.active_split_probe = Some(TableSplitProbe {
+            calibration_key: (calibration.samples < SPLIT_CALIBRATION_SAMPLES).then_some(key),
+            root_winner,
+            descendant_start: session.jobs.len(),
+            baseline_grammar_milli: session.confidence_milli[root_winner],
+            baseline_mean_confidence_milli: session.mean_word_confidence_milli[root_winner],
+        });
+    }
     for index in session.active_attempts.iter().copied() {
         session.superseded[index] = true;
     }
@@ -1016,8 +1173,11 @@ fn verified_route_jobs(
             logical_column_count: block.logical_scope_shape.map_or(column_stop, |shape| {
                 u32::try_from(shape[1]).unwrap_or(u32::MAX)
             }),
+            ocr_required: !(matches!(object_kind, OBJECT_PARAGRAPH | OBJECT_LIST)
+                && (rect.right.saturating_sub(rect.left) <= 1
+                    || rect.bottom.saturating_sub(rect.top) <= 1)),
         });
-        rasters.push(if matches!(object_kind, OBJECT_PARAGRAPH | OBJECT_LIST) {
+        let raster = if matches!(object_kind, OBJECT_PARAGRAPH | OBJECT_LIST) {
             render_exact_rect_raster(
                 &analysis.foreground.pixels,
                 analysis.foreground.width.checked_mul(3)?,
@@ -1033,7 +1193,8 @@ fn verified_route_jobs(
                 pixels: compacted.pixels,
                 placements,
             }
-        });
+        };
+        rasters.push(raster);
     }
     let reconstructed_objects = reconstruction.objects;
     let planned_blocks = plan.blocks;
@@ -1509,7 +1670,9 @@ pub unsafe extern "C" fn ittm_separated_begin(
     let block_rasters = job_rasters.clone();
     let mut pending_contexts = VecDeque::new();
     for (job, raster) in jobs.into_iter().zip(job_rasters) {
-        pending_contexts.push_back(PendingContext { job, raster });
+        if job.ocr_required {
+            pending_contexts.push_back(PendingContext { job, raster });
+        }
     }
     let mut session = Session {
         objects,
@@ -1519,6 +1682,7 @@ pub unsafe extern "C" fn ittm_separated_begin(
         job_rasters: Vec::new(),
         text: Vec::new(),
         confidence_milli: Vec::new(),
+        mean_word_confidence_milli: Vec::new(),
         words: Vec::new(),
         superseded: Vec::new(),
         selected: Vec::new(),
@@ -1529,6 +1693,8 @@ pub unsafe extern "C" fn ittm_separated_begin(
         language_state: LanguageSplayState::default(),
         evidenced_native_profiles: BTreeSet::new(),
         table_profile_discovery_complete: false,
+        split_calibrations: BTreeMap::new(),
+        active_split_probe: None,
         topology,
         rendered: None,
         stage_mask: PLANNED_STAGE_MASK,
@@ -2132,6 +2298,7 @@ pub unsafe extern "C" fn ittm_separated_set_ocr(
         (word_confidences.iter().sum::<f64>() / word_confidences.len() as f64 * 1_000.0)
             .round_ties_even() as u32
     };
+    session.mean_word_confidence_milli[index] = mean_confidence_milli;
     let assessment = grammar::assess_grammar(
         &normalized_text,
         session.jobs[index].language_profile.code(),
@@ -2560,6 +2727,7 @@ mod tests {
             transform: OcrTransform::Raw,
             logical_row_count: 2,
             logical_column_count: 1,
+            ocr_required: true,
         };
         let parent = JobRaster {
             width: 4,
@@ -2649,6 +2817,7 @@ mod tests {
             transform: OcrTransform::Raw,
             logical_row_count: 1,
             logical_column_count: 2,
+            ocr_required: true,
         };
         let session = Session {
             objects: Vec::new(),
@@ -2679,6 +2848,7 @@ mod tests {
             }],
             text: vec![Some("Alpha Beta".to_owned())],
             confidence_milli: vec![990],
+            mean_word_confidence_milli: vec![975],
             words: vec![vec![
                 OcrWordEvidence {
                     text: "Alpha".to_owned(),
@@ -2710,6 +2880,8 @@ mod tests {
             language_state: LanguageSplayState::default(),
             evidenced_native_profiles: BTreeSet::new(),
             table_profile_discovery_complete: false,
+            split_calibrations: BTreeMap::new(),
+            active_split_probe: None,
             rendered: None,
             stage_mask: ALL_STAGE_MASK,
         };

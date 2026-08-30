@@ -578,6 +578,8 @@ pub fn compact_blocks(
         if block.logical_segment_spans.len() != block.segment_indexes.len() {
             return None;
         }
+        let canonical_shape = canonical_packed_shape(block);
+        let local_layout = canonical_shape.is_some();
         let mut groups = Vec::<([usize; 4], Vec<usize>)>::new();
         for (segment, key) in block
             .segment_indexes
@@ -632,20 +634,32 @@ pub fn compact_blocks(
                 omitted.push(unit_index);
                 continue;
             }
-            let local_left = ink_indexes
-                .iter()
-                .map(|index| index % unit_width)
-                .min()?
-                .saturating_sub(2);
-            let local_top = ink_indexes
-                .iter()
-                .map(|index| index / unit_width)
-                .min()?
-                .saturating_sub(2);
-            let local_right =
-                (ink_indexes.iter().map(|index| index % unit_width).max()? + 3).min(unit_width);
-            let local_bottom =
-                (ink_indexes.iter().map(|index| index / unit_width).max()? + 3).min(unit_height);
+            let (local_left, local_top, local_right, local_bottom) = if local_layout {
+                let exact_bbox = segments[*group.first()?].bbox;
+                (
+                    exact_bbox[0] - analysis_bbox[0],
+                    exact_bbox[1] - analysis_bbox[1],
+                    exact_bbox[2] - analysis_bbox[0],
+                    exact_bbox[3] - analysis_bbox[1],
+                )
+            } else {
+                (
+                    ink_indexes
+                        .iter()
+                        .map(|index| index % unit_width)
+                        .min()?
+                        .saturating_sub(2),
+                    ink_indexes
+                        .iter()
+                        .map(|index| index / unit_width)
+                        .min()?
+                        .saturating_sub(2),
+                    (ink_indexes.iter().map(|index| index % unit_width).max()? + 3)
+                        .min(unit_width),
+                    (ink_indexes.iter().map(|index| index / unit_width).max()? + 3)
+                        .min(unit_height),
+                )
+            };
             let tile_width = local_right - local_left;
             let tile_height = local_bottom - local_top;
             let mut tile_pixels = Vec::with_capacity(tile_width * tile_height * 3);
@@ -657,11 +671,18 @@ pub fn compact_blocks(
                     local_ink.push(ink[y * unit_width + x]);
                 }
             }
+            if !local_ink.iter().any(|value| *value) {
+                tile_cache.insert(group.clone(), None);
+                omitted.push(unit_index);
+                continue;
+            }
             let retained = dilate_mask(&local_ink, tile_width, tile_height);
             if dark_on_light {
-                for (index, keep) in retained.iter().enumerate() {
-                    if !keep {
-                        tile_pixels[index * 3..index * 3 + 3].fill(255);
+                if !local_layout {
+                    for (index, keep) in retained.iter().enumerate() {
+                        if !keep {
+                            tile_pixels[index * 3..index * 3 + 3].fill(255);
+                        }
                     }
                 }
             } else {
@@ -674,8 +695,11 @@ pub fn compact_blocks(
                     tile_pixels[index * 3..index * 3 + 3].fill(value);
                 }
             }
-            let (tile_pixels, compact_width, compact_height) =
-                compact_internal_whitespace(&tile_pixels, &local_ink, tile_width, tile_height)?;
+            let (tile_pixels, compact_width, compact_height) = if local_layout {
+                (tile_pixels, tile_width, tile_height)
+            } else {
+                compact_internal_whitespace(&tile_pixels, &local_ink, tile_width, tile_height)?
+            };
             let tile = Tile {
                 unit_index,
                 segment_indexes: group.clone(),
@@ -742,7 +766,7 @@ pub fn compact_blocks(
                 packed_canvas_pixels: crop_width * crop_height,
             }
         } else {
-            pack_tiles(&tiles, canonical_packed_shape(block))?
+            pack_tiles(&tiles, canonical_shape)?
         };
         let mut unique_omitted = Vec::new();
         for unit in omitted {
@@ -750,9 +774,7 @@ pub fn compact_blocks(
                 unique_omitted.push(unit);
             }
         }
-        if !used_fallback {
-            compacted.omitted_unit_indexes = unique_omitted;
-        }
+        compacted.omitted_unit_indexes = unique_omitted;
         outputs.push(compacted);
     }
     Some(outputs)

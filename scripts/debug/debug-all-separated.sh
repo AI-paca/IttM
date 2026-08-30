@@ -752,14 +752,27 @@ overall_failed=0
   else
     bash scripts/runtime/build-pipeline-core.sh >/dev/null
   fi
-  runtime_lang_path="${ITTM_OCR_LANG_PATH:-${BROWSER_OCR_LANG_PATH:-$PWD/.cache/tessdata}}"
-  if [[ ! -f "$runtime_lang_path/rus.traineddata" ||
-    ! -f "$runtime_lang_path/eng.traineddata" ||
-    ! -f "$runtime_lang_path/chi_sim.traineddata" ||
-    ! -f "$runtime_lang_path/ell.traineddata" ||
-    ! -f "$runtime_lang_path/equ.traineddata" ]]; then
-    BROWSER_OCR_LANG_PATH="$runtime_lang_path" \
-      bash scripts/models/download-browser-tessdata.sh >/dev/null
+  runtime_lang_path_managed=0
+  if [[ -n "$tessdata" ]]; then
+    runtime_lang_path="$tessdata"
+  elif [[ -n "${ITTM_OCR_LANG_PATH:-}" ]]; then
+    runtime_lang_path="$ITTM_OCR_LANG_PATH"
+  elif [[ -n "${BROWSER_OCR_LANG_PATH:-}" ]]; then
+    runtime_lang_path="$BROWSER_OCR_LANG_PATH"
+  else
+    runtime_lang_path="$PWD/.cache/tessdata"
+    runtime_lang_path_managed=1
+  fi
+  if [[ ! -d "$runtime_lang_path" ]] ||
+    ! find "$runtime_lang_path" -maxdepth 1 -type f -name '*.traineddata' \
+      -print -quit 2>/dev/null | grep -q .; then
+    if [[ "$runtime_lang_path_managed" -eq 1 ]]; then
+      BROWSER_OCR_LANG_PATH="$runtime_lang_path" \
+        bash scripts/models/download-browser-tessdata.sh >/dev/null
+    else
+      echo "Explicit tessdata has no traineddata models: $runtime_lang_path" >&2
+      exit 2
+    fi
   fi
   printf 'RUN %s commit=%s runtime=%s items=%s\n' \
     "$run_dir" "$(git rev-parse --short HEAD)" "$runtime" "${#ITEM_IDS[@]}"
@@ -780,6 +793,7 @@ overall_failed=0
         "TESSDATA_PREFIX=$runtime_lang_path"
         python3 scripts/debug/debug-rust-separated.py
         "${ITEM_SOURCE[$item_id]}" --output "$item_dir" --engine tesseract
+        --tessdata "$runtime_lang_path"
         --to-stage "$to_stage"
       )
     else
@@ -788,11 +802,8 @@ overall_failed=0
         common_git_dir="$(realpath "$(git rev-parse --git-common-dir)")"
         workspace_parent="$(dirname "$(dirname "$common_git_dir")")"
         while IFS= read -r candidate; do
-          if [[ -f "$candidate/rus.traineddata" &&
-            -f "$candidate/eng.traineddata" &&
-            -f "$candidate/chi_sim.traineddata" &&
-            -f "$candidate/ell.traineddata" &&
-            -f "$candidate/equ.traineddata" ]]; then
+          if find "$candidate" -maxdepth 1 -type f -name '*.traineddata' \
+            -print -quit 2>/dev/null | grep -q .; then
             browser_lang_path="$candidate"
             break
           fi
@@ -804,7 +815,7 @@ overall_failed=0
         )
       fi
       if [[ -z "$browser_lang_path" ]]; then
-        echo "Could not resolve browser tessdata with rus, eng, chi_sim, ell, and equ models" >"$item_dir/logs/runtime.log"
+        echo "Could not resolve browser tessdata with at least one traineddata model" >"$item_dir/logs/runtime.log"
         overall_failed=1
         printf '  %s FAILED; browser tessdata is unavailable\n' "$item_id"
         continue

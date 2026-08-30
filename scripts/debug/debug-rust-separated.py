@@ -18,7 +18,6 @@ from app.pipeline_config import resolve_pipeline_profile
 from app.pipeline_core.separated import (
     NativeSeparatedSession,
     SeparatedOcrJob,
-    SeparatedOcrWord,
 )
 from app.pipeline_core.separated_recognition import recognize_separated_block
 from app.services.convert_service import _create_engine, _recognize_text_with_sparse_fallback
@@ -79,7 +78,7 @@ def parser() -> argparse.ArgumentParser:
     )
     value.add_argument(
         "--to-stage",
-        choices=("find-object", "separate-block", "generate-object"),
+        choices=STAGE_NAMES,
         default="generate-object",
     )
     return value
@@ -97,8 +96,11 @@ def main() -> int:
         image = ImageOps.exif_transpose(opened).convert("RGB")
     image.save(output / "00-preprocess" / "raster.png")
 
-    run_blocks = args.to_stage in {"separate-block", "generate-object"}
-    run_ocr = args.to_stage == "generate-object"
+    target_index = STAGE_NAMES.index(args.to_stage)
+    run_blocks = target_index >= STAGE_NAMES.index("separate-block")
+    run_ocr = target_index >= STAGE_NAMES.index("ocr-blocks")
+    run_get_segment = target_index >= STAGE_NAMES.index("get-segment")
+    run_generate = target_index >= STAGE_NAMES.index("generate-object")
     profile = resolve_pipeline_profile(args.engine) if run_ocr else None
     engine = _create_engine(args.engine, profile) if run_ocr else None
     texts: dict[int, str] = {}
@@ -119,14 +121,15 @@ def main() -> int:
                     )
                 finally:
                     block_raster.close()
-        jobs = []
-        index = 0
-        while index < session.job_count:
-            job = session.job(index)
-            jobs.append(job)
-            crop = session.raster(job)
-            try:
-                if run_ocr:
+        jobs = list(session.jobs)
+        if run_ocr:
+            jobs = []
+            index = 0
+            while index < session.job_count:
+                job = session.job(index)
+                jobs.append(job)
+                crop = session.raster(job)
+                try:
                     assert profile is not None and engine is not None
                     result = recognize_separated_block(
                         crop,
@@ -138,47 +141,30 @@ def main() -> int:
                     text = result.text
                     confidence_milli = result.confidence_milli
                     words = result.words
-                else:
-                    text = "accepted"
-                    confidence_milli = 0
-                    words = (
-                        SeparatedOcrWord(
-                            text=text,
-                            bbox=(
-                                0,
-                                0,
-                                max(1, min(10, crop.width)),
-                                max(1, min(10, crop.height)),
-                            ),
-                            confidence_milli=1_000,
-                        ),
-                    )
-                if run_ocr:
                     crop.save(
                         output
                         / "05-ocr-blocks"
                         / f"block-{job.index + 1:03d}.png"
                     )
-            finally:
-                crop.close()
-            for word in words:
-                session.add_ocr_word(job.index, word)
-            words_by_job[job.index] = [
-                {
-                    "text": word.text,
-                    "bbox": word.bbox,
-                    "confidence_milli": word.confidence_milli,
-                }
-                for word in words
-            ]
-            session.set_ocr(job.index, text, confidence_milli)
-            if run_ocr:
+                finally:
+                    crop.close()
+                for word in words:
+                    session.add_ocr_word(job.index, word)
+                words_by_job[job.index] = [
+                    {
+                        "text": word.text,
+                        "bbox": word.bbox,
+                        "confidence_milli": word.confidence_milli,
+                    }
+                    for word in words
+                ]
+                session.set_ocr(job.index, text, confidence_milli)
                 texts[job.index] = text
                 (output / "05-ocr-blocks" / f"block-{job.index + 1:03d}.txt").write_text(
                     text.rstrip() + "\n", encoding="utf-8"
                 )
-            index += 1
-        markdown = session.render() if run_ocr else ""
+                index += 1
+        markdown = session.render() if run_generate else ""
         jobs = [session.job(index) for index in range(session.job_count)]
         segment_records = [
             {
@@ -199,9 +185,8 @@ def main() -> int:
                 ],
             }
             for job in jobs
-            if not job.superseded
+            if run_get_segment and not job.superseded
         ]
-        target_index = STAGE_NAMES.index(args.to_stage)
         completed_stages = tuple(
             stage
             for stage in session.completed_stages
@@ -236,8 +221,8 @@ def main() -> int:
                 width=max(2, image.width // 700),
             )
             draw.text(
-                (job.bbox[0] + 3, job.bbox[1] + 3),
-                str(job.index + 1),
+                (block.bbox[0] + 3, block.bbox[1] + 3),
+                str(block.index + 1),
                 fill="red",
             )
         overlay.save(output / "04-separate-block" / "overlay.png")
@@ -323,7 +308,7 @@ def main() -> int:
                 "jobs": [job_payload(job) for job in structural_jobs],
             },
         )
-    if run_ocr:
+    if run_get_segment:
         write_json(
             output / "06-get-segment" / "segments.json",
             {
@@ -331,6 +316,7 @@ def main() -> int:
                 "records": segment_records,
             },
         )
+    if run_generate:
         (output / "07-generate-object" / "result.md").write_text(
             markdown.rstrip() + "\n", encoding="utf-8"
         )
@@ -447,7 +433,7 @@ def main() -> int:
                     "",
                 ]
             )
-    if run_ocr:
+    if run_generate:
         report.extend(["## Generated Markdown", "", markdown.rstrip(), ""])
     (output / "report.md").write_text(
         "\n".join(report) + "\n", encoding="utf-8"

@@ -28,6 +28,7 @@ The C/WASM ABI exports:
 - `ittm_separated_job_count` / `ittm_separated_job_field`;
 - `ittm_separated_set_ocr`;
 - `ittm_separated_add_ocr_word`;
+- `ittm_separated_add_ocr_word_ppm`;
 - `ittm_separated_render_length` / `ittm_separated_render_copy`;
 - `ittm_separated_stage_mask`.
 

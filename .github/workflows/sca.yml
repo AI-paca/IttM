@@ -21,13 +21,17 @@ jobs:
           cache: npm
 
       - name: Install npm dependencies
-        run: npm ci
+        # SCA consumes the lockfile/package graph and builds production images
+        # separately. Native package postinstalls (for example ONNX Runtime)
+        # only add an unrelated external binary download and make this gate
+        # dependent on that CDN being reachable.
+        run: npm ci --ignore-scripts
 
       - name: Scan source and production images
         run: npm run test:sca
 
       - name: Upload vulnerability reports and SBOMs
-        if: always()
+        if: ${{ always() && github.actor != 'nektos/act' }}
         uses: actions/upload-artifact@v6
         with:
           name: sca-sbom-${{ github.run_id }}

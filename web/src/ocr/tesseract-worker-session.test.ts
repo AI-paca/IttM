@@ -461,6 +461,41 @@ test("separated block keeps a confident mixed-script primary candidate", async (
   await pool.releaseCached();
 });
 
+test("separated block skips a Rust-requested unavailable language", async () => {
+  let recognizeCalls = 0;
+  let reinitializeCalls = 0;
+  const pool = new BrowserOcrWorkerPool(async () => ({
+    async setParameters() {},
+    async reinitialize() {
+      reinitializeCalls += 1;
+    },
+    async recognize() {
+      recognizeCalls += 1;
+      return { data: { text: "unexpected" } };
+    },
+    async terminate() {},
+  }));
+  const availableProfile: BrowserOcrProfile = {
+    ...profile(),
+    languages: "eng",
+    availableLanguages: ["eng"],
+  };
+
+  const lease = await pool.acquire(availableProfile, () => {});
+  const result = await lease.recognizeSeparatedBlockDetailed(
+    new Blob(["greek"]),
+    "6",
+    "ell",
+  );
+
+  assert.deepEqual(result, { text: "", words: [], confidence: 0 });
+  assert.equal(recognizeCalls, 0);
+  assert.equal(reinitializeCalls, 0);
+
+  await lease.release();
+  await pool.releaseCached();
+});
+
 test("small reviewer language retry learns numeric table segments", async () => {
   let activeLanguages = "rus+eng+equ";
   const recognizedLanguages: string[] = [];

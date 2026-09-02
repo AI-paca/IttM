@@ -144,109 +144,8 @@ fn normalized_confidence(value: f64) -> f64 {
     }
 }
 
-pub fn normalize_tesseract_text(text: &str) -> String {
-    text.lines()
-        .map(|line| {
-            let mut words = line
-                .split_whitespace()
-                .map(str::to_owned)
-                .collect::<Vec<_>>();
-            for index in 0..words.len() {
-                let value = words[index].clone();
-                let previous = index
-                    .checked_sub(1)
-                    .and_then(|position| words.get(position))
-                    .map_or_else(String::new, |word| word.to_lowercase());
-                let following = words
-                    .get(index + 1)
-                    .map_or_else(String::new, |word| word.to_lowercase());
-                words[index] = if matches!(value.as_str(), "“|" | "“l" | "\"l" | "‘l" | "'l")
-                    && matches!(following.as_str(), "already" | "have")
-                {
-                    "\"I".to_owned()
-                } else if value == "Sh" && previous == "and" && following == "means" {
-                    "5h".to_owned()
-                } else if matches!(value.as_str(), "»" | "•")
-                    && matches!(following.as_str(), "|f" | "|t" | "if" | "it")
-                {
-                    "-".to_owned()
-                } else if matches!(value.as_str(), "IT" | "|T" | "|f") && following == "you" {
-                    if previous == "-" {
-                        "If".to_owned()
-                    } else {
-                        "- If".to_owned()
-                    }
-                } else if matches!(value.as_str(), "—" | "—." | "–" | "-.")
-                    && matches!(previous.as_str(), "there" | "safely")
-                {
-                    "->".to_owned()
-                } else if matches!(value.as_str(), "—" | "—." | "–" | "-." | "~.")
-                    && previous.is_empty()
-                    && following.ends_with(':')
-                {
-                    "->".to_owned()
-                } else {
-                    value
-                };
-            }
-            if words.iter().any(|word| word.starts_with("\"I")) {
-                for word in &mut words {
-                    if let Some(prefix) = word.strip_suffix('”') {
-                        *word = format!("{prefix}\"");
-                    }
-                }
-            }
-            words.join(" ")
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 fn is_supported_symbol(character: char) -> bool {
     ".,:;!?%+-=*/()[]{}<>_|#@".contains(character)
-}
-
-fn structural_confusables(text: &str) -> usize {
-    let mut list_markers = Vec::new();
-    let mut glued_words = 0_usize;
-    for line in text.lines() {
-        let trimmed = line.trim_start();
-        let mut characters = trimmed.chars();
-        if let (Some(marker), Some(separator)) = (characters.next(), characters.next())
-            && matches!(marker, '-' | '*' | '+')
-            && separator.is_whitespace()
-        {
-            list_markers.push(marker);
-        }
-        for token in trimmed.split_whitespace() {
-            let Some((left, right)) = token.split_once('\'') else {
-                continue;
-            };
-            let left_letters = left
-                .chars()
-                .filter(|character| character.is_alphabetic())
-                .collect::<Vec<_>>();
-            let right_letters = right
-                .chars()
-                .filter(|character| character.is_alphabetic())
-                .collect::<Vec<_>>();
-            if left_letters.len() >= 2
-                && right_letters.len() >= 3
-                && left_letters.iter().all(|character| character.is_uppercase())
-                && right_letters.iter().all(|character| character.is_lowercase())
-            {
-                glued_words += 1;
-            }
-        }
-    }
-    let inconsistent_markers = if list_markers.len() >= 2 {
-        list_markers.sort_unstable();
-        list_markers.dedup();
-        list_markers.len().saturating_sub(1)
-    } else {
-        0
-    };
-    glued_words + inconsistent_markers
 }
 
 fn script_index(script: Script) -> Option<usize> {
@@ -335,6 +234,14 @@ fn text_selection_evidence(text: &str, tokens: &[&str]) -> (usize, usize, usize)
         malformed_punctuation,
         numeric_separators,
     )
+}
+
+pub fn selection_evidence(text: &str) -> (usize, usize, usize) {
+    let tokens = text
+        .split(|character: char| !character.is_alphanumeric() && character != '_')
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>();
+    text_selection_evidence(text, &tokens)
 }
 
 pub fn assess_grammar(text: &str, languages: &str, word_confidences: &[f64]) -> GrammarAssessment {
@@ -463,8 +370,6 @@ pub fn assess_grammar(text: &str, languages: &str, word_confidences: &[f64]) -> 
         cyrillic_letters > latin_letters.saturating_mul(2) && suspicious_latin_tokens;
     let (minority_confusables, malformed_punctuation, numeric_separators) =
         text_selection_evidence(text, &tokens);
-    let structural_confusables = structural_confusables(text);
-
     let mut score = mean_confidence * 0.48
         + script_fit * 0.28
         + lexical_fit * 0.18
@@ -473,7 +378,6 @@ pub fn assess_grammar(text: &str, languages: &str, word_confidences: &[f64]) -> 
     score -= (controls as f64 * 0.20).min(0.50);
     score -= (minority_confusables as f64 * 0.04).min(0.12);
     score -= (malformed_punctuation as f64 * 0.03).min(0.09);
-    score -= (structural_confusables as f64 * 0.04).min(0.12);
     score += (numeric_separators as f64 * 0.01).min(0.02);
     let mut percent = (score * 100.0).round_ties_even().clamp(0.0, 99.0) as u8;
     let exact = !confidences.is_empty()
@@ -517,9 +421,6 @@ pub fn assess_grammar(text: &str, languages: &str, word_confidences: &[f64]) -> 
     if malformed_punctuation > 0 {
         reasons.push("punctuation-confusable");
     }
-    if structural_confusables > 0 {
-        reasons.push("structural-confusable");
-    }
     if exact {
         percent = 100;
         reasons.push("exact");
@@ -534,16 +435,6 @@ pub fn assess_grammar(text: &str, languages: &str, word_confidences: &[f64]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn normalizes_the_frozen_tesseract_line_confusables() {
-        assert_eq!(
-            normalize_tesseract_text("» |f you can safely —. go\nand Sh means losing"),
-            "- If you can safely -> go\nand 5h means losing"
-        );
-        assert_eq!(normalize_tesseract_text("~. answer: 2h"), "-> answer: 2h");
-        assert_eq!(normalize_tesseract_text("—. result: 2h"), "-> result: 2h");
-    }
 
     #[test]
     fn accepts_clean_bilingual_evidence() {
@@ -600,19 +491,4 @@ mod tests {
         assert!(separated.percent >= fused.percent);
     }
 
-    #[test]
-    fn prefers_consistent_list_markers_over_glued_gamma_text() {
-        let raw = assess_grammar(
-            "- If you can safely get there\n- If you are too dizzy to travel safely",
-            "eng",
-            &[84.0; 14],
-        );
-        let gamma = assess_grammar(
-            "* IT'youcan safely get there\n+ If you are too dizzy to travel safely",
-            "eng",
-            &[89.0; 14],
-        );
-        assert!(raw.percent > gamma.percent);
-        assert!(gamma.reasons.contains(&"structural-confusable"));
-    }
 }

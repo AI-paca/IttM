@@ -14,6 +14,9 @@ const separatedExports = [
   "ittm_alloc",
   "ittm_dealloc",
   "ittm_separated_begin",
+  "ittm_separated_plan_begin",
+  "ittm_separated_start_ocr",
+  "ittm_separated_run_get_segment",
   "ittm_separated_job_count",
   "ittm_separated_job_field",
   "ittm_separated_job_raster_field",
@@ -21,10 +24,17 @@ const separatedExports = [
   "ittm_separated_job_raster_copy",
   "ittm_separated_set_ocr",
   "ittm_separated_add_ocr_word",
+  "ittm_separated_add_ocr_word_ppm",
   "ittm_separated_render_length",
   "ittm_separated_render_copy",
   "ittm_separated_stage_mask",
   "ittm_separated_drop",
+  "ittm_pdf_native_begin",
+  "ittm_pdf_native_add_item",
+  "ittm_pdf_native_build",
+  "ittm_pdf_native_render_length",
+  "ittm_pdf_native_render_copy",
+  "ittm_pdf_native_drop",
 ];
 for (const name of separatedExports) {
   if (!exports[name]) throw new Error(`WASM ABI 6 misses ${name}`);
@@ -64,6 +74,60 @@ if (exports.ittm_should_drop_text_block(100, 100, 8, 10, 10, 879) !== 0) {
   throw new Error("WASM distinct block preservation failed");
 }
 
+const nativePdfHandle = exports.ittm_pdf_native_begin();
+if (!nativePdfHandle) throw new Error("WASM native PDF route rejected a session");
+try {
+  for (const [index, [text, x, y]] of [
+    ["A", 10, 100],
+    ["B", 80, 100],
+    ["C", 10, 70],
+    ["D", 80, 70],
+  ].entries()) {
+    const encoded = new TextEncoder().encode(text);
+    const pointer = exports.ittm_alloc(encoded.byteLength);
+    new Uint8Array(exports.memory.buffer, pointer, encoded.byteLength).set(encoded);
+    const status = exports.ittm_pdf_native_add_item(
+      nativePdfHandle,
+      pointer,
+      encoded.byteLength,
+      20,
+      10,
+      1,
+      1,
+      0,
+      0,
+      1,
+      x,
+      y,
+    );
+    exports.ittm_dealloc(pointer, encoded.byteLength);
+    if (status !== 0) {
+      throw new Error(`WASM native PDF item ${index} failed with status ${status}`);
+    }
+  }
+  if (exports.ittm_pdf_native_build(nativePdfHandle) !== 0) {
+    throw new Error("WASM native PDF build failed");
+  }
+  const length = exports.ittm_pdf_native_render_length(nativePdfHandle);
+  const pointer = exports.ittm_alloc(length);
+  const copied = exports.ittm_pdf_native_render_copy(nativePdfHandle, pointer, length);
+  const artifact = JSON.parse(
+    new TextDecoder().decode(new Uint8Array(exports.memory.buffer, pointer, length)),
+  );
+  exports.ittm_dealloc(pointer, length);
+  if (
+    copied !== length ||
+    artifact.objects?.[0]?.kind !== "table" ||
+    artifact.segments?.length !== 4
+  ) {
+    throw new Error("WASM native PDF object/segment parity failed");
+  }
+} finally {
+  if (exports.ittm_pdf_native_drop(nativePdfHandle) !== 0) {
+    throw new Error("WASM native PDF session cleanup failed");
+  }
+}
+
 const trustedMarkdownCapabilities = 1 | 2 | 4;
 const recognizeSegmentsBit = 1 << 3;
 if (
@@ -88,7 +152,7 @@ const pixelPointer = exports.ittm_alloc(pixels.byteLength);
 new Uint8Array(exports.memory.buffer, pixelPointer, pixels.byteLength).set(
   pixels,
 );
-const handle = exports.ittm_separated_begin(
+const handle = exports.ittm_separated_plan_begin(
   pixelPointer,
   pixels.byteLength,
   width,
@@ -102,8 +166,14 @@ try {
   if (exports.ittm_separated_stage_mask(handle) !== 0b00011111) {
     throw new Error("WASM separated planning stage mask failed");
   }
+  if (exports.ittm_separated_job_count(handle) !== 0) {
+    throw new Error("WASM planning stage leaked an OCR job");
+  }
+  if (exports.ittm_separated_start_ocr(handle) !== 1) {
+    throw new Error("WASM explicit OCR stage did not start");
+  }
   if (exports.ittm_separated_job_count(handle) !== 1) {
-    throw new Error("WASM separated job count parity failed");
+    throw new Error("WASM separated OCR job count parity failed");
   }
   const firstBox = Array.from({ length: 4 }, (_unused, field) =>
     exports.ittm_separated_job_field(handle, 0, field),
@@ -126,7 +196,7 @@ try {
     new Uint8Array(exports.memory.buffer, pointer, encoded.byteLength).set(
       encoded,
     );
-    const wordStatus = exports.ittm_separated_add_ocr_word(
+    const wordStatus = exports.ittm_separated_add_ocr_word_ppm(
       handle,
       index,
       pointer,
@@ -135,7 +205,7 @@ try {
       0,
       1,
       1,
-      1000,
+      1_000_000,
     );
     const textStatus = exports.ittm_separated_set_ocr(
       handle,
@@ -167,6 +237,9 @@ try {
     throw new Error(`WASM recursive geometry parity failed: ${secondBox}`);
   }
   setOcr(1, "second");
+  if (exports.ittm_separated_run_get_segment(handle) !== 1) {
+    throw new Error("WASM explicit get-segment stage failed");
+  }
   const length = exports.ittm_separated_render_length(handle);
   const outputPointer = exports.ittm_alloc(length);
   const copied = exports.ittm_separated_render_copy(
@@ -178,7 +251,7 @@ try {
     new Uint8Array(exports.memory.buffer, outputPointer, length),
   );
   exports.ittm_dealloc(outputPointer, length);
-  if (copied !== length || output !== "first\n\nsecond") {
+  if (copied !== length || output !== "# result\n\nfirst\n\nsecond") {
     throw new Error("WASM separated assembly parity failed");
   }
   if (exports.ittm_separated_stage_mask(handle) !== 0b11111111) {

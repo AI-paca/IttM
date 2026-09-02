@@ -1,6 +1,8 @@
 import {
   loadBrowserPipelineCore,
   SEPARATED_PIPELINE_STAGES,
+  type SeparatedBlock,
+  type SeparatedObject,
   type SeparatedOcrJob,
   type SeparatedOcrRaster,
   type SeparatedOcrWord,
@@ -20,17 +22,22 @@ export interface BrowserSeparatedResult {
   routeId: number;
 }
 
+export interface BrowserSeparatedPlan {
+  jobs: readonly SeparatedOcrJob[];
+  objects: readonly SeparatedObject[];
+  blocks: readonly SeparatedBlock[];
+}
+
 export interface BrowserSeparatedDebugObserver {
   input?(input: Blob): void | Promise<void>;
-  planned?(
-    jobs: readonly SeparatedOcrJob[],
-    routeId: number,
-  ): void | Promise<void>;
+  planned?(plan: BrowserSeparatedPlan, routeId: number): void | Promise<void>;
+  separateBlock?(image: Blob, block: SeparatedBlock): void | Promise<void>;
   block?(image: Blob, job: SeparatedOcrJob): void | Promise<void>;
   recognized?(
     text: string,
     confidenceMilli: number,
     job: SeparatedOcrJob,
+    words: readonly SeparatedOcrWord[],
   ): void | Promise<void>;
 }
 
@@ -136,31 +143,43 @@ export async function runBrowserSeparatedPipeline(
   });
   try {
     const jobs: SeparatedOcrJob[] = [];
-    await debugObserver?.planned?.(session.jobs(), routeId);
+    const plan = {
+      jobs: session.jobs(),
+      objects: session.objects(),
+      blocks: session.blocks(),
+    };
+    await debugObserver?.planned?.(plan, routeId);
+    for (const block of plan.blocks) {
+      await debugObserver?.separateBlock?.(
+        await rasterBlob(session.blockRaster(block.index)),
+        block,
+      );
+    }
+    session.startOcr();
     let index = 0;
     while (index < session.jobCount()) {
       const job = session.job(index);
       jobs.push(job);
-      onProgress?.(
-        `ocr-blocks ${job.index + 1}/${session.jobCount()}...`,
-      );
+      onProgress?.(`ocr-blocks ${job.index + 1}/${session.jobCount()}...`);
       const block = await rasterBlob(session.raster(job.index));
       await debugObserver?.block?.(block, job);
       const result = await recognize(block, job);
       const text = typeof result === "string" ? result : result.text;
       const confidenceMilli =
         typeof result === "string" ? 0 : (result.confidenceMilli ?? 0);
+      const words = typeof result === "string" ? [] : (result.words ?? []);
       if (typeof result !== "string") {
-        for (const word of result.words ?? []) {
+        for (const word of words) {
           session.addOcrWord(job.index, word);
         }
       }
       session.setOcr(job.index, text, confidenceMilli);
-      await debugObserver?.recognized?.(text, confidenceMilli, job);
+      await debugObserver?.recognized?.(text, confidenceMilli, job, words);
       onSegment?.(text, job);
       index += 1;
     }
     onProgress?.("get-segment → generate-object...");
+    session.runGetSegment();
     const markdown = session.render();
     const stages = session.completedStages();
     if (

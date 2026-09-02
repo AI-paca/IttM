@@ -16,7 +16,13 @@ import {
   createBrowserOcrProfile,
 } from "../../web/src/ocr/browser-profile";
 import { resolveBrowserBenchmarkProfile } from "./browser-benchmark-profile";
-import { configureBrowserPipelineCoreUrl } from "../../web/src/ocr/pipeline-core";
+import {
+  configureBrowserPipelineCoreUrl,
+  type SeparatedBlock,
+  type SeparatedObject,
+  type SeparatedOcrJob,
+  type SeparatedOcrWord,
+} from "../../web/src/ocr/pipeline-core";
 
 const globalRecord = globalThis as unknown as Record<string, unknown>;
 globalRecord.document = {
@@ -125,19 +131,15 @@ const profile = {
 };
 const rssBefore = process.memoryUsage().rss;
 const startedAt = performance.now();
-const debugJobs: Array<{
-  index: number;
-  bbox: readonly [number, number, number, number];
-  objectId: number;
-  row: number;
-  column: number;
-  rowSpan: number;
-  columnSpan: number;
-  recognitionMode: number;
-  objectKind: number;
-  text?: string;
-  confidenceMilli?: number;
-}> = [];
+const debugJobs: Array<
+  SeparatedOcrJob & {
+    text?: string;
+    confidenceMilli?: number;
+    words?: readonly SeparatedOcrWord[];
+  }
+> = [];
+const debugObjects: SeparatedObject[] = [];
+const debugBlocks: SeparatedBlock[] = [];
 let debugRouteId = 0;
 
 async function writeJson(path: string, value: unknown) {
@@ -181,22 +183,42 @@ async function prepareArtifactRoot() {
 
 async function finishArtifacts(markdown: string) {
   if (!artifactRoot) return;
+  await writeJson(join(artifactRoot, "03-find-object", "manifest.json"), {
+    stage: "recursive-topology-object-partition",
+    route_id: debugRouteId,
+    objects: debugObjects.map((object) => ({
+      object_id: object.index,
+      bbox: object.bbox,
+      object_kind: object.objectKind,
+      segment_indexes: object.segmentIndexes,
+      reading_index: object.readingIndex,
+      row_start: object.rowStart,
+      row_stop: object.rowStop,
+      column_start: object.columnStart,
+      column_stop: object.columnStop,
+    })),
+  });
   await writeJson(join(artifactRoot, "04-separate-block", "manifest.json"), {
     stage: "separate-block",
     route_id: debugRouteId,
-    jobs: debugJobs,
+    blocks: debugBlocks.map((block) => ({
+      index: block.index,
+      object_id: block.objectId,
+      bbox: block.bbox,
+      segment_indexes: block.segmentIndexes,
+      dyadic_mask: block.dyadicMask,
+      matrix_window: block.matrixWindow,
+      logical_scope_shape: block.logicalScopeShape,
+    })),
+    jobs: debugJobs.filter((job) => job.depth === 0),
   });
   const sourceImage = await loadImage(bytes);
-  const objectIds = [...new Set(debugJobs.map((job) => job.objectId))].sort(
-    (a, b) => a - b,
-  );
-  for (const objectId of objectIds) {
-    const jobs = debugJobs.filter((job) => job.objectId === objectId);
-    const objectKind = ["paragraph", "list", "table"][jobs[0]?.objectKind] || "unknown";
-    const left = Math.min(...jobs.map((job) => job.bbox[0]));
-    const top = Math.min(...jobs.map((job) => job.bbox[1]));
-    const right = Math.max(...jobs.map((job) => job.bbox[2]));
-    const bottom = Math.max(...jobs.map((job) => job.bbox[3]));
+  const objectIds = debugObjects.map((object) => object.index);
+  for (const object of debugObjects) {
+    const objectId = object.index;
+    const objectKind =
+      ["paragraph", "list", "table"][object.objectKind] || "unknown";
+    const [left, top, right, bottom] = object.bbox;
     const canvas = createCanvas(right - left, bottom - top);
     canvas
       .getContext("2d")
@@ -230,6 +252,8 @@ async function finishArtifacts(markdown: string) {
     route_id: debugRouteId,
     source: resolve(source),
     jobs: debugJobs,
+    objects: debugObjects,
+    blocks: debugBlocks,
   });
   const report: string[] = [
     "# Rust separated visual report",
@@ -244,8 +268,9 @@ async function finishArtifacts(markdown: string) {
     "",
   ];
   for (const objectId of objectIds) {
-    const objectJobs = debugJobs.filter((job) => job.objectId === objectId);
-    const objectKind = ["paragraph", "list", "table"][objectJobs[0]?.objectKind] || "unknown";
+    const object = debugObjects.find((value) => value.index === objectId);
+    const objectKind =
+      ["paragraph", "list", "table"][object?.objectKind ?? -1] || "unknown";
     const objectName = `object-${String(objectId + 1).padStart(3, "0")}-${objectKind}.png`;
     report.push(
       `## Object ${objectId + 1} (type: ${objectKind})`,
@@ -253,6 +278,17 @@ async function finishArtifacts(markdown: string) {
       `<img src="03-find-object/${objectName}" width="1200" alt="object ${objectId + 1}">`,
       "",
     );
+    for (const block of debugBlocks.filter(
+      (value) => value.objectId === objectId,
+    )) {
+      const stem = `block-${String(block.index + 1).padStart(3, "0")}`;
+      report.push(
+        `### Separate block ${block.index + 1}`,
+        "",
+        `<img src="04-separate-block/${stem}.png" width="1200" alt="Separate block ${block.index + 1}">`,
+        "",
+      );
+    }
     for (const job of debugJobs.filter(
       (value) => value.objectId === objectId,
     )) {
@@ -260,7 +296,7 @@ async function finishArtifacts(markdown: string) {
       report.push(
         `### OCR block ${job.index + 1}`,
         "",
-        `<img src="04-separate-block/${stem}.png" width="1200" alt="OCR block ${job.index + 1}">`,
+        `<img src="05-ocr-blocks/${stem}.png" width="1200" alt="OCR block ${job.index + 1}">`,
         "",
         "~~~text",
         job.text || "",
@@ -283,12 +319,26 @@ try {
     profile,
     artifactRoot
       ? {
-          async planned(jobs, routeId) {
+          async planned(plan, routeId) {
             debugRouteId = routeId;
-            debugJobs.push(...jobs.map((job) => ({ ...job })));
+            debugJobs.push(...plan.jobs.map((job) => ({ ...job })));
+            debugObjects.push(...plan.objects);
+            debugBlocks.push(...plan.blocks);
             await writeJson(
               join(artifactRoot, "04-separate-block", "manifest.json"),
-              { stage: "separate-block", route_id: routeId, jobs },
+              {
+                stage: "separate-block",
+                route_id: routeId,
+                blocks: plan.blocks,
+                jobs: plan.jobs,
+              },
+            );
+          },
+          async separateBlock(image, block) {
+            const stem = `block-${String(block.index + 1).padStart(3, "0")}`;
+            await writeFile(
+              join(artifactRoot, "04-separate-block", `${stem}.png`),
+              Buffer.from(await image.arrayBuffer()),
             );
           },
           async block(image, job) {
@@ -298,19 +348,13 @@ try {
             const stem = `block-${String(job.index + 1).padStart(3, "0")}`;
             const blockBytes = Buffer.from(await image.arrayBuffer());
             await writeFile(
-              join(artifactRoot, "04-separate-block", `${stem}.png`),
-              blockBytes,
-            );
-            await writeFile(
               join(artifactRoot, "05-ocr-blocks", `${stem}.png`),
               blockBytes,
             );
           },
-          async recognized(text, confidenceMilli, job) {
-            const target = debugJobs.find(
-              (value) => value.index === job.index,
-            );
-            if (target) Object.assign(target, { text, confidenceMilli });
+          async recognized(text, confidenceMilli, job, words) {
+            const target = debugJobs.find((value) => value.index === job.index);
+            if (target) Object.assign(target, { text, confidenceMilli, words });
             const stem = `block-${String(job.index + 1).padStart(3, "0")}`;
             await writeFile(
               join(artifactRoot, "05-ocr-blocks", `${stem}.txt`),

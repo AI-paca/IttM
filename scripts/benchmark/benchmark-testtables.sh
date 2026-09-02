@@ -512,7 +512,7 @@ start_container() {
     -v "$models_volume:/models/easyocr" \
     -w /app \
     "$runtime_image" \
-    sh -lc 'python -c "from app.pipeline_core.native import native_pipeline_core; core = native_pipeline_core(); assert core is not None; print(f\"pipeline-core ABI 5: {core.path}\")" && exec uvicorn app.main:app --host 0.0.0.0 --port 8000' \
+    sh -lc 'python -c "from app.pipeline_core.native import PIPELINE_CORE_ABI_VERSION, native_pipeline_core; core = native_pipeline_core(); assert core is not None; print(f\"pipeline-core ABI {PIPELINE_CORE_ABI_VERSION}: {core.path}\")" && exec uvicorn app.main:app --host 0.0.0.0 --port 8000' \
     >/dev/null
 
   port="$(docker port "$container_name" 8000/tcp | sed 's/.*://')"

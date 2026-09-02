@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::slice;
 use std::str;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::language::{
     LanguageAgenda, LanguageAgendaResult, LanguageObservation, LanguageProfileId, LanguageRequest,
@@ -18,8 +18,11 @@ const OBJECT_TABLE: u32 = 2;
 const OBJECT_UNKNOWN: u32 = 3;
 const SPLIT_CALIBRATION_SAMPLES: usize = 3;
 const SPLIT_CALIBRATION_MIN_SUCCESSES: usize = 2;
-const OCR_UPSCALE_MIN_HEIGHT: usize = 320;
-const OCR_UPSCALE_MAX_FACTOR: usize = 4;
+const OCR_CONTEXT_BORDER: u32 = 8;
+const OCR_PARAGRAPH_UPSCALE_MIN_HEIGHT: usize = 96;
+const OCR_PARAGRAPH_UPSCALE_MAX_FACTOR: usize = 4;
+const OCR_TABLE_UPSCALE_MIN_HEIGHT: usize = 96;
+const OCR_TABLE_UPSCALE_MAX_FACTOR: usize = 4;
 const OCR_UPSCALE_MAX_PIXELS: usize = 16_000_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -43,12 +46,14 @@ struct OcrWordEvidence {
     text: String,
     rect: Rect,
     confidence_milli: u32,
+    ranking_confidence_units: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct OcrJob {
     rect: Rect,
     segments: Vec<Rect>,
+    source_segment_indexes: Vec<usize>,
     segment_cells: Vec<SegmentCell>,
     compact_segments: bool,
     object_id: u32,
@@ -64,6 +69,7 @@ struct OcrJob {
     logical_row_count: u32,
     logical_column_count: u32,
     ocr_required: bool,
+    words_in_source_space: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -71,7 +77,7 @@ struct JobRaster {
     width: u32,
     height: u32,
     stride: u32,
-    pixels: Vec<u8>,
+    pixels: Arc<[u8]>,
     placements: Vec<RasterPlacement>,
 }
 
@@ -110,6 +116,16 @@ struct TableSplitProbe {
     baseline_mean_confidence_milli: u32,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RecognizedSegment {
+    object_id: u32,
+    object_kind: u32,
+    source_segment_indexes: Vec<usize>,
+    cell: SegmentCell,
+    text: String,
+    evidence_job_indexes: Vec<usize>,
+}
+
 #[derive(Debug)]
 struct Session {
     objects: Vec<objects::DocumentObject>,
@@ -132,9 +148,46 @@ struct Session {
     table_profile_discovery_complete: bool,
     split_calibrations: BTreeMap<SplitStrategyKey, SplitCalibration>,
     active_split_probe: Option<TableSplitProbe>,
+    recognized_segments: Option<Vec<RecognizedSegment>>,
+    importing_ocr: bool,
     topology: topology::PhysicalTopology,
     rendered: Option<Vec<u8>>,
     stage_mask: u32,
+}
+
+struct ImportCursor<'a> {
+    values: &'a [u32],
+    index: usize,
+}
+
+impl<'a> ImportCursor<'a> {
+    fn new(values: &'a [u32]) -> Self {
+        Self { values, index: 0 }
+    }
+
+    fn take(&mut self) -> Option<u32> {
+        let value = *self.values.get(self.index)?;
+        self.index += 1;
+        Some(value)
+    }
+
+    fn rect(&mut self) -> Option<Rect> {
+        Some(Rect {
+            left: self.take()?,
+            top: self.take()?,
+            right: self.take()?,
+            bottom: self.take()?,
+        })
+    }
+
+    fn indexes(&mut self) -> Option<Vec<usize>> {
+        let count = self.take()? as usize;
+        (0..count).map(|_| self.take().map(|value| value as usize)).collect()
+    }
+
+    fn finished(&self) -> bool {
+        self.index == self.values.len()
+    }
 }
 
 fn raster_for_request(
@@ -142,64 +195,136 @@ fn raster_for_request(
     request: LanguageRequest,
     object_kind: u32,
 ) -> JobRaster {
-    let normalized = if request.transform == OcrTransform::Raw {
-        normalize_dark_small_text_rgb(&raw.pixels, raw.width as usize, raw.height as usize)
-    } else {
-        gamma_dark_rgb(&raw.pixels, 3)
-    };
-    if let Some(gray) = normalized {
+    let grayscale = |source: &JobRaster, gray: Vec<u8>| {
         let mut pixels = Vec::with_capacity(gray.len().saturating_mul(3));
         for value in gray {
             pixels.extend_from_slice(&[value, value, value]);
         }
         JobRaster {
-            width: raw.width,
-            height: raw.height,
-            stride: raw.width.saturating_mul(3),
-            pixels,
-            placements: raw.placements.clone(),
+            width: source.width,
+            height: source.height,
+            stride: source.width.saturating_mul(3),
+            pixels: pixels.into(),
+            placements: source.placements.clone(),
         }
-    } else if request.transform == OcrTransform::Raw && object_kind != OBJECT_TABLE {
-        let width = raw.width as usize;
-        let height = raw.height as usize;
-        let mut scale = OCR_UPSCALE_MIN_HEIGHT
-            .div_ceil(height.max(1))
-            .clamp(1, OCR_UPSCALE_MAX_FACTOR);
-        while scale > 1
-            && width
-                .checked_mul(height)
-                .and_then(|pixels| pixels.checked_mul(scale))
-                .and_then(|pixels| pixels.checked_mul(scale))
-                .is_none_or(|pixels| pixels > OCR_UPSCALE_MAX_PIXELS)
-        {
-            scale -= 1;
-        }
-        if scale == 1 {
-            return raw.clone();
-        }
-        let scale_u32 = scale as u32;
-        JobRaster {
-            width: raw.width.saturating_mul(scale_u32),
-            height: raw.height.saturating_mul(scale_u32),
-            stride: raw.stride.saturating_mul(scale_u32),
-            pixels: compact::resize_lanczos(&raw.pixels, width, height, scale),
-            placements: raw
-                .placements
-                .iter()
-                .map(|placement| RasterPlacement {
-                    segment_indexes: placement.segment_indexes.clone(),
-                    source_rect: placement.source_rect,
-                    crop_rect: Rect {
-                        left: placement.crop_rect.left.saturating_mul(scale_u32),
-                        top: placement.crop_rect.top.saturating_mul(scale_u32),
-                        right: placement.crop_rect.right.saturating_mul(scale_u32),
-                        bottom: placement.crop_rect.bottom.saturating_mul(scale_u32),
-                    },
-                })
-                .collect(),
-        }
+    };
+    let transformed = if request.transform == OcrTransform::Raw {
+        raw.clone()
+    } else if let Some(gray) = gamma_dark_rgb(&raw.pixels, 3) {
+        grayscale(raw, gray)
     } else {
         raw.clone()
+    };
+    let transformed = if let Some(gray) = normalize_dark_small_text_rgb(
+        &transformed.pixels,
+        transformed.width as usize,
+        transformed.height as usize,
+    ) {
+        grayscale(&transformed, gray)
+    } else {
+        transformed
+    };
+    let transformed = add_ocr_context_border(transformed);
+    let (minimum_height, maximum_factor) = if object_kind == OBJECT_TABLE {
+        (
+            OCR_TABLE_UPSCALE_MIN_HEIGHT,
+            OCR_TABLE_UPSCALE_MAX_FACTOR,
+        )
+    } else {
+        (
+            OCR_PARAGRAPH_UPSCALE_MIN_HEIGHT,
+            OCR_PARAGRAPH_UPSCALE_MAX_FACTOR,
+        )
+    };
+    let width = transformed.width as usize;
+    let height = transformed.height as usize;
+    let mut scale = minimum_height
+        .div_ceil(height.max(1))
+        .clamp(1, maximum_factor);
+    while scale > 1
+        && width
+            .checked_mul(height)
+            .and_then(|pixels| pixels.checked_mul(scale))
+            .and_then(|pixels| pixels.checked_mul(scale))
+            .is_none_or(|pixels| pixels > OCR_UPSCALE_MAX_PIXELS)
+    {
+        scale -= 1;
+    }
+    if scale == 1 {
+        return transformed;
+    }
+    let scale_u32 = scale as u32;
+    JobRaster {
+        width: transformed.width.saturating_mul(scale_u32),
+        height: transformed.height.saturating_mul(scale_u32),
+        stride: transformed.stride.saturating_mul(scale_u32),
+        pixels: compact::resize_lanczos(&transformed.pixels, width, height, scale).into(),
+        placements: transformed
+            .placements
+            .iter()
+            .map(|placement| RasterPlacement {
+                segment_indexes: placement.segment_indexes.clone(),
+                source_rect: placement.source_rect,
+                crop_rect: Rect {
+                    left: placement.crop_rect.left.saturating_mul(scale_u32),
+                    top: placement.crop_rect.top.saturating_mul(scale_u32),
+                    right: placement.crop_rect.right.saturating_mul(scale_u32),
+                    bottom: placement.crop_rect.bottom.saturating_mul(scale_u32),
+                },
+            })
+            .collect(),
+    }
+}
+
+fn add_ocr_context_border(source: JobRaster) -> JobRaster {
+    let Some(width) = source.width.checked_add(OCR_CONTEXT_BORDER.saturating_mul(2)) else {
+        return source;
+    };
+    let Some(height) = source.height.checked_add(OCR_CONTEXT_BORDER.saturating_mul(2)) else {
+        return source;
+    };
+    let Some(stride) = width.checked_mul(3) else {
+        return source;
+    };
+    let Some(pixel_length) = stride.checked_mul(height).map(|value| value as usize) else {
+        return source;
+    };
+    let mut pixels = vec![255_u8; pixel_length];
+    let source_row_length = source.width.saturating_mul(3) as usize;
+    for row in 0..source.height as usize {
+        let source_start = row.saturating_mul(source.stride as usize);
+        let source_stop = source_start.saturating_add(source_row_length);
+        let target_start = (row + OCR_CONTEXT_BORDER as usize)
+            .saturating_mul(stride as usize)
+            .saturating_add(OCR_CONTEXT_BORDER as usize * 3);
+        let target_stop = target_start.saturating_add(source_row_length);
+        let (Some(source_row), Some(target_row)) = (
+            source.pixels.get(source_start..source_stop),
+            pixels.get_mut(target_start..target_stop),
+        ) else {
+            return source;
+        };
+        target_row.copy_from_slice(source_row);
+    }
+    JobRaster {
+        width,
+        height,
+        stride,
+        pixels: pixels.into(),
+        placements: source
+            .placements
+            .iter()
+            .map(|placement| RasterPlacement {
+                segment_indexes: placement.segment_indexes.clone(),
+                source_rect: placement.source_rect,
+                crop_rect: Rect {
+                    left: placement.crop_rect.left.saturating_add(OCR_CONTEXT_BORDER),
+                    top: placement.crop_rect.top.saturating_add(OCR_CONTEXT_BORDER),
+                    right: placement.crop_rect.right.saturating_add(OCR_CONTEXT_BORDER),
+                    bottom: placement.crop_rect.bottom.saturating_add(OCR_CONTEXT_BORDER),
+                },
+            })
+            .collect(),
     }
 }
 
@@ -213,7 +338,15 @@ fn append_attempt(session: &mut Session, request: LanguageRequest) -> bool {
     let mut job = context.job.clone();
     job.language_profile = request.profile;
     job.transform = request.transform;
-    let raster = raster_for_request(&context.raster, request, job.object_kind);
+    let raster = session
+        .active_attempts
+        .iter()
+        .copied()
+        .find(|index| session.jobs[*index].transform == request.transform)
+        .and_then(|index| session.job_rasters.get(index))
+        .filter(|raster| !raster.pixels.is_empty())
+        .cloned()
+        .unwrap_or_else(|| raster_for_request(&context.raster, request, job.object_kind));
     let index = session.jobs.len();
     session.jobs.push(job);
     session.job_rasters.push(raster);
@@ -225,6 +358,14 @@ fn append_attempt(session: &mut Session, request: LanguageRequest) -> bool {
     session.selected.push(false);
     session.active_attempts.push(index);
     true
+}
+
+fn release_active_raster_pixels(session: &mut Session) {
+    for index in session.active_attempts.iter().copied() {
+        if let Some(raster) = session.job_rasters.get_mut(index) {
+            raster.pixels = Arc::from([]);
+        }
+    }
 }
 
 fn finalize_table_split_probe(session: &mut Session) {
@@ -321,6 +462,7 @@ fn start_next_context(session: &mut Session) {
         session.active_context = None;
         session.active_agenda = None;
         session.active_attempts.clear();
+        session.stage_mask |= 1 << 5;
         return;
     };
     let evidenced_profiles = session
@@ -329,8 +471,11 @@ fn start_next_context(session: &mut Session) {
         .copied()
         .collect::<Vec<_>>();
     let table_context = context.job.object_kind == OBJECT_TABLE;
-    let agenda = if table_context && !session.table_profile_discovery_complete {
-        LanguageAgenda::begin_for_context(&session.language_state, true)
+    let agenda = if table_context
+        && !session.table_profile_discovery_complete
+        && session.language_state.locked_profile.is_some()
+    {
+        LanguageAgenda::begin_locked_profile(&session.language_state)
     } else {
         LanguageAgenda::begin_for_context_with_fallbacks(
             &session.language_state,
@@ -343,6 +488,172 @@ fn start_next_context(session: &mut Session) {
     session.active_agenda = Some(agenda);
     session.active_attempts.clear();
     let _ = append_attempt(session, request);
+}
+
+fn mean_ranking_confidence(words: &[OcrWordEvidence]) -> u64 {
+    words
+        .iter()
+        .map(|word| u64::from(word.ranking_confidence_units))
+        .sum::<u64>()
+        .checked_div(words.len() as u64)
+        .unwrap_or(0)
+}
+
+fn fuse_word_slots(
+    attempts: &[(usize, u32, Vec<OcrWordEvidence>)],
+) -> Option<(usize, Vec<(Rect, Vec<OcrWordEvidence>, usize)>)> {
+    let (baseline_index, _grammar, baseline_words) = attempts
+        .iter()
+        .filter(|(_index, _grammar, words)| !words.is_empty())
+        .max_by_key(|(index, grammar, words)| {
+            (
+                mean_ranking_confidence(words),
+                *grammar,
+                usize::MAX.saturating_sub(*index),
+            )
+        })?;
+    let mut candidates =
+        vec![Vec::<(usize, u64, Vec<OcrWordEvidence>)>::new(); baseline_words.len()];
+    for (attempt_index, _grammar, words) in attempts {
+        let attempt_confidence = mean_ranking_confidence(words);
+        let mut assigned = vec![Vec::<OcrWordEvidence>::new(); baseline_words.len()];
+        for word in words {
+            let word_center_x = u64::from(word.rect.left) + u64::from(word.rect.right);
+            let word_center_y = u64::from(word.rect.top) + u64::from(word.rect.bottom);
+            let Some((slot_index, _slot)) = baseline_words
+                .iter()
+                .enumerate()
+                .filter_map(|(slot_index, slot)| {
+                    let area = intersection_area(word.rect, slot.rect);
+                    if area == 0 {
+                        return None;
+                    }
+                    let slot_center_x = u64::from(slot.rect.left) + u64::from(slot.rect.right);
+                    let slot_center_y = u64::from(slot.rect.top) + u64::from(slot.rect.bottom);
+                    let distance = word_center_x
+                        .abs_diff(slot_center_x)
+                        .saturating_add(word_center_y.abs_diff(slot_center_y));
+                    Some((
+                        slot_index,
+                        slot,
+                        (
+                            area,
+                            u64::MAX.saturating_sub(distance),
+                            usize::MAX.saturating_sub(slot_index),
+                        ),
+                    ))
+                })
+                .max_by_key(|(_slot_index, _slot, score)| *score)
+                .map(|(slot_index, slot, _score)| (slot_index, slot))
+            else {
+                continue;
+            };
+            assigned[slot_index].push(word.clone());
+        }
+        for (slot_index, words) in assigned.into_iter().enumerate() {
+            if !words.is_empty() {
+                candidates[slot_index].push((*attempt_index, attempt_confidence, words));
+            }
+        }
+    }
+    let slots = baseline_words
+        .iter()
+        .zip(candidates)
+        .filter_map(|(baseline_word, candidates)| {
+            candidates
+                .into_iter()
+                .max_by_key(|(attempt_index, attempt_confidence, words)| {
+                    let slot_confidence = mean_ranking_confidence(words);
+                    (
+                        slot_confidence.saturating_add(*attempt_confidence),
+                        slot_confidence,
+                        *attempt_confidence,
+                        usize::MAX.saturating_sub(*attempt_index),
+                    )
+                })
+                .map(|(attempt_index, _attempt_confidence, words)| {
+                    (baseline_word.rect, words, attempt_index)
+                })
+        })
+        .collect::<Vec<_>>();
+    (!slots.is_empty()).then_some((*baseline_index, slots))
+}
+
+fn render_fused_word_slots(slots: &[(Rect, Vec<OcrWordEvidence>, usize)]) -> String {
+    let mut output = String::new();
+    let mut previous_rect = None::<Rect>;
+    for (rect, words, _attempt_index) in slots {
+        if !output.is_empty() {
+            output.push(if previous_rect.is_some_and(|previous| rect.top > previous.bottom) {
+                '\n'
+            } else {
+                ' '
+            });
+        }
+        output.push_str(
+            &words
+                .iter()
+                .map(|word| word.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+        previous_rect = Some(*rect);
+    }
+    output
+}
+
+fn fuse_active_word_evidence(session: &mut Session) -> Option<LanguageRequest> {
+    let attempts = session
+        .active_attempts
+        .iter()
+        .copied()
+        .map(|index| {
+            (
+                index,
+                session.confidence_milli[index],
+                session.words[index].clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let (baseline_index, slots) = fuse_word_slots(&attempts)?;
+    let contributors = slots
+        .iter()
+        .map(|(_rect, _words, attempt_index)| *attempt_index)
+        .collect::<BTreeSet<_>>();
+    if contributors.len() < 2 {
+        return None;
+    }
+    let text = render_fused_word_slots(&slots);
+    if text.trim().is_empty() {
+        return None;
+    }
+    let words = slots
+        .into_iter()
+        .flat_map(|(_rect, words, _attempt_index)| words)
+        .collect::<Vec<_>>();
+    let word_confidences = words
+        .iter()
+        .map(|word| f64::from(word.ranking_confidence_units) / 1_000_000.0)
+        .collect::<Vec<_>>();
+    let assessment = grammar::assess_grammar(
+        &text,
+        session.jobs[baseline_index].language_profile.code(),
+        &word_confidences,
+    );
+    session.text[baseline_index] = Some(text);
+    session.words[baseline_index] = words;
+    session.confidence_milli[baseline_index] = u32::from(assessment.percent) * 10;
+    session.mean_word_confidence_milli[baseline_index] = if word_confidences.is_empty() {
+        0
+    } else {
+        (word_confidences.iter().copied().sum::<f64>() / word_confidences.len() as f64
+            * 1_000.0)
+            .round_ties_even() as u32
+    };
+    Some(LanguageRequest {
+        profile: session.jobs[baseline_index].language_profile,
+        transform: session.jobs[baseline_index].transform,
+    })
 }
 
 fn select_active_winner(session: &mut Session, request: LanguageRequest) {
@@ -504,7 +815,7 @@ fn repack_parent_placements(
         width: atlas_width as u32,
         height: atlas_height as u32,
         stride: stride as u32,
-        pixels,
+        pixels: pixels.into(),
         placements,
     })
 }
@@ -515,7 +826,7 @@ fn compact_context_children(
     chunk_size: usize,
     child_depth: u32,
 ) -> Option<Vec<PendingContext>> {
-    let recursive_placements = recursive_raster_placements(&parent, &parent_raster);
+    let recursive_placements = recursive_raster_placements(parent, parent_raster);
     if chunk_size == 0 || recursive_placements.len() <= chunk_size {
         return Some(Vec::new());
     }
@@ -541,6 +852,10 @@ fn compact_context_children(
             .iter()
             .map(|index| parent.segment_cells.get(*index).copied())
             .collect::<Option<Vec<_>>>()?;
+        let source_segment_indexes = parent_indexes
+            .iter()
+            .map(|index| parent.source_segment_indexes.get(*index).copied())
+            .collect::<Option<Vec<_>>>()?;
         let rect = selected
             .iter()
             .map(|placement| placement.source_rect)
@@ -554,6 +869,7 @@ fn compact_context_children(
         let mut child = parent.clone();
         child.rect = rect;
         child.segments = segments;
+        child.source_segment_indexes = source_segment_indexes;
         child.segment_cells = segment_cells;
         child.row = child
             .segment_cells
@@ -915,7 +1231,7 @@ fn patch_missing_native_units(
         .join(" ");
     let confidences = words
         .iter()
-        .map(|word| f64::from(word.confidence_milli) / 1_000.0)
+        .map(|word| f64::from(word.ranking_confidence_units) / 1_000_000.0)
         .collect::<Vec<_>>();
     let assessment = grammar::assess_grammar(
         &text,
@@ -936,6 +1252,15 @@ fn split_active_context(
         return false;
     };
     let unit_count = recursive_raster_placements(&context.job, &context.raster).len();
+    let planned_finer_block_exists = context.job.depth == 0
+        && session.blocks.iter().any(|block| {
+            block.scope_index == context.job.object_id as usize
+                && !block.segment_indexes.is_empty()
+                && block.segment_indexes.len() < unit_count
+        });
+    if planned_finer_block_exists {
+        return false;
+    }
     let Some(chunk_size) = recursive_chunk_size(
         context.job.depth,
         unit_count,
@@ -1056,7 +1381,7 @@ fn render_exact_rect_raster(
         width: width as u32,
         height: height as u32,
         stride: output_stride as u32,
-        pixels: output,
+        pixels: output.into(),
         placements: segments
             .iter()
             .copied()
@@ -1073,6 +1398,69 @@ fn render_exact_rect_raster(
             })
             .collect(),
     }
+}
+
+fn scaled_raster_coordinate(value: u32, input: u32, output: u32, ceil: bool) -> u32 {
+    let numerator = u64::from(value).saturating_mul(u64::from(output));
+    let denominator = u64::from(input);
+    let scaled = if ceil {
+        numerator.saturating_add(denominator.saturating_sub(1)) / denominator
+    } else {
+        numerator / denominator
+    };
+    u32::try_from(scaled).unwrap_or(output).min(output)
+}
+
+fn bound_job_raster(mut raster: JobRaster) -> Option<JobRaster> {
+    let (width, height) = compact::bounded_ocr_dimensions(
+        raster.width as usize,
+        raster.height as usize,
+    )?;
+    let width = u32::try_from(width).ok()?;
+    let height = u32::try_from(height).ok()?;
+    if width >= raster.width && height >= raster.height {
+        return Some(raster);
+    }
+    let pixels = compact::resize_bilinear_rgb(
+        &raster.pixels,
+        raster.width as usize,
+        raster.height as usize,
+        width as usize,
+        height as usize,
+    )?;
+    for placement in &mut raster.placements {
+        placement.crop_rect = Rect {
+            left: scaled_raster_coordinate(
+                placement.crop_rect.left,
+                raster.width,
+                width,
+                false,
+            ),
+            top: scaled_raster_coordinate(
+                placement.crop_rect.top,
+                raster.height,
+                height,
+                false,
+            ),
+            right: scaled_raster_coordinate(
+                placement.crop_rect.right,
+                raster.width,
+                width,
+                true,
+            ),
+            bottom: scaled_raster_coordinate(
+                placement.crop_rect.bottom,
+                raster.height,
+                height,
+                true,
+            ),
+        };
+    }
+    raster.width = width;
+    raster.height = height;
+    raster.stride = width.checked_mul(3)?;
+    raster.pixels = pixels.into();
+    Some(raster)
 }
 
 #[derive(Default)]
@@ -1115,7 +1503,7 @@ fn verified_route_jobs(
     if plan.blocks.len() > MAX_JOBS {
         return None;
     }
-    let compacted = compact::compact_blocks(&analysis, &plan)?;
+    let compacted = compact::compact_blocks(&analysis, &plan, &reconstruction.objects)?;
     if compacted.len() != plan.blocks.len() {
         return None;
     }
@@ -1216,6 +1604,7 @@ fn verified_route_jobs(
         jobs.push(OcrJob {
             rect,
             segments,
+            source_segment_indexes: block.segment_indexes.clone(),
             segment_cells,
             compact_segments: true,
             object_id,
@@ -1237,6 +1626,7 @@ fn verified_route_jobs(
             ocr_required: !(matches!(object_kind, OBJECT_PARAGRAPH | OBJECT_LIST)
                 && (rect.right.saturating_sub(rect.left) <= 1
                     || rect.bottom.saturating_sub(rect.top) <= 1)),
+            words_in_source_space: false,
         });
         let raster = if matches!(object_kind, OBJECT_PARAGRAPH | OBJECT_LIST) {
             render_exact_rect_raster(
@@ -1251,11 +1641,11 @@ fn verified_route_jobs(
                 width: u32::try_from(compacted.width).ok()?,
                 height: u32::try_from(compacted.height).ok()?,
                 stride: u32::try_from(compacted.width.checked_mul(3)?).ok()?,
-                pixels: compacted.pixels,
+                pixels: compacted.pixels.into(),
                 placements,
             }
         };
-        rasters.push(raster);
+        rasters.push(bound_job_raster(raster)?);
     }
     let reconstructed_objects = reconstruction.objects;
     let planned_blocks = plan.blocks;
@@ -1328,7 +1718,7 @@ fn project_crop_rect_to_source(rect: Rect, placement: &RasterPlacement) -> Rect 
 fn cell_text(candidates: &[(String, u32)]) -> String {
     let mut grouped: BTreeMap<String, (usize, u64)> = BTreeMap::new();
     for (text, confidence) in candidates {
-        let normalized = grammar::normalize_tesseract_text(text)
+        let normalized = text
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
@@ -1344,6 +1734,204 @@ fn cell_text(candidates: &[(String, u32)]) -> String {
         .max_by_key(|(text, (count, confidence))| (*count, *confidence, text.len()))
         .map(|(text, _score)| text)
         .unwrap_or_default()
+}
+
+fn clean_table_cell(value: &str) -> String {
+    value
+        .split_whitespace()
+        .filter(|token| !matches!(*token, "|" | "¦" | "│"))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim_matches([' ', '|', ',', '.', ':', ';'])
+        .to_owned()
+}
+
+fn cell_text_by_job(candidates: &[(String, u32, usize)]) -> String {
+    let mut grouped = BTreeMap::<String, (BTreeSet<usize>, usize, u64)>::new();
+    for (text, confidence, job_index) in candidates {
+        let normalized = clean_table_cell(text);
+        if normalized.is_empty() {
+            continue;
+        }
+        let entry = grouped.entry(normalized).or_default();
+        entry.0.insert(*job_index);
+        entry.1 += 1;
+        entry.2 += u64::from(*confidence);
+    }
+    grouped
+        .into_iter()
+        .max_by(|(first_text, first), (second_text, second)| {
+            first
+                .0
+                .len()
+                .cmp(&second.0.len())
+                .then_with(|| first.1.cmp(&second.1))
+                .then_with(|| {
+                    (first.2 * second.1 as u64).cmp(&(second.2 * first.1 as u64))
+                })
+                .then_with(|| first_text.len().cmp(&second_text.len()))
+                .then_with(|| first_text.cmp(second_text))
+        })
+        .map(|(text, _score)| text)
+        .unwrap_or_default()
+}
+
+fn word_center_in_source(job: &OcrJob, word: &OcrWordEvidence) -> (u64, u64) {
+    if job.words_in_source_space {
+        return (
+            u64::from(word.rect.left) + u64::from(word.rect.right),
+            u64::from(word.rect.top) + u64::from(word.rect.bottom),
+        );
+    }
+    (
+        u64::from(job.rect.left) * 2
+            + u64::from(word.rect.left)
+            + u64::from(word.rect.right),
+        u64::from(job.rect.top) * 2
+            + u64::from(word.rect.top)
+            + u64::from(word.rect.bottom),
+    )
+}
+
+fn materialize_recognized_segments(session: &Session) -> Vec<RecognizedSegment> {
+    let mut by_object = BTreeMap::<u32, Vec<usize>>::new();
+    for index in 0..session.jobs.len() {
+        if session.selected[index]
+            && !session.superseded[index]
+            && session.text[index].is_some()
+        {
+            by_object
+                .entry(session.jobs[index].object_id)
+                .or_default()
+                .push(index);
+        }
+    }
+    let mut output = Vec::new();
+    for (object_id, indexes) in by_object {
+        let object_kind = session.jobs[indexes[0]].object_kind;
+        if object_kind != OBJECT_TABLE {
+            let mut source_segment_indexes = indexes
+                .iter()
+                .flat_map(|index| session.jobs[*index].source_segment_indexes.iter().copied())
+                .collect::<Vec<_>>();
+            source_segment_indexes.sort_unstable();
+            source_segment_indexes.dedup();
+            let mut texts = Vec::new();
+            for text in indexes
+                .iter()
+                .filter_map(|index| session.text[*index].as_deref().map(str::trim))
+                .filter(|text| !text.is_empty())
+            {
+                if !texts.contains(&text) {
+                    texts.push(text);
+                }
+            }
+            let text = texts.join("\n");
+            output.push(RecognizedSegment {
+                object_id,
+                object_kind: OBJECT_PARAGRAPH,
+                source_segment_indexes,
+                cell: SegmentCell {
+                    row: 0,
+                    column: 0,
+                    row_span: 1,
+                    column_span: 1,
+                },
+                text,
+                evidence_job_indexes: indexes,
+            });
+            continue;
+        }
+
+        type SegmentKey = (u32, u32, u32, u32);
+        let mut evidence = BTreeMap::<SegmentKey, (BTreeSet<usize>, Vec<usize>)>::new();
+        let mut candidates = BTreeMap::<SegmentKey, Vec<(String, u32, usize)>>::new();
+        for index in &indexes {
+            let job = &session.jobs[*index];
+            for (segment_index, cell) in job.segment_cells.iter().copied().enumerate() {
+                let Some(source_index) = job.source_segment_indexes.get(segment_index).copied()
+                else {
+                    continue;
+                };
+                let entry = evidence
+                    .entry((cell.row, cell.column, cell.row_span, cell.column_span))
+                    .or_default();
+                entry.0.insert(source_index);
+                entry.1.push(*index);
+            }
+            let mut words_by_segment = BTreeMap::<SegmentKey, Vec<&OcrWordEvidence>>::new();
+            for word in &session.words[*index] {
+                let (center_x_twice, center_y_twice) = word_center_in_source(job, word);
+                let Some(segment_index) = job.segments.iter().position(|source| {
+                    u64::from(source.left) * 2 <= center_x_twice
+                        && center_x_twice < u64::from(source.right) * 2
+                        && u64::from(source.top) * 2 <= center_y_twice
+                        && center_y_twice < u64::from(source.bottom) * 2
+                })
+                else {
+                    continue;
+                };
+                let Some(cell) = job.segment_cells.get(segment_index).copied() else {
+                    continue;
+                };
+                let Some(_source_index) = job.source_segment_indexes.get(segment_index).copied()
+                else {
+                    continue;
+                };
+                words_by_segment
+                    .entry((cell.row, cell.column, cell.row_span, cell.column_span))
+                    .or_default()
+                    .push(word);
+            }
+            for (key, words) in words_by_segment {
+                let text = words
+                    .iter()
+                    .map(|word| word.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let confidence = words
+                    .iter()
+                    .map(|word| u64::from(word.ranking_confidence_units))
+                    .sum::<u64>()
+                    .checked_div(words.len() as u64)
+                    .unwrap_or(0) as u32;
+                candidates
+                    .entry(key)
+                    .or_default()
+                    .push((text, confidence, *index));
+            }
+        }
+        for (key, (source_segment_indexes, mut job_indexes)) in evidence {
+            job_indexes.sort_unstable();
+            job_indexes.dedup();
+            output.push(RecognizedSegment {
+                object_id,
+                object_kind,
+                source_segment_indexes: source_segment_indexes.into_iter().collect(),
+                cell: SegmentCell {
+                    row: key.0,
+                    column: key.1,
+                    row_span: key.2,
+                    column_span: key.3,
+                },
+                text: cell_text_by_job(candidates.get(&key).map_or(&[], Vec::as_slice)),
+                evidence_job_indexes: job_indexes,
+            });
+        }
+    }
+    output.sort_by_key(|segment| {
+        (
+            segment.object_id,
+            segment.cell.row,
+            segment.cell.column,
+            segment
+                .source_segment_indexes
+                .first()
+                .copied()
+                .unwrap_or(usize::MAX),
+        )
+    });
+    output
 }
 
 fn inferred_table_column_anchors(
@@ -1614,7 +2202,70 @@ fn render_table_object(session: &Session, indexes: &[usize]) -> String {
     lines.join("\n")
 }
 
+fn render_recognized_segments(segments: &[RecognizedSegment]) -> Vec<u8> {
+    use crate::assembler::{
+        AssemblerSegment, AssemblerSource, SegmentObjectLayout, StructuralObjectKind,
+        assemble_segment_topology,
+    };
+
+    let object_kind = |kind| {
+        if kind == OBJECT_TABLE {
+            StructuralObjectKind::Table
+        } else {
+            StructuralObjectKind::Paragraph
+        }
+    };
+    let mut object_bounds = BTreeMap::<u32, (u32, u32, u32)>::new();
+    let assembler_segments = segments
+        .iter()
+        .enumerate()
+        .map(|(index, segment)| {
+            let bounds = object_bounds
+                .entry(segment.object_id)
+                .or_insert((segment.object_kind, 0, 0));
+            bounds.1 = bounds
+                .1
+                .max(segment.cell.row.saturating_add(segment.cell.row_span));
+            bounds.2 = bounds
+                .2
+                .max(segment.cell.column.saturating_add(segment.cell.column_span));
+            AssemblerSegment {
+                segment_id: format!("segment-{index:06}"),
+                object_id: format!("object-{:06}", segment.object_id),
+                object_kind: object_kind(segment.object_kind),
+                row: segment.cell.row,
+                column: segment.cell.column,
+                row_span: segment.cell.row_span,
+                column_span: segment.cell.column_span,
+                text: segment.text.clone(),
+            }
+        })
+        .collect::<Vec<_>>();
+    let layouts = object_bounds
+        .into_iter()
+        .map(|(object_id, (kind, logical_row_count, logical_column_count))| {
+            SegmentObjectLayout {
+                object_id: format!("object-{object_id:06}"),
+                object_kind: object_kind(kind),
+                logical_row_count,
+                logical_column_count,
+            }
+        })
+        .collect::<Vec<_>>();
+    let markdown = assemble_segment_topology(
+        AssemblerSource::RasterGeometry,
+        &layouts,
+        &assembler_segments,
+    )
+    .map(|artifact| artifact.markdown)
+    .unwrap_or_default();
+    format!("# result\n\n{markdown}").into_bytes()
+}
+
 fn render_session(session: &Session) -> Vec<u8> {
+    if let Some(segments) = session.recognized_segments.as_deref() {
+        return render_recognized_segments(segments);
+    }
     let terminal_jobs: Vec<usize> = (0..session.jobs.len())
         .filter(|index| !session.superseded[*index] && session.text[*index].is_some())
         .collect();
@@ -1625,25 +2276,24 @@ fn render_session(session: &Session) -> Vec<u8> {
             .or_default()
             .push(index);
     }
-    let mut objects: Vec<(u32, u32, Vec<usize>)> = by_object
+    let mut objects: Vec<(usize, u32, Vec<usize>)> = by_object
         .into_iter()
         .map(|(object_id, mut indexes)| {
             indexes.sort_by_key(|index| {
                 let job = &session.jobs[*index];
                 (job.row, job.column, job.depth, *index)
             });
-            let first_row = indexes
-                .iter()
-                .map(|index| session.jobs[*index].row)
-                .min()
-                .unwrap_or(0);
-            (first_row, object_id, indexes)
+            let reading_index = session
+                .objects
+                .get(object_id as usize)
+                .map_or(object_id as usize, |object| object.reading_index);
+            (reading_index, object_id, indexes)
         })
         .collect();
-    objects.sort_by_key(|(first_row, object_id, _indexes)| (*first_row, *object_id));
+    objects.sort_by_key(|(reading_index, object_id, _indexes)| (*reading_index, *object_id));
 
     let mut rendered_objects = Vec::new();
-    for (_first_row, object_id, indexes) in objects {
+    for (_reading_index, object_id, indexes) in objects {
         let object_kind = session.jobs[indexes[0]].object_kind;
         let rendered = if object_kind == OBJECT_TABLE {
             let evidence_indexes = (0..session.jobs.len())
@@ -1689,25 +2339,24 @@ pub unsafe extern "C" fn ittm_dealloc(pointer: *mut u8, capacity: u32) {
     unsafe { drop(Vec::from_raw_parts(pointer, 0, capacity as usize)) };
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn ittm_separated_begin(
+unsafe fn planned_session_from_raw(
     pixels: *const u8,
     pixel_length: u32,
     width: u32,
     height: u32,
     stride: u32,
     format: u32,
-) -> u32 {
+) -> Option<Session> {
     let Some(channel_count) = channels(format) else {
-        return 0;
+        return None;
     };
     let minimum_stride = match (width as usize).checked_mul(channel_count) {
         Some(value) => value,
-        None => return 0,
+        None => return None,
     };
     let expected_length = match (stride as usize).checked_mul(height as usize) {
         Some(value) => value,
-        None => return 0,
+        None => return None,
     };
     if pixels.is_null()
         || width == 0
@@ -1715,7 +2364,7 @@ pub unsafe extern "C" fn ittm_separated_begin(
         || (stride as usize) < minimum_stride
         || pixel_length as usize != expected_length
     {
-        return 0;
+        return None;
     }
     // SAFETY: the validated byte range is owned by the caller for this call.
     let input = unsafe { slice::from_raw_parts(pixels, expected_length) };
@@ -1726,7 +2375,7 @@ pub unsafe extern "C" fn ittm_separated_begin(
         stride as usize,
         channel_count,
     ) else {
-        return 0;
+        return None;
     };
     let block_rasters = job_rasters.clone();
     let mut pending_contexts = VecDeque::new();
@@ -1735,7 +2384,7 @@ pub unsafe extern "C" fn ittm_separated_begin(
             pending_contexts.push_back(PendingContext { job, raster });
         }
     }
-    let mut session = Session {
+    Some(Session {
         objects,
         blocks,
         block_rasters,
@@ -1756,20 +2405,690 @@ pub unsafe extern "C" fn ittm_separated_begin(
         table_profile_discovery_complete: false,
         split_calibrations: BTreeMap::new(),
         active_split_probe: None,
+        recognized_segments: None,
+        importing_ocr: false,
         topology,
         rendered: None,
         stage_mask: PLANNED_STAGE_MASK,
-    };
-    start_next_context(&mut session);
-    if session.jobs.is_empty() {
-        return 0;
+    })
+}
+
+fn empty_imported_plan_session() -> Session {
+    Session {
+        objects: Vec::new(),
+        blocks: Vec::new(),
+        block_rasters: Vec::new(),
+        jobs: Vec::new(),
+        job_rasters: Vec::new(),
+        text: Vec::new(),
+        confidence_milli: Vec::new(),
+        mean_word_confidence_milli: Vec::new(),
+        words: Vec::new(),
+        superseded: Vec::new(),
+        selected: Vec::new(),
+        pending_contexts: VecDeque::new(),
+        active_context: None,
+        active_agenda: None,
+        active_attempts: Vec::new(),
+        language_state: LanguageSplayState::default(),
+        evidenced_native_profiles: BTreeSet::new(),
+        table_profile_discovery_complete: false,
+        split_calibrations: BTreeMap::new(),
+        active_split_probe: None,
+        recognized_segments: None,
+        importing_ocr: false,
+        topology: topology::PhysicalTopology { rows: Vec::new() },
+        rendered: None,
+        stage_mask: PLANNED_STAGE_MASK,
     }
+}
+
+fn register_session(session: Session) -> Option<u32> {
     let Ok(mut registry) = registry().lock() else {
-        return 0;
+        return None;
     };
     registry.next_handle = registry.next_handle.wrapping_add(1).max(1);
     let handle = registry.next_handle;
     registry.sessions.insert(handle, session);
+    Some(handle)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ittm_separated_plan_begin(
+    pixels: *const u8,
+    pixel_length: u32,
+    width: u32,
+    height: u32,
+    stride: u32,
+    format: u32,
+) -> u32 {
+    // SAFETY: `planned_session_from_raw` validates the caller-owned byte range.
+    let Some(session) = (unsafe {
+        planned_session_from_raw(pixels, pixel_length, width, height, stride, format)
+    }) else {
+        return 0;
+    };
+    register_session(session).unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_import_blocks_begin() -> u32 {
+    register_session(empty_imported_plan_session()).unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_import_segments_begin() -> u32 {
+    let mut session = empty_imported_plan_session();
+    session.stage_mask = (1 << 7) - 1;
+    session.recognized_segments = Some(Vec::new());
+    register_session(session).unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ittm_separated_import_segment(
+    handle: u32,
+    object_id: u32,
+    object_kind: u32,
+    row: u32,
+    column: u32,
+    row_span: u32,
+    column_span: u32,
+    source_indexes: *const u32,
+    source_count: u32,
+    text: *const u8,
+    text_length: u32,
+) -> i32 {
+    if object_kind > OBJECT_UNKNOWN
+        || row_span == 0
+        || column_span == 0
+        || (source_indexes.is_null() && source_count != 0)
+        || (text.is_null() && text_length != 0)
+    {
+        return -1;
+    }
+    let sources = if source_count == 0 {
+        &[][..]
+    } else {
+        // SAFETY: the caller owns source_count values for this call.
+        unsafe { slice::from_raw_parts(source_indexes, source_count as usize) }
+    };
+    let text_bytes = if text_length == 0 {
+        &[][..]
+    } else {
+        // SAFETY: the caller owns text_length bytes for this call.
+        unsafe { slice::from_raw_parts(text, text_length as usize) }
+    };
+    let Ok(text) = str::from_utf8(text_bytes) else {
+        return -2;
+    };
+    let Ok(mut registry) = registry().lock() else {
+        return -3;
+    };
+    let Some(segments) = registry
+        .sessions
+        .get_mut(&handle)
+        .and_then(|session| session.recognized_segments.as_mut())
+    else {
+        return -3;
+    };
+    segments.push(RecognizedSegment {
+        object_id,
+        object_kind,
+        source_segment_indexes: sources.iter().map(|value| *value as usize).collect(),
+        cell: SegmentCell {
+            row,
+            column,
+            row_span,
+            column_span,
+        },
+        text: text.to_owned(),
+        evidence_job_indexes: Vec::new(),
+    });
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_import_segments_finish(handle: u32) -> i32 {
+    let Ok(mut registry) = registry().lock() else {
+        return 0;
+    };
+    let Some(session) = registry.sessions.get_mut(&handle) else {
+        return 0;
+    };
+    let Some(segments) = session.recognized_segments.as_mut() else {
+        return 0;
+    };
+    if segments.is_empty() {
+        return 0;
+    }
+    segments.sort_by_key(|segment| {
+        (
+            segment.object_id,
+            segment.cell.row,
+            segment.cell.column,
+            segment.source_segment_indexes.first().copied().unwrap_or(usize::MAX),
+        )
+    });
+    session.stage_mask = (1 << 7) - 1;
+    1
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ittm_separated_import_block(
+    handle: u32,
+    metadata: *const u32,
+    metadata_length: u32,
+    pixels: *const u8,
+    pixel_length: u32,
+    width: u32,
+    height: u32,
+    stride: u32,
+) -> i32 {
+    if metadata.is_null()
+        || pixels.is_null()
+        || metadata_length == 0
+        || width == 0
+        || height == 0
+        || stride < width.saturating_mul(3)
+        || pixel_length != stride.saturating_mul(height)
+    {
+        return -1;
+    }
+    // SAFETY: both caller-owned ranges are validated for this call.
+    let metadata = unsafe { slice::from_raw_parts(metadata, metadata_length as usize) };
+    // SAFETY: the pixel range length was validated above.
+    let pixels = unsafe { slice::from_raw_parts(pixels, pixel_length as usize) };
+    let mut cursor = ImportCursor::new(metadata);
+    if cursor.take() != Some(1) {
+        return -2;
+    }
+    let Some(object_id) = cursor.take() else {
+        return -3;
+    };
+    let Some(object_kind) = cursor.take() else {
+        return -3;
+    };
+    if object_kind > OBJECT_UNKNOWN {
+        return -3;
+    }
+    let Some(object_rect) = cursor.rect() else {
+        return -3;
+    };
+    let Some(block_rect) = cursor.rect() else {
+        return -3;
+    };
+    let compact_segments = cursor.take() == Some(1);
+    let matrix_present = cursor.take() == Some(1);
+    let Some(matrix_rect) = cursor.rect() else {
+        return -3;
+    };
+    let Some(logical_row_count) = cursor.take() else {
+        return -3;
+    };
+    let Some(logical_column_count) = cursor.take() else {
+        return -3;
+    };
+    let Some(core_segment_indexes) = cursor.indexes() else {
+        return -3;
+    };
+    let Some(segment_count) = cursor.take().map(|value| value as usize) else {
+        return -3;
+    };
+    let mut segment_indexes = Vec::with_capacity(segment_count);
+    let mut segments = Vec::with_capacity(segment_count);
+    let mut segment_cells = Vec::with_capacity(segment_count);
+    let mut logical_segment_spans = Vec::with_capacity(segment_count);
+    for _ in 0..segment_count {
+        let Some(segment_index) = cursor.take() else {
+            return -3;
+        };
+        let Some(source_rect) = cursor.rect() else {
+            return -3;
+        };
+        let Some(row) = cursor.take() else {
+            return -3;
+        };
+        let Some(column) = cursor.take() else {
+            return -3;
+        };
+        let Some(row_span) = cursor.take() else {
+            return -3;
+        };
+        let Some(column_span) = cursor.take() else {
+            return -3;
+        };
+        if row_span == 0 || column_span == 0 {
+            return -3;
+        }
+        segment_indexes.push(segment_index as usize);
+        segments.push(source_rect);
+        segment_cells.push(SegmentCell {
+            row,
+            column,
+            row_span,
+            column_span,
+        });
+        logical_segment_spans.push([
+            row as usize,
+            row.saturating_add(row_span) as usize,
+            column as usize,
+            column.saturating_add(column_span) as usize,
+        ]);
+    }
+    let Some(context_segment_indexes) = cursor.indexes() else {
+        return -3;
+    };
+    let Some(placement_count) = cursor.take().map(|value| value as usize) else {
+        return -3;
+    };
+    let mut placements = Vec::with_capacity(placement_count);
+    for _ in 0..placement_count {
+        let Some(source_rect) = cursor.rect() else {
+            return -3;
+        };
+        let Some(crop_rect) = cursor.rect() else {
+            return -3;
+        };
+        let Some(placement_segments) = cursor.indexes() else {
+            return -3;
+        };
+        placements.push(RasterPlacement {
+            segment_indexes: placement_segments,
+            source_rect,
+            crop_rect,
+        });
+    }
+    if !cursor.finished()
+        || segment_indexes.is_empty()
+        || block_rect.left >= block_rect.right
+        || block_rect.top >= block_rect.bottom
+        || object_rect.left >= object_rect.right
+        || object_rect.top >= object_rect.bottom
+    {
+        return -3;
+    }
+    let object_kind_value = match object_kind {
+        OBJECT_PARAGRAPH => objects::ObjectKind::Paragraph,
+        OBJECT_LIST => objects::ObjectKind::List,
+        OBJECT_TABLE => objects::ObjectKind::Table,
+        _ => objects::ObjectKind::Unknown,
+    };
+    let raster = JobRaster {
+        width,
+        height,
+        stride,
+        pixels: pixels.to_vec().into(),
+        placements,
+    };
+    let matrix_window = matrix_present.then_some([
+        matrix_rect.left as usize,
+        matrix_rect.top as usize,
+        matrix_rect.right as usize,
+        matrix_rect.bottom as usize,
+    ]);
+    let job = OcrJob {
+        rect: block_rect,
+        segments,
+        source_segment_indexes: segment_indexes.clone(),
+        segment_cells,
+        compact_segments,
+        object_id,
+        row: if matrix_present { matrix_rect.left } else { 0 },
+        column: if matrix_present { matrix_rect.right } else { 0 },
+        row_span: if matrix_present {
+            matrix_rect.top.saturating_sub(matrix_rect.left)
+        } else {
+            1
+        },
+        column_span: if matrix_present {
+            matrix_rect.bottom.saturating_sub(matrix_rect.right)
+        } else {
+            1
+        },
+        recognition_mode: 0,
+        object_kind,
+        depth: 0,
+        language_profile: LanguageProfileId::RusEng,
+        transform: OcrTransform::Raw,
+        logical_row_count: logical_row_count.max(1),
+        logical_column_count: logical_column_count.max(1),
+        ocr_required: true,
+        words_in_source_space: false,
+    };
+
+    let Ok(mut registry) = registry().lock() else {
+        return -4;
+    };
+    let Some(session) = registry.sessions.get_mut(&handle) else {
+        return -4;
+    };
+    if session.active_context.is_some() || !session.jobs.is_empty() {
+        return -5;
+    }
+    while object_id as usize > session.objects.len() {
+        let placeholder = session.objects.len();
+        session.objects.push(objects::DocumentObject {
+            kind: objects::ObjectKind::Unknown,
+            segment_indexes: Vec::new(),
+            bbox: [0, 0, 0, 0],
+            reading_index: placeholder,
+            row_start: 0,
+            row_stop: 0,
+            column_start: 0,
+            column_stop: 0,
+            confidence: 0.0,
+            evidence: vec!["missing-imported-stage-object"],
+            logical_spans: None,
+        });
+    }
+    if object_id as usize == session.objects.len() {
+        session.objects.push(objects::DocumentObject {
+            kind: object_kind_value,
+            segment_indexes: segment_indexes.clone(),
+            bbox: [
+                object_rect.left as usize,
+                object_rect.top as usize,
+                object_rect.right as usize,
+                object_rect.bottom as usize,
+            ],
+            reading_index: object_id as usize,
+            row_start: 0,
+            row_stop: logical_row_count.max(1) as usize,
+            column_start: 0,
+            column_stop: logical_column_count.max(1) as usize,
+            confidence: 1.0,
+            evidence: vec!["imported-stage-boundary"],
+            logical_spans: None,
+        });
+    } else if let Some(object) = session.objects.get_mut(object_id as usize) {
+        object.segment_indexes.extend(segment_indexes.iter().copied());
+        object.segment_indexes.sort_unstable();
+        object.segment_indexes.dedup();
+    }
+    session.blocks.push(blocks::RecognitionBlock {
+        bbox: [
+            block_rect.left as usize,
+            block_rect.top as usize,
+            block_rect.right as usize,
+            block_rect.bottom as usize,
+        ],
+        core_segment_indexes,
+        segment_indexes,
+        context_segment_indexes,
+        object_indexes: vec![object_id as usize],
+        scope_index: object_id as usize,
+        matrix_window,
+        dyadic_mask: matrix_present,
+        matrix_segment_shape: None,
+        logical_segment_spans,
+        logical_scope_shape: Some([
+            logical_row_count.max(1) as usize,
+            logical_column_count.max(1) as usize,
+        ]),
+    });
+    session.block_rasters.push(raster.clone());
+    session.pending_contexts.push_back(PendingContext { job, raster });
+    0
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ittm_separated_import_ocr_job(
+    handle: u32,
+    block_index: u32,
+    profile: u32,
+    transform: u32,
+    words_in_source_space: u32,
+    text: *const u8,
+    text_length: u32,
+    grammar_milli: u32,
+) -> i32 {
+    if text.is_null() && text_length != 0 {
+        return -1;
+    }
+    let profile = match profile {
+        0 => LanguageProfileId::RusEng,
+        1 => LanguageProfileId::Rus,
+        2 => LanguageProfileId::Eng,
+        3 => LanguageProfileId::ChiSim,
+        4 => LanguageProfileId::Ell,
+        5 => LanguageProfileId::Equ,
+        _ => return -2,
+    };
+    let transform = match transform {
+        0 => OcrTransform::Raw,
+        1 => OcrTransform::GammaDark,
+        _ => return -2,
+    };
+    let bytes = if text_length == 0 {
+        &[][..]
+    } else {
+        // SAFETY: the caller owns this byte range for this call.
+        unsafe { slice::from_raw_parts(text, text_length as usize) }
+    };
+    let Ok(text) = str::from_utf8(bytes) else {
+        return -3;
+    };
+    let Ok(mut registry) = registry().lock() else {
+        return -4;
+    };
+    let Some(session) = registry.sessions.get_mut(&handle) else {
+        return -4;
+    };
+    if session.active_context.is_some() || session.stage_mask & (1 << 5) != 0 {
+        return -5;
+    }
+    let Some(context) = session.pending_contexts.get(block_index as usize).cloned() else {
+        return -6;
+    };
+    let mut job = context.job;
+    job.language_profile = profile;
+    job.transform = transform;
+    job.words_in_source_space = words_in_source_space != 0;
+    let raster = if job.words_in_source_space {
+        context.raster
+    } else {
+        raster_for_request(
+            &context.raster,
+            LanguageRequest { profile, transform },
+            job.object_kind,
+        )
+    };
+    let index = session.jobs.len();
+    session.jobs.push(job);
+    session.job_rasters.push(raster);
+    session.text.push(Some(text.to_owned()));
+    session.confidence_milli.push(grammar_milli.min(1_000));
+    session.mean_word_confidence_milli.push(0);
+    session.words.push(Vec::new());
+    session.superseded.push(false);
+    session.selected.push(true);
+    session.importing_ocr = true;
+    i32::try_from(index).unwrap_or(-7)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_import_ocr_finish(handle: u32) -> i32 {
+    let Ok(mut registry) = registry().lock() else {
+        return 0;
+    };
+    let Some(session) = registry.sessions.get_mut(&handle) else {
+        return 0;
+    };
+    if session.jobs.is_empty() {
+        return 0;
+    }
+    session.pending_contexts.clear();
+    session.active_context = None;
+    session.active_agenda = None;
+    session.active_attempts.clear();
+    session.importing_ocr = false;
+    session.stage_mask |= 1 << 5;
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_run_get_segment(handle: u32) -> i32 {
+    let Ok(mut registry) = registry().lock() else {
+        return 0;
+    };
+    let Some(session) = registry.sessions.get_mut(&handle) else {
+        return 0;
+    };
+    if session.stage_mask & (1 << 5) == 0 || session.active_context.is_some() {
+        return 0;
+    }
+    session.recognized_segments = Some(materialize_recognized_segments(session));
+    session.stage_mask |= 1 << 6;
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_segment_count(handle: u32) -> u32 {
+    registry()
+        .lock()
+        .ok()
+        .and_then(|registry| {
+            registry
+                .sessions
+                .get(&handle)
+                .and_then(|session| session.recognized_segments.as_ref())
+                .map(|segments| segments.len() as u32)
+        })
+        .unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_segment_field(handle: u32, index: u32, field: u32) -> i32 {
+    let Ok(registry) = registry().lock() else {
+        return -1;
+    };
+    let Some(segment) = registry
+        .sessions
+        .get(&handle)
+        .and_then(|session| session.recognized_segments.as_ref())
+        .and_then(|segments| segments.get(index as usize))
+    else {
+        return -1;
+    };
+    let value = match field {
+        0 => segment.object_id as usize,
+        1 => segment.object_kind as usize,
+        2 => segment.cell.row as usize,
+        3 => segment.cell.column as usize,
+        4 => segment.cell.row_span as usize,
+        5 => segment.cell.column_span as usize,
+        6 => segment.source_segment_indexes.len(),
+        7 => segment.evidence_job_indexes.len(),
+        _ => return -1,
+    };
+    i32::try_from(value).unwrap_or(-1)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_segment_source(
+    handle: u32,
+    index: u32,
+    source_index: u32,
+) -> i32 {
+    registry()
+        .lock()
+        .ok()
+        .and_then(|registry| {
+            registry
+                .sessions
+                .get(&handle)
+                .and_then(|session| session.recognized_segments.as_ref())
+                .and_then(|segments| segments.get(index as usize))
+                .and_then(|segment| segment.source_segment_indexes.get(source_index as usize))
+                .and_then(|value| i32::try_from(*value).ok())
+        })
+        .unwrap_or(-1)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_segment_text_length(handle: u32, index: u32) -> u32 {
+    registry()
+        .lock()
+        .ok()
+        .and_then(|registry| {
+            registry
+                .sessions
+                .get(&handle)
+                .and_then(|session| session.recognized_segments.as_ref())
+                .and_then(|segments| segments.get(index as usize))
+                .and_then(|segment| u32::try_from(segment.text.len()).ok())
+        })
+        .unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ittm_separated_segment_text_copy(
+    handle: u32,
+    index: u32,
+    output: *mut u8,
+    capacity: u32,
+) -> i32 {
+    if output.is_null() && capacity != 0 {
+        return -1;
+    }
+    let Ok(registry) = registry().lock() else {
+        return -1;
+    };
+    let Some(text) = registry
+        .sessions
+        .get(&handle)
+        .and_then(|session| session.recognized_segments.as_ref())
+        .and_then(|segments| segments.get(index as usize))
+        .map(|segment| segment.text.as_bytes())
+    else {
+        return -1;
+    };
+    if text.len() != capacity as usize {
+        return -1;
+    }
+    if !text.is_empty() {
+        // SAFETY: the caller promises capacity bytes at output.
+        unsafe { std::ptr::copy_nonoverlapping(text.as_ptr(), output, text.len()) };
+    }
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_start_ocr(handle: u32) -> i32 {
+    let Ok(mut registry) = registry().lock() else {
+        return 0;
+    };
+    let Some(session) = registry.sessions.get_mut(&handle) else {
+        return 0;
+    };
+    if session.active_context.is_some() || !session.jobs.is_empty() {
+        return 1;
+    }
+    start_next_context(session);
+    i32::from(!session.jobs.is_empty())
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ittm_separated_begin(
+    pixels: *const u8,
+    pixel_length: u32,
+    width: u32,
+    height: u32,
+    stride: u32,
+    format: u32,
+) -> u32 {
+    // SAFETY: the stage-only constructor performs the same complete validation.
+    let handle = unsafe {
+        ittm_separated_plan_begin(pixels, pixel_length, width, height, stride, format)
+    };
+    if handle == 0 || ittm_separated_start_ocr(handle) != 1 {
+        if handle != 0
+            && let Ok(mut registry) = registry().lock()
+        {
+            registry.sessions.remove(&handle);
+        }
+        return 0;
+    }
     handle
 }
 
@@ -1853,6 +3172,53 @@ pub extern "C" fn ittm_separated_job_count(handle: u32) -> u32 {
                 .map(|session| session.jobs.len() as u32)
         })
         .unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_job_text_length(handle: u32, index: u32) -> u32 {
+    registry()
+        .lock()
+        .ok()
+        .and_then(|registry| {
+            registry
+                .sessions
+                .get(&handle)
+                .and_then(|session| session.text.get(index as usize))
+                .and_then(Option::as_ref)
+                .and_then(|text| u32::try_from(text.len()).ok())
+        })
+        .unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ittm_separated_job_text_copy(
+    handle: u32,
+    index: u32,
+    output: *mut u8,
+    capacity: u32,
+) -> i32 {
+    if output.is_null() && capacity > 0 {
+        return -1;
+    }
+    let Ok(registry) = registry().lock() else {
+        return -2;
+    };
+    let Some(text) = registry
+        .sessions
+        .get(&handle)
+        .and_then(|session| session.text.get(index as usize))
+        .and_then(Option::as_ref)
+    else {
+        return -3;
+    };
+    if text.len() > capacity as usize {
+        return -4;
+    }
+    if !text.is_empty() {
+        // SAFETY: the caller supplies at least `capacity` writable bytes.
+        unsafe { std::ptr::copy_nonoverlapping(text.as_ptr(), output, text.len()) };
+    }
+    0
 }
 
 #[unsafe(no_mangle)]
@@ -2001,6 +3367,74 @@ pub extern "C" fn ittm_separated_block_raster_field(
         3 => 3,
         _ => -1,
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_block_raster_placement_count(
+    handle: u32,
+    block_index: u32,
+) -> u32 {
+    let Ok(registry) = registry().lock() else {
+        return 0;
+    };
+    registry
+        .sessions
+        .get(&handle)
+        .and_then(|session| session.block_rasters.get(block_index as usize))
+        .map_or(0, |raster| raster.placements.len() as u32)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_block_raster_placement_field(
+    handle: u32,
+    block_index: u32,
+    placement_index: u32,
+    field: u32,
+) -> i32 {
+    let Ok(registry) = registry().lock() else {
+        return -1;
+    };
+    let Some(placement) = registry
+        .sessions
+        .get(&handle)
+        .and_then(|session| session.block_rasters.get(block_index as usize))
+        .and_then(|raster| raster.placements.get(placement_index as usize))
+    else {
+        return -1;
+    };
+    let value = match field {
+        0 => placement.source_rect.left,
+        1 => placement.source_rect.top,
+        2 => placement.source_rect.right,
+        3 => placement.source_rect.bottom,
+        4 => placement.crop_rect.left,
+        5 => placement.crop_rect.top,
+        6 => placement.crop_rect.right,
+        7 => placement.crop_rect.bottom,
+        8 => return i32::try_from(placement.segment_indexes.len()).unwrap_or(-1),
+        _ => return -1,
+    };
+    i32::try_from(value).unwrap_or(-1)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_block_raster_placement_segment(
+    handle: u32,
+    block_index: u32,
+    placement_index: u32,
+    segment_index: u32,
+) -> i32 {
+    let Ok(registry) = registry().lock() else {
+        return -1;
+    };
+    registry
+        .sessions
+        .get(&handle)
+        .and_then(|session| session.block_rasters.get(block_index as usize))
+        .and_then(|raster| raster.placements.get(placement_index as usize))
+        .and_then(|placement| placement.segment_indexes.get(segment_index as usize))
+        .and_then(|value| i32::try_from(*value).ok())
+        .unwrap_or(-1)
 }
 
 #[unsafe(no_mangle)]
@@ -2220,6 +3654,11 @@ pub extern "C" fn ittm_separated_job_segment_field(
         14 => placement.map_or(-1, |value| value.source_rect.right as i32),
         15 => placement.map_or(-1, |value| value.source_rect.bottom as i32),
         16 => i32::from(placement.is_some()),
+        17 => job
+            .source_segment_indexes
+            .get(segment_index)
+            .and_then(|value| i32::try_from(*value).ok())
+            .unwrap_or(-1),
         _ => -1,
     }
 }
@@ -2266,8 +3705,7 @@ pub extern "C" fn ittm_separated_language_node_field(handle: u32, index: u32, fi
     }
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn ittm_separated_add_ocr_word(
+unsafe fn add_ocr_word_evidence(
     handle: u32,
     index: u32,
     text_pointer: *const u8,
@@ -2277,6 +3715,7 @@ pub unsafe extern "C" fn ittm_separated_add_ocr_word(
     right: u32,
     bottom: u32,
     confidence_milli: u32,
+    ranking_confidence_units: u32,
 ) -> i32 {
     if text_pointer.is_null() || text_length == 0 || left >= right || top >= bottom {
         return -1;
@@ -2295,20 +3734,104 @@ pub unsafe extern "C" fn ittm_separated_add_ocr_word(
     let Some(raster) = session.job_rasters.get(index) else {
         return -5;
     };
-    if right > raster.width || bottom > raster.height || session.text[index].is_some() {
+    let Some(job) = session.jobs.get(index) else {
+        return -5;
+    };
+    let words_in_source_space = job.words_in_source_space;
+    let (maximum_width, maximum_height) = if words_in_source_space {
+        (
+            job.rect.right.saturating_sub(job.rect.left),
+            job.rect.bottom.saturating_sub(job.rect.top),
+        )
+    } else {
+        (raster.width, raster.height)
+    };
+    if right > maximum_width
+        || bottom > maximum_height
+        || (session.text[index].is_some() && !session.importing_ocr)
+    {
         return -6;
     }
-    session.words[index].push(OcrWordEvidence {
-        text: text.to_owned(),
-        rect: Rect {
+    let rect = if words_in_source_space {
+        Rect {
+            left: job.rect.left.saturating_add(left),
+            top: job.rect.top.saturating_add(top),
+            right: job.rect.left.saturating_add(right),
+            bottom: job.rect.top.saturating_add(bottom),
+        }
+    } else {
+        Rect {
             left,
             top,
             right,
             bottom,
-        },
+        }
+    };
+    session.words[index].push(OcrWordEvidence {
+        text: text.to_owned(),
+        rect,
         confidence_milli: confidence_milli.min(1_000),
+        ranking_confidence_units: ranking_confidence_units.min(1_000_000),
     });
     0
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ittm_separated_add_ocr_word(
+    handle: u32,
+    index: u32,
+    text_pointer: *const u8,
+    text_length: u32,
+    left: u32,
+    top: u32,
+    right: u32,
+    bottom: u32,
+    confidence_milli: u32,
+) -> i32 {
+    let confidence_milli = confidence_milli.min(1_000);
+    unsafe {
+        add_ocr_word_evidence(
+            handle,
+            index,
+            text_pointer,
+            text_length,
+            left,
+            top,
+            right,
+            bottom,
+            confidence_milli,
+            confidence_milli.saturating_mul(1_000),
+        )
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ittm_separated_add_ocr_word_ppm(
+    handle: u32,
+    index: u32,
+    text_pointer: *const u8,
+    text_length: u32,
+    left: u32,
+    top: u32,
+    right: u32,
+    bottom: u32,
+    confidence_ppm: u32,
+) -> i32 {
+    let confidence_ppm = confidence_ppm.min(1_000_000);
+    unsafe {
+        add_ocr_word_evidence(
+            handle,
+            index,
+            text_pointer,
+            text_length,
+            left,
+            top,
+            right,
+            bottom,
+            confidence_ppm.saturating_add(500) / 1_000,
+            confidence_ppm,
+        )
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -2344,15 +3867,26 @@ pub unsafe extern "C" fn ittm_separated_set_ocr(
     if session.text[index].is_some() {
         return -6;
     }
-    let normalized_text = grammar::normalize_tesseract_text(text);
+    let normalized_text = text.to_owned();
     session.text[index] = Some(normalized_text.clone());
     if !session.active_attempts.contains(&index) {
         return -7;
     }
     let word_confidences = session.words[index]
         .iter()
-        .map(|word| f64::from(word.confidence_milli) / 1_000.0)
+        .map(|word| f64::from(word.ranking_confidence_units) / 1_000_000.0)
         .collect::<Vec<_>>();
+    let mean_confidence_ppm = if session.words[index].is_empty() {
+        0
+    } else {
+        session.words[index]
+            .iter()
+            .map(|word| u64::from(word.ranking_confidence_units))
+            .sum::<u64>()
+            .checked_div(session.words[index].len() as u64)
+            .unwrap_or(0)
+            .min(1_000_000) as u32
+    };
     let mean_confidence_milli = if word_confidences.is_empty() {
         0
     } else {
@@ -2370,16 +3904,42 @@ pub unsafe extern "C" fn ittm_separated_set_ocr(
         session.evidenced_native_profiles.insert(request.profile);
     }
     let _legacy_confidence_milli = confidence_milli;
-    let observation =
-        LanguageObservation::bounded(u32::from(assessment.percent), mean_confidence_milli);
+    let (minority_confusables, malformed_punctuation, numeric_separators) =
+        grammar::selection_evidence(&normalized_text);
+    let selection_percent = i32::from(assessment.percent)
+        - i32::try_from(minority_confusables.saturating_mul(4)).unwrap_or(i32::MAX)
+        - i32::try_from(malformed_punctuation.saturating_mul(3)).unwrap_or(i32::MAX)
+        + i32::try_from(numeric_separators.min(2)).unwrap_or(2);
+    let observation = LanguageObservation::with_selection(
+        u32::from(assessment.percent),
+        mean_confidence_milli,
+        mean_confidence_ppm,
+        selection_percent,
+        minority_confusables,
+        malformed_punctuation,
+        numeric_separators,
+        normalized_text.chars().count(),
+    );
     let Some(mut agenda) = session.active_agenda.take() else {
         return -8;
     };
     match agenda.observe(&mut session.language_state, observation) {
         LanguageAgendaResult::Request(request) => {
-            session.active_agenda = Some(agenda);
             if !append_attempt(session, request) {
-                return -9;
+                let winner_request = agenda
+                    .best_request()
+                    .unwrap_or(LanguageRequest {
+                        profile: session.jobs[index].language_profile,
+                        transform: session.jobs[index].transform,
+                    });
+                select_active_winner(session, winner_request);
+                release_active_raster_pixels(session);
+                session.active_context = None;
+                session.active_attempts.clear();
+                session.pending_contexts.clear();
+                session.active_agenda = None;
+            } else {
+                session.active_agenda = Some(agenda);
             }
         }
         LanguageAgendaResult::Complete { winner_request, .. } => {
@@ -2391,11 +3951,16 @@ pub unsafe extern "C" fn ittm_separated_set_ocr(
             {
                 session.table_profile_discovery_complete = true;
             }
+            release_active_raster_pixels(session);
             session.active_context = None;
             session.active_attempts.clear();
             start_next_context(session);
         }
         LanguageAgendaResult::Exhausted { winner_request, .. } => {
+            let table_context = session
+                .active_context
+                .as_ref()
+                .is_some_and(|context| context.job.object_kind == OBJECT_TABLE);
             let unit_count = session.active_context.as_ref().map_or(0, |context| {
                 recursive_raster_placements(&context.job, &context.raster).len()
             });
@@ -2407,21 +3972,23 @@ pub unsafe extern "C" fn ittm_separated_set_ocr(
                 patch_missing_native_units(session, winner_request, request)
             });
             let unresolved_native = (!native_patched).then_some(native_request).flatten();
-            let selected_request = if unit_count <= 1 {
-                unresolved_native.unwrap_or(winner_request)
-            } else {
-                winner_request
-            };
+            let fused_request = (!table_context)
+                .then(|| fuse_active_word_evidence(session))
+                .flatten();
+            let selected_request = fused_request.unwrap_or_else(|| {
+                if unit_count <= 1 {
+                    unresolved_native.unwrap_or(winner_request)
+                } else {
+                    winner_request
+                }
+            });
             select_active_winner(session, selected_request);
-            let table_context = session
-                .active_context
-                .as_ref()
-                .is_some_and(|context| context.job.object_kind == OBJECT_TABLE);
             if table_context {
                 let _ =
                     split_active_context(session, unresolved_native.map(|request| request.profile));
                 session.table_profile_discovery_complete = true;
             }
+            release_active_raster_pixels(session);
             session.active_context = None;
             session.active_attempts.clear();
             start_next_context(session);
@@ -2529,6 +4096,101 @@ mod tests {
         assert_eq!(recursive_chunk_size(2, 16, true), Some(4));
         assert_eq!(recursive_chunk_size(3, 4, true), Some(1));
         assert_eq!(recursive_chunk_size(4, 1, true), None);
+    }
+
+    #[test]
+    fn readable_paragraph_raster_adds_context_without_upscaling() {
+        let width = 100_u32;
+        let height = 120_u32;
+        let mut pixels = vec![255_u8; (width * height * 3) as usize];
+        pixels[0..3].fill(0);
+        let raster = raster_for_request(
+            &JobRaster {
+                width,
+                height,
+                stride: width * 3,
+                pixels: pixels.into(),
+                placements: vec![RasterPlacement {
+                    segment_indexes: vec![0],
+                    source_rect: Rect {
+                        left: 10,
+                        top: 20,
+                        right: 110,
+                        bottom: 140,
+                    },
+                    crop_rect: Rect {
+                        left: 0,
+                        top: 0,
+                        right: width,
+                        bottom: height,
+                    },
+                }],
+            },
+            LanguageRequest {
+                profile: LanguageProfileId::RusEng,
+                transform: OcrTransform::Raw,
+            },
+            OBJECT_PARAGRAPH,
+        );
+        assert_eq!((raster.width, raster.height, raster.stride), (116, 136, 348));
+        assert_eq!(&raster.pixels[..3], &[255, 255, 255]);
+        let first_source_pixel = ((8 * raster.stride + 8 * 3) as usize)..;
+        assert_eq!(&raster.pixels[first_source_pixel][..3], &[0, 0, 0]);
+        assert_eq!(
+            raster.placements[0].crop_rect,
+            Rect {
+                left: 8,
+                top: 8,
+                right: 108,
+                bottom: 128,
+            }
+        );
+    }
+
+    #[test]
+    fn exhausted_mixed_context_fuses_confident_words_by_geometry() {
+        let word = |text: &str, left: u32, right: u32, confidence: u32| OcrWordEvidence {
+            text: text.to_owned(),
+            rect: Rect {
+                left,
+                top: 10,
+                right,
+                bottom: 30,
+            },
+            confidence_milli: confidence / 1_000,
+            ranking_confidence_units: confidence,
+        };
+        let attempts = vec![
+            (
+                0,
+                820,
+                vec![
+                    word("MIXED", 0, 50, 968_000),
+                    word("Д", 60, 75, 928_000),
+                    word("#X", 90, 130, 700_000),
+                ],
+            ),
+            (
+                1,
+                530,
+                vec![
+                    word("MIXED", 0, 50, 920_000),
+                    word("凡", 60, 75, 0),
+                    word("中", 90, 125, 960_000),
+                    word("文", 112, 130, 950_000),
+                ],
+            ),
+        ];
+        let (baseline, slots) = fuse_word_slots(&attempts).expect("fused slots");
+        assert_eq!(baseline, 0);
+        assert_eq!(render_fused_word_slots(&slots), "MIXED Д 中 文");
+        assert_eq!(
+            slots
+                .iter()
+                .map(|(_rect, _words, attempt)| *attempt)
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([0, 1])
+        );
     }
 
     #[test]
@@ -2764,6 +4426,7 @@ mod tests {
                     bottom: 20,
                 },
             ],
+            source_segment_indexes: vec![0, 1],
             segment_cells: vec![
                 SegmentCell {
                     row: 0,
@@ -2792,12 +4455,13 @@ mod tests {
             logical_row_count: 2,
             logical_column_count: 1,
             ocr_required: true,
+            words_in_source_space: false,
         };
         let parent = JobRaster {
             width: 4,
             height: 1,
             stride: 12,
-            pixels: vec![10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120],
+            pixels: vec![10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120].into(),
             placements: vec![RasterPlacement {
                 segment_indexes: vec![0, 1],
                 source_rect: job.rect,
@@ -2854,6 +4518,7 @@ mod tests {
                     bottom: 10,
                 },
             ],
+            source_segment_indexes: vec![0, 1],
             segment_cells: vec![
                 SegmentCell {
                     row: 0,
@@ -2882,6 +4547,7 @@ mod tests {
             logical_row_count: 1,
             logical_column_count: 2,
             ocr_required: true,
+            words_in_source_space: false,
         };
         let session = Session {
             objects: Vec::new(),
@@ -2893,7 +4559,7 @@ mod tests {
                 width: 20,
                 height: 10,
                 stride: 60,
-                pixels: Vec::new(),
+                pixels: Vec::new().into(),
                 placements: vec![RasterPlacement {
                     segment_indexes: vec![0, 1],
                     source_rect: Rect {
@@ -2923,6 +4589,7 @@ mod tests {
                         bottom: 9,
                     },
                     confidence_milli: 980,
+                    ranking_confidence_units: 980,
                 },
                 OcrWordEvidence {
                     text: "Beta".to_owned(),
@@ -2933,6 +4600,7 @@ mod tests {
                         bottom: 9,
                     },
                     confidence_milli: 970,
+                    ranking_confidence_units: 970,
                 },
             ]],
             superseded: vec![false],
@@ -2946,6 +4614,8 @@ mod tests {
             table_profile_discovery_complete: false,
             split_calibrations: BTreeMap::new(),
             active_split_probe: None,
+            recognized_segments: None,
+            importing_ocr: false,
             rendered: None,
             stage_mask: ALL_STAGE_MASK,
         };

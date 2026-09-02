@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::cmp::{Ordering, Reverse};
 
 pub const LOCK_GRAMMAR_PERCENT: u8 = 97;
 pub const GAMMA_DARK: f32 = 1.2;
@@ -279,13 +279,50 @@ pub struct LanguageRequest {
 pub struct LanguageObservation {
     pub grammar_percent: u8,
     pub mean_confidence_milli: u16,
+    selection_percent: i16,
+    minority_confusables: u16,
+    malformed_punctuation: u16,
+    numeric_separators: u8,
+    mean_confidence_ppm: u32,
+    text_length: u32,
 }
 
 impl LanguageObservation {
+    #[cfg(test)]
     pub fn bounded(grammar_percent: u32, mean_confidence_milli: u32) -> Self {
+        let grammar_percent = grammar_percent.min(100);
+        Self {
+            grammar_percent: grammar_percent as u8,
+            mean_confidence_milli: mean_confidence_milli.min(1_000) as u16,
+            selection_percent: grammar_percent as i16,
+            minority_confusables: 0,
+            malformed_punctuation: 0,
+            numeric_separators: 0,
+            mean_confidence_ppm: mean_confidence_milli.min(1_000) * 1_000,
+            text_length: 0,
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_selection(
+        grammar_percent: u32,
+        mean_confidence_milli: u32,
+        mean_confidence_ppm: u32,
+        selection_percent: i32,
+        minority_confusables: usize,
+        malformed_punctuation: usize,
+        numeric_separators: usize,
+        text_length: usize,
+    ) -> Self {
         Self {
             grammar_percent: grammar_percent.min(100) as u8,
             mean_confidence_milli: mean_confidence_milli.min(1_000) as u16,
+            selection_percent: selection_percent.clamp(i16::MIN as i32, i16::MAX as i32) as i16,
+            minority_confusables: minority_confusables.min(u16::MAX as usize) as u16,
+            malformed_punctuation: malformed_punctuation.min(u16::MAX as usize) as u16,
+            numeric_separators: numeric_separators.min(2) as u8,
+            mean_confidence_ppm: mean_confidence_ppm.min(1_000_000),
+            text_length: text_length.min(u32::MAX as usize) as u32,
         }
     }
 }
@@ -430,7 +467,6 @@ pub enum LanguageAgendaResult {
 #[derive(Clone, Debug)]
 pub struct LanguageAgenda {
     bootstrap: bool,
-    specialized_transform_retry: bool,
     profiles: Vec<LanguageProfileId>,
     profile_index: usize,
     pending: LanguageRequest,
@@ -439,39 +475,38 @@ pub struct LanguageAgenda {
     winner: Option<(LanguageRequest, LanguageObservation)>,
 }
 
-const EQUIVALENT_GRAMMAR_MARGIN_PERCENT: u8 = 2;
+fn rounded_confidence_percent(confidence_ppm: u32) -> u8 {
+    let quotient = confidence_ppm / 10_000;
+    let remainder = confidence_ppm % 10_000;
+    let rounded = quotient
+        + u32::from(remainder > 5_000 || (remainder == 5_000 && quotient % 2 == 1));
+    rounded.min(100) as u8
+}
 
-fn observation_score(observation: LanguageObservation) -> (u8, u16) {
+fn observation_score(
+    observation: LanguageObservation,
+    profile: LanguageProfileId,
+) -> (i16, Reverse<u16>, Reverse<u16>, u8, u8, u8, Reverse<u8>, u32, u32) {
     (
+        observation.selection_percent,
+        Reverse(observation.minority_confusables),
+        Reverse(observation.malformed_punctuation),
+        observation.numeric_separators,
         observation.grammar_percent,
-        observation.mean_confidence_milli,
+        rounded_confidence_percent(observation.mean_confidence_ppm),
+        Reverse(profile as u8),
+        observation.mean_confidence_ppm,
+        observation.text_length,
     )
 }
 
 fn candidate_is_better(
     candidate: LanguageObservation,
-    candidate_rank: u8,
+    candidate_profile: LanguageProfileId,
     current: LanguageObservation,
-    current_rank: u8,
+    current_profile: LanguageProfileId,
 ) -> bool {
-    if candidate.grammar_percent
-        > current
-            .grammar_percent
-            .saturating_add(EQUIVALENT_GRAMMAR_MARGIN_PERCENT)
-    {
-        return true;
-    }
-    if current.grammar_percent
-        > candidate
-            .grammar_percent
-            .saturating_add(EQUIVALENT_GRAMMAR_MARGIN_PERCENT)
-    {
-        return false;
-    }
-    if candidate_rank != current_rank {
-        return candidate_rank < current_rank;
-    }
-    observation_score(candidate) > observation_score(current)
+    observation_score(candidate, candidate_profile) > observation_score(current, current_profile)
 }
 
 impl LanguageAgenda {
@@ -496,7 +531,6 @@ impl LanguageAgenda {
         }
         Self {
             bootstrap,
-            specialized_transform_retry: !local_membership,
             profiles,
             profile_index: 0,
             pending: LanguageRequest {
@@ -536,8 +570,25 @@ impl LanguageAgenda {
         }
         Self {
             bootstrap,
-            specialized_transform_retry: !local_membership,
             profiles,
+            profile_index: 0,
+            pending: LanguageRequest {
+                profile: primary,
+                transform: OcrTransform::Raw,
+            },
+            primary_grammar_percent: 0,
+            profile_best: None,
+            winner: None,
+        }
+    }
+
+    pub fn begin_locked_profile(state: &LanguageSplayState) -> Self {
+        let primary = state
+            .locked_profile
+            .expect("locked-profile agenda requires a document language lock");
+        Self {
+            bootstrap: false,
+            profiles: vec![primary],
             profile_index: 0,
             pending: LanguageRequest {
                 profile: primary,
@@ -553,25 +604,30 @@ impl LanguageAgenda {
         self.pending
     }
 
+    pub const fn best_request(&self) -> Option<LanguageRequest> {
+        match self.winner {
+            Some((request, _)) => Some(request),
+            None => None,
+        }
+    }
+
     fn retain_candidate(&mut self, request: LanguageRequest, observation: LanguageObservation) {
-        let rank = self
-            .profiles
-            .iter()
-            .position(|profile| *profile == request.profile)
-            .unwrap_or(usize::MAX) as u8;
         if self
             .profile_best
-            .is_none_or(|current| observation_score(observation) > observation_score(current))
+            .is_none_or(|current| {
+                observation_score(observation, request.profile)
+                    > observation_score(current, request.profile)
+            })
         {
             self.profile_best = Some(observation);
         }
         let replace_winner = self.winner.is_none_or(|(winner_request, current)| {
-            let winner_rank = self
-                .profiles
-                .iter()
-                .position(|profile| *profile == winner_request.profile)
-                .unwrap_or(usize::MAX) as u8;
-            candidate_is_better(observation, rank, current, winner_rank)
+            candidate_is_better(
+                observation,
+                request.profile,
+                current,
+                winner_request.profile,
+            )
         });
         if replace_winner {
             self.winner = Some((request, observation));
@@ -597,14 +653,9 @@ impl LanguageAgenda {
         let request = self.pending;
         self.retain_candidate(request, observation);
 
-        let specialized_retry = matches!(
-            request.profile,
-            LanguageProfileId::ChiSim | LanguageProfileId::Ell | LanguageProfileId::Equ
-        ) && self.specialized_transform_retry
-            && observation.grammar_percent > 0;
         if request.transform == OcrTransform::Raw
             && observation.grammar_percent < LOCK_GRAMMAR_PERCENT
-            && (self.profile_index == 0 || specialized_retry)
+            && self.profile_index == 0
         {
             self.pending.transform = OcrTransform::GammaDark;
             return LanguageAgendaResult::Request(self.pending);
@@ -783,7 +834,7 @@ mod tests {
     }
 
     #[test]
-    fn mixed_text_retries_a_specialized_profile_with_gamma() {
+    fn mixed_text_retries_only_the_primary_profile_with_gamma() {
         let mut state = LanguageSplayState::default();
         let mut agenda = LanguageAgenda::begin_for_context(&state, false);
         let expected = [
@@ -804,8 +855,12 @@ mod tests {
                 transform: OcrTransform::Raw,
             },
             LanguageRequest {
-                profile: LanguageProfileId::ChiSim,
-                transform: OcrTransform::GammaDark,
+                profile: LanguageProfileId::Ell,
+                transform: OcrTransform::Raw,
+            },
+            LanguageRequest {
+                profile: LanguageProfileId::Equ,
+                transform: OcrTransform::Raw,
             },
         ];
         let mut result = agenda.observe(&mut state, score(50));
@@ -816,7 +871,7 @@ mod tests {
     }
 
     #[test]
-    fn nearby_grammar_score_keeps_the_current_splay_priority() {
+    fn higher_grammar_score_beats_the_current_splay_priority() {
         let mut state = LanguageSplayState::default();
         let mut agenda = LanguageAgenda::begin(&state);
         let observations = [
@@ -839,7 +894,7 @@ mod tests {
             result,
             Some(LanguageAgendaResult::Exhausted {
                 winner_request: LanguageRequest {
-                    profile: LanguageProfileId::RusEng,
+                    profile: LanguageProfileId::Ell,
                     transform: OcrTransform::Raw,
                 },
                 ..
@@ -884,7 +939,7 @@ mod tests {
     }
 
     #[test]
-    fn locked_whole_context_splays_after_primary_and_mixed_fallback() {
+    fn locked_whole_context_reaches_unevidenced_fallback_after_low_scores() {
         let mut state = LanguageSplayState::default();
         state.locked_profile = Some(LanguageProfileId::Eng);
         let mut agenda =
@@ -905,22 +960,55 @@ mod tests {
                 transform: OcrTransform::Raw,
             })
         ));
+        let mut result = agenda.observe(&mut state, score(79));
+        loop {
+            let LanguageAgendaResult::Request(request) = result else {
+                panic!("low locked context stopped before the CJK fallback");
+            };
+            if request.profile == LanguageProfileId::ChiSim {
+                result = agenda.observe(&mut state, score(100));
+                break;
+            }
+            result = agenda.observe(&mut state, score(40));
+        }
         assert!(matches!(
-            agenda.observe(&mut state, score(79)),
+            result,
+            LanguageAgendaResult::Complete {
+                winner_profile: LanguageProfileId::ChiSim,
+                ..
+            }
+        ));
+
+        let mut evidenced_state = LanguageSplayState::default();
+        evidenced_state.locked_profile = Some(LanguageProfileId::Eng);
+        let mut evidenced = LanguageAgenda::begin_for_context_with_fallbacks(
+            &evidenced_state,
+            false,
+            &[LanguageProfileId::ChiSim],
+        );
+        assert!(matches!(
+            evidenced.observe(&mut evidenced_state, score(80)),
             LanguageAgendaResult::Request(LanguageRequest {
-                profile: LanguageProfileId::Rus,
+                profile: LanguageProfileId::Eng,
+                transform: OcrTransform::GammaDark,
+            })
+        ));
+        assert!(matches!(
+            evidenced.observe(&mut evidenced_state, score(82)),
+            LanguageAgendaResult::Request(LanguageRequest {
+                profile: LanguageProfileId::RusEng,
                 transform: OcrTransform::Raw,
             })
         ));
         assert!(matches!(
-            agenda.observe(&mut state, score(70)),
+            evidenced.observe(&mut evidenced_state, score(79)),
             LanguageAgendaResult::Request(LanguageRequest {
                 profile: LanguageProfileId::ChiSim,
                 transform: OcrTransform::Raw,
             })
         ));
         assert!(matches!(
-            agenda.observe(&mut state, score(100)),
+            evidenced.observe(&mut evidenced_state, score(100)),
             LanguageAgendaResult::Complete {
                 winner_profile: LanguageProfileId::ChiSim,
                 ..

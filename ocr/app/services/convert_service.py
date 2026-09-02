@@ -371,20 +371,29 @@ def _parse_pdf_text_layer_bbox_pages(html: str) -> list[_PdfTextLayerPage | None
             pages.append(None)
             continue
         words: list[_PdfTextLayerWord] = []
-        for word in page.iter():
-            if _xml_tag_name(word) != "word":
+        for line in page.iter():
+            if _xml_tag_name(line) != "line":
                 continue
-            text = "".join(word.itertext()).strip()
-            if not text:
+            line_words = [
+                word for word in line.iter() if _xml_tag_name(word) == "word"
+            ]
+            if not line_words:
                 continue
             try:
+                text = " ".join(
+                    value
+                    for word in line_words
+                    if (value := "".join(word.itertext()).strip())
+                )
+                if not text:
+                    continue
                 words.append(
                     _PdfTextLayerWord(
                         text=text,
-                        x_min=float(word.attrib["xMin"]),
-                        y_min=float(word.attrib["yMin"]),
-                        x_max=float(word.attrib["xMax"]),
-                        y_max=float(word.attrib["yMax"]),
+                        x_min=min(float(word.attrib["xMin"]) for word in line_words),
+                        y_min=min(float(word.attrib["yMin"]) for word in line_words),
+                        x_max=max(float(word.attrib["xMax"]) for word in line_words),
+                        y_max=max(float(word.attrib["yMax"]) for word in line_words),
                     )
                 )
             except (KeyError, ValueError):
@@ -1901,6 +1910,80 @@ def _pdf_text_layer_fixed_width_markdown(text: str) -> tuple[str, int]:
     return core.assemble_topology(0, layouts, segments), table_count
 
 
+def _pdf_text_layer_rust_markdown(page: _PdfTextLayerPage) -> tuple[str, dict]:
+    core = native_pipeline_core()
+    if core is None:
+        raise RuntimeError("Native PDF object extraction requires the Rust pipeline core")
+    parts = core.build_native_pdf_parts(
+        [
+            {
+                "text": word.text,
+                "width": max(0.0, word.x_max - word.x_min),
+                "height": max(0.0, word.y_max - word.y_min),
+                "transform": (
+                    1.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    word.x_min,
+                    page.height - word.y_min,
+                ),
+            }
+            for word in page.words
+        ]
+    )
+    if parts is None:
+        return "", {
+            "objects": 0,
+            "tables_found": 0,
+            "table_cells": 0,
+            "segments": 0,
+        }
+    kind_codes = {"paragraph": 0, "table": 1, "small_table": 2}
+    layouts: list[tuple[str, int, int, int]] = []
+    for item in parts["objects"]:
+        cells = item.get("cells", [])
+        layouts.append(
+            (
+                str(item["objectId"]),
+                kind_codes[str(item["kind"])],
+                max(
+                    (int(cell["row"]) + int(cell["rowSpan"]) for cell in cells),
+                    default=1,
+                ),
+                max(
+                    (
+                        int(cell["column"]) + int(cell["columnSpan"])
+                        for cell in cells
+                    ),
+                    default=1,
+                ),
+            )
+        )
+    segments = [
+        (
+            str(segment["segmentId"]),
+            str(segment["topology"]["object_id"]),
+            kind_codes[str(segment["topology"]["object_kind"])],
+            int(segment["topology"]["row"]),
+            int(segment["topology"]["column"]),
+            int(segment["topology"]["row_span"]),
+            int(segment["topology"]["column_span"]),
+            str(segment["text"]),
+        )
+        for segment in parts["segments"]
+    ]
+    table_objects = [
+        item for item in parts["objects"] if item.get("kind") in {"table", "small_table"}
+    ]
+    return core.assemble_topology(0, layouts, segments), {
+        "objects": len(parts["objects"]),
+        "tables_found": len(table_objects),
+        "table_cells": sum(len(item.get("cells", [])) for item in table_objects),
+        "segments": len(segments),
+    }
+
+
 def _render_pdf_text_layer_table_region(
     region: LayoutRegion,
     words: list[dict],
@@ -2119,40 +2202,15 @@ def _render_pdf_text_layer_markdown_pages(
             layout_step="pdf_text_layer_layout",
         )
 
-    fixed_width_pages: list[str | None] = []
-    fixed_width_tables = 0
-    fixed_width_preserves_text = True
-    for page_text in page_candidates:
-        if page_text is None:
-            fixed_width_pages.append(None)
-            continue
-        fixed_markdown, table_count = _pdf_text_layer_fixed_width_markdown(page_text)
-        fixed_width_pages.append(fixed_markdown if table_count else page_text)
-        fixed_width_tables += table_count
-        if table_count and _ocr_compact_char_count(fixed_markdown) < int(_ocr_compact_char_count(page_text) * 0.96):
-            fixed_width_preserves_text = False
-    if fixed_width_tables and fixed_width_preserves_text:
-        return PdfTextLayerArtifact(
-            pages=tuple(fixed_width_pages),
-            counters=(("tables_found", fixed_width_tables), ("table_cells", 0)),
-            flags=(
-                "pdf_text_layer:fixed_width_markdown",
-                "pipeline:rust_topology_assembler_v1",
-            ),
-            layout_step="pdf_text_layer_fixed_width",
-        )
-
     bbox_pages = _extract_pdf_text_layer_bbox_pages(content, filename)
     if not bbox_pages or len(bbox_pages) < len(page_candidates):
         return PdfTextLayerArtifact(
-            pages=tuple(fixed_width_pages),
-            counters=(("tables_found", fixed_width_tables), ("table_cells", 0)),
+            pages=tuple(page_candidates),
+            counters=(("tables_found", 0), ("table_cells", 0)),
             flags=(
                 "pdf_text_layer:bbox_unavailable",
-                "pdf_text_layer:fixed_width_markdown",
-                "pipeline:rust_topology_assembler_v1",
             ),
-            layout_step="pdf_text_layer_fixed_width",
+            layout_step="pdf_text_layer_raw",
         )
 
     markdown_pages: list[str | None] = list(page_candidates)
@@ -2160,35 +2218,25 @@ def _render_pdf_text_layer_markdown_pages(
         "tables_found": 0,
         "table_cells": 0,
     }
-    runtime_flags: set[str] = set()
-    identity_pipeline = OcrPreprocessingPipeline.from_step_names(())
-    for image, page_number, _ in _iter_document_pages(content, filename, identity_pipeline):
-        try:
-            index = page_number - 1
-            if index >= len(page_candidates):
-                continue
-            page_text = page_candidates[index]
-            page_layout = bbox_pages[index] if index < len(bbox_pages) else None
-            if page_text is None or page_layout is None:
-                continue
-            markdown, meta = _convert_pdf_text_layer_page_markdown(
-                page_text,
-                page_layout,
-                image,
-                profile,
-            )
-            markdown_pages[index] = markdown
-            totals["tables_found"] += int(meta["tables_found"])
-            totals["table_cells"] += int(meta["table_cells"])
-            runtime_flags.update(meta.get("runtime_flags", ()))
-        finally:
-            image.close()
+    segment_count = 0
+    for index, page_layout in enumerate(bbox_pages[: len(page_candidates)]):
+        if page_candidates[index] is None or page_layout is None:
+            continue
+        markdown, meta = _pdf_text_layer_rust_markdown(page_layout)
+        markdown_pages[index] = markdown or page_candidates[index]
+        totals["tables_found"] += int(meta["tables_found"])
+        totals["table_cells"] += int(meta["table_cells"])
+        segment_count += int(meta["segments"])
 
     return PdfTextLayerArtifact(
         pages=tuple(markdown_pages),
         counters=tuple((name, int(value)) for name, value in totals.items()),
-        flags=tuple(sorted(runtime_flags)),
-        layout_step="pdf_text_layer_layout",
+        flags=(
+            f"pdf_text_layer:native_segments:{segment_count}",
+            "pipeline:rust_native_pdf_v1",
+            "pipeline:rust_topology_assembler_v1",
+        ),
+        layout_step="rust_native_pdf",
     )
 
 

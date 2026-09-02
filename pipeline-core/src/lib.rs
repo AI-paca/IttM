@@ -7,8 +7,14 @@ mod grammar;
 mod language;
 mod local_structure;
 mod objects;
+mod pdf_native;
 mod separated;
 mod topology;
+
+pub use pdf_native::{
+    NativePdfArtifact, NativePdfSegment, NativeTextCell, NativeTextObject, PdfTextGeometryItem,
+    build_native_pdf_artifact,
+};
 
 pub use candidates::{SpanEvidence, score_span_evidence};
 
@@ -4312,7 +4318,7 @@ pub unsafe extern "C" fn ittm_analyze_compact_fingerprint_copy(
     let Some(plan) = blocks::plan_blocks(&analysis, &reconstruction) else {
         return -4;
     };
-    let Some(compacted) = compact::compact_blocks(&analysis, &plan) else {
+    let Some(compacted) = compact::compact_blocks(&analysis, &plan, &reconstruction.objects) else {
         return -5;
     };
     let mut placement_values = Vec::<u64>::new();
@@ -4403,7 +4409,7 @@ pub unsafe extern "C" fn ittm_analyze_compact_block_hashes_copy(
     let Some(plan) = blocks::plan_blocks(&analysis, &reconstruction) else {
         return -4;
     };
-    let Some(compacted) = compact::compact_blocks(&analysis, &plan) else {
+    let Some(compacted) = compact::compact_blocks(&analysis, &plan, &reconstruction.objects) else {
         return -5;
     };
     if output_length as usize != compacted.len() * 3 {

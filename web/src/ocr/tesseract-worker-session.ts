@@ -578,6 +578,15 @@ function splitLanguages(languages: string): string[] {
   return Array.from(new Set(languages.split("+").filter(Boolean)));
 }
 
+function languagesAreAvailable(
+  languages: string,
+  availableLanguages?: readonly string[],
+): boolean {
+  if (!availableLanguages) return true;
+  const available = new Set(availableLanguages);
+  return splitLanguages(languages).every((language) => available.has(language));
+}
+
 function reviewerRetryLanguages(
   languages: string,
   availableLanguages?: readonly string[],
@@ -928,6 +937,9 @@ class BrowserOcrWorkerSession {
   ): Promise<BrowserOcrDetailedResult> {
     // Rust has already bounded the block. Re-running language and image
     // candidates here would reinitialize Tesseract for every segment.
+    if (!languagesAreAvailable(languages, this.profile.availableLanguages)) {
+      return { text: "", words: [], confidence: 0 };
+    }
     this.busy = true;
     try {
       const worker = await this.workerPromise;
@@ -949,18 +961,28 @@ class BrowserOcrWorkerSession {
       );
       if (
         primary.words.length > 0 ||
+        primary.text.trim() ||
         pageSegmentationMode === PSM.SINGLE_WORD ||
         pageSegmentationMode === PSM.RAW_LINE
       ) {
         return primary;
       }
+      let selected = primary;
+      for (const fallbackPsm of [PSM.SINGLE_WORD, PSM.RAW_LINE]) {
+        await worker.setParameters?.({ tessedit_pageseg_mode: fallbackPsm });
+        selected = strongerEdgeFallback(
+          selected,
+          await this.recognizeWithOutput(worker, recognizeInput, true),
+        );
+      }
+      if (selected.words.length > 0 || selected.text.trim()) return selected;
+
       const edgeFallback = await buildEdgeFallbackInput(
         input,
         this.profile.ocrBorderPixels,
       );
-      if (!edgeFallback) return primary;
+      if (!edgeFallback) return selected;
       const fallbackInput = await toTesseractRecognizeInput(edgeFallback.input);
-      let selected = primary;
       for (const fallbackPsm of [PSM.SINGLE_WORD, PSM.RAW_LINE]) {
         await worker.setParameters?.({ tessedit_pageseg_mode: fallbackPsm });
         selected = strongerEdgeFallback(

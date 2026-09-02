@@ -53,6 +53,7 @@ class SeparatedOcrJob:
 @dataclass(frozen=True)
 class SeparatedJobSegment:
     index: int
+    source_index: int
     source_bbox: tuple[int, int, int, int]
     cell: tuple[int, int, int, int]
     crop_bbox: tuple[int, int, int, int] | None
@@ -112,18 +113,59 @@ class SeparatedBlock:
     logical_scope_shape: tuple[int, int]
 
 
+@dataclass(frozen=True)
+class SeparatedBlockStageInput:
+    metadata: tuple[int, ...]
+    pixels: bytes
+    width: int
+    height: int
+    stride: int
+
+
+@dataclass(frozen=True)
+class SeparatedOcrStageInput:
+    block_index: int
+    languages: str
+    transform: str
+    text: str
+    grammar_milli: int
+    words: tuple[SeparatedOcrWord, ...] = ()
+    words_in_source_space: bool = True
+
+
+@dataclass(frozen=True)
+class SeparatedRecognizedSegment:
+    index: int
+    object_id: int
+    object_kind: int
+    cell: tuple[int, int, int, int]
+    source_segment_indexes: tuple[int, ...]
+    text: str
+
+
 RecognitionResult: TypeAlias = str | tuple[str, int] | SeparatedRecognition
 
 
 class NativeSeparatedSession:
-    def __init__(self, image: Image.Image, core: NativePipelineCore | None = None):
+    def __init__(
+        self,
+        image: Image.Image,
+        core: NativePipelineCore | None = None,
+        *,
+        start_ocr: bool = True,
+    ):
         self._core = core or native_pipeline_core()
         if self._core is None:
             raise RuntimeError("Native separated pipeline core is unavailable")
         raster = image.convert("RGB")
         try:
             width, height = raster.size
-            self._handle = self._core.separated_begin(
+            begin = (
+                self._core.separated_begin
+                if start_ocr
+                else self._core.separated_plan_begin
+            )
+            self._handle = begin(
                 raster.tobytes(),
                 width,
                 height,
@@ -134,6 +176,117 @@ class NativeSeparatedSession:
             if raster is not image:
                 raster.close()
         self._closed = False
+
+    @classmethod
+    def from_separate_blocks(
+        cls,
+        blocks: tuple[SeparatedBlockStageInput, ...],
+        core: NativePipelineCore | None = None,
+    ) -> NativeSeparatedSession:
+        if not blocks:
+            raise ValueError("Separate-block checkpoint contains no OCR blocks")
+        value = cls.__new__(cls)
+        value._core = core or native_pipeline_core()
+        if value._core is None:
+            raise RuntimeError("Native separated pipeline core is unavailable")
+        value._handle = value._core.separated_import_blocks_begin()
+        value._closed = False
+        try:
+            for block in blocks:
+                value._core.separated_import_block(
+                    value._handle,
+                    block.metadata,
+                    block.pixels,
+                    block.width,
+                    block.height,
+                    block.stride,
+                )
+        except BaseException:
+            value.close()
+            raise
+        return value
+
+    @classmethod
+    def from_recognized_segments(
+        cls,
+        segments: tuple[SeparatedRecognizedSegment, ...],
+        core: NativePipelineCore | None = None,
+    ) -> NativeSeparatedSession:
+        if not segments:
+            raise ValueError("Get-segment checkpoint contains no segments")
+        value = cls.__new__(cls)
+        value._core = core or native_pipeline_core()
+        if value._core is None:
+            raise RuntimeError("Native separated pipeline core is unavailable")
+        value._handle = value._core.separated_import_segments_begin()
+        value._closed = False
+        try:
+            for segment in segments:
+                value._core.separated_import_segment(
+                    value._handle,
+                    segment.object_id,
+                    segment.object_kind,
+                    segment.cell,
+                    segment.source_segment_indexes,
+                    segment.text,
+                )
+            value._core.separated_import_segments_finish(value._handle)
+        except BaseException:
+            value.close()
+            raise
+        return value
+
+    def start_ocr(self) -> None:
+        self._core.separated_start_ocr(self._handle)
+
+    def import_ocr(self, jobs: tuple[SeparatedOcrStageInput, ...]) -> None:
+        if not jobs:
+            raise ValueError("OCR checkpoint contains no selected jobs")
+        for job in jobs:
+            profile = SEPARATED_LANGUAGE_PROFILES.index(job.languages)
+            transform = SEPARATED_TRANSFORMS.index(job.transform)
+            index = self._core.separated_import_ocr_job(
+                self._handle,
+                job.block_index,
+                profile,
+                transform,
+                job.words_in_source_space,
+                job.text,
+                job.grammar_milli,
+            )
+            for word in job.words:
+                self._core.separated_add_ocr_word(
+                    self._handle,
+                    index,
+                    word.text,
+                    word.bbox,
+                    word.confidence_milli,
+                )
+        self._core.separated_import_ocr_finish(self._handle)
+
+    def run_get_segment(self) -> None:
+        self._core.separated_run_get_segment(self._handle)
+
+    @property
+    def recognized_segments(self) -> tuple[SeparatedRecognizedSegment, ...]:
+        values = []
+        field = self._core.separated_segment_field
+        for index in range(self._core.separated_segment_count(self._handle)):
+            source_count = field(self._handle, index, 6)
+            values.append(
+                SeparatedRecognizedSegment(
+                    index=index,
+                    object_id=field(self._handle, index, 0),
+                    object_kind=field(self._handle, index, 1),
+                    cell=tuple(field(self._handle, index, value) for value in range(2, 6)),
+                    source_segment_indexes=tuple(
+                        self._core.separated_segment_source(self._handle, index, source)
+                        for source in range(source_count)
+                    ),
+                    text=self._core.separated_segment_text(self._handle, index),
+                )
+            )
+        return tuple(values)
 
     @property
     def route_id(self) -> int:
@@ -177,12 +330,13 @@ class NativeSeparatedSession:
                     segment_index,
                     field,
                 )
-                for field in range(17)
+                for field in range(18)
             )
             placed = bool(fields[16])
             values.append(
                 SeparatedJobSegment(
                     index=segment_index,
+                    source_index=fields[17],
                     source_bbox=fields[0:4],
                     cell=fields[4:8],
                     crop_bbox=fields[8:12] if placed else None,
@@ -194,6 +348,9 @@ class NativeSeparatedSession:
     @property
     def jobs(self) -> tuple[SeparatedOcrJob, ...]:
         return tuple(self.job(index) for index in range(self.job_count))
+
+    def text(self, index: int) -> str:
+        return self._core.separated_job_text(self._handle, index)
 
     @property
     def objects(self) -> tuple[SeparatedObject, ...]:

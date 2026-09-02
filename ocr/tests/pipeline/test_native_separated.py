@@ -32,7 +32,7 @@ def test_native_session_exposes_the_complete_separated_contract():
                         SeparatedOcrWord(
                             text=text,
                             bbox=(0, 0, crop.width, crop.height),
-                            confidence_milli=1000,
+                            confidence_milli=1_000_000,
                         ),
                     )
                 session.set_ocr(index, text, 1000)
@@ -58,7 +58,7 @@ def test_native_runner_keeps_ocr_as_a_host_adapter():
                 SeparatedOcrWord(
                     text=text,
                     bbox=(0, 0, crop.width, crop.height),
-                    confidence_milli=1000,
+                    confidence_milli=1_000_000,
                 ),
             ),
         )

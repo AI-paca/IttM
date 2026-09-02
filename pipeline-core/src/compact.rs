@@ -2,6 +2,10 @@ use std::collections::BTreeMap;
 
 use crate::blocks::BlockPlan;
 use crate::geometry::GeometryAnalysis;
+use crate::objects::DocumentObject;
+
+const OCR_RASTER_MAX_PIXELS: usize = 4_000_000;
+const OCR_RASTER_MAX_EDGE: usize = 3_300;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompactionPlacement {
@@ -316,6 +320,107 @@ pub(crate) fn resize_lanczos(pixels: &[u8], width: usize, height: usize, scale: 
     output
 }
 
+pub(crate) fn bounded_ocr_dimensions(
+    width: usize,
+    height: usize,
+) -> Option<(usize, usize)> {
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let pixel_scale = (OCR_RASTER_MAX_PIXELS as f64 / width.checked_mul(height)? as f64)
+        .sqrt()
+        .min(1.0);
+    let edge_scale = (OCR_RASTER_MAX_EDGE as f64 / width.max(height) as f64).min(1.0);
+    let scale = pixel_scale.min(edge_scale);
+    Some((
+        ((width as f64 * scale).floor() as usize).max(1),
+        ((height as f64 * scale).floor() as usize).max(1),
+    ))
+}
+
+pub(crate) fn resize_bilinear_rgb(
+    pixels: &[u8],
+    width: usize,
+    height: usize,
+    output_width: usize,
+    output_height: usize,
+) -> Option<Vec<u8>> {
+    if pixels.len() != width.checked_mul(height)?.checked_mul(3)?
+        || output_width == 0
+        || output_height == 0
+    {
+        return None;
+    }
+    if (width, height) == (output_width, output_height) {
+        return Some(pixels.to_vec());
+    }
+    let mut output = vec![0_u8; output_width.checked_mul(output_height)?.checked_mul(3)?];
+    for target_y in 0..output_height {
+        let source_y = ((target_y as f64 + 0.5) * height as f64 / output_height as f64 - 0.5)
+            .clamp(0.0, height.saturating_sub(1) as f64);
+        let y0 = source_y.floor() as usize;
+        let y1 = (y0 + 1).min(height - 1);
+        let wy = source_y - y0 as f64;
+        for target_x in 0..output_width {
+            let source_x =
+                ((target_x as f64 + 0.5) * width as f64 / output_width as f64 - 0.5)
+                    .clamp(0.0, width.saturating_sub(1) as f64);
+            let x0 = source_x.floor() as usize;
+            let x1 = (x0 + 1).min(width - 1);
+            let wx = source_x - x0 as f64;
+            let target = (target_y * output_width + target_x) * 3;
+            for channel in 0..3 {
+                let top = pixels[(y0 * width + x0) * 3 + channel] as f64 * (1.0 - wx)
+                    + pixels[(y0 * width + x1) * 3 + channel] as f64 * wx;
+                let bottom = pixels[(y1 * width + x0) * 3 + channel] as f64 * (1.0 - wx)
+                    + pixels[(y1 * width + x1) * 3 + channel] as f64 * wx;
+                output[target + channel] =
+                    (top * (1.0 - wy) + bottom * wy).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    Some(output)
+}
+
+fn scaled_coordinate(value: usize, input: usize, output: usize, ceil: bool) -> usize {
+    let numerator = (value as u128).saturating_mul(output as u128);
+    let denominator = input as u128;
+    let scaled = if ceil {
+        numerator.saturating_add(denominator.saturating_sub(1)) / denominator
+    } else {
+        numerator / denominator
+    };
+    usize::try_from(scaled).unwrap_or(output).min(output)
+}
+
+fn bound_compacted_block(mut block: CompactedBlock) -> Option<CompactedBlock> {
+    let (width, height) = bounded_ocr_dimensions(block.width, block.height)?;
+    if (width, height) == (block.width, block.height) {
+        return Some(block);
+    }
+    block.pixels = resize_bilinear_rgb(&block.pixels, block.width, block.height, width, height)?;
+    for placement in &mut block.placements {
+        placement.crop_bbox = [
+            scaled_coordinate(placement.crop_bbox[0], block.width, width, false),
+            scaled_coordinate(placement.crop_bbox[1], block.height, height, false),
+            scaled_coordinate(placement.crop_bbox[2], block.width, width, true),
+            scaled_coordinate(placement.crop_bbox[3], block.height, height, true),
+        ];
+    }
+    block.width = width;
+    block.height = height;
+    block.occupied_pixels_after = block
+        .placements
+        .iter()
+        .map(|placement| {
+            (placement.crop_bbox[2] - placement.crop_bbox[0])
+                * (placement.crop_bbox[3] - placement.crop_bbox[1])
+        })
+        .sum();
+    block.packed_canvas_pixels = width.checked_mul(height)?;
+    Some(block)
+}
+
 fn canonical_packed_shape(block: &crate::blocks::RecognitionBlock) -> Option<[usize; 2]> {
     let shape = block.logical_scope_shape?;
     if shape[0] == 0 || shape[1] == 0 || shape[0] > 16 || shape[1] > 16 {
@@ -556,6 +661,7 @@ fn crop_rgb(page: &[u8], page_width: usize, bbox: [usize; 4]) -> Vec<u8> {
 pub fn compact_blocks(
     analysis: &GeometryAnalysis,
     plan: &BlockPlan,
+    objects: &[DocumentObject],
 ) -> Option<Vec<CompactedBlock>> {
     let width = analysis.foreground.width;
     let height = analysis.foreground.height;
@@ -575,6 +681,7 @@ pub fn compact_blocks(
     let mut tile_cache = BTreeMap::<Vec<usize>, Option<Tile>>::new();
     let mut outputs = Vec::with_capacity(plan.blocks.len());
     for (block_index, block) in plan.blocks.iter().enumerate() {
+        let scope_bbox = objects.get(block.scope_index)?.bbox;
         if block.logical_segment_spans.len() != block.segment_indexes.len() {
             return None;
         }
@@ -606,10 +713,10 @@ pub fn compact_blocks(
             }
             let member_bbox = bbox_union(group.iter().map(|index| segments[*index].bbox))?;
             let analysis_bbox = [
-                member_bbox[0].saturating_sub(4),
-                member_bbox[1].saturating_sub(4),
-                (member_bbox[2] + 4).min(width),
-                (member_bbox[3] + 4).min(height),
+                member_bbox[0].saturating_sub(4).max(scope_bbox[0]),
+                member_bbox[1].saturating_sub(4).max(scope_bbox[1]),
+                (member_bbox[2] + 4).min(scope_bbox[2]).min(width),
+                (member_bbox[3] + 4).min(scope_bbox[3]).min(height),
             ];
             let unit_width = analysis_bbox[2] - analysis_bbox[0];
             let unit_height = analysis_bbox[3] - analysis_bbox[1];
@@ -717,7 +824,7 @@ pub fn compact_blocks(
             tiles.push(tile);
         }
         let used_fallback = tiles.is_empty();
-        let mut compacted = if used_fallback {
+        let compacted = if used_fallback {
             let bbox = block.bbox;
             let crop_width = bbox[2] - bbox[0];
             let crop_height = bbox[3] - bbox[1];
@@ -768,6 +875,7 @@ pub fn compact_blocks(
         } else {
             pack_tiles(&tiles, canonical_shape)?
         };
+        let mut compacted = bound_compacted_block(compacted)?;
         let mut unique_omitted = Vec::new();
         for unit in omitted {
             if !unique_omitted.contains(&unit) {
@@ -778,4 +886,18 @@ pub fn compact_blocks(
         outputs.push(compacted);
     }
     Some(outputs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{OCR_RASTER_MAX_EDGE, OCR_RASTER_MAX_PIXELS, bounded_ocr_dimensions};
+
+    #[test]
+    fn bounded_dimensions_limit_large_ocr_rasters_without_changing_aspect_ratio() {
+        let (width, height) = bounded_ocr_dimensions(8_000, 6_000).unwrap();
+        assert!(width <= OCR_RASTER_MAX_EDGE);
+        assert!(height <= OCR_RASTER_MAX_EDGE);
+        assert!(width * height <= OCR_RASTER_MAX_PIXELS);
+        assert!((width as f64 / height as f64 - 4.0 / 3.0).abs() < 0.01);
+    }
 }

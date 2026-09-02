@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -41,8 +42,31 @@ class NativePipelineCore:
             "ittm_assembler_render_length",
             "ittm_assembler_render_copy",
             "ittm_assembler_drop",
+            "ittm_pdf_native_begin",
+            "ittm_pdf_native_add_item",
+            "ittm_pdf_native_build",
+            "ittm_pdf_native_render_length",
+            "ittm_pdf_native_render_copy",
+            "ittm_pdf_native_drop",
             "ittm_separated_begin",
+            "ittm_separated_plan_begin",
+            "ittm_separated_import_blocks_begin",
+            "ittm_separated_import_block",
+            "ittm_separated_import_segments_begin",
+            "ittm_separated_import_segment",
+            "ittm_separated_import_segments_finish",
+            "ittm_separated_import_ocr_job",
+            "ittm_separated_import_ocr_finish",
+            "ittm_separated_run_get_segment",
+            "ittm_separated_segment_count",
+            "ittm_separated_segment_field",
+            "ittm_separated_segment_source",
+            "ittm_separated_segment_text_length",
+            "ittm_separated_segment_text_copy",
+            "ittm_separated_start_ocr",
             "ittm_separated_job_count",
+            "ittm_separated_job_text_length",
+            "ittm_separated_job_text_copy",
             "ittm_separated_job_field",
             "ittm_separated_job_segment_count",
             "ittm_separated_job_segment_field",
@@ -147,6 +171,34 @@ class NativePipelineCore:
         library.ittm_assembler_render_copy.restype = ctypes.c_int32
         library.ittm_assembler_drop.argtypes = (ctypes.c_uint32,)
         library.ittm_assembler_drop.restype = ctypes.c_int32
+        library.ittm_pdf_native_begin.restype = ctypes.c_uint32
+        library.ittm_pdf_native_add_item.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_uint32,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+            ctypes.c_double,
+        )
+        library.ittm_pdf_native_add_item.restype = ctypes.c_int32
+        library.ittm_pdf_native_build.argtypes = (ctypes.c_uint32,)
+        library.ittm_pdf_native_build.restype = ctypes.c_int32
+        library.ittm_pdf_native_render_length.argtypes = (ctypes.c_uint32,)
+        library.ittm_pdf_native_render_length.restype = ctypes.c_uint32
+        library.ittm_pdf_native_render_copy.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+        )
+        library.ittm_pdf_native_render_copy.restype = ctypes.c_int32
+        library.ittm_pdf_native_drop.argtypes = (ctypes.c_uint32,)
+        library.ittm_pdf_native_drop.restype = ctypes.c_int32
         library.ittm_separated_begin.argtypes = (
             ctypes.c_void_p,
             ctypes.c_uint32,
@@ -156,8 +208,103 @@ class NativePipelineCore:
             ctypes.c_uint32,
         )
         library.ittm_separated_begin.restype = ctypes.c_uint32
+        library.ittm_separated_plan_begin.argtypes = (
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_plan_begin.restype = ctypes.c_uint32
+        library.ittm_separated_import_blocks_begin.argtypes = ()
+        library.ittm_separated_import_blocks_begin.restype = ctypes.c_uint32
+        library.ittm_separated_import_block.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_import_block.restype = ctypes.c_int32
+        library.ittm_separated_import_segments_begin.argtypes = ()
+        library.ittm_separated_import_segments_begin.restype = ctypes.c_uint32
+        library.ittm_separated_import_segment.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_import_segment.restype = ctypes.c_int32
+        library.ittm_separated_import_segments_finish.argtypes = (ctypes.c_uint32,)
+        library.ittm_separated_import_segments_finish.restype = ctypes.c_int32
+        library.ittm_separated_import_ocr_job.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_import_ocr_job.restype = ctypes.c_int32
+        library.ittm_separated_import_ocr_finish.argtypes = (ctypes.c_uint32,)
+        library.ittm_separated_import_ocr_finish.restype = ctypes.c_int32
+        library.ittm_separated_run_get_segment.argtypes = (ctypes.c_uint32,)
+        library.ittm_separated_run_get_segment.restype = ctypes.c_int32
+        library.ittm_separated_segment_count.argtypes = (ctypes.c_uint32,)
+        library.ittm_separated_segment_count.restype = ctypes.c_uint32
+        library.ittm_separated_segment_field.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_segment_field.restype = ctypes.c_int32
+        library.ittm_separated_segment_source.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_segment_source.restype = ctypes.c_int32
+        library.ittm_separated_segment_text_length.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_segment_text_length.restype = ctypes.c_uint32
+        library.ittm_separated_segment_text_copy.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_segment_text_copy.restype = ctypes.c_int32
+        library.ittm_separated_start_ocr.argtypes = (ctypes.c_uint32,)
+        library.ittm_separated_start_ocr.restype = ctypes.c_int32
         library.ittm_separated_job_count.argtypes = (ctypes.c_uint32,)
         library.ittm_separated_job_count.restype = ctypes.c_uint32
+        library.ittm_separated_job_text_length.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_job_text_length.restype = ctypes.c_uint32
+        library.ittm_separated_job_text_copy.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_job_text_copy.restype = ctypes.c_int32
         library.ittm_separated_job_field.argtypes = (
             ctypes.c_uint32,
             ctypes.c_uint32,
@@ -281,6 +428,18 @@ class NativePipelineCore:
             ctypes.c_uint32,
         )
         library.ittm_separated_add_ocr_word.restype = ctypes.c_int32
+        library.ittm_separated_add_ocr_word_ppm.argtypes = (
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+        )
+        library.ittm_separated_add_ocr_word_ppm.restype = ctypes.c_int32
         library.ittm_separated_render_length.argtypes = (ctypes.c_uint32,)
         library.ittm_separated_render_length.restype = ctypes.c_uint32
         library.ittm_separated_render_copy.argtypes = (
@@ -465,6 +624,61 @@ class NativePipelineCore:
             if int(self._library.ittm_assembler_drop(handle)) != 0:
                 raise ValueError(f"Unknown topology assembler handle: {handle}")
 
+    def build_native_pdf_parts(self, items: list[dict]) -> dict | None:
+        handle = int(self._library.ittm_pdf_native_begin())
+        if handle == 0:
+            raise RuntimeError("Rust native PDF route rejected a new session")
+        try:
+            for item in items:
+                encoded = str(item.get("text", "")).encode("utf-8")
+                text_buffer = ctypes.create_string_buffer(encoded) if encoded else None
+                transform = tuple(float(value) for value in item.get("transform", ()))
+                if len(transform) != 6:
+                    raise ValueError("Native PDF transform must contain six values")
+                height = item.get("height")
+                status = int(
+                    self._library.ittm_pdf_native_add_item(
+                        handle,
+                        text_buffer,
+                        len(encoded),
+                        float(item.get("width", 0.0)),
+                        float(height) if height is not None else 0.0,
+                        int(height is not None),
+                        *transform,
+                    )
+                )
+                if status != 0:
+                    raise RuntimeError(
+                        f"Rust native PDF item handoff failed with status {status}"
+                    )
+            build_status = int(self._library.ittm_pdf_native_build(handle))
+            if build_status != 0:
+                raise RuntimeError(
+                    f"Rust native PDF build failed with status {build_status}"
+                )
+            length = int(self._library.ittm_pdf_native_render_length(handle))
+            if length <= 0:
+                raise RuntimeError("Rust native PDF route returned no artifact")
+            output = ctypes.create_string_buffer(length)
+            copied = int(
+                self._library.ittm_pdf_native_render_copy(handle, output, length)
+            )
+            if copied != length:
+                raise RuntimeError(
+                    f"Rust native PDF route copied {copied} bytes; expected {length}"
+                )
+            artifact = json.loads(bytes(output.raw[:length]).decode("utf-8"))
+            if artifact is None:
+                return None
+            if not isinstance(artifact.get("objects"), list) or not isinstance(
+                artifact.get("segments"), list
+            ):
+                raise RuntimeError("Rust native PDF route returned an invalid artifact")
+            return artifact
+        finally:
+            if int(self._library.ittm_pdf_native_drop(handle)) != 0:
+                raise ValueError(f"Unknown Rust native PDF handle: {handle}")
+
     def separated_begin(
         self,
         pixels: bytes,
@@ -490,8 +704,197 @@ class NativePipelineCore:
             raise ValueError("Separated pipeline rejected the raster plane")
         return handle
 
+    def separated_plan_begin(
+        self,
+        pixels: bytes,
+        width: int,
+        height: int,
+        stride: int,
+        pixel_format: int,
+    ) -> int:
+        if not pixels:
+            raise ValueError("Separated pipeline pixels must not be empty")
+        source = ctypes.create_string_buffer(pixels)
+        handle = int(
+            self._library.ittm_separated_plan_begin(
+                source,
+                len(pixels),
+                width,
+                height,
+                stride,
+                pixel_format,
+            )
+        )
+        if handle == 0:
+            raise ValueError("Separated planning stage rejected the raster plane")
+        return handle
+
+    def separated_start_ocr(self, handle: int) -> None:
+        if int(self._library.ittm_separated_start_ocr(handle)) != 1:
+            raise ValueError("Separated OCR stage could not start")
+
+    def separated_import_blocks_begin(self) -> int:
+        handle = int(self._library.ittm_separated_import_blocks_begin())
+        if handle == 0:
+            raise RuntimeError("Separated block import could not start")
+        return handle
+
+    def separated_import_segments_begin(self) -> int:
+        handle = int(self._library.ittm_separated_import_segments_begin())
+        if handle == 0:
+            raise RuntimeError("Separated segment import could not start")
+        return handle
+
+    def separated_import_segment(
+        self,
+        handle: int,
+        object_id: int,
+        object_kind: int,
+        cell: tuple[int, int, int, int],
+        source_indexes: tuple[int, ...],
+        text: str,
+    ) -> None:
+        sources = (
+            (ctypes.c_uint32 * len(source_indexes))(*source_indexes)
+            if source_indexes
+            else None
+        )
+        encoded = text.encode("utf-8")
+        text_buffer = ctypes.create_string_buffer(encoded) if encoded else None
+        result = int(
+            self._library.ittm_separated_import_segment(
+                handle,
+                object_id,
+                object_kind,
+                *cell,
+                sources,
+                len(source_indexes),
+                text_buffer,
+                len(encoded),
+            )
+        )
+        if result != 0:
+            raise ValueError(f"Separated segment import failed: {result}")
+
+    def separated_import_segments_finish(self, handle: int) -> None:
+        if int(self._library.ittm_separated_import_segments_finish(handle)) != 1:
+            raise ValueError("Separated segment import could not finish")
+
+    def separated_import_block(
+        self,
+        handle: int,
+        metadata: tuple[int, ...],
+        pixels: bytes,
+        width: int,
+        height: int,
+        stride: int,
+    ) -> None:
+        if not metadata or not pixels:
+            raise ValueError("Imported separated block must not be empty")
+        metadata_buffer = (ctypes.c_uint32 * len(metadata))(*metadata)
+        pixel_buffer = ctypes.create_string_buffer(pixels)
+        result = int(
+            self._library.ittm_separated_import_block(
+                handle,
+                metadata_buffer,
+                len(metadata),
+                pixel_buffer,
+                len(pixels),
+                width,
+                height,
+                stride,
+            )
+        )
+        if result != 0:
+            raise ValueError(f"Separated block import failed: {result}")
+
+    def separated_import_ocr_job(
+        self,
+        handle: int,
+        block_index: int,
+        profile: int,
+        transform: int,
+        words_in_source_space: bool,
+        text: str,
+        grammar_milli: int,
+    ) -> int:
+        encoded = text.encode("utf-8")
+        source = ctypes.create_string_buffer(encoded) if encoded else None
+        index = int(
+            self._library.ittm_separated_import_ocr_job(
+                handle,
+                block_index,
+                profile,
+                transform,
+                int(words_in_source_space),
+                source,
+                len(encoded),
+                grammar_milli,
+            )
+        )
+        if index < 0:
+            raise ValueError(f"Separated OCR import failed: {index}")
+        return index
+
+    def separated_import_ocr_finish(self, handle: int) -> None:
+        if int(self._library.ittm_separated_import_ocr_finish(handle)) != 1:
+            raise ValueError("Separated OCR import could not finish")
+
+    def separated_run_get_segment(self, handle: int) -> None:
+        if int(self._library.ittm_separated_run_get_segment(handle)) != 1:
+            raise ValueError("Separated get-segment stage could not run")
+
+    def separated_segment_count(self, handle: int) -> int:
+        return int(self._library.ittm_separated_segment_count(handle))
+
+    def separated_segment_field(self, handle: int, index: int, field: int) -> int:
+        value = int(self._library.ittm_separated_segment_field(handle, index, field))
+        if value < 0:
+            raise ValueError(f"Invalid separated segment field: {index}:{field}")
+        return value
+
+    def separated_segment_source(self, handle: int, index: int, source: int) -> int:
+        value = int(self._library.ittm_separated_segment_source(handle, index, source))
+        if value < 0:
+            raise ValueError(f"Invalid separated segment source: {index}:{source}")
+        return value
+
+    def separated_segment_text(self, handle: int, index: int) -> str:
+        length = int(self._library.ittm_separated_segment_text_length(handle, index))
+        if length == 0:
+            return ""
+        output = ctypes.create_string_buffer(length)
+        result = int(
+            self._library.ittm_separated_segment_text_copy(
+                handle,
+                index,
+                output,
+                length,
+            )
+        )
+        if result != 0:
+            raise ValueError(f"Invalid separated segment text: {index}:{result}")
+        return output.raw.decode("utf-8")
+
     def separated_job_count(self, handle: int) -> int:
         return int(self._library.ittm_separated_job_count(handle))
+
+    def separated_job_text(self, handle: int, index: int) -> str:
+        length = int(self._library.ittm_separated_job_text_length(handle, index))
+        if length == 0:
+            return ""
+        output = ctypes.create_string_buffer(length)
+        result = int(
+            self._library.ittm_separated_job_text_copy(
+                handle,
+                index,
+                output,
+                length,
+            )
+        )
+        if result != 0:
+            raise ValueError(f"Invalid separated OCR job text: {index}:{result}")
+        return output.raw.decode("utf-8")
 
     def separated_job_field(self, handle: int, index: int, field: int) -> int:
         value = int(self._library.ittm_separated_job_field(handle, index, field))
@@ -675,7 +1078,7 @@ class NativePipelineCore:
         encoded = text.encode("utf-8")
         source = ctypes.create_string_buffer(encoded)
         status = int(
-            self._library.ittm_separated_add_ocr_word(
+            self._library.ittm_separated_add_ocr_word_ppm(
                 handle,
                 index,
                 source,

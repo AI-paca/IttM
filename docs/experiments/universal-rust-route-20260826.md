@@ -73,3 +73,52 @@ Pending:
   finish so it cannot distort that comparison.
 - The corrected branch still needs a full corpus run after the baseline
   `clean` and checkpoint runs.
+
+## Update: isolated route audit (2026-08-31)
+
+### Successful
+
+- Explicit `best_int` tessdata is no longer replaced by the browser model
+  downloader. On `image copy.png`, native and WASM now produce byte-identical
+  final Markdown.
+- Unavailable browser language profiles are skipped instead of silently
+  substituting another profile.
+- Grammar normalization preserves the source arrow notation used by the
+  reference output.
+- Native PDF object and segment discovery is now owned by Rust and is exposed
+  through the same native/WASM ABI. The eight-page curriculum PDF produces 45
+  objects and 5538 segments in the browser. Local `pdftotext` grouping produces
+  5527 segments, with 9975/9975 final text tokens shared with the browser route.
+- `doc_course_tasks_legacy.png` produces one paragraph object, one `8 x 6`
+  table object and eight overlapping dyadic table blocks. Empty logical cells
+  remain topology placeholders but are absent from the packed OCR rasters.
+- Final raster objects are rendered by Rust `reading_index`, not by a terminal
+  OCR job's local row. The standalone table header is therefore emitted before
+  the table.
+- The browser debug adapter now reads Rust objects, base blocks and dense block
+  rasters directly from the existing ABI. Recursive language attempts are
+  reported under `ocr-blocks`, not mislabeled as `separate-block` output.
+
+### Rejected hypotheses and approaches
+
+- Kornia is not a geometry or table-partition dependency. The autotune lab used
+  Kornia as an Apache-2.0 evaluation reference; production Rust owns the small
+  gamma formula and invokes `gamma-dark` only as an OCR retry. It can improve or
+  worsen individual recognized words, but cannot change alignment, objects,
+  block masks or native PDF topology.
+- The current Python fixed-width PDF oracle is not a usable source of truth for
+  object boundaries: it produced 113 objects and 3359 segments on the curriculum
+  PDF, versus the Rust/PDF.js text-layer route's 45 objects and 5538 segments.
+- Passing every `pdftotext` word as an independent segment destroys line
+  context and creates 9979 tiny segments. Grouping XML words by the PDF line is
+  both faster and structurally faithful.
+- Bridging any adjacent wide PDF tables over paragraph-like rows overmerged
+  unrelated small tables. The accepted bridge is restricted to very large,
+  similarly wide tables with aligned interruption rows.
+
+### Still unverified
+
+- SCA/SBOM through the GitHub Actions workflow after the current adapter change.
+- At least 60% final corpus quality for each declared engine and route.
+- Full all-engine, browser, native PDF and raster comparison against the July 30
+  checkpoint.

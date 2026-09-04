@@ -1793,6 +1793,563 @@ fn word_center_in_source(job: &OcrJob, word: &OcrWordEvidence) -> (u64, u64) {
     )
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ProjectedListWord {
+    text: String,
+    rect: Rect,
+    confidence_units: u32,
+    source_segment_index: usize,
+    evidence_job_index: usize,
+}
+
+fn project_list_word(
+    job: &OcrJob,
+    raster: Option<&JobRaster>,
+    word: &OcrWordEvidence,
+) -> Option<(usize, Rect)> {
+    if job.words_in_source_space {
+        return job
+            .segments
+            .iter()
+            .copied()
+            .enumerate()
+            .filter_map(|(segment_index, source)| {
+                let area = intersection_area(word.rect, source);
+                (area > 0).then_some((segment_index, word.rect, area))
+            })
+            .max_by_key(|(segment_index, _source_word, area)| {
+                (*area, usize::MAX - *segment_index)
+            })
+            .map(|(segment_index, source_word, _area)| (segment_index, source_word));
+    }
+
+    let raster = raster?;
+    let (placement, _area) = raster
+        .placements
+        .iter()
+        .filter_map(|placement| {
+            let area = intersection_area(word.rect, placement.crop_rect);
+            (area > 0).then_some((placement, area))
+        })
+        .max_by_key(|(placement, area)| {
+            (
+                *area,
+                usize::MAX - placement.segment_indexes.first().copied().unwrap_or(0),
+            )
+        })?;
+    let source_word = project_crop_rect_to_source(word.rect, placement);
+    placement
+        .segment_indexes
+        .iter()
+        .copied()
+        .filter_map(|segment_index| {
+            let area = intersection_area(source_word, job.segments[segment_index]);
+            (area > 0).then_some((segment_index, area))
+        })
+        .max_by_key(|(segment_index, area)| (*area, usize::MAX - *segment_index))
+        .map(|(segment_index, _area)| (segment_index, source_word))
+}
+
+fn infer_tabular_list_segments(
+    object_id: u32,
+    mut words: Vec<ProjectedListWord>,
+    structural_boundaries: &[u32],
+) -> Option<Vec<RecognizedSegment>> {
+    if words.len() < 6 {
+        return None;
+    }
+
+    let mut heights = words
+        .iter()
+        .map(|word| word.rect.bottom.saturating_sub(word.rect.top).max(1))
+        .collect::<Vec<_>>();
+    heights.sort_unstable();
+    let median_height = heights[heights.len() / 2];
+    let row_tolerance_twice = median_height.saturating_mul(3).div_ceil(2);
+    words.sort_by_key(|word| {
+        (
+            word.rect.top.saturating_add(word.rect.bottom),
+            word.rect.left,
+            word.rect.right,
+        )
+    });
+
+    let mut rows = Vec::<Vec<ProjectedListWord>>::new();
+    let mut row_center_sums = Vec::<u64>::new();
+    for word in words {
+        let center_twice = u64::from(word.rect.top) + u64::from(word.rect.bottom);
+        let joins_last = row_center_sums.last().is_some_and(|sum| {
+            let count = rows.last().map_or(1, Vec::len) as u64;
+            center_twice.abs_diff(*sum / count) <= u64::from(row_tolerance_twice)
+        });
+        if joins_last {
+            row_center_sums.last_mut().map(|sum| *sum += center_twice);
+            rows.last_mut().expect("row exists").push(word);
+        } else {
+            row_center_sums.push(center_twice);
+            rows.push(vec![word]);
+        }
+    }
+    if rows.len() < 3 {
+        return None;
+    }
+
+    let document_left = rows
+        .iter()
+        .flatten()
+        .map(|word| word.rect.left)
+        .min()?;
+    let document_right = rows
+        .iter()
+        .flatten()
+        .map(|word| word.rect.right)
+        .max()?;
+    let gap_threshold = median_height
+        .saturating_mul(2)
+        .max(document_right.saturating_sub(document_left) / 64)
+        .max(8);
+    let anchor_tolerance = median_height.saturating_mul(2).max(12);
+
+    let grouped_rows = rows
+        .into_iter()
+        .map(|mut row| {
+            row.sort_by_key(|word| (word.rect.left, word.rect.top, word.rect.right));
+            let mut groups = Vec::<Vec<ProjectedListWord>>::new();
+            for word in row {
+                let starts_group = groups.last().is_some_and(|group| {
+                    let previous_right = group
+                        .iter()
+                        .map(|previous| previous.rect.right)
+                        .max()
+                        .unwrap_or(0);
+                    word.rect.left.saturating_sub(previous_right) >= gap_threshold
+                        || structural_boundaries.iter().any(|boundary| {
+                            previous_right <= *boundary && *boundary <= word.rect.left
+                        })
+                });
+                if starts_group || groups.is_empty() {
+                    groups.push(vec![word]);
+                } else {
+                    groups.last_mut().expect("group exists").push(word);
+                }
+            }
+            groups
+        })
+        .collect::<Vec<_>>();
+    if grouped_rows.iter().filter(|groups| groups.len() >= 2).count() < 3 {
+        return None;
+    }
+
+    let mut starts = grouped_rows
+        .iter()
+        .enumerate()
+        .flat_map(|(row, groups)| {
+            groups
+                .iter()
+                .filter_map(move |group| group.first().map(|word| (word.rect.left, row)))
+        })
+        .collect::<Vec<_>>();
+    starts.sort_unstable();
+    let mut clusters = Vec::<(u64, u32, BTreeSet<usize>)>::new();
+    for (start, row) in starts {
+        if let Some((sum, count, supporting_rows)) = clusters.last_mut()
+            && start.abs_diff((*sum / u64::from(*count)) as u32) <= anchor_tolerance
+        {
+            *sum += u64::from(start);
+            *count += 1;
+            supporting_rows.insert(row);
+        } else {
+            clusters.push((u64::from(start), 1, BTreeSet::from([row])));
+        }
+    }
+    let minimum_support = 3;
+    let anchors = clusters
+        .into_iter()
+        .filter(|(_sum, _count, supporting_rows)| supporting_rows.len() >= minimum_support)
+        .map(|(sum, count, _supporting_rows)| (sum / u64::from(count)) as u32)
+        .collect::<Vec<_>>();
+    if anchors.len() < 2
+        || anchors
+            .last()
+            .copied()
+            .unwrap_or(0)
+            .saturating_sub(anchors.first().copied().unwrap_or(0))
+            < gap_threshold
+    {
+        return None;
+    }
+
+    let mut cells = BTreeMap::<(u32, u32), Vec<ProjectedListWord>>::new();
+    for (row, groups) in grouped_rows.into_iter().enumerate() {
+        for group in groups {
+            let Some(start) = group.first().map(|word| word.rect.left) else {
+                continue;
+            };
+            let column = anchors
+                .iter()
+                .enumerate()
+                .min_by_key(|(column, anchor)| (start.abs_diff(**anchor), *column))
+                .map_or(0, |(column, _anchor)| column as u32);
+            cells.entry((row as u32, column)).or_default().extend(group);
+        }
+    }
+
+    let mut output = Vec::new();
+    for ((row, column), mut cell_words) in cells {
+        cell_words.sort_by(|first, second| rect_reading_order(first.rect, second.rect));
+        let text = cell_words
+            .iter()
+            .map(|word| word.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if text.trim().is_empty() {
+            continue;
+        }
+        let source_segment_indexes = cell_words
+            .iter()
+            .map(|word| word.source_segment_index)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let evidence_job_indexes = cell_words
+            .iter()
+            .map(|word| word.evidence_job_index)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        output.push(RecognizedSegment {
+            object_id,
+            object_kind: OBJECT_TABLE,
+            source_segment_indexes,
+            cell: SegmentCell {
+                row,
+                column,
+                row_span: 1,
+                column_span: 1,
+            },
+            text,
+            evidence_job_indexes,
+        });
+    }
+    (output.len() >= 6).then_some(output)
+}
+
+fn materialize_list_table_segments(
+    session: &Session,
+    object_id: u32,
+    indexes: &[usize],
+) -> Option<Vec<RecognizedSegment>> {
+    let mut words = BTreeMap::<(u32, u32, u32, u32, String, usize), ProjectedListWord>::new();
+    for index in indexes {
+        let job = &session.jobs[*index];
+        let raster = session.job_rasters.get(*index);
+        for word in &session.words[*index] {
+            let Some((segment_index, source_word)) = project_list_word(job, raster, word) else {
+                continue;
+            };
+            let Some(source_segment_index) =
+                job.source_segment_indexes.get(segment_index).copied()
+            else {
+                continue;
+            };
+            let projected = ProjectedListWord {
+                text: word.text.clone(),
+                rect: source_word,
+                confidence_units: word.ranking_confidence_units,
+                source_segment_index,
+                evidence_job_index: *index,
+            };
+            let key = (
+                source_word.left,
+                source_word.top,
+                source_word.right,
+                source_word.bottom,
+                word.text.clone(),
+                source_segment_index,
+            );
+            match words.entry(key) {
+                std::collections::btree_map::Entry::Vacant(entry) => {
+                    entry.insert(projected);
+                }
+                std::collections::btree_map::Entry::Occupied(mut entry) => {
+                    if projected.confidence_units > entry.get().confidence_units {
+                        entry.insert(projected);
+                    }
+                }
+            }
+        }
+    }
+    let object_top = indexes
+        .iter()
+        .map(|index| session.jobs[*index].rect.top as usize)
+        .min()?;
+    let object_left = indexes
+        .iter()
+        .map(|index| session.jobs[*index].rect.left as usize)
+        .min()?;
+    let object_right = indexes
+        .iter()
+        .map(|index| session.jobs[*index].rect.right as usize)
+        .max()?;
+    let structural_boundaries = session
+        .topology
+        .rows
+        .iter()
+        .filter(|row| row.bottom <= object_top && row.slots.len() >= 3)
+        .max_by_key(|row| row.bottom)
+        .map(|row| {
+            row.slots
+                .iter()
+                .skip(1)
+                .map(|slot| slot.start)
+                .filter(|boundary| object_left < *boundary && *boundary < object_right)
+                .map(|boundary| boundary as u32)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    infer_tabular_list_segments(
+        object_id,
+        words.into_values().collect(),
+        &structural_boundaries,
+    )
+}
+
+fn paragraph_from_projected_words(
+    object_id: u32,
+    mut words: Vec<ProjectedListWord>,
+) -> Option<RecognizedSegment> {
+    if words.is_empty() {
+        return None;
+    }
+    let mut heights = words
+        .iter()
+        .map(|word| word.rect.bottom.saturating_sub(word.rect.top).max(1))
+        .collect::<Vec<_>>();
+    heights.sort_unstable();
+    let row_tolerance_twice = heights[heights.len() / 2].saturating_mul(2);
+    words.sort_by_key(|word| {
+        (
+            word.rect.top.saturating_add(word.rect.bottom),
+            word.rect.left,
+            word.rect.right,
+        )
+    });
+    let mut rows = Vec::<Vec<ProjectedListWord>>::new();
+    let mut centers = Vec::<u64>::new();
+    for word in words {
+        let center = u64::from(word.rect.top) + u64::from(word.rect.bottom);
+        let same_row = centers.last().is_some_and(|sum| {
+            let count = rows.last().map_or(1, Vec::len) as u64;
+            center.abs_diff(*sum / count) <= u64::from(row_tolerance_twice)
+        });
+        if same_row {
+            *centers.last_mut().expect("row center exists") += center;
+            rows.last_mut().expect("row exists").push(word);
+        } else {
+            centers.push(center);
+            rows.push(vec![word]);
+        }
+    }
+    let mut ordered_words = Vec::new();
+    let mut lines = Vec::new();
+    for mut row in rows {
+        row.sort_by_key(|word| (word.rect.left, word.rect.top, word.rect.right));
+        lines.push(
+            row.iter()
+                .map(|word| word.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
+        ordered_words.extend(row);
+    }
+    let text = lines
+        .into_iter()
+        .filter(|line| !line.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if text.is_empty() {
+        return None;
+    }
+    Some(RecognizedSegment {
+        object_id,
+        object_kind: OBJECT_PARAGRAPH,
+        source_segment_indexes: ordered_words
+            .iter()
+            .map(|word| word.source_segment_index)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+        cell: SegmentCell {
+            row: 0,
+            column: 0,
+            row_span: 1,
+            column_span: 1,
+        },
+        text,
+        evidence_job_indexes: ordered_words
+            .iter()
+            .map(|word| word.evidence_job_index)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+    })
+}
+
+fn materialize_cross_object_list_table(
+    session: &Session,
+    by_object: &BTreeMap<u32, Vec<usize>>,
+) -> Option<(BTreeSet<u32>, Vec<RecognizedSegment>)> {
+    let (&list_object_id, list_indexes) = by_object.iter().find(|(_object_id, indexes)| {
+        indexes
+            .first()
+            .is_some_and(|index| session.jobs[*index].object_kind == OBJECT_LIST)
+    })?;
+    let list_top = list_indexes
+        .iter()
+        .map(|index| session.jobs[*index].rect.top as usize)
+        .min()?;
+    let list_bottom = list_indexes
+        .iter()
+        .map(|index| session.jobs[*index].rect.bottom as usize)
+        .max()?;
+    let list_center = list_top.saturating_add(list_bottom).div_ceil(2);
+    let header_row = session
+        .topology
+        .rows
+        .iter()
+        .filter(|row| row.bottom <= list_top && row.slots.len() >= 3)
+        .max_by_key(|row| row.bottom)?;
+    let body_row = session
+        .topology
+        .rows
+        .iter()
+        .filter(|row| row.top <= list_center && list_center < row.bottom)
+        .max_by_key(|row| row.slots.len())?;
+    let first_header_boundary = header_row.slots.get(1)?.start;
+    let maximum_divider_width = 8_usize.max(
+        header_row
+            .slots
+            .last()?
+            .end
+            .saturating_sub(header_row.slots[0].start)
+            / 128,
+    );
+    let table_left = body_row
+        .slots
+        .iter()
+        .filter(|slot| {
+            slot.start < first_header_boundary
+                && slot.end.saturating_sub(slot.start) <= maximum_divider_width
+        })
+        .map(|slot| slot.end)
+        .max()?;
+    let table_right = header_row.slots.last()?.end;
+    let table_top = header_row.top;
+    let table_bottom = body_row.bottom;
+    if table_left >= table_right || table_top >= table_bottom {
+        return None;
+    }
+    let structural_boundaries = header_row
+        .slots
+        .iter()
+        .skip(1)
+        .map(|slot| slot.start as u32)
+        .filter(|boundary| {
+            (table_left as u32) < *boundary && *boundary < table_right as u32
+        })
+        .collect::<Vec<_>>();
+    if structural_boundaries.len() < 2 {
+        return None;
+    }
+
+    let first_candidate = list_object_id.saturating_sub(1);
+    let last_candidate = list_object_id.saturating_add(1);
+    let mut consumed_objects = BTreeSet::new();
+    let mut projected = BTreeMap::<(u32, u32, u32, u32, String, usize), ProjectedListWord>::new();
+    for (object_id, indexes) in by_object.range(first_candidate..=last_candidate) {
+        if indexes
+            .first()
+            .is_some_and(|index| session.jobs[*index].object_kind == OBJECT_TABLE)
+        {
+            continue;
+        }
+        let overlaps_table_band = indexes.iter().any(|index| {
+            let rect = session.jobs[*index].rect;
+            rect.top < table_bottom as u32 && (table_top as u32) < rect.bottom
+        });
+        if !overlaps_table_band {
+            continue;
+        }
+        consumed_objects.insert(*object_id);
+        for index in indexes {
+            let job = &session.jobs[*index];
+            let raster = session.job_rasters.get(*index);
+            for word in &session.words[*index] {
+                let Some((segment_index, source_word)) = project_list_word(job, raster, word)
+                else {
+                    continue;
+                };
+                let Some(source_segment_index) =
+                    job.source_segment_indexes.get(segment_index).copied()
+                else {
+                    continue;
+                };
+                let key = (
+                    source_word.left,
+                    source_word.top,
+                    source_word.right,
+                    source_word.bottom,
+                    word.text.clone(),
+                    source_segment_index,
+                );
+                projected.entry(key).or_insert_with(|| ProjectedListWord {
+                    text: word.text.clone(),
+                    rect: source_word,
+                    confidence_units: word.ranking_confidence_units,
+                    source_segment_index,
+                    evidence_job_index: *index,
+                });
+            }
+        }
+    }
+    if !consumed_objects.contains(&list_object_id) {
+        return None;
+    }
+
+    let mut table_words = Vec::new();
+    let mut before_words = Vec::new();
+    let mut after_words = Vec::new();
+    for word in projected.into_values() {
+        let center_x_twice = u64::from(word.rect.left) + u64::from(word.rect.right);
+        let center_y_twice = u64::from(word.rect.top) + u64::from(word.rect.bottom);
+        let inside_table = u64::from(table_left as u32) * 2 <= center_x_twice
+            && center_x_twice < u64::from(table_right as u32) * 2
+            && u64::from(table_top as u32) * 2 <= center_y_twice
+            && center_y_twice < u64::from(table_bottom as u32) * 2;
+        if inside_table {
+            table_words.push(word);
+        } else if center_y_twice < u64::from(table_bottom as u32) * 2 {
+            before_words.push(word);
+        } else {
+            after_words.push(word);
+        }
+    }
+    let mut output = infer_tabular_list_segments(
+        list_object_id,
+        table_words,
+        &structural_boundaries,
+    )?;
+    if let Some(before) =
+        paragraph_from_projected_words(first_candidate, before_words)
+    {
+        output.push(before);
+    }
+    if let Some(after) = paragraph_from_projected_words(last_candidate, after_words) {
+        output.push(after);
+    }
+    Some((consumed_objects, output))
+}
+
 fn materialize_recognized_segments(session: &Session) -> Vec<RecognizedSegment> {
     let mut by_object = BTreeMap::<u32, Vec<usize>>::new();
     for index in 0..session.jobs.len() {
@@ -1806,10 +2363,22 @@ fn materialize_recognized_segments(session: &Session) -> Vec<RecognizedSegment> 
                 .push(index);
         }
     }
-    let mut output = Vec::new();
+    let (consumed_objects, mut output) =
+        materialize_cross_object_list_table(session, &by_object)
+            .unwrap_or_else(|| (BTreeSet::new(), Vec::new()));
     for (object_id, indexes) in by_object {
+        if consumed_objects.contains(&object_id) {
+            continue;
+        }
         let object_kind = session.jobs[indexes[0]].object_kind;
         if object_kind != OBJECT_TABLE {
+            if object_kind == OBJECT_LIST
+                && let Some(mut table_segments) =
+                    materialize_list_table_segments(session, object_id, &indexes)
+            {
+                output.append(&mut table_segments);
+                continue;
+            }
             let mut source_segment_indexes = indexes
                 .iter()
                 .flat_map(|index| session.jobs[*index].source_segment_indexes.iter().copied())
@@ -4623,5 +5192,34 @@ mod tests {
             String::from_utf8(render_session(&session)).unwrap(),
             "| Alpha | Beta |\n| --- | --- |"
         );
+    }
+
+    #[test]
+    fn repeated_list_columns_materialize_as_non_empty_table_cells() {
+        let mut words = Vec::new();
+        for row in 0..3_u32 {
+            for (column, left) in [10_u32, 160, 260].into_iter().enumerate() {
+                words.push(ProjectedListWord {
+                    text: format!("r{row}c{column}"),
+                    rect: Rect {
+                        left,
+                        top: row * 24,
+                        right: left + 36,
+                        bottom: row * 24 + 12,
+                    },
+                    confidence_units: 990,
+                    source_segment_index: row as usize * 3 + column,
+                    evidence_job_index: 0,
+                });
+            }
+        }
+
+        let segments = infer_tabular_list_segments(7, words, &[]).expect("table structure");
+        assert_eq!(segments.len(), 9);
+        assert!(segments.iter().all(|segment| segment.object_kind == OBJECT_TABLE));
+        assert!(segments.iter().all(|segment| !segment.text.is_empty()));
+        assert_eq!(segments[4].cell.row, 1);
+        assert_eq!(segments[4].cell.column, 1);
+        assert_eq!(segments[4].text, "r1c1");
     }
 }

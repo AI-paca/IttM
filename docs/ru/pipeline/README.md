@@ -33,12 +33,12 @@ CLI/curl -> /api/extract/text или /api/tasks -> TaskService
 ```bash
 docker compose ps
 docker compose port nginx 80
-curl -fsS http://127.0.0.1:3000/api/health
-curl -fsS http://127.0.0.1:3000/api/capabilities
-curl -fsS http://127.0.0.1:3000/api/diagnostics
+curl -fsS "http://127.0.0.1:<порт>/api/health"
+curl -fsS "http://127.0.0.1:<порт>/api/capabilities"
+curl -fsS "http://127.0.0.1:<порт>/api/diagnostics"
 ```
 
-Если Compose опубликовал другой порт, замените `3000`. `health` проверяет
+Подставьте порт из вывода `docker compose port nginx 80`. `health` проверяет
 gateway → Python, `capabilities` — backend engines, `diagnostics` — CPU,
 память, GPU и загрузку EasyOCR.
 
@@ -90,7 +90,7 @@ events и error описаны в [Task API](../../en/task-api.md).
 
 ## Этапы production raster
 
-`pipeline-core` ABI 4 исполняет восемь границ:
+`pipeline-core` ABI 6 исполняет восемь границ:
 
 ```text
 preprocess → geometry → topology → find-object → separate-block
@@ -182,15 +182,15 @@ docker compose exec -T ocr python -c \
 ## Прочитать и воспроизвести запрос
 
 ```bash
-curl -fsS "http://127.0.0.1:3000/api/tasks?limit=10"
-curl -fsS "http://127.0.0.1:3000/api/tasks/<task-id>"
+curl -fsS "http://127.0.0.1:<порт>/api/tasks?limit=10"
+curl -fsS "http://127.0.0.1:<порт>/api/tasks/<task-id>"
 
 curl -sS -D - --data-binary @problem.pdf \
-  "http://127.0.0.1:3000/api/tasks?sync=json&filename=problem.pdf"
+  "http://127.0.0.1:<порт>/api/tasks?sync=json&filename=problem.pdf"
 
 curl -sS -N -H "Accept: application/x-ndjson" \
   --data-binary @problem.pdf \
-  "http://127.0.0.1:3000/api/tasks?sync=events&filename=problem.pdf"
+  "http://127.0.0.1:<порт>/api/tasks?sync=events&filename=problem.pdf"
 ```
 
 В task record сопоставьте `state`, `request`, последовательность `events`,

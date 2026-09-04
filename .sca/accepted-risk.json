@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "reviewed_at": "2026-08-29",
+  "reviewed_at": "2026-09-04",
   "source": "Trivy image reports for OCR production and OCR CI images",
   "policy": "Only vulnerabilities without FixedVersion may be accepted here. Fixable MEDIUM/HIGH/CRITICAL image findings remain blocked by scripts/ci/run-sca.sh.",
   "reason": "The listed Debian package families currently have no FixedVersion in the vendor feed. They are tracked as accepted risk until Debian publishes a fix or the package leaves the OCR images.",
@@ -59,6 +59,17 @@
     "libpam-runtime",
     "libpam0g",
     "libp11-kit0",
+    {
+      "package": "libpcre2-8-0",
+      "vulnerabilities": [
+        "TEMP-0000000-21C4F8",
+        "TEMP-0000000-64109B",
+        "TEMP-0000000-8188AC",
+        "TEMP-0000000-A5518C",
+        "TEMP-0000000-B05303"
+      ],
+      "reason": "Debian 13 has no FixedVersion and reports UNKNOWN severity. The service does not call PCRE2 directly or accept user-controlled regex patterns, runs as non-root, and the two 32-bit-only write findings do not apply to the amd64 image. Re-review when Debian publishes fixed packages."
+    },
     "libpixman-1-0",
     "libpng16-16t64",
     "libpoppler147",

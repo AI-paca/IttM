@@ -17,8 +17,8 @@ PDF, если пользователь не включил принудител�
 [`project-architecture.drawio`](../assets/project-architecture.drawio).
 
 На этой схеме pipeline намеренно показан black box. В него входят
-`PipelineArtifact` и одна из двух сборок одного Rust source: WASM ABI 4 для
-browser executor либо native `.so` ABI 4 для Python executor. Его подробная
+`PipelineArtifact` и одна из двух сборок одного Rust source: WASM ABI 6 для
+browser executor либо native `.so` ABI 6 для Python executor. Его подробная
 под-схема: [этапы pipeline](./architecture-unified-pipeline.md) и
 [`ocr-pipeline.drawio`](../assets/ocr-pipeline.drawio).
 
@@ -43,14 +43,14 @@ Markdown не является прямым результатом OCR engine. R
 | Python FastAPI         | Upload guard, health и conversion routes                                  | [`ocr/app/routers`](../../ocr/app/routers)                                     |
 | `convert_service.py`   | Текущий публичный PDF/image pipeline                                      | [Backend pipeline](../en/backend-pipeline.md)                                  |
 | Tesseract / EasyOCR    | Платформенные OCR adapters                                                | [`ocr/app/engines`](../../ocr/app/engines)                                     |
-| `pipeline-core` ABI 4  | Единый separated raster route из одного Rust source                       | [`pipeline-core/README.md`](../../pipeline-core/README.md)                     |
+| `pipeline-core` ABI 6  | Единый separated raster route из одного Rust source                       | [`pipeline-core/README.md`](../../pipeline-core/README.md)                     |
 | `rust/ocr-core`        | Generated browser grammar WASM; production caller сейчас отсутствует      | [`web/src/ocr/grammar-assessment.ts`](../../web/src/ocr/grammar-assessment.ts) |
 | Sparse pipeline        | Отдельный library/debug runtime; публичные routes его не создают          | [Sparse pipeline](../en/sparse-pipeline.md)                                    |
 | External provider path | Gemini/OpenRouter после consent или явно настроенный локальный Ollama URL | [`web/src/ocr/llm-client.ts`](../../web/src/ocr/llm-client.ts)                 |
 
 `rust/ocr-core` и `pipeline-core` — разные crates. Generated wrapper
 `grammar-assessment.ts` вызывает первый, но текущий browser runtime этот wrapper
-не импортирует. `pipeline-core` ABI 4 реально собирается из одного Rust source
+не импортирует. `pipeline-core` ABI 6 реально собирается из одного Rust source
 в native `.so` и WASM. Python и browser используют одинаковые stage engine,
 геометрию блоков, порядок сегментов и сборку результата; платформенным остаётся
 только decode/PDF render и вызов OCR adapter.
@@ -102,7 +102,7 @@ nginx
      -> Python /v1/convert/stream
   -> upload/PDF guards
   -> convert_service
-  -> native pipeline-core ABI 4
+  -> native pipeline-core ABI 6
   -> Rust separated jobs -> Tesseract/EasyOCR adapter -> Rust assembly
   -> page/warning/complete events
   -> gateway result

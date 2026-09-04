@@ -44,7 +44,7 @@
 | PDF и структура    | text-layer shortcut, raster OCR, layout и таблицы | PNG/JPEG/WebP/PDF → Markdown                                      |
 | Task clients       | очередь, events, cancellation и CLI               | in-memory Task API и `/api/extract/text`                          |
 | Browser runtime    | workers, Tesseract.js и локальные assets          | Lite без backend и browser fallback                               |
-| Shared raster path | восемь separated stages и единая block geometry   | `pipeline-core` ABI 4 в native и WASM                             |
+| Shared raster path | восемь separated stages и единая block geometry   | `pipeline-core` ABI 6 в native и WASM                             |
 | Security gates     | SAST, SCA, SBOM и accepted-risk policy            | блокирующие Semgrep/npm/Trivy gates                               |
 | Sparse diagnostics | разреженную матрицу, objects, blocks и fusion     | opt-in debug runtime и [полный пример](../../../debug/EXAMPLE.md) |
 
@@ -70,7 +70,7 @@
 2. Версионировать sparse artifact schema и закрепить ключ
    `page/object/policy/block/job`.
 3. Добавить installed-language diagnostics и multilingual reference gates.
-4. Поддерживать native/WASM parity ABI 4 и отдельно определить судьбу
+4. Поддерживать native/WASM parity ABI 6 и отдельно определить судьбу
    generated `rust/ocr-core`, который не вызывается production browser path.
 
 ## Будущее

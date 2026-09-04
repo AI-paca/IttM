@@ -13,7 +13,7 @@ caller forces raster mode.
 
 ## ABI v6
 
-The C/WASM ABI exports:
+Key C/WASM ABI exports include:
 
 - `ittm_pipeline_abi_version`;
 - `ittm_pipeline_route_id` (the same deterministic route marker in native and WASM builds);
@@ -63,7 +63,7 @@ Generated native files under `pipeline-core/target` and
 and copy the native library into the runtime image; Lite builds generate the
 WASM module.
 
-Python `/readiness` reports `pipeline_core_abi5`. A missing or incompatible
+Python `/readiness` reports `pipeline_core_abi6`. A missing or incompatible
 native library makes readiness fail; production raster conversion does not
 silently fall back to the old Python layout route.
 

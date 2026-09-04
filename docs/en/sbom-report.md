@@ -14,6 +14,18 @@ vulnerability JSON and CycloneDX; gates source `HIGH/CRITICAL` and fixable
 image `MEDIUM/HIGH/CRITICAL`; and reconciles unfixed image package families
 with `.sca/accepted-risk.json`.
 
+Both Cargo lockfiles are part of the source scan. The runtime images retain
+the `ittm-pipeline-core` Cargo manifests beside the native library or outside
+the nginx document root, so their CycloneDX reports include the Rust component.
+The gate fails if either source Rust crate or any shipped Rust component is
+missing from the expected SBOM.
+
+Image scans exclude pip's embedded `pip/_vendor/bom.cdx.json`. That file is an
+upstream vendoring inventory rather than a list of installed Python
+distributions; scanning it as an image SBOM creates pathless duplicate
+components. Installed pip, setuptools, and other runtime distributions remain
+in scope.
+
 Generated `.sca/*.json` and `.sca/*.txt` files are per-run evidence and remain
 untracked. CI uploads them for 30 days. This page intentionally does not freeze
 a CVE list that would become stale.

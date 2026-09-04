@@ -20,6 +20,17 @@ npm run test:sca
 6. сравнивает все неисправимые image package families с
    `.sca/accepted-risk.json`.
 
+Оба Cargo lockfile входят в source scan. Runtime images сохраняют Cargo
+manifests `ittm-pipeline-core` рядом с native library либо вне document root
+nginx, поэтому Rust component входит в их CycloneDX. Gate падает, если любой
+source Rust crate или поставляемый Rust component отсутствует в ожидаемом
+SBOM.
+
+Image scan исключает встроенный в pip файл `pip/_vendor/bom.cdx.json`. Это
+upstream inventory вендоринга, а не список установленных Python distributions;
+его разбор как image SBOM создаёт дубли без пути. Установленные pip, setuptools
+и остальные runtime distributions остаются в области сканирования.
+
 Результаты находятся в `.sca/*.json` и `.sca/*.txt`, игнорируются Git и
 публикуются CI artifact на 30 дней. Это evidence конкретного запуска, поэтому
 статический список CVE в документации не поддерживается.

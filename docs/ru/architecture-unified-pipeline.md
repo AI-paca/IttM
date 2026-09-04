@@ -29,11 +29,11 @@ Runtime adapters вложены только в `ocr-blocks`. Tesseract.js ли�
 Tesseract/EasyOCR получают crop jobs от Rust и возвращают UTF-8; Rust сохраняет
 source order и выполняет `get-segment`/`generate-object`.
 
-| Stage contracts                           | Browser runtime        | Python runtime          |
-| ----------------------------------------- | ---------------------- | ----------------------- |
-| preprocess … separate-block               | `pipeline-core` WASM   | native `pipeline-core`  |
-| ocr-blocks                                | Tesseract.js/provider  | Tesseract/EasyOCR       |
-| get-segment, generate-object              | `pipeline-core` WASM   | native `pipeline-core`  |
+| Stage contracts              | Browser runtime       | Python runtime         |
+| ---------------------------- | --------------------- | ---------------------- |
+| preprocess … separate-block  | `pipeline-core` WASM  | native `pipeline-core` |
+| ocr-blocks                   | Tesseract.js/provider | Tesseract/EasyOCR      |
+| get-segment, generate-object | `pipeline-core` WASM  | native `pipeline-core` |
 
 ## Что действительно общее
 
@@ -45,15 +45,15 @@ source order и выполняет `get-segment`/`generate-object`.
 
 Общими являются stage controller, raster block geometry, source order и
 сборка результата, а также bounded recipe/evidence helpers. Сборка проверяет
-Rust tests, Python/Rust parity и WASM ABI 4.
+Rust tests, Python/Rust parity и WASM ABI 6.
 
 ## Что остаётся платформенным
 
-| Runtime  | Исполнитель                                                   |
-| -------- | ------------------------------------------------------------- |
-| Browser  | PDF.js/image decode и Tesseract.js/provider adapter            |
-| Backend  | PDF/image decode и Tesseract/EasyOCR adapter                   |
-| Provider | Сетевой OCR adapter после consent/configuration                |
+| Runtime  | Исполнитель                                         |
+| -------- | --------------------------------------------------- |
+| Browser  | PDF.js/image decode и Tesseract.js/provider adapter |
+| Backend  | PDF/image decode и Tesseract/EasyOCR adapter        |
+| Provider | Сетевой OCR adapter после consent/configuration     |
 
 OCR engine платформенный, но маршрут до/после его вызова один и реализован Rust.
 

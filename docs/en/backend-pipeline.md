@@ -7,7 +7,7 @@ Public conversion routes call `ocr/app/services/convert_service.py`.
 `ocr/app/sparse_pipeline` is a separate opt-in runtime and is not wired into
 those routes.
 
-Every raster page runs the native ABI 4 route `preprocess → geometry →
+Every raster page runs the native ABI 6 route `preprocess → geometry →
 topology → find-object → separate-block → ocr-blocks → get-segment →
 generate-object`. Python engines only implement `ocr-blocks`. A trustworthy
 native PDF text layer is the only shortcut; `pdf_mode=raster` disables it.

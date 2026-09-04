@@ -31,7 +31,7 @@
     "test:sast": "bash scripts/ci/run-sast.sh",
     "test:sca": "bash scripts/ci/run-sca.sh",
     "test:pages": "node scripts/ci/verify-pages-build.mjs dist /IttM/",
-    "test:pipeline-docs": "python3 scripts/ci/verify_pipeline_profile_docs.py && python3 scripts/ci/verify_pipeline_flag_docs.py",
+    "test:pipeline-docs": "python3 scripts/ci/verify_pipeline_profile_docs.py && python3 scripts/ci/verify_pipeline_flag_docs.py && python3 scripts/ci/verify_pipeline_abi_docs.py",
     "test:pages:live": "node scripts/ci/smoke-pages.mjs",
     "test:compose": "bash scripts/ci/smoke-compose.sh",
     "test:resources": "bash scripts/ci/run-resource-tests.sh",
@@ -55,6 +55,7 @@
     "brace-expansion": "5.0.9",
     "nanoid": "3.3.18",
     "postcss": "8.5.25",
+    "qs": "6.16.0",
     "sharp": "0.35.3"
   },
   "devDependencies": {

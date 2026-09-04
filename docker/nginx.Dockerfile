@@ -42,6 +42,7 @@ ENV GATEWAY_HOSTNAME=gateway
 ENV GATEWAY_INTERNAL_PORT=3000
 
 COPY gateway/nginx.conf /etc/nginx/templates/default.conf.template
+COPY pipeline-core/Cargo.toml pipeline-core/Cargo.lock /usr/share/ittm/sbom/pipeline-core/
 COPY --from=builder /app/dist /usr/share/nginx/html
 RUN envsubst '$NGINX_LISTEN_PORT $GATEWAY_HOSTNAME $GATEWAY_INTERNAL_PORT' \
     < /etc/nginx/templates/default.conf.template \

@@ -21,22 +21,26 @@ and `cancelled`. Records disappear when the gateway process restarts.
 
 ## Request shape
 
-`POST /api/tasks` accepts multipart, a binary body, or the JSON request
-defined in `gateway/src/tasks/types.ts`. Query/header aliases are normalized by
-`gateway/src/tasks/http-api.ts`:
+`POST /api/tasks` accepts multipart, a binary body, or a JSON request record
+defined in `gateway/src/tasks/types.ts`. Multipart and binary uploads are the
+executable public inputs. JSON records are accepted, but the current local
+executor can run only an in-memory `file` or `screenshot` source; other JSON
+source kinds finish with `UNSUPPORTED_INPUT`. Query/header aliases are
+normalized by `gateway/src/tasks/http-api.ts`:
 
 - `engine` or `engine_type`: `auto`, `tesseract`, `easyocr`;
 - `profile` or `pipeline_profile`: a backend profile name;
 - `pdf_mode`, `X-PDF-Mode` or JSON `pdfMode`: `auto`, `raster`;
-- `filename`: required for a binary body when the content type does not supply
-  a useful name.
+- `filename`: optional for a binary body; the gateway infers a supported media
+  type from its signature when possible and otherwise uses `upload.bin`.
 
 `sync=text|markdown|json|events` selects a synchronous response. The equivalent
 `Accept` headers are also supported.
 
 A serialized task intentionally exposes the normalized `request`, sequenced
-`events`, terminal `result` or `error`, and timestamps. File content is never
-returned; the source record contains only kind, name, size and media type.
+`events`, terminal `result` or `error`, and timestamps. Uploaded file content is
+never returned; a `file` source record contains only kind, name, size and media
+type. Non-file JSON source records are serialized as supplied.
 
 This serialization boundary is not a storage boundary. `http-api.ts` currently
 uses `formData()` or `arrayBuffer()`, and the internal `TaskRecord` retains its

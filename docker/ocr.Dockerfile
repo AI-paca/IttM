@@ -45,7 +45,7 @@ RUN set -eux; \
 WORKDIR /app
 
 ARG PYTHON_REQUIREMENTS=requirements-light.txt
-ARG PIP_VERSION=26.1.2
+ARG PIP_VERSION=26.2.0
 ARG SETUPTOOLS_VERSION=83.0.0
 ARG WHEEL_VERSION=0.47.0
 COPY ocr/requirements*.txt ./
@@ -67,6 +67,7 @@ RUN python -m pip install \
 
 FROM base AS app-base
 COPY --from=pipeline-core-builder /core/target/release/libittm_pipeline_core.so /opt/ittm-pipeline-core/libittm_pipeline_core.so
+COPY pipeline-core/Cargo.toml pipeline-core/Cargo.lock /opt/ittm-pipeline-core/
 COPY ocr/app ./app
 
 FROM app-base AS test

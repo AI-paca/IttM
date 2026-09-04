@@ -15,7 +15,15 @@ npm run test:sca
 
 This is a networked, image-building scheduled/manual gate. It performs
 `npm audit`, Trivy source scanning with dev dependencies, and Trivy
-vulnerability plus CycloneDX scans for four current images.
+vulnerability plus CycloneDX scans for four current images. The gate also
+asserts that both Rust crates are present in the source SBOM and that the
+production `ittm-pipeline-core` component is present in the nginx, OCR, and
+OCR CI image SBOMs.
+
+Image scans skip only pip's embedded third-party
+`pip/_vendor/bom.cdx.json`. It describes the upstream vendoring inventory,
+not installed Python distributions, and otherwise creates pathless duplicate
+findings. The installed pip and setuptools distributions remain in scope.
 
 Generated `.sca/*.json` and `.sca/*.txt` files are evidence and must not be
 edited or committed. The only tracked policy data is `accepted-risk.json`.
@@ -30,6 +38,7 @@ edited or committed. The only tracked policy data is `accepted-risk.json`.
 | Nginx image            | `.sca/nginx-vuln.json`, `.sca/nginx.cdx.json`                  | Fixable image `MEDIUM`, `HIGH`, or `CRITICAL`           |
 | OCR runtime image      | `.sca/ocr-vuln.json`, `.sca/ocr.cdx.json`                      | Fixable image `MEDIUM`, `HIGH`, or `CRITICAL`           |
 | OCR CI image           | `.sca/ocr-ci-vuln.json`, `.sca/ocr-ci.cdx.json`                | Fixable image `MEDIUM`, `HIGH`, or `CRITICAL`           |
+| Rust SBOM coverage     | source/nginx/OCR CycloneDX reports                              | Missing expected Cargo root component                   |
 | Unfixed image families | `.sca/accepted-risk-current.txt`, `-missing.txt`, `-stale.txt` | New or disappeared family relative to tracked policy    |
 
 The image definitions are:

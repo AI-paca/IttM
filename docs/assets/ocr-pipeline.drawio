@@ -20,7 +20,7 @@
         <mxCell id="artifact" value="&lt;b&gt;PipelineArtifact&lt;/b&gt;&lt;br&gt;payload · capabilities&lt;br&gt;runtime · profile" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#28214A;strokeColor=#9A77E8;strokeWidth=2;fontColor=#F0EAFE;fontSize=10;" vertex="1" parent="pipeline-shell">
           <mxGeometry x="25" y="285" width="170" height="110" as="geometry"/>
         </mxCell>
-        <mxCell id="recipe" value="&lt;b&gt;begin ABI 4 session&lt;/b&gt;&lt;br&gt;ordered stage mask" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#342865;strokeColor=#A887F4;strokeWidth=2;fontColor=#F0EAFE;fontSize=10;" vertex="1" parent="pipeline-shell">
+        <mxCell id="recipe" value="&lt;b&gt;begin ABI 6 session&lt;/b&gt;&lt;br&gt;ordered stage mask" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#342865;strokeColor=#A887F4;strokeWidth=2;fontColor=#F0EAFE;fontSize=10;" vertex="1" parent="pipeline-shell">
           <mxGeometry x="225" y="295" width="170" height="90" as="geometry"/>
         </mxCell>
 

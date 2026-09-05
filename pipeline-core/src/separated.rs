@@ -149,6 +149,7 @@ struct Session {
     split_calibrations: BTreeMap<SplitStrategyKey, SplitCalibration>,
     active_split_probe: Option<TableSplitProbe>,
     recognized_segments: Option<Vec<RecognizedSegment>>,
+    recognized_layouts: BTreeMap<u32, (u32, u32, u32)>,
     importing_ocr: bool,
     topology: topology::PhysicalTopology,
     rendered: Option<Vec<u8>>,
@@ -2771,7 +2772,31 @@ fn render_table_object(session: &Session, indexes: &[usize]) -> String {
     lines.join("\n")
 }
 
-fn render_recognized_segments(segments: &[RecognizedSegment]) -> Vec<u8> {
+fn finalize_recognized_layouts(session: &mut Session) {
+    for segment in session.recognized_segments.iter().flatten() {
+        let bounds = session.recognized_layouts
+            .entry(segment.object_id)
+            .or_insert((segment.object_kind, 0, 0));
+        bounds.1 = bounds.1.max(segment.cell.row.saturating_add(segment.cell.row_span));
+        bounds.2 = bounds.2.max(segment.cell.column.saturating_add(segment.cell.column_span));
+    }
+    // Empty edge cells are part of a table's logical scope even when no OCR
+    // word produced a segment there. Recover that scope from the actual jobs.
+    for job in &session.jobs {
+        if job.object_kind == OBJECT_TABLE
+            && let Some(bounds) = session.recognized_layouts.get_mut(&job.object_id)
+            && bounds.0 == OBJECT_TABLE
+        {
+            bounds.1 = bounds.1.max(job.logical_row_count);
+            bounds.2 = bounds.2.max(job.logical_column_count);
+        }
+    }
+}
+
+fn render_recognized_segments(
+    segments: &[RecognizedSegment],
+    object_layouts: &BTreeMap<u32, (u32, u32, u32)>,
+) -> Vec<u8> {
     use crate::assembler::{
         AssemblerSegment, AssemblerSource, SegmentObjectLayout, StructuralObjectKind,
         assemble_segment_topology,
@@ -2784,7 +2809,7 @@ fn render_recognized_segments(segments: &[RecognizedSegment]) -> Vec<u8> {
             StructuralObjectKind::Paragraph
         }
     };
-    let mut object_bounds = BTreeMap::<u32, (u32, u32, u32)>::new();
+    let mut object_bounds = object_layouts.clone();
     let assembler_segments = segments
         .iter()
         .enumerate()
@@ -2833,7 +2858,7 @@ fn render_recognized_segments(segments: &[RecognizedSegment]) -> Vec<u8> {
 
 fn render_session(session: &Session) -> Vec<u8> {
     if let Some(segments) = session.recognized_segments.as_deref() {
-        return render_recognized_segments(segments);
+        return render_recognized_segments(segments, &session.recognized_layouts);
     }
     let terminal_jobs: Vec<usize> = (0..session.jobs.len())
         .filter(|index| !session.superseded[*index] && session.text[*index].is_some())
@@ -2975,6 +3000,7 @@ unsafe fn planned_session_from_raw(
         split_calibrations: BTreeMap::new(),
         active_split_probe: None,
         recognized_segments: None,
+        recognized_layouts: BTreeMap::new(),
         importing_ocr: false,
         topology,
         rendered: None,
@@ -3005,6 +3031,7 @@ fn empty_imported_plan_session() -> Session {
         split_calibrations: BTreeMap::new(),
         active_split_probe: None,
         recognized_segments: None,
+        recognized_layouts: BTreeMap::new(),
         importing_ocr: false,
         topology: topology::PhysicalTopology { rows: Vec::new() },
         rendered: None,
@@ -3051,6 +3078,52 @@ pub extern "C" fn ittm_separated_import_segments_begin() -> u32 {
     session.stage_mask = (1 << 7) - 1;
     session.recognized_segments = Some(Vec::new());
     register_session(session).unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_import_layout(
+    handle: u32,
+    object_id: u32,
+    object_kind: u32,
+    rows: u32,
+    columns: u32,
+) -> i32 {
+    if object_kind > OBJECT_UNKNOWN {
+        return -1;
+    }
+    let Ok(mut registry) = registry().lock() else { return -2; };
+    let Some(session) = registry.sessions.get_mut(&handle) else { return -2; };
+    if session.recognized_segments.is_none() || session.rendered.is_some() {
+        return -2;
+    }
+    if session.recognized_layouts.contains_key(&object_id) {
+        return -3;
+    }
+    session.recognized_layouts.insert(object_id, (object_kind, rows, columns));
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_layout_count(handle: u32) -> u32 {
+    let Ok(registry) = registry().lock() else { return 0; };
+    registry.sessions.get(&handle)
+        .map_or(0, |session| session.recognized_layouts.len() as u32)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ittm_separated_layout_field(handle: u32, index: u32, field: u32) -> i32 {
+    let Ok(registry) = registry().lock() else { return -1; };
+    let Some(session) = registry.sessions.get(&handle) else { return -1; };
+    let Some((&object_id, &(kind, rows, columns))) =
+        session.recognized_layouts.iter().nth(index as usize)
+    else { return -1; };
+    match field {
+        0 => object_id as i32,
+        1 => kind as i32,
+        2 => rows as i32,
+        3 => columns as i32,
+        _ => -1,
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -3127,7 +3200,7 @@ pub extern "C" fn ittm_separated_import_segments_finish(handle: u32) -> i32 {
     let Some(segments) = session.recognized_segments.as_mut() else {
         return 0;
     };
-    if segments.is_empty() {
+    if segments.is_empty() && session.recognized_layouts.is_empty() {
         return 0;
     }
     segments.sort_by_key(|segment| {
@@ -3139,6 +3212,7 @@ pub extern "C" fn ittm_separated_import_segments_finish(handle: u32) -> i32 {
         )
     });
     session.stage_mask = (1 << 7) - 1;
+    finalize_recognized_layouts(session);
     1
 }
 
@@ -3507,6 +3581,7 @@ pub extern "C" fn ittm_separated_run_get_segment(handle: u32) -> i32 {
         return 0;
     }
     session.recognized_segments = Some(materialize_recognized_segments(session));
+    finalize_recognized_layouts(session);
     session.stage_mask |= 1 << 6;
     1
 }
@@ -5184,6 +5259,7 @@ mod tests {
             split_calibrations: BTreeMap::new(),
             active_split_probe: None,
             recognized_segments: None,
+            recognized_layouts: BTreeMap::new(),
             importing_ocr: false,
             rendered: None,
             stage_mask: ALL_STAGE_MASK,

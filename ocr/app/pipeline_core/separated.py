@@ -134,6 +134,14 @@ class SeparatedOcrStageInput:
 
 
 @dataclass(frozen=True)
+class SeparatedObjectLayout:
+    object_id: int
+    object_kind: int
+    logical_row_count: int
+    logical_column_count: int
+
+
+@dataclass(frozen=True)
 class SeparatedRecognizedSegment:
     index: int
     object_id: int
@@ -211,8 +219,10 @@ class NativeSeparatedSession:
         cls,
         segments: tuple[SeparatedRecognizedSegment, ...],
         core: NativePipelineCore | None = None,
+        *,
+        layouts: tuple[SeparatedObjectLayout, ...] = (),
     ) -> NativeSeparatedSession:
-        if not segments:
+        if not segments and not layouts:
             raise ValueError("Get-segment checkpoint contains no segments")
         value = cls.__new__(cls)
         value._core = core or native_pipeline_core()
@@ -221,6 +231,11 @@ class NativeSeparatedSession:
         value._handle = value._core.separated_import_segments_begin()
         value._closed = False
         try:
+            for layout in layouts:
+                value._core.separated_import_layout(
+                    value._handle, layout.object_id, layout.object_kind,
+                    layout.logical_row_count, layout.logical_column_count,
+                )
             for segment in segments:
                 value._core.separated_import_segment(
                     value._handle,
@@ -266,6 +281,11 @@ class NativeSeparatedSession:
 
     def run_get_segment(self) -> None:
         self._core.separated_run_get_segment(self._handle)
+
+    @property
+    def recognized_layouts(self) -> tuple[SeparatedObjectLayout, ...]:
+        return tuple(SeparatedObjectLayout(*value)
+                     for value in self._core.separated_layouts(self._handle))
 
     @property
     def recognized_segments(self) -> tuple[SeparatedRecognizedSegment, ...]:

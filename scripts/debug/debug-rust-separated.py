@@ -23,6 +23,7 @@ from app.pipeline_core.separated import (
     SeparatedOcrStageInput,
     SeparatedOcrJob,
     SeparatedOcrWord,
+    SeparatedObjectLayout,
     SeparatedRecognizedSegment,
 )
 from app.pipeline_core.separated_recognition import recognize_separated_block
@@ -296,7 +297,7 @@ def load_separate_block_inputs(stage: Path) -> tuple[SeparatedBlockStageInput, .
                 width, height = raster.size
                 pixels = raster.tobytes()
                 raster.close()
-            placements = block["compaction"]["placements"]
+            placements = (block.get("compaction") or {}).get("placements", [])
             source_by_segment: dict[int, tuple[int, int, int, int]] = {}
             for placement in placements:
                 source = page_bbox(placement["source_bbox"], offset)
@@ -426,7 +427,15 @@ def load_ocr_stage_inputs(stage: Path) -> tuple[SeparatedOcrStageInput, ...]:
         if not object_dir.is_dir():
             continue
         block_object_dir = block_stage / "objects" / object_dir.name
-        block_count = len(tuple(block_object_dir.glob("*/block-*.json")))
+        block_files = sorted(block_object_dir.glob("*/block-*.json"))
+        block_count = len(block_files)
+        block_indexes = {
+            (
+                block_file.parent.name,
+                str(json.loads(block_file.read_text(encoding="utf-8"))["block_id"]),
+            ): block_offset + index
+            for index, block_file in enumerate(block_files)
+        }
         jobs_paths = sorted(object_dir.glob("*/jobs.json"))
         selected_policy = selected_policies.get(object_dir.name)
         if selected_policy is not None:
@@ -449,6 +458,14 @@ def load_ocr_stage_inputs(stage: Path) -> tuple[SeparatedOcrStageInput, ...]:
             jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
             for job in jobs.get("jobs", jobs):
                 output = job.get("output") or {}
+                if (
+                    job.get("capability_id") == "adaptive-language-unresolved"
+                    and not str(output.get("text", "")).strip()
+                    and not output.get("words")
+                ):
+                    # The Python resolver emitted no OCR evidence for this
+                    # context. Do not invent a language for a scheduler marker.
+                    continue
                 words = tuple(
                     SeparatedOcrWord(
                         text=str(word.get("text", "")),
@@ -467,7 +484,7 @@ def load_ocr_stage_inputs(stage: Path) -> tuple[SeparatedOcrStageInput, ...]:
                 )
                 values.append(
                     SeparatedOcrStageInput(
-                        block_index=block_offset + numeric_id(job["block_id"]),
+                        block_index=block_indexes[(jobs_path.parent.name, job["block_id"])],
                         languages=str(job["lane_id"]).replace("-", "+"),
                         transform=(
                             "gamma-dark" if job.get("transform") == "gamma" else "raw"
@@ -479,6 +496,25 @@ def load_ocr_stage_inputs(stage: Path) -> tuple[SeparatedOcrStageInput, ...]:
                 )
         block_offset += block_count
     return tuple(values)
+
+
+def load_segment_stage_layouts(stage: Path) -> tuple[SeparatedObjectLayout, ...]:
+    stage = stage.resolve(strict=True)
+    checkpoint = stage / "segments.json"
+    if checkpoint.is_file():
+        records = json.loads(checkpoint.read_text(encoding="utf-8")).get("object_layouts", [])
+        return tuple(SeparatedObjectLayout(**record) for record in records)
+    payload = json.loads((stage / "segment-topology-handoff.json").read_text(encoding="utf-8"))
+    kind_codes = {"paragraph": 0, "list": 1, "table": 2, "unknown": 3}
+    return tuple(
+        SeparatedObjectLayout(
+            object_id=numeric_id(record["object_id"]),
+            object_kind=kind_codes[record["object_kind"]],
+            logical_row_count=int(record["logical_row_count"]),
+            logical_column_count=int(record["logical_column_count"]),
+        )
+        for record in payload.get("object_layouts", [])
+    )
 
 
 def load_segment_stage_inputs(stage: Path) -> tuple[SeparatedRecognizedSegment, ...]:
@@ -545,6 +581,7 @@ def main() -> int:
     run_generate = target_index >= STAGE_NAMES.index("generate-object")
     imported_ocr: tuple[SeparatedOcrStageInput, ...] | None = None
     imported_segments: tuple[SeparatedRecognizedSegment, ...] | None = None
+    imported_layouts: tuple[SeparatedObjectLayout, ...] = ()
     block_stage: Path | None = None
     if args.from_stage is not None:
         imported_stage = args.from_stage.resolve(strict=True)
@@ -560,6 +597,7 @@ def main() -> int:
             imported_ocr = load_ocr_stage_inputs(imported_stage)
         elif imported_stage.name == "06-get-segment" and args.to_stage == "generate-object":
             imported_segments = load_segment_stage_inputs(imported_stage)
+            imported_layouts = load_segment_stage_layouts(imported_stage)
         else:
             raise ValueError(
                 "Stage import must execute exactly n+1: 04->ocr-blocks, 05->get-segment, or 06->generate-object"
@@ -590,7 +628,9 @@ def main() -> int:
         else None
     )
     if imported_segments is not None:
-        session_value = NativeSeparatedSession.from_recognized_segments(imported_segments)
+        session_value = NativeSeparatedSession.from_recognized_segments(
+            imported_segments, layouts=imported_layouts,
+        )
     elif imported_blocks is not None:
         session_value = NativeSeparatedSession.from_separate_blocks(imported_blocks)
     else:
@@ -696,6 +736,15 @@ def main() -> int:
         else:
             segment_records = []
         markdown = session.render() if run_generate else ""
+        layout_records = [
+            {
+                "object_id": layout.object_id,
+                "object_kind": layout.object_kind,
+                "logical_row_count": layout.logical_row_count,
+                "logical_column_count": layout.logical_column_count,
+            }
+            for layout in session.recognized_layouts
+        ] if run_get_segment else []
         jobs = [session.job(index) for index in range(session.job_count)]
         job_segments_by_job = {
             job.index: session.job_segments(job.index) for job in jobs
@@ -926,6 +975,7 @@ def main() -> int:
             {
                 "stage": "get-segment",
                 "records": segment_records,
+                "object_layouts": layout_records,
             },
         )
     if run_generate:

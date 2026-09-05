@@ -53,6 +53,9 @@ class NativePipelineCore:
             "ittm_separated_import_blocks_begin",
             "ittm_separated_import_block",
             "ittm_separated_import_segments_begin",
+            "ittm_separated_import_layout",
+            "ittm_separated_layout_count",
+            "ittm_separated_layout_field",
             "ittm_separated_import_segment",
             "ittm_separated_import_segments_finish",
             "ittm_separated_import_ocr_job",
@@ -232,6 +235,12 @@ class NativePipelineCore:
         library.ittm_separated_import_block.restype = ctypes.c_int32
         library.ittm_separated_import_segments_begin.argtypes = ()
         library.ittm_separated_import_segments_begin.restype = ctypes.c_uint32
+        library.ittm_separated_import_layout.argtypes = (ctypes.c_uint32,) * 5
+        library.ittm_separated_import_layout.restype = ctypes.c_int32
+        library.ittm_separated_layout_count.argtypes = (ctypes.c_uint32,)
+        library.ittm_separated_layout_count.restype = ctypes.c_uint32
+        library.ittm_separated_layout_field.argtypes = (ctypes.c_uint32,) * 3
+        library.ittm_separated_layout_field.restype = ctypes.c_int32
         library.ittm_separated_import_segment.argtypes = (
             ctypes.c_uint32,
             ctypes.c_uint32,
@@ -775,6 +784,23 @@ class NativePipelineCore:
         )
         if result != 0:
             raise ValueError(f"Separated segment import failed: {result}")
+
+    def separated_import_layout(
+        self, handle: int, object_id: int, object_kind: int,
+        rows: int, columns: int,
+    ) -> None:
+        status = int(self._library.ittm_separated_import_layout(
+            handle, object_id, object_kind, rows, columns,
+        ))
+        if status != 0:
+            raise ValueError(f"Separated layout import failed: {status}")
+
+    def separated_layouts(self, handle: int) -> tuple[tuple[int, int, int, int], ...]:
+        return tuple(
+            tuple(int(self._library.ittm_separated_layout_field(handle, index, field))
+                  for field in range(4))
+            for index in range(int(self._library.ittm_separated_layout_count(handle)))
+        )
 
     def separated_import_segments_finish(self, handle: int) -> None:
         if int(self._library.ittm_separated_import_segments_finish(handle)) != 1:

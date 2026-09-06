@@ -6,8 +6,6 @@ use crate::geometry::{
 };
 use crate::topology::{PhysicalTopology, SpatialValue};
 
-const MAX_PAIRWISE_CHECKS: usize = 2_000_000;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ObjectKind {
     Paragraph,
@@ -128,6 +126,118 @@ fn bbox_union(values: impl IntoIterator<Item = [usize; 4]>) -> Option<[usize; 4]
 fn boxes_intersect(first: [usize; 4], second: [usize; 4]) -> bool {
     first[0].max(second[0]) < first[2].min(second[2])
         && first[1].max(second[1]) < first[3].min(second[3])
+}
+
+#[derive(Clone, Debug)]
+struct SpatialBoxNode {
+    bbox: [usize; 4],
+    children: Option<[usize; 2]>,
+    source_index: usize,
+}
+
+/// Conservative spatial pruning, with results in the original input order.
+/// Sorting matches preserves the exhaustive algorithm's union and ownership order.
+struct SpatialBoxIndex {
+    nodes: Vec<SpatialBoxNode>,
+    root: Option<usize>,
+}
+
+impl SpatialBoxIndex {
+    fn new(boxes: impl IntoIterator<Item = [usize; 4]>) -> Self {
+        let mut values: Vec<_> = boxes.into_iter().enumerate().collect();
+        let mut index = Self {
+            nodes: Vec::with_capacity(values.len().saturating_mul(2)),
+            root: None,
+        };
+        if !values.is_empty() {
+            index.root = Some(index.build(&mut values));
+        }
+        index
+    }
+
+    fn build(&mut self, values: &mut [(usize, [usize; 4])]) -> usize {
+        let bbox = bbox_union(values.iter().map(|(_, bbox)| *bbox))
+            .expect("spatial node is nonempty");
+        let node = self.nodes.len();
+        self.nodes.push(SpatialBoxNode {
+            bbox,
+            children: None,
+            source_index: values[0].0,
+        });
+        if values.len() > 1 {
+            let axis = usize::from(bbox[3] - bbox[1] > bbox[2] - bbox[0]);
+            let middle = values.len() / 2;
+            values.select_nth_unstable_by_key(middle, |(source_index, bbox)| {
+                (bbox[axis] as u128 + bbox[axis + 2] as u128, *source_index)
+            });
+            let (left, right) = values.split_at_mut(middle);
+            let children = [self.build(left), self.build(right)];
+            self.nodes[node].children = Some(children);
+        }
+        node
+    }
+
+    fn collect_intersections(&self, node: usize, bbox: [usize; 4], found: &mut Vec<usize>) {
+        let node = &self.nodes[node];
+        if !boxes_intersect(node.bbox, bbox) {
+            return;
+        }
+        if let Some(children) = node.children {
+            for child in children {
+                self.collect_intersections(child, bbox, found);
+            }
+        } else {
+            found.push(node.source_index);
+        }
+    }
+
+    fn intersecting(&self, bbox: [usize; 4]) -> Vec<usize> {
+        let mut found = Vec::new();
+        if let Some(root) = self.root {
+            self.collect_intersections(root, bbox, &mut found);
+        }
+        found.sort_unstable();
+        found
+    }
+}
+
+#[cfg(test)]
+mod spatial_box_index_tests {
+    use super::{SpatialBoxIndex, boxes_intersect};
+
+    #[test]
+    fn spatial_queries_match_exhaustive_half_open_intersections() {
+        let mut state = 29_u64;
+        let mut next = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 32) as usize
+        };
+        let boxes: Vec<_> = (0..512).map(|_| {
+            let x = next() % 100;
+            let y = next() % 100;
+            [x, y, x + next() % 21, y + next() % 21]
+        }).collect();
+        let index = SpatialBoxIndex::new(boxes.iter().copied());
+        for bbox in boxes.iter().copied().chain([[0, 0, 0, 0], [0, 0, 120, 120], [120, 0, 130, 120]]) {
+            let expected: Vec<_> = boxes.iter().enumerate()
+                .filter_map(|(index, candidate)| boxes_intersect(*candidate, bbox).then_some(index))
+                .collect();
+            assert_eq!(index.intersecting(bbox), expected);
+        }
+        assert!(SpatialBoxIndex::new([]).intersecting([0, 0, 10, 10]).is_empty());
+    }
+
+    #[test]
+    fn separated_regions_do_not_exhaust_a_cartesian_pair_budget() {
+        let boxes: Vec<_> = (0..1600).map(|index| {
+            let coordinate = index * 4;
+            [coordinate, coordinate, coordinate + 2, coordinate + 2]
+        }).collect();
+        let index = SpatialBoxIndex::new(boxes.iter().copied());
+        for (source_index, bbox) in boxes.into_iter().enumerate() {
+            assert_eq!(index.intersecting(bbox), vec![source_index]);
+        }
+    }
 }
 
 fn median(mut values: Vec<f64>) -> f64 {
@@ -252,16 +362,12 @@ fn table_drafts(
     combined.extend(vertical.iter().copied());
     let vertical_offset = horizontal.len();
     let mut disjoint = DisjointSet::new(combined.len());
-    let mut pairwise_checks = 0_usize;
+    let vertical_boxes = SpatialBoxIndex::new(
+        vertical.iter().map(|(_, rule)| rule.summary.bbox),
+    );
     for (horizontal_index, (_, horizontal_rule)) in horizontal.iter().enumerate() {
-        for (vertical_index, (_, vertical_rule)) in vertical.iter().enumerate() {
-            pairwise_checks += 1;
-            if pairwise_checks > MAX_PAIRWISE_CHECKS {
-                return None;
-            }
-            if boxes_intersect(horizontal_rule.summary.bbox, vertical_rule.summary.bbox) {
-                disjoint.union(horizontal_index, vertical_offset + vertical_index);
-            }
+        for vertical_index in vertical_boxes.intersecting(horizontal_rule.summary.bbox) {
+            disjoint.union(horizontal_index, vertical_offset + vertical_index);
         }
     }
     let mut networks: BTreeMap<usize, Vec<(usize, &MaterializedRule)>> = BTreeMap::new();
@@ -276,6 +382,10 @@ fn table_drafts(
         }
         cells_by_segment[cell.segment_index].push((cell.row, cell.column));
     }
+    let segment_boxes = SpatialBoxIndex::new(source_segments.iter().map(|index| {
+        let span = spans[*index];
+        [span.column_start, span.row_start, span.column_stop, span.row_stop]
+    }));
     let mut candidates = Vec::<TableCandidate>::new();
     for network in networks.into_values() {
         let network_horizontal: Vec<_> = network
@@ -346,12 +456,11 @@ fn table_drafts(
         ];
         let mut members = Vec::new();
         let mut logical_cells = vec![BTreeSet::<(usize, usize)>::new(); segment_count];
-        for segment_index in source_segments {
-            pairwise_checks += 1;
-            if pairwise_checks > MAX_PAIRWISE_CHECKS {
-                return None;
-            }
-            let span = spans[*segment_index];
+        for source_position in segment_boxes.intersecting([
+            sparse_span[2], sparse_span[0], sparse_span[3], sparse_span[1],
+        ]) {
+            let segment_index = source_segments[source_position];
+            let span = spans[segment_index];
             if span.row_start < sparse_span[0]
                 || span.row_stop > sparse_span[1]
                 || span.column_start < sparse_span[2]
@@ -359,11 +468,7 @@ fn table_drafts(
             {
                 continue;
             }
-            for (row, column) in &cells_by_segment[*segment_index] {
-                pairwise_checks += 1;
-                if pairwise_checks > MAX_PAIRWISE_CHECKS {
-                    return None;
-                }
+            for (row, column) in &cells_by_segment[segment_index] {
                 let Some(logical_row) = logical_lane(matrix.rows[*row], &horizontal_bands) else {
                     continue;
                 };
@@ -371,10 +476,10 @@ fn table_drafts(
                 else {
                     continue;
                 };
-                logical_cells[*segment_index].insert((logical_row, logical_column));
+                logical_cells[segment_index].insert((logical_row, logical_column));
             }
-            if !logical_cells[*segment_index].is_empty() {
-                members.push(*segment_index);
+            if !logical_cells[segment_index].is_empty() {
+                members.push(segment_index);
             }
         }
         if populated_table(&members, &logical_cells) {

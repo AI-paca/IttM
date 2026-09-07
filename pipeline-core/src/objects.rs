@@ -137,13 +137,13 @@ struct SpatialBoxNode {
 
 /// Conservative spatial pruning, with results in the original input order.
 /// Sorting matches preserves the exhaustive algorithm's union and ownership order.
-struct SpatialBoxIndex {
+pub(crate) struct SpatialBoxIndex {
     nodes: Vec<SpatialBoxNode>,
     root: Option<usize>,
 }
 
 impl SpatialBoxIndex {
-    fn new(boxes: impl IntoIterator<Item = [usize; 4]>) -> Self {
+    pub(crate) fn new(boxes: impl IntoIterator<Item = [usize; 4]>) -> Self {
         let mut values: Vec<_> = boxes.into_iter().enumerate().collect();
         let mut index = Self {
             nodes: Vec::with_capacity(values.len().saturating_mul(2)),
@@ -156,8 +156,8 @@ impl SpatialBoxIndex {
     }
 
     fn build(&mut self, values: &mut [(usize, [usize; 4])]) -> usize {
-        let bbox = bbox_union(values.iter().map(|(_, bbox)| *bbox))
-            .expect("spatial node is nonempty");
+        let bbox =
+            bbox_union(values.iter().map(|(_, bbox)| *bbox)).expect("spatial node is nonempty");
         let node = self.nodes.len();
         self.nodes.push(SpatialBoxNode {
             bbox,
@@ -191,7 +191,7 @@ impl SpatialBoxIndex {
         }
     }
 
-    fn intersecting(&self, bbox: [usize; 4]) -> Vec<usize> {
+    pub(crate) fn intersecting(&self, bbox: [usize; 4]) -> Vec<usize> {
         let mut found = Vec::new();
         if let Some(root) = self.root {
             self.collect_intersections(root, bbox, &mut found);
@@ -212,27 +212,42 @@ mod spatial_box_index_tests {
             state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
             (state >> 32) as usize
         };
-        let boxes: Vec<_> = (0..512).map(|_| {
-            let x = next() % 100;
-            let y = next() % 100;
-            [x, y, x + next() % 21, y + next() % 21]
-        }).collect();
+        let boxes: Vec<_> = (0..512)
+            .map(|_| {
+                let x = next() % 100;
+                let y = next() % 100;
+                [x, y, x + next() % 21, y + next() % 21]
+            })
+            .collect();
         let index = SpatialBoxIndex::new(boxes.iter().copied());
-        for bbox in boxes.iter().copied().chain([[0, 0, 0, 0], [0, 0, 120, 120], [120, 0, 130, 120]]) {
-            let expected: Vec<_> = boxes.iter().enumerate()
+        for bbox in
+            boxes
+                .iter()
+                .copied()
+                .chain([[0, 0, 0, 0], [0, 0, 120, 120], [120, 0, 130, 120]])
+        {
+            let expected: Vec<_> = boxes
+                .iter()
+                .enumerate()
                 .filter_map(|(index, candidate)| boxes_intersect(*candidate, bbox).then_some(index))
                 .collect();
             assert_eq!(index.intersecting(bbox), expected);
         }
-        assert!(SpatialBoxIndex::new([]).intersecting([0, 0, 10, 10]).is_empty());
+        assert!(
+            SpatialBoxIndex::new([])
+                .intersecting([0, 0, 10, 10])
+                .is_empty()
+        );
     }
 
     #[test]
     fn separated_regions_do_not_exhaust_a_cartesian_pair_budget() {
-        let boxes: Vec<_> = (0..1600).map(|index| {
-            let coordinate = index * 4;
-            [coordinate, coordinate, coordinate + 2, coordinate + 2]
-        }).collect();
+        let boxes: Vec<_> = (0..1600)
+            .map(|index| {
+                let coordinate = index * 4;
+                [coordinate, coordinate, coordinate + 2, coordinate + 2]
+            })
+            .collect();
         let index = SpatialBoxIndex::new(boxes.iter().copied());
         for (source_index, bbox) in boxes.into_iter().enumerate() {
             assert_eq!(index.intersecting(bbox), vec![source_index]);
@@ -362,9 +377,7 @@ fn table_drafts(
     combined.extend(vertical.iter().copied());
     let vertical_offset = horizontal.len();
     let mut disjoint = DisjointSet::new(combined.len());
-    let vertical_boxes = SpatialBoxIndex::new(
-        vertical.iter().map(|(_, rule)| rule.summary.bbox),
-    );
+    let vertical_boxes = SpatialBoxIndex::new(vertical.iter().map(|(_, rule)| rule.summary.bbox));
     for (horizontal_index, (_, horizontal_rule)) in horizontal.iter().enumerate() {
         for vertical_index in vertical_boxes.intersecting(horizontal_rule.summary.bbox) {
             disjoint.union(horizontal_index, vertical_offset + vertical_index);
@@ -384,7 +397,12 @@ fn table_drafts(
     }
     let segment_boxes = SpatialBoxIndex::new(source_segments.iter().map(|index| {
         let span = spans[*index];
-        [span.column_start, span.row_start, span.column_stop, span.row_stop]
+        [
+            span.column_start,
+            span.row_start,
+            span.column_stop,
+            span.row_stop,
+        ]
     }));
     let mut candidates = Vec::<TableCandidate>::new();
     for network in networks.into_values() {
@@ -457,7 +475,10 @@ fn table_drafts(
         let mut members = Vec::new();
         let mut logical_cells = vec![BTreeSet::<(usize, usize)>::new(); segment_count];
         for source_position in segment_boxes.intersecting([
-            sparse_span[2], sparse_span[0], sparse_span[3], sparse_span[1],
+            sparse_span[2],
+            sparse_span[0],
+            sparse_span[3],
+            sparse_span[1],
         ]) {
             let segment_index = source_segments[source_position];
             let span = spans[segment_index];
@@ -527,13 +548,21 @@ fn table_drafts(
                 })
             })
             .collect::<Option<Vec<_>>>()?;
+        // A ruled table owns its finite border as well as its source text.
+        // Python network_bbox_for_crop unions the network and member rectangles.
+        let member_bbox = bbox_union(
+            unowned
+                .iter()
+                .map(|i| analysis.materialized_segments.segments[*i].bbox),
+        )?;
+        let crop_bbox = bbox_union([candidate.bbox, member_bbox])?;
         drafts.push(ObjectDraft {
             kind: ObjectKind::Table,
             segment_indexes: unowned,
             confidence: 1.0,
             evidence: vec!["orthogonal-rule-grid", "populated-logical-rule-grid"],
             sparse_span: Some(candidate.sparse_span),
-            bbox_override: None,
+            bbox_override: Some(crop_bbox),
             logical_spans: Some(logical_spans),
         });
     }
@@ -575,7 +604,7 @@ fn visual_rows(segment_indexes: &[usize], segments: &[MaterializedSegment]) -> V
             } else {
                 larger
             };
-            (row_center - candidate_center).abs() <= 0.65 * scale
+            (row_center - candidate_center).abs() <= 2.0_f64.max(0.65 * scale)
         });
         if same_row {
             rows.last_mut().expect("row exists").push(index);
@@ -594,7 +623,7 @@ fn upper_quartile(mut values: Vec<usize>) -> f64 {
         return 0.0;
     }
     values.sort_unstable();
-    let index = (0.75 * (values.len().saturating_sub(1)) as f64).round() as usize;
+    let index = (0.75 * (values.len().saturating_sub(1)) as f64).round_ties_even() as usize;
     values[index] as f64
 }
 
@@ -669,8 +698,9 @@ fn has_empty_row_separator(
     if (separator_height as f64) < 8.0_f64.max(local_scale) {
         return false;
     }
-    let edge_inset =
-        1_usize.max((separator_height / 4).min(1_usize.max((local_scale * 0.25).round() as usize)));
+    let edge_inset = 1_usize.max(
+        (separator_height / 4).min(1_usize.max((local_scale * 0.25).round_ties_even() as usize)),
+    );
     let core = [
         separator[0],
         separator[1].saturating_add(edge_inset),
@@ -905,73 +935,282 @@ fn split_flow_rows(
     )
 }
 
+fn flow_rows(
+    indexes: &[usize],
+    segments: &[MaterializedSegment],
+) -> (Vec<Vec<usize>>, Vec<usize>, f64) {
+    let heights: Vec<_> = indexes
+        .iter()
+        .map(|i| segments[*i].bbox)
+        .filter(|b| b[3] - b[1] >= 3 && b[2] - b[0] >= 4)
+        .map(|b| (b[3] - b[1]) as f64)
+        .collect();
+    let height = if heights.is_empty() {
+        4.0
+    } else {
+        median(heights)
+    };
+    let mut ordered = indexes.to_vec();
+    ordered.sort_by_key(|i| {
+        let b = segments[*i].bbox;
+        (b[1], b[0], b[3], *i)
+    });
+    let (fringe, primary): (Vec<_>, Vec<_>) = ordered.into_iter().partition(|i| {
+        let b = segments[*i].bbox;
+        let w = (b[2] - b[0]) as f64;
+        let h = (b[3] - b[1]) as f64;
+        (w <= 3.0_f64.max(height * 0.20) && h >= height * 1.5)
+            || (w <= 3.0_f64.max(height * 0.25) && h <= 2.0_f64.max(height * 0.18))
+    });
+    (visual_rows(&primary, segments), fringe, height)
+}
+fn geometry_list_witness(
+    rows: &[Vec<usize>],
+    segments: &[MaterializedSegment],
+    height: f64,
+) -> bool {
+    if rows.len() < 4 {
+        return false;
+    }
+    let boxes: Vec<_> = rows
+        .iter()
+        .map(|r| row_bbox(r, segments).unwrap())
+        .collect();
+    let outer = boxes.iter().map(|b| b[0]).min().unwrap() as f64;
+    let tolerance = 4.0_f64.max(height * 0.20);
+    let inner: Vec<_> = boxes
+        .iter()
+        .map(|b| b[0] as f64)
+        .filter(|x| *x >= outer + 5.0_f64.max(height * 0.25))
+        .collect();
+    if inner.len() >= 3 && inner.len() * 2 >= rows.len() {
+        let track = median(inner.clone());
+        if (boxes[0][0] as f64 - outer).abs() <= tolerance
+            && inner.iter().all(|x| (*x - track).abs() <= tolerance)
+        {
+            return true;
+        }
+    }
+    if rows.len() < 5 {
+        return false;
+    }
+    let indent = 5.0_f64.max(height * 0.75);
+    let inner: Vec<_> = boxes
+        .iter()
+        .map(|b| b[0] as f64)
+        .filter(|x| *x >= outer + indent)
+        .collect();
+    if inner.len() < 2 {
+        return false;
+    }
+    let track = median(inner);
+    if track - outer < indent {
+        return false;
+    }
+    let tracks: Option<Vec<_>> = boxes
+        .iter()
+        .map(|b| {
+            let left = b[0] as f64;
+            if (left - outer).abs() <= tolerance {
+                Some(false)
+            } else if (left - track).abs() <= tolerance {
+                Some(true)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let Some(tracks) = tracks else {
+        return false;
+    };
+    if tracks[0] {
+        return false;
+    }
+    let inner_count = tracks[1..].iter().filter(|x| **x).count();
+    let outer_count = tracks[1..]
+        .iter()
+        .zip(&boxes[1..])
+        .filter(|(t, b)| !**t && b[2] as f64 >= track + 4.0_f64.max(height * 0.50))
+        .count();
+    let transitions = tracks[1..].windows(2).filter(|v| v[0] != v[1]).count();
+    inner_count >= 2 && outer_count >= 2 && transitions >= 2
+}
+fn merge_indented_flow_sections(
+    mut drafts: Vec<ConnectivityDraft>,
+    segments: &[MaterializedSegment],
+) -> Option<Vec<ConnectivityDraft>> {
+    drafts.sort_by_key(|d| (d.bbox[1], d.bbox[0]));
+    let mut out = Vec::new();
+    let mut drafts = drafts.into_iter().peekable();
+    while let Some(first) = drafts.next() {
+        if let Some(second) = drafts.peek() {
+            let indexes: Vec<_> = first
+                .segment_indexes
+                .union(&second.segment_indexes)
+                .copied()
+                .collect();
+            let first_ids: Vec<_> = first.segment_indexes.iter().copied().collect();
+            let (first_rows, _, height) = flow_rows(&first_ids, segments);
+            let (combined, _, combined_height) = flow_rows(&indexes, segments);
+            if first_rows.len() == 1
+                && combined.len() >= 4
+                && second.bbox[1].saturating_sub(first.bbox[3]) as f64 <= 16.0_f64.max(2.0 * height)
+                && first.bbox[0].max(second.bbox[0]) < first.bbox[2].min(second.bbox[2])
+                && geometry_list_witness(&combined, segments, combined_height)
+            {
+                let bbox = bbox_union([first.bbox, second.bbox])?;
+                drafts.next();
+                out.push(ConnectivityDraft {
+                    segment_indexes: indexes.into_iter().collect(),
+                    bbox,
+                });
+                continue;
+            }
+        }
+        out.push(first);
+    }
+    Some(out)
+}
 fn semantic_flow_drafts(
     connectivity: Vec<ConnectivityDraft>,
     segments: &[MaterializedSegment],
+    page: [usize; 4],
 ) -> Option<Vec<ObjectDraft>> {
+    fn draft(
+        kind: ObjectKind,
+        indexes: Vec<usize>,
+        segments: &[MaterializedSegment],
+        evidence: Vec<&'static str>,
+    ) -> Option<ObjectDraft> {
+        let bbox = bbox_union(indexes.iter().map(|i| segments[*i].bbox))?;
+        Some(ObjectDraft {
+            kind,
+            segment_indexes: indexes,
+            confidence: 0.85,
+            evidence,
+            sparse_span: None,
+            bbox_override: Some(bbox),
+            logical_spans: None,
+        })
+    }
     let mut result = Vec::new();
-    for draft in connectivity {
-        let indexes: Vec<usize> = draft.segment_indexes.iter().copied().collect();
-        let rows = visual_rows(&indexes, segments);
+    for d in merge_indented_flow_sections(connectivity, segments)? {
+        let indexes: Vec<_> = d.segment_indexes.iter().copied().collect();
+        if indexes.len() == 1 {
+            let b = segments[indexes[0]].bbox;
+            let w = b[2] - b[0];
+            let h = b[3] - b[1];
+            if (b[1] == page[1] || b[3] == page[3])
+                && w as f64 >= (page[2] - page[0]) as f64 * 0.80
+                && h as f64 <= (page[3] - page[1]) as f64 * 0.08
+                && w >= 12 * h
+            {
+                result.push(draft(
+                    ObjectKind::Unknown,
+                    indexes,
+                    segments,
+                    vec!["wide-thin-page-edge-fringe", "structural-residual"],
+                )?);
+                continue;
+            }
+        }
+        let (rows, fringe, height) = flow_rows(&indexes, segments);
         if rows.is_empty() {
+            let kind = if indexes.len() == 1 {
+                ObjectKind::Paragraph
+            } else {
+                ObjectKind::Unknown
+            };
+            result.push(draft(
+                kind,
+                indexes,
+                segments,
+                vec!["recursive-local-connectivity"],
+            )?);
             continue;
         }
-        let heights: Vec<f64> = indexes
-            .iter()
-            .map(|index| segments[*index].bbox)
-            .filter(|bbox| bbox[3] - bbox[1] >= 3 && bbox[2] - bbox[0] >= 4)
-            .map(|bbox| (bbox[3] - bbox[1]) as f64)
-            .collect();
-        let body_height = if heights.is_empty() {
-            4.0
-        } else {
-            median(heights)
-        };
-        let mut groups = Vec::<(bool, Vec<Vec<usize>>)>::new();
-        if let Some((start, stop)) = marker_list_span(&rows, segments, body_height) {
+        let (structural, attachable): (Vec<_>, Vec<_>) = fringe.into_iter().partition(|i| {
+            let b = segments[*i].bbox;
+            (b[0] == page[0] || b[2] == page[2]) && (b[3] - b[1]) as f64 >= height * 1.5
+        });
+        let marker = marker_list_span(&rows, segments, height);
+        let mut groups = Vec::new();
+        if let Some((start, stop)) = marker {
             groups.extend(
-                split_flow_rows(&rows[..start], segments, body_height)?
+                split_flow_rows(&rows[..start], segments, height)?
                     .into_iter()
-                    .map(|group| (false, group)),
+                    .map(|g| (false, g)),
             );
             groups.push((true, rows[start..stop].to_vec()));
             groups.extend(
-                split_flow_rows(&rows[stop..], segments, body_height)?
+                split_flow_rows(&rows[stop..], segments, height)?
                     .into_iter()
-                    .map(|group| (false, group)),
+                    .map(|g| (false, g)),
             );
+        } else if geometry_list_witness(&rows, segments, height) {
+            groups.push((true, rows));
         } else {
             groups.extend(
-                split_flow_rows(&rows, segments, body_height)?
+                split_flow_rows(&rows, segments, height)?
                     .into_iter()
-                    .map(|group| (false, group)),
+                    .map(|g| (false, g)),
             );
         }
-        for (is_list, group) in groups {
-            let group_row_count = group.len();
-            let mut segment_indexes: Vec<usize> = group.into_iter().flatten().collect();
-            segment_indexes.sort_unstable();
-            segment_indexes.dedup();
-            let bbox = bbox_union(segment_indexes.iter().map(|index| segments[*index].bbox))?;
-            result.push(ObjectDraft {
-                kind: if is_list {
+        let mut parts = Vec::new();
+        for (forced, group) in groups {
+            let is_list = forced || geometry_list_witness(&group, segments, height);
+            let evidence = vec![
+                if is_list {
+                    if forced {
+                        "repeated-marker-body-rows"
+                    } else {
+                        "repeated-indented-rows"
+                    }
+                } else if group.len() >= 2 {
+                    "connected-multiline-flow"
+                } else {
+                    "single-visual-row-paragraph"
+                },
+                "geometry-only-visual-rows",
+            ];
+            let indexes: BTreeSet<_> = group.into_iter().flatten().collect();
+            parts.push(draft(
+                if is_list {
                     ObjectKind::List
                 } else {
                     ObjectKind::Paragraph
                 },
-                segment_indexes,
-                confidence: if is_list { 0.95 } else { 0.85 },
-                evidence: if is_list {
-                    vec!["repeated-marker-body-rows", "geometry-only-visual-rows"]
-                } else if group_row_count >= 2 {
-                    vec!["connected-multiline-flow", "geometry-only-visual-rows"]
-                } else {
-                    vec!["single-visual-row-paragraph", "geometry-only-visual-rows"]
-                },
-                sparse_span: None,
-                bbox_override: Some(bbox),
-                logical_spans: None,
-            });
+                indexes.into_iter().collect(),
+                segments,
+                evidence,
+            )?);
+        }
+        for i in attachable {
+            let b = segments[i].bbox;
+            let selected = (0..parts.len()).max_by_key(|j| {
+                let p = parts[*j].bbox_override.unwrap();
+                (
+                    b[3].min(p[3]).saturating_sub(b[1].max(p[1])),
+                    std::cmp::Reverse((b[1] + b[3]).abs_diff(p[1] + p[3])),
+                    std::cmp::Reverse(*j),
+                )
+            })?;
+            parts[selected].segment_indexes.push(i);
+            parts[selected].bbox_override = bbox_union(
+                parts[selected]
+                    .segment_indexes
+                    .iter()
+                    .map(|i| segments[*i].bbox),
+            );
+        }
+        result.extend(parts);
+        for i in structural {
+            result.push(draft(
+                ObjectKind::Unknown,
+                vec![i],
+                segments,
+                vec!["tall-narrow-page-edge-fringe", "structural-residual"],
+            )?);
         }
     }
     Some(result)
@@ -1158,7 +1397,11 @@ pub fn reconstruct_objects_with_topology(
         node_segments[node.source_index] = node.segment_indexes.clone();
     }
     let connectivity = recurse_connectivity(analysis, topology, &node_segments, &remaining, 0)?;
-    drafts.extend(semantic_flow_drafts(connectivity, segments)?);
+    drafts.extend(semantic_flow_drafts(
+        connectivity,
+        segments,
+        [0, 0, analysis.foreground.width, analysis.foreground.height],
+    )?);
     drafts = merge_horizontal_rule_tables(analysis, drafts)?;
     drafts.sort_by(|first, second| {
         let first_bbox = bbox_union(
@@ -1278,4 +1521,83 @@ pub fn reconstruct_objects_with_topology(
         objects,
         segment_ownership,
     })
+}
+
+#[cfg(test)]
+mod flow_parity_tests {
+    use super::*;
+    fn segment(bbox: [usize; 4], index: usize) -> MaterializedSegment {
+        MaterializedSegment {
+            bbox,
+            source_bbox: bbox,
+            ink_pixels: 1,
+            row_index: index,
+            leaf_index: index,
+            component_ids: vec![index],
+        }
+    }
+    #[test]
+    fn indented_list_keeps_its_separated_title() {
+        let segments = vec![
+            segment([10, 10, 100, 20], 0),
+            segment([30, 36, 100, 46], 1),
+            segment([30, 50, 100, 60], 2),
+            segment([30, 64, 100, 74], 3),
+        ];
+        let input = vec![
+            ConnectivityDraft {
+                segment_indexes: BTreeSet::from([0]),
+                bbox: segments[0].bbox,
+            },
+            ConnectivityDraft {
+                segment_indexes: BTreeSet::from([1, 2, 3]),
+                bbox: [30, 36, 100, 74],
+            },
+        ];
+        let result = semantic_flow_drafts(input, &segments, [0, 0, 200, 200]).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].kind, ObjectKind::List);
+        assert_eq!(result[0].segment_indexes, vec![0, 1, 2, 3]);
+    }
+    #[test]
+    fn edge_fringe_does_not_expand_the_paragraph_crop() {
+        let segments = vec![
+            segment([20, 10, 100, 20], 0),
+            segment([20, 24, 100, 34], 1),
+            segment([0, 0, 2, 60], 2),
+            segment([80, 21, 81, 22], 3),
+        ];
+        let result = semantic_flow_drafts(
+            vec![ConnectivityDraft {
+                segment_indexes: (0..4).collect(),
+                bbox: [0, 0, 100, 60],
+            }],
+            &segments,
+            [0, 0, 200, 200],
+        )
+        .unwrap();
+        assert_eq!(result.len(), 2);
+        let paragraph = result
+            .iter()
+            .find(|d| d.kind == ObjectKind::Paragraph)
+            .unwrap();
+        assert_eq!(paragraph.bbox_override, Some([20, 10, 100, 34]));
+        assert_eq!(
+            paragraph
+                .segment_indexes
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from([0, 1, 3])
+        );
+        let residual = result
+            .iter()
+            .find(|d| d.evidence.contains(&"structural-residual"))
+            .unwrap();
+        assert_eq!(residual.segment_indexes, vec![2]);
+    }
+    #[test]
+    fn local_height_uses_python_even_rounding_at_a_half_index() {
+        assert_eq!(upper_quartile(vec![10, 10, 10, 20, 20, 100, 100]), 20.0);
+    }
 }

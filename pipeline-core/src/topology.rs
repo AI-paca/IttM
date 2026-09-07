@@ -3,6 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::geometry::{GeometryAnalysis, MaterializedSegment, SparseAxisInterval};
 use crate::{MERGE_LEFT_CODE, MERGE_UP_CODE};
 
+#[path = "topology_rules.rs"]
+mod rules;
+pub(crate) use rules::{RuledNetwork, rule_networks};
+
 const TOPOLOGY_EMPTY_SLOT_CODE: u8 = 7;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -10,6 +14,7 @@ pub enum SpatialValue {
     Empty,
     VisualRows(Vec<usize>),
     DenseRow(usize),
+    RuledNetwork(usize),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -197,10 +202,18 @@ pub fn build_physical_topology(analysis: &GeometryAnalysis) -> Option<PhysicalTo
         .map(|rule| rule.summary.bbox)
         .collect();
     let visual_rows = visual_rows(&analysis.materialized_segments.segments);
+    let networks = rule_networks(analysis)?;
     let mut values = Vec::<PhysicalRow>::new();
     let mut rule_barrier = false;
     for (row, interval) in matrix.rows.iter().copied().enumerate() {
-        if horizontal_rule_rows.contains(&row) {
+        if horizontal_rule_rows.contains(&row)
+            || networks.iter().any(|n| {
+                overlaps(
+                    (interval.start, interval.end),
+                    (n.y_lines[0], *n.y_lines.last().unwrap()),
+                )
+            })
+        {
             rule_barrier = true;
             continue;
         }
@@ -231,6 +244,8 @@ pub fn build_physical_topology(analysis: &GeometryAnalysis) -> Option<PhysicalTo
         }
         rule_barrier = false;
     }
+    values.extend(rules::network_rows(analysis, &networks, &visual_rows)?);
+    values.sort_by_key(|r| r.top);
     let mut group_start = 0_usize;
     for index in 1..=values.len() {
         let boundary = index == values.len() || values[index - 1].bottom != values[index].top;

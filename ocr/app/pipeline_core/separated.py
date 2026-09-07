@@ -123,6 +123,14 @@ class SeparatedBlockStageInput:
 
 
 @dataclass(frozen=True)
+class SeparatedBlockGeometryInput:
+    metadata: tuple[int, ...]
+    width: int
+    height: int
+    stride: int
+
+
+@dataclass(frozen=True)
 class SeparatedOcrStageInput:
     block_index: int
     languages: str
@@ -215,6 +223,29 @@ class NativeSeparatedSession:
         return value
 
     @classmethod
+    def from_block_geometry(
+        cls, blocks: tuple[SeparatedBlockGeometryInput, ...],
+        core: NativePipelineCore | None = None,
+    ) -> NativeSeparatedSession:
+        if not blocks:
+            raise ValueError("Block geometry checkpoint contains no blocks")
+        value = cls.__new__(cls)
+        value._core = core or native_pipeline_core()
+        if value._core is None:
+            raise RuntimeError("Native separated pipeline core is unavailable")
+        value._handle = value._core.separated_import_blocks_begin()
+        value._closed = False
+        try:
+            for block in blocks:
+                value._core.separated_import_block_geometry(
+                    value._handle, block.metadata, block.width, block.height, block.stride,
+                )
+        except BaseException:
+            value.close()
+            raise
+        return value
+
+    @classmethod
     def from_recognized_segments(
         cls,
         segments: tuple[SeparatedRecognizedSegment, ...],
@@ -259,7 +290,10 @@ class NativeSeparatedSession:
             raise ValueError("OCR checkpoint contains no selected jobs")
         for job in jobs:
             profile = SEPARATED_LANGUAGE_PROFILES.index(job.languages)
-            transform = SEPARATED_TRANSFORMS.index(job.transform)
+            # Composite output is already mapped into source-block coordinates;
+            # the import ABI preserves that fact without transforming its pixels.
+            transform = (2 if job.transform == "contextual/composite"
+                         else SEPARATED_TRANSFORMS.index(job.transform))
             index = self._core.separated_import_ocr_job(
                 self._handle,
                 job.block_index,

@@ -19,6 +19,7 @@ from app.pipeline_config import resolve_pipeline_profile
 from app.pipeline_core.separated import (
     NativeSeparatedSession,
     SeparatedBlockStageInput,
+    SeparatedBlockGeometryInput,
     SeparatedJobSegment,
     SeparatedOcrStageInput,
     SeparatedOcrJob,
@@ -213,20 +214,51 @@ def source_space_word_bbox(
     )
 
 
+def checkpoint_block_metadata(record: dict, objects: dict) -> tuple[int, ...]:
+    metadata = tuple(int(value) for value in record["metadata"])
+    cells = objects.get(int(record.get("object_id", metadata[1])), {}).get("matrix_cells")
+    if cells and metadata[0] == 1:
+        # Lossless matrix extension; geometric provenance can be empty.
+        extension = [len(cells)]
+        for cell in cells:
+            sources = [numeric_id(value) for value in cell["source_segment_ids"]]
+            extension.extend((int(cell["row"]), int(cell["logical_column"]),
+                              int(cell["row_span"]), int(cell["column_span"]),
+                              *map(int, cell["bbox"]), len(sources), *sources))
+        metadata = (2, *metadata[1:], *extension)
+    obj = objects.get(int(record.get("object_id", metadata[1])), {})
+    if obj.get("policy") == "line-windows" and len(obj.get("membership_units", [])) == 1:
+        if metadata[0] == 1:
+            metadata = (2, *metadata[1:], 0)
+        metadata = (3, *metadata[1:], 1)
+    return metadata
+
+
+def load_separate_block_geometry_inputs(stage: Path) -> tuple[SeparatedBlockGeometryInput, ...]:
+    checkpoint = json.loads((stage / "checkpoint.json").read_text(encoding="utf-8"))
+    objects = {int(value["object_id"]): value for value in checkpoint.get("objects", [])}
+    return tuple(SeparatedBlockGeometryInput(
+        metadata=checkpoint_block_metadata(record, objects),
+        width=int(record["width"]), height=int(record["height"]), stride=int(record["stride"]),
+    ) for record in checkpoint["records"])
+
+
 def load_separate_block_inputs(stage: Path) -> tuple[SeparatedBlockStageInput, ...]:
     stage = stage.resolve(strict=True)
     checkpoint_path = stage / "checkpoint.json"
     if checkpoint_path.is_file():
         checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
         values = []
+        objects = {int(value["object_id"]): value for value in checkpoint.get("objects", [])}
         for record in checkpoint["records"]:
+            metadata = checkpoint_block_metadata(record, objects)
             with Image.open(stage / record["raster"]) as opened:
                 raster = opened.convert("RGB")
                 pixels = raster.tobytes()
                 raster.close()
             values.append(
                 SeparatedBlockStageInput(
-                    metadata=tuple(int(value) for value in record["metadata"]),
+                    metadata=metadata,
                     pixels=pixels,
                     width=int(record["width"]),
                     height=int(record["height"]),
@@ -407,6 +439,11 @@ def load_ocr_stage_inputs(stage: Path) -> tuple[SeparatedOcrStageInput, ...]:
                 ),
             )
             for job in checkpoint["jobs"]
+            if not (
+                job.get("capability_id") == "adaptive-language-unresolved"
+                and not str(job.get("text", "")).strip()
+                and not job.get("words")
+            )
         )
     block_stage = resolve_stage_input(
         stage,

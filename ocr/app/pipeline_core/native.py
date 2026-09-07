@@ -52,6 +52,7 @@ class NativePipelineCore:
             "ittm_separated_plan_begin",
             "ittm_separated_import_blocks_begin",
             "ittm_separated_import_block",
+            "ittm_separated_import_block_geometry",
             "ittm_separated_import_segments_begin",
             "ittm_separated_import_layout",
             "ittm_separated_layout_count",
@@ -233,6 +234,11 @@ class NativePipelineCore:
             ctypes.c_uint32,
         )
         library.ittm_separated_import_block.restype = ctypes.c_int32
+        library.ittm_separated_import_block_geometry.argtypes = (
+            ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32,
+            ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32,
+        )
+        library.ittm_separated_import_block_geometry.restype = ctypes.c_int32
         library.ittm_separated_import_segments_begin.argtypes = ()
         library.ittm_separated_import_segments_begin.restype = ctypes.c_uint32
         library.ittm_separated_import_layout.argtypes = (ctypes.c_uint32,) * 5
@@ -833,6 +839,18 @@ class NativePipelineCore:
         )
         if result != 0:
             raise ValueError(f"Separated block import failed: {result}")
+
+    def separated_import_block_geometry(
+        self, handle: int, metadata: tuple[int, ...], width: int, height: int, stride: int,
+    ) -> None:
+        if not metadata:
+            raise ValueError("Imported block geometry must not be empty")
+        buffer = (ctypes.c_uint32 * len(metadata))(*metadata)
+        status = int(self._library.ittm_separated_import_block_geometry(
+            handle, buffer, len(metadata), width, height, stride,
+        ))
+        if status != 0:
+            raise ValueError(f"Separated block geometry import failed: {status}")
 
     def separated_import_ocr_job(
         self,

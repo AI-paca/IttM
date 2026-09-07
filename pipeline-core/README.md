@@ -69,3 +69,26 @@ silently fall back to the old Python layout route.
 
 When changing ABI behavior, update the Rust tests, native wrapper, browser
 wrapper, parity verifier, WASM verifier, and this document together.
+
+
+### Frozen OCR stage inputs
+
+`export-python-ocr-checkpoint.py` exports the selected legacy Python OCR plan,
+words and complete matrix without executing OCR or reading recognized stage-06
+text. Selection metadata is an explicit input to this materialization check;
+it does not prove policy-selection parity.
+
+The block import accepts the original packed-u32 metadata version 1. Version 2
+appends a logical cell count followed by each cell's row, column, row/column
+span, source rectangle and a length-prefixed list of geometric source IDs.
+Empty source lists are valid. Version 3 appends a text-order mode (0 retains
+OCR text; 1 requests Python line ordering for a single membership unit).
+
+`ittm_separated_import_block_geometry` imports the same metadata and raster
+dimensions without loading pixels. It is for Python-05 → Rust-06 replay; it
+refuses to start OCR or import raster-coordinate OCR results. Raster-backed
+import remains available for earlier boundaries. Composite imported OCR
+results use transform code 2 and preserve Python's original crop extent and
+source-block offset interpretation. No word coordinates are clipped or
+replaced by geometry IDs. These entry points are compiled for native and WASM
+from the same Rust source.

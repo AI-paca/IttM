@@ -41,6 +41,14 @@ struct SegmentCell {
     column_span: u32,
 }
 
+// A logical matrix slot exists independently of its optional geometric sources.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct MatrixCell {
+    cell: SegmentCell,
+    rect: Rect,
+    source_segment_indexes: Vec<usize>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct OcrWordEvidence {
     text: String,
@@ -70,6 +78,7 @@ struct OcrJob {
     logical_column_count: u32,
     ocr_required: bool,
     words_in_source_space: bool,
+    imported_composite: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -150,6 +159,8 @@ struct Session {
     active_split_probe: Option<TableSplitProbe>,
     recognized_segments: Option<Vec<RecognizedSegment>>,
     recognized_layouts: BTreeMap<u32, (u32, u32, u32)>,
+    matrix_cells: BTreeMap<u32, Vec<MatrixCell>>,
+    reading_order_objects: BTreeSet<u32>,
     importing_ocr: bool,
     topology: topology::PhysicalTopology,
     rendered: Option<Vec<u8>>,
@@ -1628,6 +1639,7 @@ fn verified_route_jobs(
                 && (rect.right.saturating_sub(rect.left) <= 1
                     || rect.bottom.saturating_sub(rect.top) <= 1)),
             words_in_source_space: false,
+        imported_composite: false,
         });
         let raster = if matches!(object_kind, OBJECT_PARAGRAPH | OBJECT_LIST) {
             render_exact_rect_raster(
@@ -1770,7 +1782,7 @@ fn cell_text_by_job(candidates: &[(String, u32, usize)]) -> String {
                 .then_with(|| {
                     (first.2 * second.1 as u64).cmp(&(second.2 * first.1 as u64))
                 })
-                .then_with(|| first_text.len().cmp(&second_text.len()))
+                .then_with(|| first_text.chars().count().cmp(&second_text.chars().count()))
                 .then_with(|| first_text.cmp(second_text))
         })
         .map(|(text, _score)| text)
@@ -1794,561 +1806,93 @@ fn word_center_in_source(job: &OcrJob, word: &OcrWordEvidence) -> (u64, u64) {
     )
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct ProjectedListWord {
-    text: String,
-    rect: Rect,
-    confidence_units: u32,
-    source_segment_index: usize,
-    evidence_job_index: usize,
-}
-
-fn project_list_word(
-    job: &OcrJob,
-    raster: Option<&JobRaster>,
-    word: &OcrWordEvidence,
-) -> Option<(usize, Rect)> {
-    if job.words_in_source_space {
-        return job
-            .segments
-            .iter()
-            .copied()
-            .enumerate()
-            .filter_map(|(segment_index, source)| {
-                let area = intersection_area(word.rect, source);
-                (area > 0).then_some((segment_index, word.rect, area))
-            })
-            .max_by_key(|(segment_index, _source_word, area)| {
-                (*area, usize::MAX - *segment_index)
-            })
-            .map(|(segment_index, source_word, _area)| (segment_index, source_word));
+// Exact line clustering used by Python _reading_order_words. Because incoming
+// centers are nondecreasing, the closest prior center is a line's maximum.
+// Keeping that representative avoids rescanning every word already in a line.
+fn reading_order_text(words: &[OcrWordEvidence]) -> String {
+    let mut order = (0..words.len()).collect::<Vec<_>>();
+    let center = |index: usize| u64::from(words[index].rect.top) + u64::from(words[index].rect.bottom);
+    order.sort_by_key(|&index| (center(index), words[index].rect.left, words[index].rect.right, index));
+    let mut lines = Vec::<(usize, Vec<usize>)>::new();
+    for index in order {
+        let rect = words[index].rect;
+        let mut best: Option<(f64, u64, usize)> = None;
+        for (line_index, (representative, _)) in lines.iter().enumerate() {
+            let previous = words[*representative].rect;
+            let overlap = previous.bottom.min(rect.bottom).saturating_sub(previous.top.max(rect.top));
+            let height = (previous.bottom - previous.top).min(rect.bottom - rect.top);
+            let fraction = f64::from(overlap) / f64::from(height);
+            let distance = center(index).abs_diff(center(*representative));
+            if fraction >= 0.25 && best.is_none_or(|candidate| {
+                fraction > candidate.0 || (fraction == candidate.0 &&
+                    (distance < candidate.1 || (distance == candidate.1 && line_index > candidate.2)))
+            }) { best = Some((fraction, distance, line_index)); }
+        }
+        if let Some((_, _, line_index)) = best {
+            let (representative, members) = &mut lines[line_index];
+            let previous = words[*representative].rect;
+            if center(index) > center(*representative) ||
+                (center(index) == center(*representative) && (rect.top, rect.left) < (previous.top, previous.left))
+            { *representative = index; }
+            members.push(index);
+        } else { lines.push((index, vec![index])); }
     }
-
-    let raster = raster?;
-    let (placement, _area) = raster
-        .placements
-        .iter()
-        .filter_map(|placement| {
-            let area = intersection_area(word.rect, placement.crop_rect);
-            (area > 0).then_some((placement, area))
-        })
-        .max_by_key(|(placement, area)| {
-            (
-                *area,
-                usize::MAX - placement.segment_indexes.first().copied().unwrap_or(0),
-            )
-        })?;
-    let source_word = project_crop_rect_to_source(word.rect, placement);
-    placement
-        .segment_indexes
-        .iter()
-        .copied()
-        .filter_map(|segment_index| {
-            let area = intersection_area(source_word, job.segments[segment_index]);
-            (area > 0).then_some((segment_index, area))
-        })
-        .max_by_key(|(segment_index, area)| (*area, usize::MAX - *segment_index))
-        .map(|(segment_index, _area)| (segment_index, source_word))
-}
-
-fn infer_tabular_list_segments(
-    object_id: u32,
-    mut words: Vec<ProjectedListWord>,
-    structural_boundaries: &[u32],
-) -> Option<Vec<RecognizedSegment>> {
-    if words.len() < 6 {
-        return None;
-    }
-
-    let mut heights = words
-        .iter()
-        .map(|word| word.rect.bottom.saturating_sub(word.rect.top).max(1))
-        .collect::<Vec<_>>();
-    heights.sort_unstable();
-    let median_height = heights[heights.len() / 2];
-    let row_tolerance_twice = median_height.saturating_mul(3).div_ceil(2);
-    words.sort_by_key(|word| {
-        (
-            word.rect.top.saturating_add(word.rect.bottom),
-            word.rect.left,
-            word.rect.right,
-        )
+    let key = |line: &(usize, Vec<usize>)| {
+        (line.1.iter().map(|&index| center(index)).sum::<u64>() as f64 / line.1.len() as f64,
+         line.1.iter().map(|&index| words[index].rect.top).min().unwrap_or(0),
+         line.1.iter().map(|&index| words[index].rect.left).min().unwrap_or(0))
+    };
+    lines.sort_by(|first, second| {
+        let a = key(first); let b = key(second);
+        a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)).then_with(|| a.2.cmp(&b.2))
     });
-
-    let mut rows = Vec::<Vec<ProjectedListWord>>::new();
-    let mut row_center_sums = Vec::<u64>::new();
-    for word in words {
-        let center_twice = u64::from(word.rect.top) + u64::from(word.rect.bottom);
-        let joins_last = row_center_sums.last().is_some_and(|sum| {
-            let count = rows.last().map_or(1, Vec::len) as u64;
-            center_twice.abs_diff(*sum / count) <= u64::from(row_tolerance_twice)
-        });
-        if joins_last {
-            row_center_sums.last_mut().map(|sum| *sum += center_twice);
-            rows.last_mut().expect("row exists").push(word);
-        } else {
-            row_center_sums.push(center_twice);
-            rows.push(vec![word]);
-        }
+    let mut texts = Vec::new();
+    for (_, mut line) in lines {
+        line.sort_by_key(|&index| { let rect = words[index].rect; (rect.left, rect.top, rect.right, rect.bottom, index) });
+        texts.extend(line.into_iter().map(|index| words[index].text.as_str()));
     }
-    if rows.len() < 3 {
-        return None;
-    }
-
-    let document_left = rows
-        .iter()
-        .flatten()
-        .map(|word| word.rect.left)
-        .min()?;
-    let document_right = rows
-        .iter()
-        .flatten()
-        .map(|word| word.rect.right)
-        .max()?;
-    let gap_threshold = median_height
-        .saturating_mul(2)
-        .max(document_right.saturating_sub(document_left) / 64)
-        .max(8);
-    let anchor_tolerance = median_height.saturating_mul(2).max(12);
-
-    let grouped_rows = rows
-        .into_iter()
-        .map(|mut row| {
-            row.sort_by_key(|word| (word.rect.left, word.rect.top, word.rect.right));
-            let mut groups = Vec::<Vec<ProjectedListWord>>::new();
-            for word in row {
-                let starts_group = groups.last().is_some_and(|group| {
-                    let previous_right = group
-                        .iter()
-                        .map(|previous| previous.rect.right)
-                        .max()
-                        .unwrap_or(0);
-                    word.rect.left.saturating_sub(previous_right) >= gap_threshold
-                        || structural_boundaries.iter().any(|boundary| {
-                            previous_right <= *boundary && *boundary <= word.rect.left
-                        })
-                });
-                if starts_group || groups.is_empty() {
-                    groups.push(vec![word]);
-                } else {
-                    groups.last_mut().expect("group exists").push(word);
-                }
-            }
-            groups
-        })
-        .collect::<Vec<_>>();
-    if grouped_rows.iter().filter(|groups| groups.len() >= 2).count() < 3 {
-        return None;
-    }
-
-    let mut starts = grouped_rows
-        .iter()
-        .enumerate()
-        .flat_map(|(row, groups)| {
-            groups
-                .iter()
-                .filter_map(move |group| group.first().map(|word| (word.rect.left, row)))
-        })
-        .collect::<Vec<_>>();
-    starts.sort_unstable();
-    let mut clusters = Vec::<(u64, u32, BTreeSet<usize>)>::new();
-    for (start, row) in starts {
-        if let Some((sum, count, supporting_rows)) = clusters.last_mut()
-            && start.abs_diff((*sum / u64::from(*count)) as u32) <= anchor_tolerance
-        {
-            *sum += u64::from(start);
-            *count += 1;
-            supporting_rows.insert(row);
-        } else {
-            clusters.push((u64::from(start), 1, BTreeSet::from([row])));
-        }
-    }
-    let minimum_support = 3;
-    let anchors = clusters
-        .into_iter()
-        .filter(|(_sum, _count, supporting_rows)| supporting_rows.len() >= minimum_support)
-        .map(|(sum, count, _supporting_rows)| (sum / u64::from(count)) as u32)
-        .collect::<Vec<_>>();
-    if anchors.len() < 2
-        || anchors
-            .last()
-            .copied()
-            .unwrap_or(0)
-            .saturating_sub(anchors.first().copied().unwrap_or(0))
-            < gap_threshold
-    {
-        return None;
-    }
-
-    let mut cells = BTreeMap::<(u32, u32), Vec<ProjectedListWord>>::new();
-    for (row, groups) in grouped_rows.into_iter().enumerate() {
-        for group in groups {
-            let Some(start) = group.first().map(|word| word.rect.left) else {
-                continue;
-            };
-            let column = anchors
-                .iter()
-                .enumerate()
-                .min_by_key(|(column, anchor)| (start.abs_diff(**anchor), *column))
-                .map_or(0, |(column, _anchor)| column as u32);
-            cells.entry((row as u32, column)).or_default().extend(group);
-        }
-    }
-
-    let mut output = Vec::new();
-    for ((row, column), mut cell_words) in cells {
-        cell_words.sort_by(|first, second| rect_reading_order(first.rect, second.rect));
-        let text = cell_words
-            .iter()
-            .map(|word| word.text.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
-        if text.trim().is_empty() {
-            continue;
-        }
-        let source_segment_indexes = cell_words
-            .iter()
-            .map(|word| word.source_segment_index)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        let evidence_job_indexes = cell_words
-            .iter()
-            .map(|word| word.evidence_job_index)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        output.push(RecognizedSegment {
-            object_id,
-            object_kind: OBJECT_TABLE,
-            source_segment_indexes,
-            cell: SegmentCell {
-                row,
-                column,
-                row_span: 1,
-                column_span: 1,
-            },
-            text,
-            evidence_job_indexes,
-        });
-    }
-    (output.len() >= 6).then_some(output)
+    texts.join(" ")
 }
 
-fn materialize_list_table_segments(
+fn materialize_matrix_segments(
     session: &Session,
     object_id: u32,
     indexes: &[usize],
-) -> Option<Vec<RecognizedSegment>> {
-    let mut words = BTreeMap::<(u32, u32, u32, u32, String, usize), ProjectedListWord>::new();
-    for index in indexes {
-        let job = &session.jobs[*index];
-        let raster = session.job_rasters.get(*index);
-        for word in &session.words[*index] {
-            let Some((segment_index, source_word)) = project_list_word(job, raster, word) else {
-                continue;
-            };
-            let Some(source_segment_index) =
-                job.source_segment_indexes.get(segment_index).copied()
-            else {
-                continue;
-            };
-            let projected = ProjectedListWord {
-                text: word.text.clone(),
-                rect: source_word,
-                confidence_units: word.ranking_confidence_units,
-                source_segment_index,
-                evidence_job_index: *index,
-            };
-            let key = (
-                source_word.left,
-                source_word.top,
-                source_word.right,
-                source_word.bottom,
-                word.text.clone(),
-                source_segment_index,
-            );
-            match words.entry(key) {
-                std::collections::btree_map::Entry::Vacant(entry) => {
-                    entry.insert(projected);
-                }
-                std::collections::btree_map::Entry::Occupied(mut entry) => {
-                    if projected.confidence_units > entry.get().confidence_units {
-                        entry.insert(projected);
-                    }
-                }
+    cells: &[MatrixCell],
+) -> Vec<RecognizedSegment> {
+    let mut candidates = vec![Vec::new(); cells.len()];
+    for &index in indexes {
+        let job = &session.jobs[index];
+        let mut grouped = BTreeMap::<usize, Vec<&OcrWordEvidence>>::new();
+        for word in &session.words[index] {
+            let (x, y) = word_center_in_source(job, word);
+            // Preserve Python matrix traversal order and half-open cell bounds.
+            if let Some(cell_index) = cells.iter().position(|cell| {
+                u64::from(cell.rect.left) * 2 <= x && x < u64::from(cell.rect.right) * 2
+                    && u64::from(cell.rect.top) * 2 <= y && y < u64::from(cell.rect.bottom) * 2
+            }) {
+                grouped.entry(cell_index).or_default().push(word);
             }
         }
+        for (cell_index, words) in grouped {
+            let text = words.iter().map(|word| word.text.as_str()).collect::<Vec<_>>().join(" ");
+            let confidence = words.iter().map(|word| u64::from(word.ranking_confidence_units))
+                .sum::<u64>() / words.len() as u64;
+            candidates[cell_index].push((text, confidence as u32, index));
+        }
     }
-    let object_top = indexes
-        .iter()
-        .map(|index| session.jobs[*index].rect.top as usize)
-        .min()?;
-    let object_left = indexes
-        .iter()
-        .map(|index| session.jobs[*index].rect.left as usize)
-        .min()?;
-    let object_right = indexes
-        .iter()
-        .map(|index| session.jobs[*index].rect.right as usize)
-        .max()?;
-    let structural_boundaries = session
-        .topology
-        .rows
-        .iter()
-        .filter(|row| row.bottom <= object_top && row.slots.len() >= 3)
-        .max_by_key(|row| row.bottom)
-        .map(|row| {
-            row.slots
-                .iter()
-                .skip(1)
-                .map(|slot| slot.start)
-                .filter(|boundary| object_left < *boundary && *boundary < object_right)
-                .map(|boundary| boundary as u32)
-                .collect::<Vec<_>>()
+    cells.iter().zip(candidates).filter_map(|(cell, candidates)| {
+        let text = cell_text_by_job(&candidates);
+        // Python preserves source-backed empty cells and nonempty inferred cells.
+        if text.is_empty() && cell.source_segment_indexes.is_empty() { return None; }
+        let mut sources = cell.source_segment_indexes.clone();
+        sources.sort_unstable(); sources.dedup();
+        Some(RecognizedSegment {
+            object_id, object_kind: OBJECT_TABLE, cell: cell.cell,
+            source_segment_indexes: sources, text,
+            evidence_job_indexes: candidates.iter().map(|candidate| candidate.2).collect(),
         })
-        .unwrap_or_default();
-    infer_tabular_list_segments(
-        object_id,
-        words.into_values().collect(),
-        &structural_boundaries,
-    )
-}
-
-fn paragraph_from_projected_words(
-    object_id: u32,
-    mut words: Vec<ProjectedListWord>,
-) -> Option<RecognizedSegment> {
-    if words.is_empty() {
-        return None;
-    }
-    let mut heights = words
-        .iter()
-        .map(|word| word.rect.bottom.saturating_sub(word.rect.top).max(1))
-        .collect::<Vec<_>>();
-    heights.sort_unstable();
-    let row_tolerance_twice = heights[heights.len() / 2].saturating_mul(2);
-    words.sort_by_key(|word| {
-        (
-            word.rect.top.saturating_add(word.rect.bottom),
-            word.rect.left,
-            word.rect.right,
-        )
-    });
-    let mut rows = Vec::<Vec<ProjectedListWord>>::new();
-    let mut centers = Vec::<u64>::new();
-    for word in words {
-        let center = u64::from(word.rect.top) + u64::from(word.rect.bottom);
-        let same_row = centers.last().is_some_and(|sum| {
-            let count = rows.last().map_or(1, Vec::len) as u64;
-            center.abs_diff(*sum / count) <= u64::from(row_tolerance_twice)
-        });
-        if same_row {
-            *centers.last_mut().expect("row center exists") += center;
-            rows.last_mut().expect("row exists").push(word);
-        } else {
-            centers.push(center);
-            rows.push(vec![word]);
-        }
-    }
-    let mut ordered_words = Vec::new();
-    let mut lines = Vec::new();
-    for mut row in rows {
-        row.sort_by_key(|word| (word.rect.left, word.rect.top, word.rect.right));
-        lines.push(
-            row.iter()
-                .map(|word| word.text.as_str())
-                .collect::<Vec<_>>()
-                .join(" "),
-        );
-        ordered_words.extend(row);
-    }
-    let text = lines
-        .into_iter()
-        .filter(|line| !line.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
-    if text.is_empty() {
-        return None;
-    }
-    Some(RecognizedSegment {
-        object_id,
-        object_kind: OBJECT_PARAGRAPH,
-        source_segment_indexes: ordered_words
-            .iter()
-            .map(|word| word.source_segment_index)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect(),
-        cell: SegmentCell {
-            row: 0,
-            column: 0,
-            row_span: 1,
-            column_span: 1,
-        },
-        text,
-        evidence_job_indexes: ordered_words
-            .iter()
-            .map(|word| word.evidence_job_index)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect(),
-    })
-}
-
-fn materialize_cross_object_list_table(
-    session: &Session,
-    by_object: &BTreeMap<u32, Vec<usize>>,
-) -> Option<(BTreeSet<u32>, Vec<RecognizedSegment>)> {
-    let (&list_object_id, list_indexes) = by_object.iter().find(|(_object_id, indexes)| {
-        indexes
-            .first()
-            .is_some_and(|index| session.jobs[*index].object_kind == OBJECT_LIST)
-    })?;
-    let list_top = list_indexes
-        .iter()
-        .map(|index| session.jobs[*index].rect.top as usize)
-        .min()?;
-    let list_bottom = list_indexes
-        .iter()
-        .map(|index| session.jobs[*index].rect.bottom as usize)
-        .max()?;
-    let list_center = list_top.saturating_add(list_bottom).div_ceil(2);
-    let header_row = session
-        .topology
-        .rows
-        .iter()
-        .filter(|row| row.bottom <= list_top && row.slots.len() >= 3)
-        .max_by_key(|row| row.bottom)?;
-    let body_row = session
-        .topology
-        .rows
-        .iter()
-        .filter(|row| row.top <= list_center && list_center < row.bottom)
-        .max_by_key(|row| row.slots.len())?;
-    let first_header_boundary = header_row.slots.get(1)?.start;
-    let maximum_divider_width = 8_usize.max(
-        header_row
-            .slots
-            .last()?
-            .end
-            .saturating_sub(header_row.slots[0].start)
-            / 128,
-    );
-    let table_left = body_row
-        .slots
-        .iter()
-        .filter(|slot| {
-            slot.start < first_header_boundary
-                && slot.end.saturating_sub(slot.start) <= maximum_divider_width
-        })
-        .map(|slot| slot.end)
-        .max()?;
-    let table_right = header_row.slots.last()?.end;
-    let table_top = header_row.top;
-    let table_bottom = body_row.bottom;
-    if table_left >= table_right || table_top >= table_bottom {
-        return None;
-    }
-    let structural_boundaries = header_row
-        .slots
-        .iter()
-        .skip(1)
-        .map(|slot| slot.start as u32)
-        .filter(|boundary| {
-            (table_left as u32) < *boundary && *boundary < table_right as u32
-        })
-        .collect::<Vec<_>>();
-    if structural_boundaries.len() < 2 {
-        return None;
-    }
-
-    let first_candidate = list_object_id.saturating_sub(1);
-    let last_candidate = list_object_id.saturating_add(1);
-    let mut consumed_objects = BTreeSet::new();
-    let mut projected = BTreeMap::<(u32, u32, u32, u32, String, usize), ProjectedListWord>::new();
-    for (object_id, indexes) in by_object.range(first_candidate..=last_candidate) {
-        if indexes
-            .first()
-            .is_some_and(|index| session.jobs[*index].object_kind == OBJECT_TABLE)
-        {
-            continue;
-        }
-        let overlaps_table_band = indexes.iter().any(|index| {
-            let rect = session.jobs[*index].rect;
-            rect.top < table_bottom as u32 && (table_top as u32) < rect.bottom
-        });
-        if !overlaps_table_band {
-            continue;
-        }
-        consumed_objects.insert(*object_id);
-        for index in indexes {
-            let job = &session.jobs[*index];
-            let raster = session.job_rasters.get(*index);
-            for word in &session.words[*index] {
-                let Some((segment_index, source_word)) = project_list_word(job, raster, word)
-                else {
-                    continue;
-                };
-                let Some(source_segment_index) =
-                    job.source_segment_indexes.get(segment_index).copied()
-                else {
-                    continue;
-                };
-                let key = (
-                    source_word.left,
-                    source_word.top,
-                    source_word.right,
-                    source_word.bottom,
-                    word.text.clone(),
-                    source_segment_index,
-                );
-                projected.entry(key).or_insert_with(|| ProjectedListWord {
-                    text: word.text.clone(),
-                    rect: source_word,
-                    confidence_units: word.ranking_confidence_units,
-                    source_segment_index,
-                    evidence_job_index: *index,
-                });
-            }
-        }
-    }
-    if !consumed_objects.contains(&list_object_id) {
-        return None;
-    }
-
-    let mut table_words = Vec::new();
-    let mut before_words = Vec::new();
-    let mut after_words = Vec::new();
-    for word in projected.into_values() {
-        let center_x_twice = u64::from(word.rect.left) + u64::from(word.rect.right);
-        let center_y_twice = u64::from(word.rect.top) + u64::from(word.rect.bottom);
-        let inside_table = u64::from(table_left as u32) * 2 <= center_x_twice
-            && center_x_twice < u64::from(table_right as u32) * 2
-            && u64::from(table_top as u32) * 2 <= center_y_twice
-            && center_y_twice < u64::from(table_bottom as u32) * 2;
-        if inside_table {
-            table_words.push(word);
-        } else if center_y_twice < u64::from(table_bottom as u32) * 2 {
-            before_words.push(word);
-        } else {
-            after_words.push(word);
-        }
-    }
-    let mut output = infer_tabular_list_segments(
-        list_object_id,
-        table_words,
-        &structural_boundaries,
-    )?;
-    if let Some(before) =
-        paragraph_from_projected_words(first_candidate, before_words)
-    {
-        output.push(before);
-    }
-    if let Some(after) = paragraph_from_projected_words(last_candidate, after_words) {
-        output.push(after);
-    }
-    Some((consumed_objects, output))
+    }).collect()
 }
 
 fn materialize_recognized_segments(session: &Session) -> Vec<RecognizedSegment> {
@@ -2364,22 +1908,13 @@ fn materialize_recognized_segments(session: &Session) -> Vec<RecognizedSegment> 
                 .push(index);
         }
     }
-    let (consumed_objects, mut output) =
-        materialize_cross_object_list_table(session, &by_object)
-            .unwrap_or_else(|| (BTreeSet::new(), Vec::new()));
+    // Source object classification is the find-object boundary's output. The
+    // Python get-segment contract renders lists as paragraph text; it does not
+    // reinterpret aligned OCR words as a new table or merge adjacent objects.
+    let mut output = Vec::new();
     for (object_id, indexes) in by_object {
-        if consumed_objects.contains(&object_id) {
-            continue;
-        }
         let object_kind = session.jobs[indexes[0]].object_kind;
         if object_kind != OBJECT_TABLE {
-            if object_kind == OBJECT_LIST
-                && let Some(mut table_segments) =
-                    materialize_list_table_segments(session, object_id, &indexes)
-            {
-                output.append(&mut table_segments);
-                continue;
-            }
             let mut source_segment_indexes = indexes
                 .iter()
                 .flat_map(|index| session.jobs[*index].source_segment_indexes.iter().copied())
@@ -2396,7 +1931,11 @@ fn materialize_recognized_segments(session: &Session) -> Vec<RecognizedSegment> 
                     texts.push(text);
                 }
             }
-            let text = texts.join("\n");
+            let text = if indexes.len() == 1 && session.reading_order_objects.contains(&object_id)
+                && !session.words[indexes[0]].is_empty() {
+                reading_order_text(&session.words[indexes[0]])
+            } else { texts.join("\n") };
+            if text.trim().is_empty() { continue; }
             output.push(RecognizedSegment {
                 object_id,
                 object_kind: OBJECT_PARAGRAPH,
@@ -2413,6 +1952,10 @@ fn materialize_recognized_segments(session: &Session) -> Vec<RecognizedSegment> 
             continue;
         }
 
+        if let Some(cells) = session.matrix_cells.get(&object_id) {
+            output.extend(materialize_matrix_segments(session, object_id, &indexes, cells));
+            continue;
+        }
         type SegmentKey = (u32, u32, u32, u32);
         let mut evidence = BTreeMap::<SegmentKey, (BTreeSet<usize>, Vec<usize>)>::new();
         let mut candidates = BTreeMap::<SegmentKey, Vec<(String, u32, usize)>>::new();
@@ -3001,6 +2544,8 @@ unsafe fn planned_session_from_raw(
         active_split_probe: None,
         recognized_segments: None,
         recognized_layouts: BTreeMap::new(),
+        matrix_cells: BTreeMap::new(),
+        reading_order_objects: BTreeSet::new(),
         importing_ocr: false,
         topology,
         rendered: None,
@@ -3032,6 +2577,8 @@ fn empty_imported_plan_session() -> Session {
         active_split_probe: None,
         recognized_segments: None,
         recognized_layouts: BTreeMap::new(),
+        matrix_cells: BTreeMap::new(),
+        reading_order_objects: BTreeSet::new(),
         importing_ocr: false,
         topology: topology::PhysicalTopology { rows: Vec::new() },
         rendered: None,
@@ -3218,31 +2765,41 @@ pub extern "C" fn ittm_separated_import_segments_finish(handle: u32) -> i32 {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ittm_separated_import_block(
-    handle: u32,
-    metadata: *const u32,
-    metadata_length: u32,
-    pixels: *const u8,
-    pixel_length: u32,
-    width: u32,
-    height: u32,
-    stride: u32,
+    handle: u32, metadata: *const u32, metadata_length: u32,
+    pixels: *const u8, pixel_length: u32, width: u32, height: u32, stride: u32,
 ) -> i32 {
-    if metadata.is_null()
-        || pixels.is_null()
-        || metadata_length == 0
-        || width == 0
-        || height == 0
+    unsafe { import_block(handle, metadata, metadata_length, pixels, pixel_length, width, height, stride, false) }
+}
+
+// Stage 06 consumes block geometry and recognized words, never source pixels.
+// This explicit entry point permits large frozen Python corpora in WASM without
+// allocating gigabytes of repeated OCR contexts or inventing replacement images.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ittm_separated_import_block_geometry(
+    handle: u32, metadata: *const u32, metadata_length: u32,
+    width: u32, height: u32, stride: u32,
+) -> i32 {
+    unsafe { import_block(handle, metadata, metadata_length, std::ptr::null(), 0, width, height, stride, true) }
+}
+
+unsafe fn import_block(
+    handle: u32, metadata: *const u32, metadata_length: u32,
+    pixels: *const u8, pixel_length: u32, width: u32, height: u32, stride: u32,
+    geometry_only: bool,
+) -> i32 {
+    if metadata.is_null() || metadata_length == 0 || width == 0 || height == 0
         || stride < width.saturating_mul(3)
-        || pixel_length != stride.saturating_mul(height)
-    {
-        return -1;
-    }
-    // SAFETY: both caller-owned ranges are validated for this call.
+        || (!geometry_only && (pixels.is_null() || pixel_length != stride.saturating_mul(height)))
+    { return -1; }
+    // SAFETY: the caller owns the metadata range for this call.
     let metadata = unsafe { slice::from_raw_parts(metadata, metadata_length as usize) };
-    // SAFETY: the pixel range length was validated above.
-    let pixels = unsafe { slice::from_raw_parts(pixels, pixel_length as usize) };
+    let pixels = if geometry_only { &[][..] } else {
+        // SAFETY: the pixel range length and non-null pointer were checked above.
+        unsafe { slice::from_raw_parts(pixels, pixel_length as usize) }
+    };
     let mut cursor = ImportCursor::new(metadata);
-    if cursor.take() != Some(1) {
+    let version = cursor.take();
+    if !matches!(version, Some(1 | 2 | 3)) {
         return -2;
     }
     let Some(object_id) = cursor.take() else {
@@ -3341,6 +2898,31 @@ pub unsafe extern "C" fn ittm_separated_import_block(
             crop_rect,
         });
     }
+    // ABI v2 appends the complete logical matrix; v1 remains unchanged.
+    let mut matrix_cells = Vec::new();
+    if matches!(version, Some(2 | 3)) {
+        let Some(count) = cursor.take() else { return -3; };
+        let mut seen = BTreeSet::new();
+        for _ in 0..count {
+            let (Some(row), Some(column), Some(row_span), Some(column_span)) =
+                (cursor.take(), cursor.take(), cursor.take(), cursor.take())
+            else { return -3; };
+            let Some(rect) = cursor.rect() else { return -3; };
+            let Some(source_segment_indexes) = cursor.indexes() else { return -3; };
+            if row_span == 0 || column_span == 0 || rect.left >= rect.right || rect.top >= rect.bottom
+                || row.checked_add(row_span).is_none_or(|end| end > logical_row_count)
+                || column.checked_add(column_span).is_none_or(|end| end > logical_column_count)
+                || !seen.insert((row, column, row_span, column_span))
+            { return -3; }
+            matrix_cells.push(MatrixCell {
+                cell: SegmentCell { row, column, row_span, column_span }, rect,
+                source_segment_indexes,
+            });
+        }
+    }
+    let reading_order = if version == Some(3) {
+        match cursor.take() { Some(0) => false, Some(1) => true, _ => return -3 }
+    } else { false };
     if !cursor.finished()
         || segment_indexes.is_empty()
         || block_rect.left >= block_rect.right
@@ -3397,6 +2979,7 @@ pub unsafe extern "C" fn ittm_separated_import_block(
         logical_column_count: logical_column_count.max(1),
         ocr_required: true,
         words_in_source_space: false,
+        imported_composite: false,
     };
 
     let Ok(mut registry) = registry().lock() else {
@@ -3408,6 +2991,14 @@ pub unsafe extern "C" fn ittm_separated_import_block(
     if session.active_context.is_some() || !session.jobs.is_empty() {
         return -5;
     }
+    if !matrix_cells.is_empty() {
+        if let Some(previous) = session.matrix_cells.get(&object_id) {
+            if previous != &matrix_cells { return -3; }
+        } else {
+            session.matrix_cells.insert(object_id, matrix_cells);
+        }
+    }
+    if reading_order { session.reading_order_objects.insert(object_id); }
     while object_id as usize > session.objects.len() {
         let placeholder = session.objects.len();
         session.objects.push(objects::DocumentObject {
@@ -3497,9 +3088,12 @@ pub unsafe extern "C" fn ittm_separated_import_ocr_job(
         5 => LanguageProfileId::Equ,
         _ => return -2,
     };
+    let imported_composite = transform == 2;
     let transform = match transform {
         0 => OcrTransform::Raw,
         1 => OcrTransform::GammaDark,
+        // A frozen composite result has already been mapped to its source block.
+        2 if words_in_source_space != 0 => OcrTransform::Raw,
         _ => return -2,
     };
     let bytes = if text_length == 0 {
@@ -3523,10 +3117,12 @@ pub unsafe extern "C" fn ittm_separated_import_ocr_job(
     let Some(context) = session.pending_contexts.get(block_index as usize).cloned() else {
         return -6;
     };
+    if words_in_source_space == 0 && context.raster.pixels.is_empty() { return -8; }
     let mut job = context.job;
     job.language_profile = profile;
     job.transform = transform;
     job.words_in_source_space = words_in_source_space != 0;
+    job.imported_composite = imported_composite;
     let raster = if job.words_in_source_space {
         context.raster
     } else {
@@ -3708,6 +3304,7 @@ pub extern "C" fn ittm_separated_start_ocr(handle: u32) -> i32 {
     if session.active_context.is_some() || !session.jobs.is_empty() {
         return 1;
     }
+    if session.pending_contexts.iter().any(|context| context.raster.pixels.is_empty()) { return 0; }
     start_next_context(session);
     i32::from(!session.jobs.is_empty())
 }
@@ -4382,7 +3979,10 @@ unsafe fn add_ocr_word_evidence(
         return -5;
     };
     let words_in_source_space = job.words_in_source_space;
-    let (maximum_width, maximum_height) = if words_in_source_space {
+    // Python composite outputs remain in the original packed crop extent, but
+    // stage 06 interprets their coordinates relative to the source block origin.
+    // Preserve both facts; do not clip or silently remap frozen OCR observations.
+    let (maximum_width, maximum_height) = if words_in_source_space && !job.imported_composite {
         (
             job.rect.right.saturating_sub(job.rect.left),
             job.rect.bottom.saturating_sub(job.rect.top),
@@ -4729,6 +4329,131 @@ mod tests {
             }
         }
         (pixels, width, height)
+    }
+
+    #[test]
+    fn reading_order_clusters_ascenders_before_sorting_left_to_right() {
+        let word = |text: &str, left, top, right, bottom| OcrWordEvidence {
+            text: text.to_owned(), rect: Rect { left, top, right, bottom },
+            confidence_milli: 950, ranking_confidence_units: 950_000,
+        };
+        assert_eq!(reading_order_text(&[
+            word("Beta", 20, 0, 30, 12), word("Alpha", 0, 4, 15, 14),
+            word("lower", 0, 30, 30, 40),
+        ]), "Alpha Beta lower");
+    }
+
+    #[test]
+    fn geometry_import_matches_raster_import_and_preserves_list_classification() {
+        let metadata = [
+            3, 0, OBJECT_LIST, 10, 20, 50, 80, 10, 20, 50, 80,
+            0, 0, 0, 0, 0, 0, 1, 1, 1, 7,
+            1, 7, 10, 20, 50, 80, 0, 0, 1, 1,
+            0, 0, 0, 1,
+        ];
+        let pixels = vec![255_u8; 40 * 60 * 3];
+        let mut outputs = Vec::new();
+        for geometry_only in [false, true] {
+            let handle = ittm_separated_import_blocks_begin();
+            let status = unsafe {
+                if geometry_only {
+                    ittm_separated_import_block_geometry(handle, metadata.as_ptr(), metadata.len() as u32, 40, 60, 120)
+                } else {
+                    ittm_separated_import_block(handle, metadata.as_ptr(), metadata.len() as u32,
+                        pixels.as_ptr(), pixels.len() as u32, 40, 60, 120)
+                }
+            };
+            assert_eq!(status, 0);
+            if geometry_only {
+                assert_eq!(ittm_separated_start_ocr(handle), 0);
+                assert_eq!(unsafe { ittm_separated_import_ocr_job(handle, 0, 2, 0, 0,
+                    "text".as_ptr(), 4, 1000) }, -8);
+            }
+            let index = unsafe { ittm_separated_import_ocr_job(handle, 0, 2, 0, 1,
+                "list".as_ptr(), 4, 1000) };
+            assert_eq!(index, 0);
+            for row in 0..6 {
+                for (prefix, left) in [("A", 1), ("B", 21)] {
+                    let text = format!("{prefix}{row}");
+                    assert_eq!(unsafe { ittm_separated_add_ocr_word_ppm(handle, 0, text.as_ptr(),
+                        text.len() as u32, left, row * 8 + 1, left + 8, row * 8 + 7, 950_000) }, 0);
+                }
+            }
+            assert_eq!(ittm_separated_import_ocr_finish(handle), 1);
+            assert_eq!(ittm_separated_run_get_segment(handle), 1);
+            {
+                let locked = registry().lock().unwrap();
+                let segments = locked.sessions[&handle].recognized_segments.as_ref().unwrap();
+                assert_eq!(segments.len(), 1);
+                assert_eq!(segments[0].object_kind, OBJECT_PARAGRAPH);
+                assert_eq!(segments[0].text, "A0 B0 A1 B1 A2 B2 A3 B3 A4 B4 A5 B5");
+                outputs.push(segments.clone());
+            }
+            ittm_separated_drop(handle);
+        }
+        assert_eq!(outputs[0], outputs[1]);
+    }
+
+    #[test]
+    fn table_vote_length_counts_unicode_characters_like_python() {
+        assert_eq!(cell_text_by_job(&[
+            ("ravens".to_owned(), 950_000, 0),
+            ("асе".to_owned(), 950_000, 1),
+        ]), "ravens");
+    }
+
+    #[test]
+    fn imported_matrix_retains_text_without_sources_and_blank_sourced_cells() {
+        let mut metadata = vec![
+            2, 0, OBJECT_TABLE, 0, 0, 40, 10, 0, 0, 40, 10,
+            0, 1, 0, 1, 0, 4, 1, 4,
+            2, 7, 9, // core geometric sources
+            2, // source-backed entries
+            7, 0, 0, 10, 10, 0, 0, 1, 1,
+            9, 30, 0, 40, 10, 0, 3, 1, 1,
+            0, 0, // context and raster placements
+            4, // complete logical matrix, including two source-free slots
+        ];
+        for column in 0..4 {
+            metadata.extend([0, column, 1, 1, column * 10, 0, (column + 1) * 10, 10]);
+            match column {
+                0 => metadata.extend([1, 7]),
+                3 => metadata.extend([1, 9]),
+                _ => metadata.push(0),
+            }
+        }
+        let pixels = vec![255_u8; 40 * 10 * 3];
+        let handle = ittm_separated_import_blocks_begin();
+        assert_ne!(handle, 0);
+        unsafe {
+            // A truncated matrix must fail before changing the session.
+            assert_eq!(ittm_separated_import_block(handle, metadata.as_ptr(),
+                metadata.len() as u32 - 1, pixels.as_ptr(), pixels.len() as u32, 40, 10, 120), -3);
+            assert_eq!(ittm_separated_import_block(handle, metadata.as_ptr(),
+                metadata.len() as u32, pixels.as_ptr(), pixels.len() as u32, 40, 10, 120), 0);
+            let text = "Alpha inferred";
+            let index = ittm_separated_import_ocr_job(handle, 0, 2, 0, 1,
+                text.as_ptr(), text.len() as u32, 1000);
+            assert_eq!(index, 0);
+            for (text, left) in [("Alpha", 1), ("inferred", 11)] {
+                assert_eq!(ittm_separated_add_ocr_word_ppm(handle, index as u32,
+                    text.as_ptr(), text.len() as u32, left, 1, left + 8, 9, 950_000), 0);
+            }
+        }
+        assert_eq!(ittm_separated_import_ocr_finish(handle), 1);
+        assert_eq!(ittm_separated_run_get_segment(handle), 1);
+        {
+            let locked = registry().lock().unwrap();
+            let segments = locked.sessions[&handle].recognized_segments.as_ref().unwrap();
+            assert_eq!(segments.len(), 3);
+            assert_eq!(segments.iter().map(|s| s.cell.column).collect::<Vec<_>>(), [0, 1, 3]);
+            assert_eq!(segments[0].source_segment_indexes, [7]);
+            assert_eq!(segments[1].text, "inferred");
+            assert!(segments[1].source_segment_indexes.is_empty());
+            assert_eq!(segments[2].source_segment_indexes, [9]);
+            assert!(segments[2].text.is_empty());
+        }
+        ittm_separated_drop(handle);
     }
 
     #[test]
@@ -5100,6 +4825,7 @@ mod tests {
             logical_column_count: 1,
             ocr_required: true,
             words_in_source_space: false,
+        imported_composite: false,
         };
         let parent = JobRaster {
             width: 4,
@@ -5192,6 +4918,7 @@ mod tests {
             logical_column_count: 2,
             ocr_required: true,
             words_in_source_space: false,
+        imported_composite: false,
         };
         let session = Session {
             objects: Vec::new(),
@@ -5260,6 +4987,8 @@ mod tests {
             active_split_probe: None,
             recognized_segments: None,
             recognized_layouts: BTreeMap::new(),
+        matrix_cells: BTreeMap::new(),
+        reading_order_objects: BTreeSet::new(),
             importing_ocr: false,
             rendered: None,
             stage_mask: ALL_STAGE_MASK,
@@ -5270,32 +4999,5 @@ mod tests {
         );
     }
 
-    #[test]
-    fn repeated_list_columns_materialize_as_non_empty_table_cells() {
-        let mut words = Vec::new();
-        for row in 0..3_u32 {
-            for (column, left) in [10_u32, 160, 260].into_iter().enumerate() {
-                words.push(ProjectedListWord {
-                    text: format!("r{row}c{column}"),
-                    rect: Rect {
-                        left,
-                        top: row * 24,
-                        right: left + 36,
-                        bottom: row * 24 + 12,
-                    },
-                    confidence_units: 990,
-                    source_segment_index: row as usize * 3 + column,
-                    evidence_job_index: 0,
-                });
-            }
-        }
 
-        let segments = infer_tabular_list_segments(7, words, &[]).expect("table structure");
-        assert_eq!(segments.len(), 9);
-        assert!(segments.iter().all(|segment| segment.object_kind == OBJECT_TABLE));
-        assert!(segments.iter().all(|segment| !segment.text.is_empty()));
-        assert_eq!(segments[4].cell.row, 1);
-        assert_eq!(segments[4].cell.column, 1);
-        assert_eq!(segments[4].text, "r1c1");
-    }
 }

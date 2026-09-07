@@ -92,3 +92,16 @@ results use transform code 2 and preserve Python's original crop extent and
 source-block offset interpretation. No word coordinates are clipped or
 replaced by geometry IDs. These entry points are compiled for native and WASM
 from the same Rust source.
+
+### Object boundary parity
+
+Object reconstruction now retains distinct crop and logical matrix rectangles,
+rule-lattice versus topology-slice provenance, and the `flow` kind. The staged
+ABI uses kind 4 for flow; its existing kinds 0–3 retain their meaning. The older
+packed diagnostic API retains its four-category encoding for compatibility.
+Finite mixed-axis cycles require both observed merge directions and independent
+rule-network evidence. Empty corridor chambers precede semantic classification;
+fragmented and stacked tables are joined using the same geometric witnesses as
+the frozen Python route. Source segments remain separately accounted, including
+structural edge residuals. Object-boundary agreement does not by itself prove
+local matrix cell construction, OCR block raster construction or OCR selection.

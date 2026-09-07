@@ -1,9 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::geometry::{
-    GeometryAnalysis, MaterializedRule, MaterializedSegment, MaterializedSegmentSpan,
-    SparseAxisInterval,
-};
+use crate::geometry::{GeometryAnalysis, MaterializedSegment, MaterializedSegmentSpan};
 use crate::topology::{PhysicalTopology, SpatialValue};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -12,10 +9,13 @@ pub enum ObjectKind {
     List,
     Table,
     Unknown,
+    Flow,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DocumentObject {
+    pub matrix_bbox: [usize; 4],
+    pub rule_lattice: bool,
     pub kind: ObjectKind,
     pub segment_indexes: Vec<usize>,
     pub bbox: [usize; 4],
@@ -38,6 +38,10 @@ pub struct ObjectReconstruction {
 
 #[derive(Clone, Debug)]
 struct ObjectDraft {
+    matrix_bbox: Option<[usize; 4]>,
+    rule_lattice: bool,
+    empty_corridors: Vec<[usize; 4]>,
+    topology_column_count: usize,
     kind: ObjectKind,
     segment_indexes: Vec<usize>,
     confidence: f64,
@@ -57,14 +61,6 @@ struct ConnectivityDraft {
 struct HorizontalRuleRegion {
     bbox: [usize; 4],
     rule_count: usize,
-}
-
-#[derive(Clone, Debug)]
-struct TableCandidate {
-    bbox: [usize; 4],
-    members: Vec<usize>,
-    sparse_span: [usize; 4],
-    logical_cells: Vec<BTreeSet<(usize, usize)>>,
 }
 
 #[derive(Clone, Debug)]
@@ -298,272 +294,511 @@ fn segment_key(
     )
 }
 
-fn rule_bands(rules: &[(usize, &MaterializedRule)], horizontal: bool) -> Vec<(usize, usize)> {
-    let mut intervals: Vec<(usize, usize)> = rules
-        .iter()
-        .map(|(_, rule)| {
-            if horizontal {
-                (rule.summary.bbox[1], rule.summary.bbox[3])
-            } else {
-                (rule.summary.bbox[0], rule.summary.bbox[2])
-            }
-        })
-        .collect();
-    intervals.sort_unstable();
-    let mut merged: Vec<(usize, usize)> = Vec::new();
-    for (start, stop) in intervals {
-        if let Some(previous) = merged.last_mut()
-            && start <= previous.1
-        {
-            previous.1 = previous.1.max(stop);
-        } else {
-            merged.push((start, stop));
-        }
-    }
-    merged
+#[derive(Clone, Debug)]
+struct TopologyChamber {
+    corridors: Vec<[usize; 4]>,
+    draft: ConnectivityDraft,
+    parallel_grid: bool,
 }
-
-fn logical_lane(interval: SparseAxisInterval, bands: &[(usize, usize)]) -> Option<usize> {
-    let completed = bands.partition_point(|(_, stop)| *stop <= interval.start);
-    if completed < 1 || completed >= bands.len() {
-        return None;
-    }
-    let lane = completed - 1;
-    (interval.start >= bands[lane].1 && interval.end <= bands[lane + 1].0).then_some(lane)
-}
-
-fn populated_table(members: &[usize], logical_cells: &[BTreeSet<(usize, usize)>]) -> bool {
-    if members.len() < 3 {
+fn parallel_grid_witness(groups: &[Vec<usize>], segments: &[MaterializedSegment]) -> bool {
+    if groups.len() < 2 {
         return false;
     }
-    let occupied: BTreeSet<(usize, usize)> = members
+    let lanes: Vec<Vec<[usize; 4]>> = groups
         .iter()
-        .flat_map(|index| logical_cells[*index].iter().copied())
+        .map(|g| {
+            flow_rows(g, segments)
+                .0
+                .iter()
+                .map(|r| row_bbox(r, segments).unwrap())
+                .collect()
+        })
         .collect();
-    let rows: BTreeSet<usize> = occupied.iter().map(|(row, _)| *row).collect();
-    let columns: BTreeSet<usize> = occupied.iter().map(|(_, column)| *column).collect();
-    rows.len() >= 2 && columns.len() >= 2 && occupied.len() >= 3
+    if lanes.iter().any(|r| r.len() < 2) {
+        return false;
+    }
+    if lanes.iter().all(|r| r.len() == lanes[0].len())
+        && (0..lanes[0].len()).all(|i| {
+            lanes.iter().map(|r| r[i][1]).max().unwrap()
+                < lanes.iter().map(|r| r[i][3]).min().unwrap()
+        })
+    {
+        return true;
+    }
+    if lanes.len() < 3 {
+        return false;
+    }
+    let mut disjoint = DisjointSet::new(lanes.len());
+    for i in 0..lanes.len() {
+        for j in i + 1..lanes.len() {
+            let (mut a, mut b, mut matches) = (0, 0, 0);
+            while a < lanes[i].len() && b < lanes[j].len() {
+                let x = lanes[i][a];
+                let y = lanes[j][b];
+                if x[1].max(y[1]) < x[3].min(y[3]) {
+                    matches += 1;
+                    a += 1;
+                    b += 1;
+                } else if x[3] <= y[1] {
+                    a += 1;
+                } else {
+                    b += 1;
+                }
+            }
+            if matches >= 3.max((lanes[i].len().min(lanes[j].len()) + 1) / 2) {
+                disjoint.union(i, j);
+            }
+        }
+    }
+    (1..lanes.len()).all(|i| disjoint.find(i) == disjoint.find(0))
 }
-
-fn table_drafts(
+fn topology_chambers(
     analysis: &GeometryAnalysis,
-    source_segments: &[usize],
-    spans: &[MaterializedSegmentSpan],
-) -> Option<(Vec<ObjectDraft>, Vec<bool>)> {
-    let matrix = &analysis.sparse_matrix;
-    let segment_count = analysis.materialized_segments.segments.len();
-    if matrix.horizontal_rule_rows.is_empty() || matrix.vertical_rule_columns.is_empty() {
-        return Some((Vec::new(), vec![false; segment_count]));
-    }
-    let mut horizontal: Vec<(usize, &MaterializedRule)> = analysis
-        .rules
-        .iter()
-        .enumerate()
-        .filter(|(_, rule)| rule.summary.horizontal)
-        .collect();
-    horizontal.sort_by_key(|(index, rule)| (rule.summary.bbox[1], rule.summary.bbox[0], *index));
-    let mut vertical: Vec<(usize, &MaterializedRule)> = analysis
-        .rules
-        .iter()
-        .enumerate()
-        .filter(|(_, rule)| !rule.summary.horizontal)
-        .collect();
-    vertical.sort_by_key(|(index, rule)| (rule.summary.bbox[0], rule.summary.bbox[1], *index));
-    if rule_bands(&horizontal, true).len() < 3 || rule_bands(&vertical, false).len() < 3 {
-        return Some((Vec::new(), vec![false; segment_count]));
-    }
-
-    let mut combined = horizontal.clone();
-    combined.extend(vertical.iter().copied());
-    let vertical_offset = horizontal.len();
-    let mut disjoint = DisjointSet::new(combined.len());
-    let vertical_boxes = SpatialBoxIndex::new(vertical.iter().map(|(_, rule)| rule.summary.bbox));
-    for (horizontal_index, (_, horizontal_rule)) in horizontal.iter().enumerate() {
-        for vertical_index in vertical_boxes.intersecting(horizontal_rule.summary.bbox) {
-            disjoint.union(horizontal_index, vertical_offset + vertical_index);
+    topology: &PhysicalTopology,
+    node_segments: &[Vec<usize>],
+) -> Option<Vec<TopologyChamber>> {
+    let segment_index = SpatialBoxIndex::new(
+        analysis
+            .materialized_segments
+            .segments
+            .iter()
+            .map(|s| s.bbox),
+    );
+    let mut all_boxes = Vec::new();
+    let mut payload_boxes = Vec::new();
+    let mut payload_rows = Vec::new();
+    for (i, r) in topology.rows.iter().enumerate() {
+        for s in &r.slots {
+            let b = [s.start, r.top, s.end, r.bottom];
+            all_boxes.push(b);
+            if s.value != SpatialValue::Empty {
+                payload_boxes.push(b);
+                payload_rows.push(i);
+            }
         }
     }
-    let mut networks: BTreeMap<usize, Vec<(usize, &MaterializedRule)>> = BTreeMap::new();
-    for (index, rule) in combined.into_iter().enumerate() {
-        let root = disjoint.find(index);
-        networks.entry(root).or_default().push(rule);
+    let all = SpatialBoxIndex::new(all_boxes);
+    let payload = SpatialBoxIndex::new(payload_boxes);
+    struct Context<'a> {
+        analysis: &'a GeometryAnalysis,
+        topology: &'a PhysicalTopology,
+        node_segments: &'a [Vec<usize>],
+        segments: &'a SpatialBoxIndex,
+        all: &'a SpatialBoxIndex,
+        payload: &'a SpatialBoxIndex,
+        payload_rows: &'a [usize],
     }
-    let mut cells_by_segment = vec![Vec::<(usize, usize)>::new(); segment_count];
-    for cell in &matrix.cells {
-        if cell.segment_index >= segment_count {
-            return None;
+    fn recurse(c: &Context<'_>, i: usize) -> Option<Vec<TopologyChamber>> {
+        let node = c.analysis.partition_nodes.get(i)?;
+        let own: BTreeSet<_> = c.node_segments.get(i)?.iter().copied().collect();
+        if own.is_empty() {
+            return Some(Vec::new());
         }
-        cells_by_segment[cell.segment_index].push((cell.row, cell.column));
-    }
-    let segment_boxes = SpatialBoxIndex::new(source_segments.iter().map(|index| {
-        let span = spans[*index];
-        [
-            span.column_start,
-            span.row_start,
-            span.column_stop,
-            span.row_stop,
-        ]
-    }));
-    let mut candidates = Vec::<TableCandidate>::new();
-    for network in networks.into_values() {
-        let network_horizontal: Vec<_> = network
-            .iter()
-            .copied()
-            .filter(|(_, rule)| rule.summary.horizontal)
-            .collect();
-        let network_vertical: Vec<_> = network
-            .iter()
-            .copied()
-            .filter(|(_, rule)| !rule.summary.horizontal)
-            .collect();
-        if rule_bands(&network_horizontal, true).len() < 3
-            || rule_bands(&network_vertical, false).len() < 3
-        {
-            continue;
-        }
-        let network_bbox = bbox_union(network.iter().map(|(_, rule)| rule.summary.bbox))?;
-        let page_frame_only = network_bbox
-            == [0, 0, analysis.foreground.width, analysis.foreground.height]
-            && !(network_horizontal.iter().any(|(_, rule)| {
-                rule.summary.bbox[1] > 0 && rule.summary.bbox[3] < analysis.foreground.height
-            }) && network_vertical.iter().any(|(_, rule)| {
-                rule.summary.bbox[0] > 0 && rule.summary.bbox[2] < analysis.foreground.width
-            }));
-        if page_frame_only {
-            continue;
-        }
-        let horizontal_bands = rule_bands(&network_horizontal, true);
-        let vertical_bands = rule_bands(&network_vertical, false);
-        let row_top = network_horizontal
-            .iter()
-            .map(|(_, rule)| rule.summary.bbox[1])
-            .min()?;
-        let row_bottom = network_horizontal
-            .iter()
-            .map(|(_, rule)| rule.summary.bbox[3])
-            .max()?;
-        let column_left = network_vertical
-            .iter()
-            .map(|(_, rule)| rule.summary.bbox[0])
-            .min()?;
-        let column_right = network_vertical
-            .iter()
-            .map(|(_, rule)| rule.summary.bbox[2])
-            .max()?;
-        let rows: Vec<usize> = matrix
+        let [left, top, right, bottom] = node.bbox;
+        let relevant: Vec<_> = c
+            .topology
             .rows
             .iter()
-            .enumerate()
-            .filter_map(|(index, interval)| {
-                (interval.start < row_bottom && interval.end > row_top).then_some(index)
-            })
+            .filter(|r| r.top.max(top) < r.bottom.min(bottom))
             .collect();
-        let columns: Vec<usize> = matrix
-            .columns
-            .iter()
-            .enumerate()
-            .filter_map(|(index, interval)| {
-                (interval.start < column_right && interval.end > column_left).then_some(index)
-            })
-            .collect();
-        let sparse_span = [
-            *rows.iter().min()?,
-            rows.iter().max()? + 1,
-            *columns.iter().min()?,
-            columns.iter().max()? + 1,
-        ];
-        let mut members = Vec::new();
-        let mut logical_cells = vec![BTreeSet::<(usize, usize)>::new(); segment_count];
-        for source_position in segment_boxes.intersecting([
-            sparse_span[2],
-            sparse_span[0],
-            sparse_span[3],
-            sparse_span[1],
-        ]) {
-            let segment_index = source_segments[source_position];
-            let span = spans[segment_index];
-            if span.row_start < sparse_span[0]
-                || span.row_stop > sparse_span[1]
-                || span.column_start < sparse_span[2]
-                || span.column_stop > sparse_span[3]
+        let mut boundaries = BTreeSet::from([left, right]);
+        for r in &relevant {
+            for s in &r.slots {
+                if s.end > left && s.start < right {
+                    boundaries.extend([s.start.max(left), s.end.min(right)]);
+                }
+            }
+        }
+        let ordered: Vec<_> = boundaries.into_iter().collect();
+        let mut empty: Vec<(usize, usize)> = Vec::new();
+        for x in ordered.windows(2) {
+            let slab = [x[0], top, x[1], bottom];
+            if c.segments
+                .intersecting(slab)
+                .into_iter()
+                .any(|j| own.contains(&j))
+                || c.all.intersecting(slab).is_empty()
+                || !c.payload.intersecting(slab).is_empty()
             {
                 continue;
             }
-            for (row, column) in &cells_by_segment[segment_index] {
-                let Some(logical_row) = logical_lane(matrix.rows[*row], &horizontal_bands) else {
+            if let Some(last) = empty.last_mut() {
+                if last.1 == x[0] {
+                    last.1 = x[1];
                     continue;
-                };
-                let Some(logical_column) = logical_lane(matrix.columns[*column], &vertical_bands)
-                else {
-                    continue;
-                };
-                logical_cells[segment_index].insert((logical_row, logical_column));
+                }
             }
-            if !logical_cells[segment_index].is_empty() {
-                members.push(segment_index);
+            empty.push((x[0], x[1]));
+        }
+        let payload_count = |scope| {
+            c.payload
+                .intersecting(scope)
+                .into_iter()
+                .map(|j| c.payload_rows[j])
+                .collect::<BTreeSet<_>>()
+                .len()
+        };
+        let walls: Vec<_> = empty
+            .into_iter()
+            .filter(|(a, b)| {
+                left < *a
+                    && *b < right
+                    && payload_count([left, top, *a, bottom]) >= 2
+                    && payload_count([*b, top, right, bottom]) >= 2
+            })
+            .collect();
+        if !walls.is_empty() {
+            let mut starts = vec![left];
+            starts.extend(walls.iter().map(|x| x.1));
+            let mut stops: Vec<_> = walls.iter().map(|x| x.0).collect();
+            stops.push(right);
+            let groups: Vec<Vec<usize>> = starts
+                .into_iter()
+                .zip(stops)
+                .filter(|(a, b)| a < b)
+                .map(|(a, b)| {
+                    own.iter()
+                        .copied()
+                        .filter(|j| {
+                            let s = c.analysis.materialized_segments.segments[*j].bbox;
+                            2 * a <= s[0] + s[2] && s[0] + s[2] < 2 * b
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .filter(|g| !g.is_empty())
+                .collect();
+            if groups.len() >= 2 && groups.iter().map(Vec::len).sum::<usize>() == own.len() {
+                let parallel =
+                    parallel_grid_witness(&groups, &c.analysis.materialized_segments.segments);
+                let groups = if parallel {
+                    vec![own.into_iter().collect()]
+                } else {
+                    groups
+                };
+                return groups
+                    .into_iter()
+                    .map(|g| {
+                        Some(TopologyChamber {
+                            corridors: walls.iter().map(|(a, b)| [*a, top, *b, bottom]).collect(),
+                            draft: ConnectivityDraft {
+                                bbox: bbox_union(
+                                    g.iter().map(|j| {
+                                        c.analysis.materialized_segments.segments[*j].bbox
+                                    }),
+                                )?,
+                                segment_indexes: g.into_iter().collect(),
+                            },
+                            parallel_grid: parallel,
+                        })
+                    })
+                    .collect();
             }
         }
-        if populated_table(&members, &logical_cells) {
-            candidates.push(TableCandidate {
-                bbox: network_bbox,
-                members,
-                sparse_span,
-                logical_cells,
-            });
+        let mut result = Vec::new();
+        for child in node.child_indexes.iter().flatten() {
+            result.extend(recurse(c, *child)?);
+        }
+        Some(result)
+    }
+    recurse(
+        &Context {
+            analysis,
+            topology,
+            node_segments,
+            segments: &segment_index,
+            all: &all,
+            payload: &payload,
+            payload_rows: &payload_rows,
+        },
+        0,
+    )
+}
+fn chamber_drafts(
+    chambers: Vec<TopologyChamber>,
+    analysis: &GeometryAnalysis,
+    topology: &PhysicalTopology,
+) -> Option<Vec<ObjectDraft>> {
+    let networks = crate::topology::rule_networks(analysis)?;
+    let cycles: Vec<_> = mixed_axis_cycles(topology)
+        .into_iter()
+        .filter(|b| {
+            networks
+                .iter()
+                .filter(|n| {
+                    n.x_lines[0] == b[0]
+                        && *n.x_lines.last().unwrap() == b[2]
+                        && n.y_lines[0] <= b[1]
+                        && b[3] <= *n.y_lines.last().unwrap()
+                        && n.y_lines.contains(&b[1])
+                        && n.y_lines.contains(&b[3])
+                })
+                .count()
+                == 1
+        })
+        .collect();
+    let segments = &analysis.materialized_segments.segments;
+    let mut out = Vec::new();
+    for chamber in chambers {
+        let d = chamber.draft;
+        let indexes: Vec<_> = d.segment_indexes.into_iter().collect();
+        let (rows, _, height) = flow_rows(&indexes, segments);
+        let lattice = cycles.iter().any(|b| {
+            2 * d.bbox[0] <= b[0] + b[2]
+                && b[0] + b[2] < 2 * d.bbox[2]
+                && 2 * d.bbox[1] <= b[1] + b[3]
+                && b[1] + b[3] < 2 * d.bbox[3]
+        });
+        let marker = marker_list_span(&rows, segments, height).is_some();
+        let geometry_list = geometry_list_witness(&rows, segments, height);
+        let kind = if lattice {
+            ObjectKind::Table
+        } else if marker || geometry_list {
+            ObjectKind::List
+        } else if chamber.parallel_grid {
+            ObjectKind::Table
+        } else if !rows.is_empty() || indexes.len() == 1 {
+            ObjectKind::Paragraph
+        } else {
+            ObjectKind::Flow
+        };
+        let mut evidence = vec!["spanning-finite-empty-corridor"];
+        if lattice {
+            evidence.extend(["finite-mixed-axis-cycle", "independent-structural-lattice"]);
+        }
+        if chamber.parallel_grid {
+            evidence.push("aligned-parallel-row-grid");
+        }
+        if marker {
+            evidence.push("repeated-marker-body-rows");
+        } else if geometry_list {
+            evidence.push("repeated-indented-rows");
+        }
+        out.push(ObjectDraft {
+            matrix_bbox: None,
+            rule_lattice: false,
+            empty_corridors: chamber.corridors,
+            topology_column_count: 0,
+            kind,
+            segment_indexes: indexes,
+            confidence: 1.0,
+            evidence,
+            sparse_span: None,
+            bbox_override: Some(d.bbox),
+            logical_spans: None,
+        });
+    }
+    Some(out)
+}
+
+fn mixed_axis_cycles(topology: &PhysicalTopology) -> Vec<[usize; 4]> {
+    let mut payload = Vec::new();
+    let positions: Vec<Vec<Option<usize>>> = topology
+        .rows
+        .iter()
+        .map(|row| {
+            row.slots
+                .iter()
+                .map(|s| {
+                    if s.value == SpatialValue::Empty {
+                        None
+                    } else {
+                        let i = payload.len();
+                        payload.push([s.start, row.top, s.end, row.bottom]);
+                        Some(i)
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    let mut disjoint = DisjointSet::new(payload.len());
+    let mut invalid = BTreeSet::new();
+    let mut edges = BTreeMap::new();
+    for (ri, row) in topology.rows.iter().enumerate() {
+        for (ci, s) in row.slots.iter().enumerate() {
+            let Some(current) = positions[ri][ci] else {
+                continue;
+            };
+            if !matches!(row.codes[ci], 5 | 8) {
+                continue;
+            }
+            let previous = if ci > 0 && row.slots[ci - 1].end == s.start {
+                positions[ri][ci - 1]
+            } else {
+                None
+            };
+            if let Some(previous) = previous {
+                disjoint.union(previous, current);
+                edges.insert((previous.min(current), previous.max(current)), false);
+            } else {
+                invalid.insert(current);
+            }
         }
     }
-    candidates.sort_by_key(|candidate| candidate.bbox);
-    let mut owned = vec![false; segment_count];
-    let mut drafts = Vec::new();
-    for candidate in candidates {
-        let mut unowned: Vec<usize> = candidate
-            .members
-            .iter()
-            .copied()
-            .filter(|index| !owned[*index])
-            .collect();
-        if !populated_table(&unowned, &candidate.logical_cells) {
+    for (ri, row) in topology.rows.iter().enumerate() {
+        for (ci, s) in row.slots.iter().enumerate() {
+            let Some(current) = positions[ri][ci] else {
+                continue;
+            };
+            if !matches!(row.codes[ci], 3 | 8) {
+                continue;
+            }
+            if ri == 0 || topology.rows[ri - 1].bottom != row.top {
+                invalid.insert(current);
+                continue;
+            }
+            let above: Vec<_> = topology.rows[ri - 1]
+                .slots
+                .iter()
+                .enumerate()
+                .filter(|(_, a)| a.start.max(s.start) < a.end.min(s.end))
+                .filter_map(|(i, _)| positions[ri - 1][i])
+                .collect();
+            let roots: BTreeSet<_> = above.iter().map(|i| disjoint.find(*i)).collect();
+            if roots.len() != 1 {
+                invalid.insert(current);
+                continue;
+            }
+            for i in above {
+                disjoint.union(i, current);
+                edges.insert((i.min(current), i.max(current)), true);
+            }
+        }
+    }
+    let invalid: BTreeSet<_> = invalid.into_iter().map(|i| disjoint.find(i)).collect();
+    let mut members: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for i in 0..payload.len() {
+        members.entry(disjoint.find(i)).or_default().push(i);
+    }
+    let mut edge_counts: BTreeMap<usize, (usize, bool, bool)> = BTreeMap::new();
+    for ((a, _), vertical) in edges {
+        let e = edge_counts.entry(disjoint.find(a)).or_default();
+        e.0 += 1;
+        if vertical {
+            e.1 = true;
+        } else {
+            e.2 = true;
+        }
+    }
+    let mut boxes = Vec::new();
+    for (root, ids) in members {
+        let (count, h, v) = edge_counts.get(&root).copied().unwrap_or_default();
+        if !invalid.contains(&root) && count >= ids.len() && h && v {
+            boxes.push(bbox_union(ids.into_iter().map(|i| payload[i])).unwrap());
+        }
+    }
+    boxes.sort_by_key(|b| (b[1], b[0], b[3], b[2]));
+    boxes
+}
+fn topology_table_drafts(
+    analysis: &GeometryAnalysis,
+    topology: &PhysicalTopology,
+    chamber_owned: &BTreeSet<usize>,
+) -> Option<(Vec<ObjectDraft>, Vec<bool>)> {
+    let networks = crate::topology::rule_networks(analysis)?;
+    let proven: Vec<_> = mixed_axis_cycles(topology)
+        .into_iter()
+        .filter_map(|b| {
+            let matches: Vec<_> = networks
+                .iter()
+                .filter(|n| {
+                    n.x_lines[0] == b[0]
+                        && *n.x_lines.last().unwrap() == b[2]
+                        && n.y_lines[0] <= b[1]
+                        && b[1] < b[3]
+                        && b[3] <= *n.y_lines.last().unwrap()
+                        && n.y_lines.contains(&b[1])
+                        && n.y_lines.contains(&b[3])
+                })
+                .collect();
+            (matches.len() == 1).then(|| (b, matches[0]))
+        })
+        .collect();
+    let segments = &analysis.materialized_segments.segments;
+    let mut groups = vec![Vec::new(); proven.len()];
+    let mut owned = vec![false; segments.len()];
+    for (i, s) in segments.iter().enumerate() {
+        if chamber_owned.contains(&i) {
             continue;
         }
-        unowned.sort_by_key(|index| {
-            segment_key(*index, &analysis.materialized_segments.segments, spans)
-        });
-        for index in &unowned {
-            owned[*index] = true;
+        let center = [s.bbox[0] + s.bbox[2], s.bbox[1] + s.bbox[3]];
+        if let Some(selected) = (0..proven.len())
+            .filter(|j| {
+                let b = proven[*j].0;
+                2 * b[0] <= center[0]
+                    && center[0] < 2 * b[2]
+                    && 2 * b[1] <= center[1]
+                    && center[1] < 2 * b[3]
+            })
+            .min_by_key(|j| {
+                let b = proven[*j].0;
+                ((b[2] - b[0]) as u128 * (b[3] - b[1]) as u128, b)
+            })
+        {
+            groups[selected].push(i);
+            owned[i] = true;
         }
-        let logical_spans = unowned
+    }
+    let mut drafts = Vec::new();
+    for ((matrix, n), ids) in proven.into_iter().zip(groups) {
+        if ids.is_empty() {
+            continue;
+        }
+        let full = [
+            n.x_lines[0],
+            n.y_lines[0],
+            *n.x_lines.last().unwrap(),
+            *n.y_lines.last().unwrap(),
+        ];
+        let crop = if matrix == full { n.bbox } else { matrix };
+        let bbox = bbox_union(std::iter::once(crop).chain(ids.iter().map(|i| segments[*i].bbox)))?;
+        let ys: Vec<_> = n
+            .y_lines
             .iter()
-            .map(|index| {
-                let cells = &candidate.logical_cells[*index];
+            .copied()
+            .filter(|y| matrix[1] <= *y && *y <= matrix[3])
+            .collect();
+        let spans = ids
+            .iter()
+            .map(|i| {
+                let b = segments[*i].bbox;
+                let rows: Vec<_> = ys
+                    .windows(2)
+                    .enumerate()
+                    .filter(|(_, y)| b[1].max(y[0]) < b[3].min(y[1]))
+                    .map(|(j, _)| j)
+                    .collect();
+                let cols: Vec<_> = n
+                    .x_lines
+                    .windows(2)
+                    .enumerate()
+                    .filter(|(_, x)| b[0].max(x[0]) < b[2].min(x[1]))
+                    .map(|(j, _)| j)
+                    .collect();
                 Some(MaterializedSegmentSpan {
-                    segment_index: *index,
-                    row_start: cells.iter().map(|(row, _)| *row).min()?,
-                    row_stop: cells.iter().map(|(row, _)| *row).max()?.saturating_add(1),
-                    column_start: cells.iter().map(|(_, column)| *column).min()?,
-                    column_stop: cells
-                        .iter()
-                        .map(|(_, column)| *column)
-                        .max()?
-                        .saturating_add(1),
+                    segment_index: *i,
+                    row_start: *rows.first()?,
+                    row_stop: rows.last()? + 1,
+                    column_start: *cols.first()?,
+                    column_stop: cols.last()? + 1,
                 })
             })
             .collect::<Option<Vec<_>>>()?;
-        // A ruled table owns its finite border as well as its source text.
-        // Python network_bbox_for_crop unions the network and member rectangles.
-        let member_bbox = bbox_union(
-            unowned
-                .iter()
-                .map(|i| analysis.materialized_segments.segments[*i].bbox),
-        )?;
-        let crop_bbox = bbox_union([candidate.bbox, member_bbox])?;
         drafts.push(ObjectDraft {
+            matrix_bbox: Some(matrix),
+            rule_lattice: true,
+            empty_corridors: Vec::new(),
+            topology_column_count: 0,
             kind: ObjectKind::Table,
-            segment_indexes: unowned,
+            segment_indexes: ids,
             confidence: 1.0,
-            evidence: vec!["orthogonal-rule-grid", "populated-logical-rule-grid"],
-            sparse_span: Some(candidate.sparse_span),
-            bbox_override: Some(crop_bbox),
-            logical_spans: Some(logical_spans),
+            evidence: vec![
+                "finite-mixed-axis-cycle",
+                "independent-structural-lattice",
+                "cycle-normalizes-to-0-5-3-8",
+            ],
+            sparse_span: None,
+            bbox_override: Some(bbox),
+            logical_spans: Some(spans),
         });
     }
     Some((drafts, owned))
@@ -1084,6 +1319,10 @@ fn semantic_flow_drafts(
     ) -> Option<ObjectDraft> {
         let bbox = bbox_union(indexes.iter().map(|i| segments[*i].bbox))?;
         Some(ObjectDraft {
+            matrix_bbox: None,
+            rule_lattice: false,
+            empty_corridors: Vec::new(),
+            topology_column_count: 0,
             kind,
             segment_indexes: indexes,
             confidence: 0.85,
@@ -1119,7 +1358,7 @@ fn semantic_flow_drafts(
             let kind = if indexes.len() == 1 {
                 ObjectKind::Paragraph
             } else {
-                ObjectKind::Unknown
+                ObjectKind::Flow
             };
             result.push(draft(
                 kind,
@@ -1286,7 +1525,12 @@ fn merge_horizontal_rule_tables(
         let selected: Vec<usize> = drafts
             .iter()
             .enumerate()
-            .filter(|(_, draft)| matches!(draft.kind, ObjectKind::Paragraph | ObjectKind::Unknown))
+            .filter(|(_, draft)| {
+                matches!(
+                    draft.kind,
+                    ObjectKind::Paragraph | ObjectKind::Unknown | ObjectKind::Flow
+                )
+            })
             .filter(|(_, draft)| {
                 let bbox = bbox_union(
                     draft
@@ -1324,6 +1568,10 @@ fn merge_horizontal_rule_tables(
         let table_bbox = bbox_union([payload_bbox, region.bbox])?;
         let first = selected[0];
         let merged = ObjectDraft {
+            matrix_bbox: None,
+            rule_lattice: false,
+            empty_corridors: Vec::new(),
+            topology_column_count: 0,
             kind: ObjectKind::Table,
             segment_indexes,
             confidence: 1.0,
@@ -1360,6 +1608,545 @@ fn merge_horizontal_rule_tables(
     Some(drafts)
 }
 
+fn member_box(d: &ObjectDraft, segments: &[MaterializedSegment]) -> [usize; 4] {
+    bbox_union(d.segment_indexes.iter().map(|i| segments[*i].bbox)).unwrap()
+}
+fn matrix_box(d: &ObjectDraft, segments: &[MaterializedSegment]) -> [usize; 4] {
+    d.matrix_bbox
+        .or(d.bbox_override)
+        .unwrap_or_else(|| member_box(d, segments))
+}
+fn promote_tables(
+    drafts: &mut [ObjectDraft],
+    analysis: &GeometryAnalysis,
+    topology: &PhysicalTopology,
+) {
+    fn merge(mut lines: Vec<(usize, usize, usize)>) -> Vec<(usize, usize, usize)> {
+        lines.sort_unstable();
+        let mut out: Vec<(usize, usize, usize)> = Vec::new();
+        for (c, a, b) in lines {
+            if let Some(p) = out.last_mut() {
+                if c - p.0 <= 2 {
+                    p.0 = (p.0 + c) / 2;
+                    p.1 = p.1.min(a);
+                    p.2 = p.2.max(b);
+                    continue;
+                }
+            }
+            out.push((c, a, b));
+        }
+        out
+    }
+    for d in drafts {
+        let b = member_box(d, &analysis.materialized_segments.segments);
+        let width = b[2] - b[0];
+        let height = b[3] - b[1];
+        if d.kind != ObjectKind::Table && width * 3 >= analysis.foreground.width {
+            let mut horizontal = Vec::new();
+            let mut vertical = Vec::new();
+            for rule in &analysis.rules {
+                let r = rule.summary.bbox;
+                if !boxes_intersect(b, r) {
+                    continue;
+                }
+                if rule.summary.horizontal {
+                    let left = b[0].max(r[0]);
+                    let right = b[2].min(r[2]);
+                    if (right - left) as f64 >= 24.0_f64.max(width as f64 * 0.20) {
+                        horizontal.push(((r[1] + r[3]) / 2, left, right));
+                    }
+                } else {
+                    let top = b[1].max(r[1]);
+                    let bottom = b[3].min(r[3]);
+                    if (bottom - top) as f64 >= 24.0_f64.max(height as f64 * 0.20) {
+                        vertical.push(((r[0] + r[2]) / 2, top, bottom));
+                    }
+                }
+            }
+            let horizontal = merge(horizontal);
+            let vertical = merge(vertical);
+            if horizontal.len() >= 3 && vertical.len() >= 3 {
+                let crosses = horizontal
+                    .iter()
+                    .flat_map(|h| vertical.iter().map(move |v| (h, v)))
+                    .filter(|(h, v)| {
+                        h.1.saturating_sub(2) <= v.0
+                            && v.0 <= h.2 + 2
+                            && v.1.saturating_sub(2) <= h.0
+                            && h.0 <= v.2 + 2
+                    })
+                    .count();
+                if crosses >= 6 {
+                    d.kind = ObjectKind::Table;
+                    d.evidence.push("stable-fragmented-rule-grid");
+                }
+            }
+        }
+        if !matches!(d.kind, ObjectKind::Paragraph | ObjectKind::List) || d.rule_lattice {
+            continue;
+        }
+        let b = matrix_box(d, &analysis.materialized_segments.segments);
+        if b[3] - b[1] < 100 {
+            continue;
+        }
+        let mut signatures: BTreeMap<Vec<(usize, usize)>, usize> = BTreeMap::new();
+        for row in &topology.rows {
+            if row.top.max(b[1]) >= row.bottom.min(b[3]) {
+                continue;
+            }
+            let sig: Vec<_> = row
+                .slots
+                .iter()
+                .filter(|s| s.value != SpatialValue::Empty && s.start.max(b[0]) < s.end.min(b[2]))
+                .map(|s| (s.start.max(b[0]), s.end.min(b[2])))
+                .collect();
+            if sig.len() >= 3 {
+                *signatures.entry(sig).or_default() += 1;
+            }
+        }
+        if let Some((signature, count)) = signatures
+            .into_iter()
+            .max_by(|a, b| (a.1, &a.0).cmp(&(b.1, &b.0)))
+        {
+            if count >= 5 {
+                d.kind = ObjectKind::Table;
+                d.topology_column_count = signature.len();
+                d.evidence.push("stable-multicolumn-topology");
+            }
+        }
+    }
+}
+fn merged_draft(
+    values: &[ObjectDraft],
+    selected: &[usize],
+    template: usize,
+    segments: &[MaterializedSegment],
+    matrix: [usize; 4],
+    lattice: bool,
+    reason: &'static str,
+) -> ObjectDraft {
+    let mut d = values[template].clone();
+    d.segment_indexes = selected
+        .iter()
+        .flat_map(|i| values[*i].segment_indexes.iter().copied())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    d.kind = ObjectKind::Table;
+    d.bbox_override = bbox_union(selected.iter().map(|i| {
+        values[*i]
+            .bbox_override
+            .unwrap_or_else(|| member_box(&values[*i], segments))
+    }));
+    d.matrix_bbox = Some(matrix);
+    d.rule_lattice = lattice;
+    d.sparse_span = None;
+    if !lattice {
+        d.logical_spans = None;
+    }
+    d.evidence.push(reason);
+    d
+}
+fn aligned_fragment_pair(
+    a: &ObjectDraft,
+    b: &ObjectDraft,
+    segments: &[MaterializedSegment],
+) -> bool {
+    if (a.kind != ObjectKind::Table && b.kind != ObjectKind::Table)
+        || a.rule_lattice
+        || b.rule_lattice
+    {
+        return false;
+    }
+    if a.kind != ObjectKind::Table || b.kind != ObjectKind::Table {
+        let anchor = if a.kind == ObjectKind::Table { a } else { b };
+        if anchor.topology_column_count < 3 {
+            return false;
+        }
+    }
+    if !a
+        .empty_corridors
+        .iter()
+        .any(|c| b.empty_corridors.contains(c))
+    {
+        return false;
+    }
+    let x = member_box(a, segments);
+    let y = member_box(b, segments);
+    if !(x[2] <= y[0] || y[2] <= x[0]) {
+        return false;
+    }
+    let overlap = x[3].min(y[3]) as i64 - x[1].max(y[1]) as i64;
+    if overlap <= 0 || overlap * 2 < (x[3] - x[1]).min(y[3] - y[1]) as i64 {
+        return false;
+    }
+    let ar = flow_rows(&a.segment_indexes, segments).0;
+    let br = flow_rows(&b.segment_indexes, segments).0;
+    let shorter = ar.len().min(br.len());
+    if shorter < 3 {
+        return false;
+    }
+    let mut used = BTreeSet::new();
+    let mut matches = 0;
+    for r in ar {
+        let a = row_bbox(&r, segments).unwrap();
+        let choice = br
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !used.contains(i))
+            .filter_map(|(i, r)| {
+                let b = row_bbox(r, segments).unwrap();
+                let overlap = a[3].min(b[3]) as i64 - a[1].max(b[1]) as i64;
+                (overlap > 0).then_some((overlap, i))
+            })
+            .max();
+        if let Some((_, i)) = choice {
+            used.insert(i);
+            matches += 1;
+        }
+    }
+    matches >= 3.max((shorter + 1) / 2)
+}
+fn merge_table_fragments(
+    values: Vec<ObjectDraft>,
+    segments: &[MaterializedSegment],
+) -> Vec<ObjectDraft> {
+    let candidates: Vec<_> = values
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| !d.rule_lattice && !d.empty_corridors.is_empty())
+        .map(|(i, _)| i)
+        .collect();
+    let mut disjoint = DisjointSet::new(values.len());
+    for (at, i) in candidates.iter().enumerate() {
+        for j in &candidates[at + 1..] {
+            if aligned_fragment_pair(&values[*i], &values[*j], segments) {
+                disjoint.union(*i, *j);
+            }
+        }
+    }
+    let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for i in candidates {
+        groups.entry(disjoint.find(i)).or_default().push(i);
+    }
+    let mut replacements = BTreeMap::new();
+    let mut consumed = BTreeSet::new();
+    for g in groups.into_values().filter(|g| g.len() >= 2) {
+        let first = *g
+            .iter()
+            .filter(|i| values[**i].kind == ObjectKind::Table)
+            .min()
+            .unwrap();
+        let matrix = bbox_union(g.iter().map(|i| matrix_box(&values[*i], segments))).unwrap();
+        let mut d = merged_draft(
+            &values,
+            &g,
+            first,
+            segments,
+            matrix,
+            false,
+            "merged-aligned-table-fragments",
+        );
+        d.evidence = Vec::new();
+        for i in &g {
+            for e in &values[*i].evidence {
+                if !d.evidence.contains(e) {
+                    d.evidence.push(e);
+                }
+            }
+        }
+        d.evidence.push("merged-aligned-table-fragments");
+        d.empty_corridors = g
+            .iter()
+            .flat_map(|i| values[*i].empty_corridors.iter().copied())
+            .collect();
+        d.topology_column_count = g
+            .iter()
+            .map(|i| values[*i].topology_column_count)
+            .max()
+            .unwrap_or(0);
+        replacements.insert(first, d);
+        consumed.extend(g.into_iter().filter(|i| *i != first));
+    }
+    let values: Vec<_> = values
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, d)| {
+            if consumed.contains(&i) {
+                None
+            } else {
+                Some(replacements.remove(&i).unwrap_or(d))
+            }
+        })
+        .collect();
+    let mut consumed = BTreeSet::new();
+    let mut replacements = BTreeMap::new();
+    for (i, parent) in values.iter().enumerate() {
+        if parent.kind != ObjectKind::Table || !parent.rule_lattice {
+            continue;
+        }
+        let b = matrix_box(parent, segments);
+        let children: Vec<_> = values
+            .iter()
+            .enumerate()
+            .filter(|(j, v)| {
+                *j != i
+                    && !consumed.contains(j)
+                    && v.kind == ObjectKind::Table
+                    && !v.rule_lattice
+                    && {
+                        let x = member_box(v, segments);
+                        b[0] <= x[0] && b[1] <= x[1] && x[2] <= b[2] && x[3] <= b[3]
+                    }
+            })
+            .map(|(j, _)| j)
+            .collect();
+        if children.is_empty() {
+            continue;
+        }
+        let mut selected = vec![i];
+        selected.extend(children.iter().copied());
+        replacements.insert(
+            i,
+            merged_draft(
+                &values,
+                &selected,
+                i,
+                segments,
+                b,
+                true,
+                "absorbed-contained-table-fragments",
+            ),
+        );
+        consumed.extend(children);
+    }
+    values
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, d)| {
+            if consumed.contains(&i) {
+                None
+            } else {
+                Some(replacements.remove(&i).unwrap_or(d))
+            }
+        })
+        .collect()
+}
+fn merge_structural_grid_sections(
+    values: Vec<ObjectDraft>,
+    segments: &[MaterializedSegment],
+) -> Vec<ObjectDraft> {
+    let structural: BTreeSet<_> = values
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| {
+            d.kind == ObjectKind::Table && d.evidence.contains(&"stable-fragmented-rule-grid")
+        })
+        .map(|(i, _)| i)
+        .collect();
+    if structural.is_empty() {
+        return values;
+    }
+    let candidates: Vec<_> = values
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| d.kind == ObjectKind::Table)
+        .map(|(i, _)| i)
+        .collect();
+    let mut disjoint = DisjointSet::new(values.len());
+    for (at, i) in candidates.iter().enumerate() {
+        let a = matrix_box(&values[*i], segments);
+        for j in &candidates[at + 1..] {
+            let b = matrix_box(&values[*j], segments);
+            let overlap = a[2].min(b[2]) as i64 - a[0].max(b[0]) as i64;
+            let shorter = (a[2] - a[0]).min(b[2] - b[0]);
+            let gap = a[1].max(b[1]).saturating_sub(a[3].min(b[3]));
+            if overlap > 0 && overlap * 4 >= shorter as i64 * 3 && gap <= 4 {
+                disjoint.union(*i, *j);
+            }
+        }
+    }
+    let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for i in candidates {
+        groups.entry(disjoint.find(i)).or_default().push(i);
+    }
+    let mut groups: Vec<_> = groups.into_values().collect();
+    groups.sort_by_key(|g| g[0]);
+    let mut replacements = BTreeMap::new();
+    let mut consumed = BTreeSet::new();
+    for g in groups {
+        let Some(anchor) = g.iter().copied().find(|i| structural.contains(i)) else {
+            continue;
+        };
+        let b = bbox_union(g.iter().map(|i| matrix_box(&values[*i], segments))).unwrap();
+        let selected: Vec<_> = values
+            .iter()
+            .enumerate()
+            .filter(|(i, d)| {
+                let x = member_box(d, segments);
+                !consumed.contains(i)
+                    && 2 * b[1] <= x[1] + x[3]
+                    && x[1] + x[3] < 2 * b[3]
+                    && (b[2].min(x[2]) as i64 - b[0].max(x[0]) as i64) * 2
+                        >= (b[2] - b[0]).min(x[2] - x[0]) as i64
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if selected.is_empty() || (selected.len() == 1 && g.len() == 1) {
+            continue;
+        }
+        let first = selected[0];
+        let matrix = bbox_union(
+            std::iter::once(b).chain(selected.iter().map(|i| member_box(&values[*i], segments))),
+        )
+        .unwrap();
+        replacements.insert(
+            first,
+            merged_draft(
+                &values,
+                &selected,
+                anchor,
+                segments,
+                matrix,
+                false,
+                "merged-overlapping-structural-grid-sections",
+            ),
+        );
+        consumed.extend(selected.into_iter().filter(|i| *i != first));
+    }
+    let mut result: Vec<_> = values
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, d)| {
+            if consumed.contains(&i) {
+                None
+            } else {
+                Some(replacements.remove(&i).unwrap_or(d))
+            }
+        })
+        .collect();
+    result.sort_by_key(|d| {
+        let b = member_box(d, segments);
+        (b[1], b[0])
+    });
+    result
+}
+fn merge_stacked_tables(values: Vec<ObjectDraft>, analysis: &GeometryAnalysis) -> Vec<ObjectDraft> {
+    let segments = &analysis.materialized_segments.segments;
+    let width = analysis.foreground.width;
+    let mut candidates: Vec<_> = values
+        .iter()
+        .enumerate()
+        .filter(|(_, d)| {
+            let b = matrix_box(d, segments);
+            d.kind == ObjectKind::Table && (b[2] - b[0]) as f64 >= width as f64 * 0.75
+        })
+        .map(|(i, _)| i)
+        .collect();
+    if candidates.len() < 3 {
+        return values;
+    }
+    candidates.sort_by_key(|i| {
+        let b = matrix_box(&values[*i], segments);
+        (b[1], b[0])
+    });
+    let maximum_gap = 512.max(width / 4);
+    let maximum_height = 512.max((width as f64 * 1.25).round_ties_even() as usize);
+    let mut clusters = Vec::new();
+    let mut current: Vec<usize> = Vec::new();
+    let mut current_box = None;
+    for i in candidates {
+        let b = matrix_box(&values[i], segments);
+        if let Some(a) = current_box {
+            let a: [usize; 4] = a;
+            let overlap = a[2].min(b[2]) as i64 - a[0].max(b[0]) as i64;
+            let shorter = (a[2] - a[0]).min(b[2] - b[0]);
+            let combined = bbox_union([a, b]).unwrap();
+            let both_structural = values[i].evidence.contains(&"stable-fragmented-rule-grid")
+                && current
+                    .iter()
+                    .any(|j| values[*j].evidence.contains(&"stable-fragmented-rule-grid"));
+            if overlap > 0
+                && overlap * 4 >= shorter as i64 * 3
+                && b[1] as i64 - a[3] as i64 <= maximum_gap as i64
+                && !(both_structural && combined[3] - combined[1] > maximum_height)
+            {
+                current.push(i);
+                current_box = Some(combined);
+                continue;
+            }
+            if current.len() >= 3 {
+                clusters.push(current);
+            }
+        }
+        current = vec![i];
+        current_box = Some(b);
+    }
+    if current.len() >= 3 {
+        clusters.push(current);
+    }
+    if clusters.is_empty() {
+        return values;
+    }
+    let mut consumed = BTreeSet::new();
+    let mut replacements = BTreeMap::new();
+    for cluster in clusters {
+        let b = bbox_union(cluster.iter().map(|i| matrix_box(&values[*i], segments))).unwrap();
+        let tail = analysis.foreground.height.min(b[3] + 96);
+        let selected: Vec<_> = values
+            .iter()
+            .enumerate()
+            .filter(|(i, d)| {
+                let x = member_box(d, segments);
+                !consumed.contains(i)
+                    && 2 * b[1] <= x[1] + x[3]
+                    && x[1] + x[3] < 2 * tail
+                    && (b[2].min(x[2]) as i64 - b[0].max(x[0]) as i64) * 2
+                        >= (b[2] - b[0]).min(x[2] - x[0]) as i64
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if selected.len() < cluster.len() {
+            continue;
+        }
+        let first = selected[0];
+        let anchor = *cluster.iter().min().unwrap();
+        let matrix = bbox_union(
+            std::iter::once(b).chain(selected.iter().map(|i| member_box(&values[*i], segments))),
+        )
+        .unwrap();
+        replacements.insert(
+            first,
+            merged_draft(
+                &values,
+                &selected,
+                anchor,
+                segments,
+                matrix,
+                false,
+                "merged-stacked-wide-table-sections",
+            ),
+        );
+        consumed.extend(selected.into_iter().filter(|i| *i != first));
+    }
+    let mut result: Vec<_> = values
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, d)| {
+            if consumed.contains(&i) {
+                None
+            } else {
+                Some(replacements.remove(&i).unwrap_or(d))
+            }
+        })
+        .collect();
+    result.sort_by_key(|d| {
+        let b = member_box(d, segments);
+        (b[1], b[0])
+    });
+    result
+}
+
 pub fn reconstruct_objects(analysis: &GeometryAnalysis) -> Option<ObjectReconstruction> {
     let topology = crate::topology::build_physical_topology(analysis)?;
     reconstruct_objects_with_topology(analysis, &topology)
@@ -1387,8 +2174,6 @@ pub fn reconstruct_objects_with_topology(
             segment_ownership: Vec::new(),
         });
     }
-    let (mut drafts, table_owned) = table_drafts(analysis, &source_segment_indexes, &spans)?;
-    let remaining: Vec<bool> = table_owned.iter().map(|owned| !owned).collect();
     let mut node_segments = vec![Vec::new(); analysis.partition_nodes.len()];
     for node in &analysis.materialized_nodes {
         if node.source_index >= node_segments.len() {
@@ -1396,6 +2181,18 @@ pub fn reconstruct_objects_with_topology(
         }
         node_segments[node.source_index] = node.segment_indexes.clone();
     }
+    let chambers = topology_chambers(analysis, topology, &node_segments)?;
+    let chamber_owned: BTreeSet<usize> = chambers
+        .iter()
+        .flat_map(|c| c.draft.segment_indexes.iter().copied())
+        .collect();
+    let (mut drafts, table_owned) = topology_table_drafts(analysis, topology, &chamber_owned)?;
+    let remaining: Vec<bool> = table_owned
+        .iter()
+        .enumerate()
+        .map(|(i, owned)| !owned && !chamber_owned.contains(&i))
+        .collect();
+    drafts.extend(chamber_drafts(chambers, analysis, topology)?);
     let connectivity = recurse_connectivity(analysis, topology, &node_segments, &remaining, 0)?;
     drafts.extend(semantic_flow_drafts(
         connectivity,
@@ -1403,6 +2200,11 @@ pub fn reconstruct_objects_with_topology(
         [0, 0, analysis.foreground.width, analysis.foreground.height],
     )?);
     drafts = merge_horizontal_rule_tables(analysis, drafts)?;
+    promote_tables(&mut drafts, analysis, topology);
+    drafts = merge_table_fragments(drafts, segments);
+    drafts = merge_structural_grid_sections(drafts, segments);
+    drafts = merge_stacked_tables(drafts, analysis);
+
     drafts.sort_by(|first, second| {
         let first_bbox = bbox_union(
             first
@@ -1484,6 +2286,8 @@ pub fn reconstruct_objects_with_topology(
             )
         };
         objects.push(DocumentObject {
+            matrix_bbox: draft.matrix_bbox.unwrap_or(bbox),
+            rule_lattice: draft.rule_lattice,
             kind: draft.kind,
             segment_indexes: draft.segment_indexes,
             bbox,
@@ -1599,5 +2403,47 @@ mod flow_parity_tests {
     #[test]
     fn local_height_uses_python_even_rounding_at_a_half_index() {
         assert_eq!(upper_quartile(vec![10, 10, 10, 20, 20, 100, 100]), 20.0);
+    }
+}
+
+#[cfg(test)]
+mod cycle_parity_tests {
+    use super::*;
+    use crate::topology::{PhysicalRow, SpatialSlot};
+    fn row(top: usize, spans: &[(usize, usize)], codes: Vec<u8>) -> PhysicalRow {
+        PhysicalRow {
+            source_rows: vec![top / 10],
+            top,
+            bottom: top + 10,
+            slots: spans
+                .iter()
+                .map(|(start, end)| SpatialSlot {
+                    start: *start,
+                    end: *end,
+                    value: SpatialValue::RuledNetwork(0),
+                })
+                .collect(),
+            codes,
+        }
+    }
+    #[test]
+    fn mixed_cycle_accepts_finite_merged_cells_and_rejects_dangling_left() {
+        let spans = [(0, 10), (10, 20)];
+        let valid = PhysicalTopology {
+            rows: vec![row(0, &spans, vec![0, 5]), row(10, &spans, vec![3, 8])],
+        };
+        assert_eq!(mixed_axis_cycles(&valid), vec![[0, 0, 20, 20]]);
+        let dangling = PhysicalTopology {
+            rows: vec![row(0, &spans, vec![0, 5]), row(10, &spans, vec![8, 8])],
+        };
+        assert!(mixed_axis_cycles(&dangling).is_empty());
+        let merged = PhysicalTopology {
+            rows: vec![row(0, &spans, vec![0, 5]), row(10, &[(0, 20)], vec![3])],
+        };
+        assert_eq!(mixed_axis_cycles(&merged), vec![[0, 0, 20, 20]]);
+        let unrelated = PhysicalTopology {
+            rows: vec![row(0, &spans, vec![0, 0]), row(10, &[(0, 20)], vec![3])],
+        };
+        assert!(mixed_axis_cycles(&unrelated).is_empty());
     }
 }

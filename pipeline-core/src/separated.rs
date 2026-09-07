@@ -16,6 +16,7 @@ const OBJECT_PARAGRAPH: u32 = 0;
 const OBJECT_LIST: u32 = 1;
 const OBJECT_TABLE: u32 = 2;
 const OBJECT_UNKNOWN: u32 = 3;
+const OBJECT_FLOW: u32 = 4;
 const SPLIT_CALIBRATION_SAMPLES: usize = 3;
 const SPLIT_CALIBRATION_MIN_SUCCESSES: usize = 2;
 const OCR_CONTEXT_BORDER: u32 = 8;
@@ -1524,6 +1525,7 @@ fn verified_route_jobs(
         objects::ObjectKind::List => Some(OBJECT_LIST),
         objects::ObjectKind::Table => Some(OBJECT_TABLE),
         objects::ObjectKind::Unknown => Some(OBJECT_UNKNOWN),
+        objects::ObjectKind::Flow => Some(OBJECT_FLOW),
     };
     let mut jobs = Vec::with_capacity(plan.blocks.len());
     let mut rasters = Vec::with_capacity(plan.blocks.len());
@@ -2635,7 +2637,7 @@ pub extern "C" fn ittm_separated_import_layout(
     rows: u32,
     columns: u32,
 ) -> i32 {
-    if object_kind > OBJECT_UNKNOWN {
+    if object_kind > OBJECT_FLOW {
         return -1;
     }
     let Ok(mut registry) = registry().lock() else { return -2; };
@@ -2687,7 +2689,7 @@ pub unsafe extern "C" fn ittm_separated_import_segment(
     text: *const u8,
     text_length: u32,
 ) -> i32 {
-    if object_kind > OBJECT_UNKNOWN
+    if object_kind > OBJECT_FLOW
         || row_span == 0
         || column_span == 0
         || (source_indexes.is_null() && source_count != 0)
@@ -2808,7 +2810,7 @@ unsafe fn import_block(
     let Some(object_kind) = cursor.take() else {
         return -3;
     };
-    if object_kind > OBJECT_UNKNOWN {
+    if object_kind > OBJECT_FLOW {
         return -3;
     }
     let Some(object_rect) = cursor.rect() else {
@@ -2936,6 +2938,7 @@ unsafe fn import_block(
         OBJECT_PARAGRAPH => objects::ObjectKind::Paragraph,
         OBJECT_LIST => objects::ObjectKind::List,
         OBJECT_TABLE => objects::ObjectKind::Table,
+        OBJECT_FLOW => objects::ObjectKind::Flow,
         _ => objects::ObjectKind::Unknown,
     };
     let raster = JobRaster {
@@ -3003,6 +3006,8 @@ unsafe fn import_block(
         let placeholder = session.objects.len();
         session.objects.push(objects::DocumentObject {
             kind: objects::ObjectKind::Unknown,
+            matrix_bbox: [0, 0, 0, 0],
+            rule_lattice: false,
             segment_indexes: Vec::new(),
             bbox: [0, 0, 0, 0],
             reading_index: placeholder,
@@ -3018,6 +3023,8 @@ unsafe fn import_block(
     if object_id as usize == session.objects.len() {
         session.objects.push(objects::DocumentObject {
             kind: object_kind_value,
+            matrix_bbox: [object_rect.left as usize, object_rect.top as usize, object_rect.right as usize, object_rect.bottom as usize],
+            rule_lattice: false,
             segment_indexes: segment_indexes.clone(),
             bbox: [
                 object_rect.left as usize,
@@ -3495,6 +3502,7 @@ pub extern "C" fn ittm_separated_object_field(handle: u32, index: u32, field: u3
             objects::ObjectKind::List => OBJECT_LIST as usize,
             objects::ObjectKind::Table => OBJECT_TABLE as usize,
             objects::ObjectKind::Unknown => OBJECT_UNKNOWN as usize,
+            objects::ObjectKind::Flow => OBJECT_FLOW as usize,
         },
         5 => object.segment_indexes.len(),
         6 => object.reading_index,

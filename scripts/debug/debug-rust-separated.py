@@ -269,7 +269,7 @@ def load_separate_block_inputs(stage: Path) -> tuple[SeparatedBlockStageInput, .
     stage_input = json.loads((stage / "input.json").read_text(encoding="utf-8"))
     object_stage = resolve_stage_input(stage, stage_input["input"])
     values: list[SeparatedBlockStageInput] = []
-    kind_codes = {"paragraph": 0, "list": 1, "table": 2, "unknown": 3}
+    kind_codes = {"paragraph": 0, "list": 1, "table": 2, "unknown": 3, "flow": 4}
     for object_dir in sorted((stage / "objects").iterdir()):
         if not object_dir.is_dir():
             continue
@@ -542,7 +542,7 @@ def load_segment_stage_layouts(stage: Path) -> tuple[SeparatedObjectLayout, ...]
         records = json.loads(checkpoint.read_text(encoding="utf-8")).get("object_layouts", [])
         return tuple(SeparatedObjectLayout(**record) for record in records)
     payload = json.loads((stage / "segment-topology-handoff.json").read_text(encoding="utf-8"))
-    kind_codes = {"paragraph": 0, "list": 1, "table": 2, "unknown": 3}
+    kind_codes = {"paragraph": 0, "list": 1, "table": 2, "unknown": 3, "flow": 4}
     return tuple(
         SeparatedObjectLayout(
             object_id=numeric_id(record["object_id"]),
@@ -575,7 +575,7 @@ def load_segment_stage_inputs(stage: Path) -> tuple[SeparatedRecognizedSegment, 
     handoff = json.loads(
         (stage / "segment-topology-handoff.json").read_text(encoding="utf-8")
     )
-    kind_codes = {"paragraph": 0, "list": 1, "table": 2, "unknown": 3}
+    kind_codes = {"paragraph": 0, "list": 1, "table": 2, "unknown": 3, "flow": 4}
     values = []
     for index, segment in enumerate(handoff["segments"]):
         topology = segment["topology"]
@@ -798,7 +798,7 @@ def main() -> int:
         if job.superseded:
             continue
         grouped[job.object_id].append(job)
-    object_kind_names = {0: "paragraph", 1: "list", 2: "table"}
+    object_kind_names = {0: "paragraph", 1: "list", 2: "table", 3: "unknown", 4: "flow"}
     for object_value in objects:
         if (
             object_value.bbox[0] >= object_value.bbox[2]

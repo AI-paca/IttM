@@ -4128,7 +4128,8 @@ pub unsafe extern "C" fn ittm_analyze_objects_fingerprint_copy(
             objects::ObjectKind::Paragraph => 1,
             objects::ObjectKind::List => 2,
             objects::ObjectKind::Table => 3,
-            objects::ObjectKind::Unknown => 4,
+            // Legacy packed diagnostics retain their four-category encoding.
+            objects::ObjectKind::Unknown | objects::ObjectKind::Flow => 4,
         });
         object_values.extend(item.bbox.map(|value| value as u64));
         object_values.extend([
@@ -4163,7 +4164,7 @@ pub unsafe extern "C" fn ittm_analyze_objects_fingerprint_copy(
         reconstruction
             .objects
             .iter()
-            .filter(|item| item.kind == objects::ObjectKind::Unknown)
+            .filter(|item| matches!(item.kind, objects::ObjectKind::Unknown | objects::ObjectKind::Flow))
             .count() as u64,
         geometry_fnv_values(object_values),
         geometry_fnv_values(

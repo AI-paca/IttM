@@ -125,3 +125,25 @@ retains the earlier 28/28 topology and object metadata agreement. OCR block
 planning, raster packing and language selection still require their own
 isolated comparisons; local-matrix agreement does not establish full-route
 quality.
+
+
+### Canonical block planning
+
+The splay route now uses the checkpoint's dyadic row/column masks for large
+tables, partitioning the original segment order into chunks of at most 256.
+The previously ported bounded-locality family and its tests remain available
+as a historical algorithm; it is not substituted into the splay route at the
+256-segment boundary. Candidate reduction is applied per stored object, so a
+large table elsewhere cannot suppress reduction for a small table. Paragraphs
+use overlapping matrix-line pairs; lists and fixed flow retain their object
+crop. OCR jobs now use each planned block's crop.
+
+On literal Python03 objects and matrices, all 1654 block plans from the 28
+frozen inputs match native Rust and real Chromium/WASM: per-object order,
+source/core/context IDs, crop bounds, matrix windows and packed logical shape.
+This comparison covers planning, not raster packing or adaptive OCR selection.
+
+Reading order first clusters rectangles into lines and then sorts by total
+keys. The old pair-dependent vertical-overlap comparator could form cycles
+and abort native Rust or trap in WASM; the shared ordering also retains the
+previously verified Python line-order behavior.

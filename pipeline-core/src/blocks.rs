@@ -570,24 +570,9 @@ fn dyadic_table_masks(
     if unit_count == 1 && scope_segments.len() == 1 {
         return None;
     }
-    // A single 16x16 OCR block can preserve the table's intrinsic row/column
-    // algebra.  Only tables that exceed that physical block limit need the
-    // bounded locality signature family; applying it to smaller tables
-    // discards useful table geometry and turns ordinary cells into a sparse
-    // polar atlas.
-    if unit_count > MAX_LOCAL_BLOCK_MEMBERS {
-        let unit_masks = locality_preserving_signature_family(unit_count)?;
-        let masks = unit_masks
-            .into_iter()
-            .map(|unit_indexes| {
-                unit_indexes
-                    .into_iter()
-                    .flat_map(|index| ordered_units[index].1.iter().copied())
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-        return Some((masks, unit_count));
-    }
+    // The splay checkpoint preserves dyadic row/column codes in chunks of
+    // at most 256 original segments. The historical bounded-locality family
+    // remains below with its own tests; it is a different planning policy.
     let mut masks = Vec::<Vec<usize>>::new();
     let mut seen = BTreeSet::<Vec<usize>>::new();
     let add_units =
@@ -1072,24 +1057,39 @@ pub fn plan_blocks_with_topology(
     let source_ids = reconstruction.source_segment_indexes.iter().copied()
         .filter(|id| active.contains(id)).collect::<Vec<_>>();
     let mut candidates = Vec::<Candidate>::new();
-    let mut all_table_units_at_most_16 = true;
-    let mut has_table = false;
+    let mut minimize_scopes = BTreeSet::new();
     for (scope_index, object) in reconstruction.objects.iter().enumerate() {
         if !object.is_recognizable() { continue; }
         if object.kind != ObjectKind::Table {
-            candidates.push(Candidate {
-                members: object.segment_indexes.clone(),
-                scope_index,
-                bbox: None,
-                window: None,
-                dyadic_mask: false,
-                segment_shape: None,
-                logical_spans: None,
-                logical_scope_shape: None,
-            });
+            let memberships = if object.kind == ObjectKind::Paragraph {
+                let mut lines = BTreeMap::<(usize,usize), BTreeSet<usize>>::new();
+                for span in object.logical_spans.as_ref()? {
+                    lines.entry((span.row_start,span.row_stop)).or_default().insert(span.segment_index);
+                }
+                let lines: Vec<_> = lines.into_values().collect();
+                if lines.len() <= 1 { vec![object.segment_indexes.clone()] }
+                else { lines.windows(2).map(|pair| object.segment_indexes.iter().copied()
+                    .filter(|id| pair[0].contains(id) || pair[1].contains(id)).collect()).collect() }
+            } else { vec![object.segment_indexes.clone()] };
+            for members in memberships {
+                let member_bbox = bbox_union(members.iter().map(|&id| segments[id].bbox))?;
+                let bbox = if object.kind == ObjectKind::Paragraph {
+                    [object.bbox[0], member_bbox[1], object.bbox[2], member_bbox[3]]
+                } else { object.bbox };
+                candidates.push(Candidate {
+                    members,
+                    scope_index,
+                    // The object crop is the planning canvas, already padded.
+                    bbox: Some(bbox),
+                    window: None,
+                    dyadic_mask: false,
+                    segment_shape: None,
+                    logical_spans: None,
+                    logical_scope_shape: None,
+                });
+            }
             continue;
         }
-        has_table = true;
         let Some((table_spans, logical_scope_shape)) = object_logical_spans(object, &spans)
             .or_else(|| {
                 table_local_spans(
@@ -1131,8 +1131,7 @@ pub fn plan_blocks_with_topology(
             });
             continue;
         };
-        all_table_units_at_most_16 &= unit_count <= 16;
-        let locality_packed = unit_count > MAX_LOCAL_BLOCK_MEMBERS;
+        if unit_count <= 16 { minimize_scopes.insert(scope_index); }
         for members in masks {
             let bbox = bbox_union(members.iter().map(|index| segments[*index].bbox))?;
             let window = [
@@ -1153,35 +1152,11 @@ pub fn plan_blocks_with_topology(
                     .map(|index| table_spans[*index].column_stop)
                     .max()?,
             ];
-            let shape = if locality_packed {
-                packed_shape(members.len())?
-            } else {
-                dense_shape(members.len())?
-            };
-            let logical_spans = if locality_packed {
-                members
-                    .iter()
-                    .enumerate()
-                    .map(|(position, _index)| {
-                        let row = position / shape[1];
-                        let column = position % shape[1];
-                        [row, row + 1, column, column + 1]
-                    })
-                    .collect()
-            } else {
-                members
-                    .iter()
-                    .map(|index| {
-                        let span = table_spans[*index];
-                        [
-                            span.row_start,
-                            span.row_stop,
-                            span.column_start,
-                            span.column_stop,
-                        ]
-                    })
-                    .collect()
-            };
+            let shape = dense_shape(members.len())?;
+            let logical_spans = members.iter().map(|index| {
+                let span = table_spans[*index];
+                [span.row_start,span.row_stop,span.column_start,span.column_stop]
+            }).collect();
             candidates.push(Candidate {
                 members,
                 scope_index,
@@ -1190,19 +1165,21 @@ pub fn plan_blocks_with_topology(
                 dyadic_mask: true,
                 segment_shape: Some(shape),
                 logical_spans: Some(logical_spans),
-                logical_scope_shape: Some(if locality_packed {
-                    shape
-                } else {
-                    logical_scope_shape
-                }),
+                logical_scope_shape: Some(logical_scope_shape),
             });
         }
     }
-    let selected = if !has_table || all_table_units_at_most_16 {
-        select_candidates(&candidates, &source_ids)?
-    } else {
-        (0..candidates.len()).collect()
-    };
+    // Python invokes the planner separately for each stored object. A large
+    // table elsewhere on the page must not disable a small table's reduction.
+    let mut selected = Vec::new();
+    for (scope_index,object) in reconstruction.objects.iter().enumerate() {
+        let indexes:Vec<_> = candidates.iter().enumerate()
+            .filter_map(|(i,c)| (c.scope_index==scope_index).then_some(i)).collect();
+        if minimize_scopes.contains(&scope_index) {
+            let local:Vec<_> = indexes.iter().map(|&i|candidates[i].clone()).collect();
+            selected.extend(select_candidates(&local,&object.segment_indexes)?.into_iter().map(|i|indexes[i]));
+        } else { selected.extend(indexes); }
+    }
     let candidates: Vec<Candidate> = selected
         .into_iter()
         .map(|index| candidates[index].clone())
@@ -1347,7 +1324,7 @@ mod tests {
     }
 
     #[test]
-    fn current_rust_object_has_bounded_family_for_2596_segments() {
+    fn historical_locality_family_is_preserved_for_2596_segments() {
         assert_python_locality_parity(2596, 59);
     }
 

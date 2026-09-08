@@ -1071,32 +1071,6 @@ fn rect_intersection_area(first: Rect, second: Rect) -> u64 {
     u64::from(width) * u64::from(height)
 }
 
-fn rect_reading_order(first: Rect, second: Rect) -> std::cmp::Ordering {
-    let vertical_overlap = first
-        .bottom
-        .min(second.bottom)
-        .saturating_sub(first.top.max(second.top));
-    let minimum_height = first
-        .bottom
-        .saturating_sub(first.top)
-        .min(second.bottom.saturating_sub(second.top));
-    if vertical_overlap.saturating_mul(2) >= minimum_height.max(1) {
-        (first.left, first.top, first.right, first.bottom).cmp(&(
-            second.left,
-            second.top,
-            second.right,
-            second.bottom,
-        ))
-    } else {
-        (first.top, first.left, first.bottom, first.right).cmp(&(
-            second.top,
-            second.left,
-            second.bottom,
-            second.right,
-        ))
-    }
-}
-
 fn native_only_word(text: &str, profile: LanguageProfileId) -> bool {
     let mut native = false;
     for character in text.chars() {
@@ -1236,7 +1210,7 @@ fn patch_missing_native_units(
                 .then_some(native)
             }),
     );
-    words.sort_by(|first, second| rect_reading_order(first.rect, second.rect));
+    sort_in_reading_order(&mut words, |word| word.rect);
     let text = words
         .iter()
         .map(|word| word.text.as_str())
@@ -1544,7 +1518,6 @@ fn verified_route_jobs(
                 })
             })
             .collect::<Option<_>>()?;
-        let document_object = reconstruction.objects.get(block.scope_index)?;
         if block.logical_segment_spans.len() != block.segment_indexes.len() {
             return None;
         }
@@ -1570,14 +1543,7 @@ fn verified_route_jobs(
             .iter()
             .map(|cell| cell.column.saturating_add(cell.column_span))
             .max()?;
-        let source_bbox = if matches!(
-            document_object.kind,
-            objects::ObjectKind::Paragraph | objects::ObjectKind::List
-        ) {
-            document_object.bbox
-        } else {
-            block.bbox
-        };
+        let source_bbox = block.bbox;
         let rect = Rect {
             left: u32::try_from(source_bbox[0]).ok()?,
             top: u32::try_from(source_bbox[1]).ok()?,
@@ -1644,7 +1610,7 @@ fn verified_route_jobs(
             words_in_source_space: false,
         imported_composite: false,
         });
-        let raster = if matches!(object_kind, OBJECT_PARAGRAPH | OBJECT_LIST) {
+        let raster = if object_kind != OBJECT_TABLE {
             render_exact_rect_raster(
                 &analysis.foreground.pixels,
                 analysis.foreground.width.checked_mul(3)?,
@@ -1835,16 +1801,16 @@ fn word_center_in_source(job: &OcrJob, word: &OcrWordEvidence) -> (u64, u64) {
 // Exact line clustering used by Python _reading_order_words. Because incoming
 // centers are nondecreasing, the closest prior center is a line's maximum.
 // Keeping that representative avoids rescanning every word already in a line.
-fn reading_order_text(words: &[OcrWordEvidence]) -> String {
-    let mut order = (0..words.len()).collect::<Vec<_>>();
-    let center = |index: usize| u64::from(words[index].rect.top) + u64::from(words[index].rect.bottom);
-    order.sort_by_key(|&index| (center(index), words[index].rect.left, words[index].rect.right, index));
+fn reading_order_indices(rects: &[Rect]) -> Vec<usize> {
+    let mut order = (0..rects.len()).collect::<Vec<_>>();
+    let center = |index: usize| u64::from(rects[index].top) + u64::from(rects[index].bottom);
+    order.sort_by_key(|&index| (center(index), rects[index].left, rects[index].right, index));
     let mut lines = Vec::<(usize, Vec<usize>)>::new();
     for index in order {
-        let rect = words[index].rect;
+        let rect = rects[index];
         let mut best: Option<(f64, u64, usize)> = None;
         for (line_index, (representative, _)) in lines.iter().enumerate() {
-            let previous = words[*representative].rect;
+            let previous = rects[*representative];
             let overlap = previous.bottom.min(rect.bottom).saturating_sub(previous.top.max(rect.top));
             let height = (previous.bottom - previous.top).min(rect.bottom - rect.top);
             let fraction = f64::from(overlap) / f64::from(height);
@@ -1856,7 +1822,7 @@ fn reading_order_text(words: &[OcrWordEvidence]) -> String {
         }
         if let Some((_, _, line_index)) = best {
             let (representative, members) = &mut lines[line_index];
-            let previous = words[*representative].rect;
+            let previous = rects[*representative];
             if center(index) > center(*representative) ||
                 (center(index) == center(*representative) && (rect.top, rect.left) < (previous.top, previous.left))
             { *representative = index; }
@@ -1865,19 +1831,34 @@ fn reading_order_text(words: &[OcrWordEvidence]) -> String {
     }
     let key = |line: &(usize, Vec<usize>)| {
         (line.1.iter().map(|&index| center(index)).sum::<u64>() as f64 / line.1.len() as f64,
-         line.1.iter().map(|&index| words[index].rect.top).min().unwrap_or(0),
-         line.1.iter().map(|&index| words[index].rect.left).min().unwrap_or(0))
+         line.1.iter().map(|&index| rects[index].top).min().unwrap_or(0),
+         line.1.iter().map(|&index| rects[index].left).min().unwrap_or(0))
     };
     lines.sort_by(|first, second| {
         let a = key(first); let b = key(second);
         a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)).then_with(|| a.2.cmp(&b.2))
     });
-    let mut texts = Vec::new();
+    let mut result = Vec::new();
     for (_, mut line) in lines {
-        line.sort_by_key(|&index| { let rect = words[index].rect; (rect.left, rect.top, rect.right, rect.bottom, index) });
-        texts.extend(line.into_iter().map(|index| words[index].text.as_str()));
+        line.sort_by_key(|&index| { let rect = rects[index]; (rect.left, rect.top, rect.right, rect.bottom, index) });
+        result.extend(line);
     }
-    texts.join(" ")
+    result
+}
+
+
+fn reading_order_text(words: &[OcrWordEvidence]) -> String {
+    let rects: Vec<_> = words.iter().map(|word| word.rect).collect();
+    reading_order_indices(&rects).into_iter().map(|index| words[index].text.as_str()).collect::<Vec<_>>().join(" ")
+}
+
+fn sort_in_reading_order<T>(values: &mut Vec<T>, rect: impl Fn(&T) -> Rect) {
+    // Pair-dependent overlap comparators form cycles and can panic inside
+    // Rust's sort (or trap in WASM). Cluster first, then use only total keys.
+    let rects: Vec<_> = values.iter().map(rect).collect();
+    let order = reading_order_indices(&rects);
+    let mut original: Vec<_> = std::mem::take(values).into_iter().map(Some).collect();
+    values.extend(order.into_iter().map(|index| original[index].take().unwrap()));
 }
 
 fn materialize_matrix_segments(
@@ -2197,9 +2178,7 @@ fn render_table_object(session: &Session, indexes: &[usize]) -> String {
             }
         }
         for ((row, segment_index), mut segment_words) in mapped {
-            segment_words.sort_by(|(_first_word, first), (_second_word, second)| {
-                rect_reading_order(*first, *second)
-            });
+            sort_in_reading_order(&mut segment_words, |(_, rect)| *rect);
             let source = job.segments[segment_index];
             let mut column_words = BTreeMap::<u32, Vec<(&OcrWordEvidence, Rect)>>::new();
             if let Some(anchors) = inferred_anchors.as_ref() {
@@ -2316,9 +2295,7 @@ fn render_table_object(session: &Session, indexes: &[usize]) -> String {
     for ((row, column), mut segments) in cell_segments {
         let local_row = row.saturating_sub(first_row) as usize;
         if local_row < row_count && (column as usize) < column_count {
-            segments.sort_by(|(first, _first_text), (second, _second_text)| {
-                rect_reading_order(*first, *second)
-            });
+            sort_in_reading_order(&mut segments, |(rect, _)| *rect);
             rows[local_row][column as usize] = segments
                 .into_iter()
                 .map(|(_source, text)| text)
@@ -4363,6 +4340,24 @@ mod tests {
             }
         }
         (pixels, width, height)
+    }
+
+    #[test]
+    fn overlap_chain_uses_stable_line_order_without_a_cyclic_comparator() {
+        let a = Rect { left: 20, top: 0, right: 30, bottom: 10 };
+        let b = Rect { left: 10, top: 4, right: 20, bottom: 14 };
+        let c = Rect { left: 0, top: 8, right: 10, bottom: 18 };
+        // A/B and B/C overlap by 60%, A/C by 20%. Comparing each pair
+        // independently used to produce A > B > C > A.
+        let mut values = vec![(a,"A"),(b,"B"),(c,"C")];
+        sort_in_reading_order(&mut values, |(rect,_)| *rect);
+        assert_eq!(values.iter().map(|(_,s)|*s).collect::<Vec<_>>(),vec!["C","B","A"]);
+        let mut many: Vec<_> = (0..100).flat_map(|id| [(a,id*3),(b,id*3+1),(c,id*3+2)]).collect();
+        sort_in_reading_order(&mut many, |(rect,_)| *rect);
+        assert_eq!(many.len(),300);
+        assert_eq!(many.iter().map(|(_,id)|*id).collect::<BTreeSet<_>>(),(0..300).collect());
+        assert_eq!(many[0].1,2);
+        assert_eq!(many[99].1,299);
     }
 
     #[test]

@@ -166,3 +166,19 @@ Python05 -> Rust06 and Python06 -> Rust07 still match 28/28 natively and in the
 browser (corpus-compact-v3, browser-late-compact-v3); 94 Rust tests pass.
 OCR input preparation, attempt selection and full-route quality remain separate
 requirements; this boundary proof does not establish their equivalence.
+
+Canonical OCR input preparation (2026-09-08): non-table contexts now use the
+checkpoint's minimum height 512 and maximum scale 8; tables retain 96/4.
+Ordinary attempts keep the existing crop border. Dark-small-text normalization
+returns at source scale before ordinary enlargement, as in the Python adapter.
+The optional context-border implementation is retained outside the canonical
+preparation path. Recognition-miss retries remain a separate adapter concern.
+
+On the first saved raw attempt of every available checkpoint object/policy,
+preparation changes from 0/256 to 256/256 exact decoded RGB planes and content-box
+coordinate transforms: 227 non-table and 29 table contexts. Native and real
+Chromium/WASM both pass. Evidence: worktrees/rust-pipeline-diagnostics-20260906/
+prepare-v1, prepare-v2, browser-prepare-v2; production source prepare-final-source-v2.
+94 Rust tests pass, and independent late native boundaries still match 28/28
+(corpus-prepare-v2). This verifies raw attempt preparation, not gamma-attempt
+selection, retries, scheduler parity, or final OCR quality.

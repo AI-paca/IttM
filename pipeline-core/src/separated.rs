@@ -90,6 +90,7 @@ struct JobRaster {
     height: u32,
     stride: u32,
     pixels: RasterPixels,
+    ocr_scale: u32,
     placements: Vec<RasterPlacement>,
 }
 
@@ -220,6 +221,7 @@ fn raster_for_request(
             height: source.height,
             stride: source.width.saturating_mul(3),
             pixels: pixels.into(),
+            ocr_scale: 1,
             placements: source.placements.clone(),
         }
     };
@@ -275,6 +277,7 @@ fn raster_for_request(
         height: transformed.height.saturating_mul(scale_u32),
         stride: transformed.stride.saturating_mul(scale_u32),
         pixels: compact::resize_lanczos(&transformed.pixels.decoded(), width, height, scale).into(),
+        ocr_scale: scale_u32,
         placements: transformed
             .placements
             .iter()
@@ -329,6 +332,7 @@ fn add_ocr_context_border(source: JobRaster) -> JobRaster {
         height,
         stride,
         pixels: pixels.into(),
+        ocr_scale: 1,
         placements: source
             .placements
             .iter()
@@ -835,6 +839,7 @@ fn repack_parent_placements(
         height: atlas_height as u32,
         stride: stride as u32,
         pixels: pixels.into(),
+        ocr_scale: 1,
         placements,
     })
 }
@@ -1375,6 +1380,7 @@ fn render_exact_rect_raster(
         height: height as u32,
         stride: output_stride as u32,
         pixels: output.into(),
+        ocr_scale: 1,
         placements: segments
             .iter()
             .copied()
@@ -1629,6 +1635,7 @@ fn verified_route_jobs(
                 height: u32::try_from(compacted.height).ok()?,
                 stride: u32::try_from(compacted.width.checked_mul(3)?).ok()?,
                 pixels: compacted.pixels.into(),
+                ocr_scale: 1,
                 placements,
             }
         };
@@ -1787,21 +1794,47 @@ fn cell_text_by_job(candidates: &[(String, u32, usize)]) -> String {
         .unwrap_or_default()
 }
 
-fn word_center_in_source(job: &OcrJob, word: &OcrWordEvidence) -> (u64, u64) {
+fn word_center_in_source(job: &OcrJob, raster: &JobRaster, word: &OcrWordEvidence) -> (u64, u64) {
     if job.words_in_source_space {
-        return (
-            u64::from(word.rect.left) + u64::from(word.rect.right),
-            u64::from(word.rect.top) + u64::from(word.rect.bottom),
-        );
+        return (u64::from(word.rect.left) + u64::from(word.rect.right),
+            u64::from(word.rect.top) + u64::from(word.rect.bottom));
     }
-    (
-        u64::from(job.rect.left) * 2
-            + u64::from(word.rect.left)
-            + u64::from(word.rect.right),
-        u64::from(job.rect.top) * 2
-            + u64::from(word.rect.top)
-            + u64::from(word.rect.bottom),
-    )
+    // First undo the adapter's integer enlargement exactly: floor left/top,
+    // ceil right/bottom. Python then maps this canonical crop rectangle through
+    // the chosen compaction placement into the original block coordinates.
+    let scale = raster.ocr_scale.max(1);
+    let rect = Rect { left: word.rect.left / scale, top: word.rect.top / scale,
+        right: word.rect.right.div_ceil(scale), bottom: word.rect.bottom.div_ceil(scale) };
+    let crop = |p: &RasterPlacement| Rect { left: p.crop_rect.left / scale,
+        top: p.crop_rect.top / scale, right: p.crop_rect.right / scale,
+        bottom: p.crop_rect.bottom / scale };
+    let placement = raster.placements.iter().enumerate().max_by_key(|(i, p)| {
+        let c = crop(p);
+        (intersection_area(rect, c), std::cmp::Reverse(
+            (u64::from(rect.left) + u64::from(rect.right)).abs_diff(u64::from(c.left) + u64::from(c.right))), std::cmp::Reverse(*i))
+    }).map(|(_, p)| p);
+    let mapped = if let Some(p) = placement {
+        let c = crop(p);
+        // Preserve Python's ratio-before-multiplication order as well as
+        // ties-to-even rounding; reassociation can change half-pixel results.
+        let scale_x = f64::from(p.source_rect.right - p.source_rect.left)
+            / f64::from((c.right - c.left).max(1));
+        let scale_y = f64::from(p.source_rect.bottom - p.source_rect.top)
+            / f64::from((c.bottom - c.top).max(1));
+        let x = |value: u32| i64::from(p.source_rect.left) +
+            (((i64::from(value) - i64::from(c.left)) as f64) * scale_x).round_ties_even() as i64;
+        let y = |value: u32| i64::from(p.source_rect.top) +
+            (((i64::from(value) - i64::from(c.top)) as f64) * scale_y).round_ties_even() as i64;
+        let left = x(rect.left).clamp(i64::from(job.rect.left), i64::from(job.rect.right - 1)) as u32;
+        let top = y(rect.top).clamp(i64::from(job.rect.top), i64::from(job.rect.bottom - 1)) as u32;
+        Rect { left, top,
+            right: x(rect.right).clamp(i64::from(left + 1), i64::from(job.rect.right)) as u32,
+            bottom: y(rect.bottom).clamp(i64::from(top + 1), i64::from(job.rect.bottom)) as u32 }
+    } else {
+        Rect { left: job.rect.left + rect.left, top: job.rect.top + rect.top,
+            right: job.rect.left + rect.right, bottom: job.rect.top + rect.bottom }
+    };
+    (u64::from(mapped.left) + u64::from(mapped.right), u64::from(mapped.top) + u64::from(mapped.bottom))
 }
 
 // Exact line clustering used by Python _reading_order_words. Because incoming
@@ -1878,7 +1911,7 @@ fn materialize_matrix_segments(
         let job = &session.jobs[index];
         let mut grouped = BTreeMap::<usize, Vec<&OcrWordEvidence>>::new();
         for word in &session.words[index] {
-            let (x, y) = word_center_in_source(job, word);
+            let (x, y) = word_center_in_source(job, &session.job_rasters[index], word);
             // Preserve Python matrix traversal order and half-open cell bounds.
             if let Some(cell_index) = cells.iter().position(|cell| {
                 u64::from(cell.rect.left) * 2 <= x && x < u64::from(cell.rect.right) * 2
@@ -1987,7 +2020,7 @@ fn materialize_recognized_segments(session: &Session) -> Vec<RecognizedSegment> 
             }
             let mut words_by_segment = BTreeMap::<SegmentKey, Vec<&OcrWordEvidence>>::new();
             for word in &session.words[*index] {
-                let (center_x_twice, center_y_twice) = word_center_in_source(job, word);
+                let (center_x_twice, center_y_twice) = word_center_in_source(job, &session.job_rasters[*index], word);
                 let Some(segment_index) = job.segments.iter().position(|source| {
                     u64::from(source.left) * 2 <= center_x_twice
                         && center_x_twice < u64::from(source.right) * 2
@@ -2953,6 +2986,7 @@ unsafe fn import_block(
         height,
         stride,
         pixels: pixels.to_vec().into(),
+        ocr_scale: 1,
         placements,
     };
     let matrix_window = matrix_present.then_some([
@@ -4514,6 +4548,7 @@ mod tests {
                 height,
                 stride: width * 3,
                 pixels: pixels.into(),
+                ocr_scale: 1,
                 placements: vec![RasterPlacement {
                     segment_indexes: vec![0],
                     source_rect: Rect {
@@ -4885,6 +4920,7 @@ mod tests {
             height: 1,
             stride: 12,
             pixels: vec![10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120].into(),
+            ocr_scale: 1,
             placements: vec![RasterPlacement {
                 segment_indexes: vec![0, 1],
                 source_rect: job.rect,
@@ -4984,6 +5020,7 @@ mod tests {
                 height: 10,
                 stride: 60,
                 pixels: Vec::new().into(),
+                ocr_scale: 1,
                 placements: vec![RasterPlacement {
                     segment_indexes: vec![0, 1],
                     source_rect: Rect {
@@ -5050,6 +5087,41 @@ mod tests {
             String::from_utf8(render_session(&session)).unwrap(),
             "| Alpha | Beta |\n| --- | --- |"
         );
+        // Full-matrix materialization must undo OCR enlargement and shuffled
+        // packed tiles before assigning words to original source cells.
+        let mut session = session;
+        session.matrix_cells.insert(0, vec![
+            MatrixCell { cell: session.jobs[0].segment_cells[0], rect: session.jobs[0].segments[0], source_segment_indexes: vec![0] },
+            MatrixCell { cell: session.jobs[0].segment_cells[1], rect: session.jobs[0].segments[1], source_segment_indexes: vec![1] },
+        ]);
+        session.job_rasters[0].width = 40;
+        session.job_rasters[0].height = 20;
+        session.job_rasters[0].stride = 120;
+        session.job_rasters[0].ocr_scale = 2;
+        session.job_rasters[0].placements = vec![
+            RasterPlacement { segment_indexes: vec![0], source_rect: session.jobs[0].segments[0], crop_rect: Rect { left: 20, top: 0, right: 40, bottom: 20 } },
+            RasterPlacement { segment_indexes: vec![1], source_rect: session.jobs[0].segments[1], crop_rect: Rect { left: 0, top: 0, right: 20, bottom: 20 } },
+        ];
+        session.words[0][0].rect = Rect { left: 23, top: 3, right: 37, bottom: 17 };
+        session.words[0][1].rect = Rect { left: 3, top: 3, right: 17, bottom: 17 };
+        let segments = materialize_recognized_segments(&session);
+        assert_eq!(segments.iter().map(|s| (s.cell.column, s.text.as_str())).collect::<Vec<_>>(), [(0, "Alpha"), (1, "Beta")]);
+        assert_eq!(word_center_in_source(&session.jobs[0], &session.job_rasters[0], &session.words[0][0]), (10, 10));
+        // The already mapped Python05 path stays independent of packed geometry.
+        session.jobs[0].words_in_source_space = true;
+        session.words[0][0].rect = Rect { left: 1, top: 1, right: 9, bottom: 9 };
+        session.words[0][1].rect = Rect { left: 11, top: 1, right: 19, bottom: 9 };
+        assert_eq!(materialize_recognized_segments(&session), segments);
+        // Python round(47 * (3 / 94)) is 1, whereas reassociation gives 2.
+        session.jobs[0].words_in_source_space = false;
+        session.job_rasters[0].ocr_scale = 1;
+        session.job_rasters[0].placements = vec![RasterPlacement {
+            segment_indexes: vec![0],
+            source_rect: Rect { left: 0, top: 0, right: 3, bottom: 10 },
+            crop_rect: Rect { left: 0, top: 0, right: 94, bottom: 10 },
+        }];
+        session.words[0][0].rect = Rect { left: 47, top: 1, right: 60, bottom: 9 };
+        assert_eq!(word_center_in_source(&session.jobs[0], &session.job_rasters[0], &session.words[0][0]), (3, 10));
     }
 
 

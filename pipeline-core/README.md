@@ -105,3 +105,23 @@ fragmented and stacked tables are joined using the same geometric witnesses as
 the frozen Python route. Source segments remain separately accounted, including
 structural edge residuals. Object-boundary agreement does not by itself prove
 local matrix cell construction, OCR block raster construction or OCR selection.
+
+
+Local matrices are now constructed in the shared Rust object stage from the
+page topology, rule lattice and original geometric source IDs. The complete
+row/cell representation preserves source-free empty cells, disconnected row
+intervals and conservative observed payload identity. Its logical spans feed
+the existing block planner; table OCR materialization receives all matrix
+cells, including empty edge cells that have no OCR job. Residual geometry keeps
+its source ownership but is excluded from OCR planning using Python's object
+extent and structural-residual rules. No ABI version change is required.
+
+The isolated matrix comparison covers 374 objects and 129937 cells from all
+28 frozen Python documents in native Rust and real Chromium/WASM. It compares
+every row interval and cell rectangle, topology code, and ordered source ID
+list. The diagnostic input contains saved Python03 objects and literal page
+topology, independently of Rust object reconstruction. Production integration
+retains the earlier 28/28 topology and object metadata agreement. OCR block
+planning, raster packing and language selection still require their own
+isolated comparisons; local-matrix agreement does not establish full-route
+quality.

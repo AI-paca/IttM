@@ -15,6 +15,8 @@ pub enum SpatialValue {
     VisualRows(Vec<usize>),
     DenseRow(usize),
     RuledNetwork(usize),
+    SourceComponents(Vec<usize>),
+    SourceSegments(Vec<usize>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -149,7 +151,7 @@ fn row_slots(
         .collect()
 }
 
-fn encode_spatial_rows(rows: &[Vec<SpatialSlot>]) -> Vec<Vec<u8>> {
+pub(crate) fn encode_spatial_rows(rows: &[Vec<SpatialSlot>]) -> Vec<Vec<u8>> {
     let mut result = Vec::with_capacity(rows.len());
     let mut previous: &[SpatialSlot] = &[];
     for row in rows {

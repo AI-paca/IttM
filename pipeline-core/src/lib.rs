@@ -7,6 +7,7 @@ mod grammar;
 mod language;
 mod local_structure;
 mod objects;
+mod object_matrix;
 mod pdf_native;
 mod separated;
 mod topology;

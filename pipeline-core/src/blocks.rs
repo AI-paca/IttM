@@ -465,6 +465,10 @@ fn object_logical_spans(
         row_stop = row_stop.max(span.row_stop);
         column_stop = column_stop.max(span.column_stop);
     }
+    if let Some(matrix) = &object.local_matrix {
+        row_stop = matrix.rows.len();
+        column_stop = matrix.rows.iter().map(|r| r.cells.len()).max().unwrap_or(0);
+    }
     (row_stop > 0 && column_stop > 0).then_some((spans, [row_stop, column_stop]))
 }
 
@@ -1062,11 +1066,16 @@ pub fn plan_blocks_with_topology(
         spans[span.segment_index] = Some(*span);
     }
     let spans: Vec<MaterializedSegmentSpan> = spans.into_iter().collect::<Option<_>>()?;
-    let source_ids = reconstruction.source_segment_indexes.clone();
+    // Residual geometry retains ownership but is excluded from Python OCR plans.
+    let active: BTreeSet<_> = reconstruction.objects.iter()
+        .filter(|o| o.is_recognizable()).flat_map(|o| o.segment_indexes.iter().copied()).collect();
+    let source_ids = reconstruction.source_segment_indexes.iter().copied()
+        .filter(|id| active.contains(id)).collect::<Vec<_>>();
     let mut candidates = Vec::<Candidate>::new();
     let mut all_table_units_at_most_16 = true;
     let mut has_table = false;
     for (scope_index, object) in reconstruction.objects.iter().enumerate() {
+        if !object.is_recognizable() { continue; }
         if object.kind != ObjectKind::Table {
             candidates.push(Candidate {
                 members: object.segment_indexes.clone(),

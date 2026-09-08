@@ -27,6 +27,16 @@ pub struct DocumentObject {
     pub confidence: f64,
     pub evidence: Vec<&'static str>,
     pub logical_spans: Option<Vec<MaterializedSegmentSpan>>,
+    pub(crate) local_matrix: Option<crate::object_matrix::ObjectLocalMatrix>,
+}
+
+impl DocumentObject {
+    pub(crate) fn is_recognizable(&self) -> bool {
+        if self.kind == ObjectKind::Table && self.rule_lattice { return true; }
+        !self.evidence.contains(&"structural-residual")
+            && self.bbox[2] - self.bbox[0] >= 10
+            && self.bbox[3] - self.bbox[1] >= 6
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2299,7 +2309,16 @@ pub fn reconstruct_objects_with_topology(
             confidence: draft.confidence,
             evidence: draft.evidence,
             logical_spans: draft.logical_spans,
+            local_matrix: None,
         });
+    }
+    let networks = crate::topology::rule_networks(analysis)?;
+    for object in &mut objects {
+        if object.is_recognizable() {
+            let matrix = crate::object_matrix::build_local_matrix(analysis, topology, &networks, object)?;
+            object.logical_spans = Some(matrix.logical_spans());
+            object.local_matrix = Some(matrix);
+        }
     }
     let mut ownership_by_segment = vec![usize::MAX; segments.len()];
     for (object_index, object) in objects.iter().enumerate() {

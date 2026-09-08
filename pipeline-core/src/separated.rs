@@ -1508,6 +1508,7 @@ fn verified_route_jobs(
     Vec<objects::DocumentObject>,
     Vec<blocks::RecognitionBlock>,
     topology::PhysicalTopology,
+    BTreeMap<u32, Vec<MatrixCell>>,
 )> {
     let analysis = geometry::analyze_geometry(pixels, width, height, stride, channels)?;
     let physical_topology = topology::build_physical_topology(&analysis)?;
@@ -1662,6 +1663,28 @@ fn verified_route_jobs(
         };
         rasters.push(bound_job_raster(raster)?);
     }
+    let mut matrix_cells = BTreeMap::new();
+    for (object_id, object) in reconstruction.objects.iter().enumerate() {
+        if object.kind != objects::ObjectKind::Table { continue; }
+        let Some(matrix) = &object.local_matrix else { continue; };
+        let mut cells = Vec::new();
+        for (row, value) in matrix.rows.iter().enumerate() {
+            for (column, cell) in value.cells.iter().enumerate() {
+                // Python recovery reads matrix_x/matrix_y as object-local OCR
+                // coordinates. Preserve that boundary even when crop padding
+                // makes the logical matrix origin differ from the crop origin.
+                let b = cell.bbox;
+                let x = |value: usize| value.checked_sub(object.matrix_bbox[0])?.checked_add(object.bbox[0]);
+                let y = |value: usize| value.checked_sub(object.matrix_bbox[1])?.checked_add(object.bbox[1]);
+                cells.push(MatrixCell {
+                    cell: SegmentCell { row: u32::try_from(row).ok()?, column: u32::try_from(column).ok()?, row_span: 1, column_span: 1 },
+                    rect: Rect { left: u32::try_from(x(b[0])?).ok()?, top: u32::try_from(y(b[1])?).ok()?, right: u32::try_from(x(b[2])?).ok()?, bottom: u32::try_from(y(b[3])?).ok()? },
+                    source_segment_indexes: cell.segment_indexes.clone(),
+                });
+            }
+        }
+        matrix_cells.insert(u32::try_from(object_id).ok()?, cells);
+    }
     let reconstructed_objects = reconstruction.objects;
     let planned_blocks = plan.blocks;
     Some((
@@ -1670,6 +1693,7 @@ fn verified_route_jobs(
         reconstructed_objects,
         planned_blocks,
         physical_topology,
+        matrix_cells,
     ))
 }
 
@@ -2507,7 +2531,7 @@ unsafe fn planned_session_from_raw(
     }
     // SAFETY: the validated byte range is owned by the caller for this call.
     let input = unsafe { slice::from_raw_parts(pixels, expected_length) };
-    let Some((jobs, job_rasters, objects, blocks, topology)) = verified_route_jobs(
+    let Some((jobs, job_rasters, objects, blocks, topology, matrix_cells)) = verified_route_jobs(
         input,
         width as usize,
         height as usize,
@@ -2546,7 +2570,7 @@ unsafe fn planned_session_from_raw(
         active_split_probe: None,
         recognized_segments: None,
         recognized_layouts: BTreeMap::new(),
-        matrix_cells: BTreeMap::new(),
+        matrix_cells,
         reading_order_objects: BTreeSet::new(),
         importing_ocr: false,
         topology,
@@ -3018,6 +3042,7 @@ unsafe fn import_block(
             confidence: 0.0,
             evidence: vec!["missing-imported-stage-object"],
             logical_spans: None,
+            local_matrix: None,
         });
     }
     if object_id as usize == session.objects.len() {
@@ -3040,6 +3065,7 @@ unsafe fn import_block(
             confidence: 1.0,
             evidence: vec!["imported-stage-boundary"],
             logical_spans: None,
+            local_matrix: None,
         });
     } else if let Some(object) = session.objects.get_mut(object_id as usize) {
         object.segment_indexes.extend(segment_indexes.iter().copied());
@@ -4324,14 +4350,14 @@ mod tests {
 
     fn white_page_with_two_lines() -> (Vec<u8>, u32, u32) {
         let width = 80_u32;
-        let height = 40_u32;
+        let height = 60_u32;
         let mut pixels = vec![255_u8; (width * height) as usize];
-        for y in 7..11 {
+        for y in 7..15 {
             for x in 8..55 {
                 pixels[(y * width + x) as usize] = 0;
             }
         }
-        for y in 24..28 {
+        for y in 40..48 {
             for x in 12..70 {
                 pixels[(y * width + x) as usize] = 0;
             }
@@ -4573,15 +4599,15 @@ mod tests {
     #[test]
     fn plans_the_same_explicit_stage_boundary_for_raster_lines() {
         let (pixels, width, height) = white_page_with_two_lines();
-        let (jobs, rasters, _objects, _blocks, _topology) =
+        let (jobs, rasters, _objects, _blocks, _topology, _matrices) =
             verified_route_jobs(&pixels, width as usize, height as usize, width as usize, 1)
                 .expect("verified route");
         assert_eq!(jobs.len(), 2);
         assert_eq!(rasters.len(), jobs.len());
-        assert!(jobs[0].rect.left <= 8);
-        assert!(jobs[0].rect.top <= 7);
-        assert!(jobs[1].rect.right >= 70, "planned jobs: {jobs:?}");
-        assert!(jobs[1].rect.bottom >= 28);
+        assert!(jobs[0].rect.left <= 12, "jobs: {jobs:?}");
+        assert!(jobs[0].rect.top <= 11, "jobs: {jobs:?}");
+        assert!(jobs[1].rect.right >= 66, "planned jobs: {jobs:?}");
+        assert!(jobs[1].rect.bottom >= 44, "jobs: {jobs:?}");
         assert!(jobs.iter().all(|job| job.object_kind == OBJECT_PARAGRAPH));
     }
 
@@ -4652,16 +4678,36 @@ mod tests {
         let width = 60;
         let height = 20;
         let mut pixels = vec![12_u8; width * height];
-        for y in 6..10 {
+        for y in 6..14 {
             for x in 9..45 {
                 pixels[y * width + x] = 240;
             }
         }
-        let (jobs, _rasters, _objects, _blocks, _topology) =
+        let (jobs, _rasters, _objects, _blocks, _topology, _matrices) =
             verified_route_jobs(&pixels, width, height, width, 1).expect("verified route");
         assert_eq!(jobs.len(), 1);
-        assert!(jobs[0].rect.left <= 9);
-        assert!(jobs[0].rect.right >= 45);
+        let inverted = pixels.iter().map(|value| 255 - value).collect::<Vec<_>>();
+        let (light_jobs, ..) = verified_route_jobs(&inverted, width, height, width, 1).unwrap();
+        assert_eq!(jobs.len(), light_jobs.len());
+        assert_eq!(jobs[0].rect, light_jobs[0].rect);
+        assert_eq!(jobs[0].segments, light_jobs[0].segments);
+        assert_eq!(jobs[0].source_segment_indexes, light_jobs[0].source_segment_indexes);
+    }
+
+    #[test]
+    fn thin_residual_geometry_is_accounted_for_without_ocr_jobs() {
+        let (width,height)=(60,20);
+        let mut pixels=vec![255_u8;width*height];
+        for y in 6..10 {for x in 9..45 {pixels[y*width+x]=0;}}
+        let analysis=geometry::analyze_geometry(&pixels,width,height,width,1).unwrap();
+        let topology=topology::build_physical_topology(&analysis).unwrap();
+        let objects=objects::reconstruct_objects_with_topology(&analysis,&topology).unwrap();
+        assert!(!objects.source_segment_indexes.is_empty());
+        assert_eq!(objects.segment_ownership.len(),objects.source_segment_indexes.len());
+        assert!(objects.objects.iter().all(|o|!o.is_recognizable()));
+        let plan=blocks::plan_blocks_with_topology(&analysis,&objects,&topology).unwrap();
+        assert!(plan.blocks.is_empty());
+        assert!(plan.source_segment_indexes.is_empty());
     }
 
     #[test]

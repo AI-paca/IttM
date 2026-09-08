@@ -2,6 +2,7 @@ mod assembler;
 mod blocks;
 mod candidates;
 mod compact;
+mod raster;
 mod geometry;
 mod grammar;
 mod language;

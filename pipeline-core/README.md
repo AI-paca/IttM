@@ -147,3 +147,22 @@ Reading order first clusters rectangles into lines and then sorts by total
 keys. The old pair-dependent vertical-overlap comparator could form cycles
 and abort native Rust or trap in WASM; the shared ordering also retains the
 previously verified Python line-order behavior.
+
+Canonical stage04 raster parity (2026-09-08): the stored table raster no longer
+passes through the optional 4M-pixel/3300-edge reduction, and fallback crops do
+not mark their units as omitted. Production planning visits compacted blocks
+sequentially and stores immutable raster bytes with lossless run/literal coding;
+the public ABI still copies the exact decoded RGB plane. This preserves full
+resolution while avoiding a multi-gigabyte vector of decoded block rasters.
+
+Independent literal Python01 RGB/ownership + Python03 objects/matrices + Python04
+table plans match all 1208 table block rasters and placements in 28/28 documents,
+both native and Chromium/WASM. The largest fixture stores 5,243,629,368 decoded
+bytes in 514,717,157 bytes; diagnostic WASM linear memory was 961,544,192 bytes.
+These are the isolated compaction/storage measurements, not a full OCR memory
+peak. Evidence under worktrees/rust-pipeline-diagnostics-20260906:
+compact-v3, browser-compact-v3, compact-final-source-v3. Independent selected
+Python05 -> Rust06 and Python06 -> Rust07 still match 28/28 natively and in the
+browser (corpus-compact-v3, browser-late-compact-v3); 94 Rust tests pass.
+OCR input preparation, attempt selection and full-route quality remain separate
+requirements; this boundary proof does not establish their equivalence.

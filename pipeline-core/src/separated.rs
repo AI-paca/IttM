@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::slice;
 use std::str;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
+use crate::raster::RasterPixels;
 
 use crate::language::{
     LanguageAgenda, LanguageAgendaResult, LanguageObservation, LanguageProfileId, LanguageRequest,
@@ -87,7 +88,7 @@ struct JobRaster {
     width: u32,
     height: u32,
     stride: u32,
-    pixels: Arc<[u8]>,
+    pixels: RasterPixels,
     placements: Vec<RasterPlacement>,
 }
 
@@ -223,13 +224,13 @@ fn raster_for_request(
     };
     let transformed = if request.transform == OcrTransform::Raw {
         raw.clone()
-    } else if let Some(gray) = gamma_dark_rgb(&raw.pixels, 3) {
+    } else if let Some(gray) = gamma_dark_rgb(&raw.pixels.decoded(), 3) {
         grayscale(raw, gray)
     } else {
         raw.clone()
     };
     let transformed = if let Some(gray) = normalize_dark_small_text_rgb(
-        &transformed.pixels,
+        &transformed.pixels.decoded(),
         transformed.width as usize,
         transformed.height as usize,
     ) {
@@ -271,7 +272,7 @@ fn raster_for_request(
         width: transformed.width.saturating_mul(scale_u32),
         height: transformed.height.saturating_mul(scale_u32),
         stride: transformed.stride.saturating_mul(scale_u32),
-        pixels: compact::resize_lanczos(&transformed.pixels, width, height, scale).into(),
+        pixels: compact::resize_lanczos(&transformed.pixels.decoded(), width, height, scale).into(),
         placements: transformed
             .placements
             .iter()
@@ -303,6 +304,7 @@ fn add_ocr_context_border(source: JobRaster) -> JobRaster {
         return source;
     };
     let mut pixels = vec![255_u8; pixel_length];
+    let source_pixels = source.pixels.decoded();
     let source_row_length = source.width.saturating_mul(3) as usize;
     for row in 0..source.height as usize {
         let source_start = row.saturating_mul(source.stride as usize);
@@ -312,7 +314,7 @@ fn add_ocr_context_border(source: JobRaster) -> JobRaster {
             .saturating_add(OCR_CONTEXT_BORDER as usize * 3);
         let target_stop = target_start.saturating_add(source_row_length);
         let (Some(source_row), Some(target_row)) = (
-            source.pixels.get(source_start..source_stop),
+            source_pixels.get(source_start..source_stop),
             pixels.get_mut(target_start..target_stop),
         ) else {
             return source;
@@ -376,7 +378,7 @@ fn append_attempt(session: &mut Session, request: LanguageRequest) -> bool {
 fn release_active_raster_pixels(session: &mut Session) {
     for index in session.active_attempts.iter().copied() {
         if let Some(raster) = session.job_rasters.get_mut(index) {
-            raster.pixels = Arc::from([]);
+            raster.pixels = RasterPixels::default();
         }
     }
 }
@@ -796,6 +798,7 @@ fn repack_parent_placements(
     let stride = atlas_width.checked_mul(3)?;
     let mut pixels = vec![255_u8; stride.checked_mul(atlas_height)?];
     let mut placements = Vec::with_capacity(selected.len());
+    let parent_pixels = parent.pixels.decoded();
     for ((placement, (width, height)), (left, top)) in selected
         .iter()
         .zip(tile_sizes.iter().copied())
@@ -807,7 +810,7 @@ fn repack_parent_placements(
                 .checked_add(placement.crop_rect.left as usize * 3)?;
             let target = (top + row).checked_mul(stride)?.checked_add(left * 3)?;
             let count = width.checked_mul(3)?;
-            pixels[target..target + count].copy_from_slice(&parent.pixels[source..source + count]);
+            pixels[target..target + count].copy_from_slice(&parent_pixels[source..source + count]);
         }
         placements.push(RasterPlacement {
             segment_indexes: placement
@@ -1387,6 +1390,7 @@ fn render_exact_rect_raster(
     }
 }
 
+#[allow(dead_code)] // Retained for explicitly bounded raster policies.
 fn scaled_raster_coordinate(value: u32, input: u32, output: u32, ceil: bool) -> u32 {
     let numerator = u64::from(value).saturating_mul(u64::from(output));
     let denominator = u64::from(input);
@@ -1398,6 +1402,7 @@ fn scaled_raster_coordinate(value: u32, input: u32, output: u32, ceil: bool) -> 
     u32::try_from(scaled).unwrap_or(output).min(output)
 }
 
+#[allow(dead_code)] // Canonical stage04 does not resize the saved raster.
 fn bound_job_raster(mut raster: JobRaster) -> Option<JobRaster> {
     let (width, height) = compact::bounded_ocr_dimensions(
         raster.width as usize,
@@ -1409,7 +1414,7 @@ fn bound_job_raster(mut raster: JobRaster) -> Option<JobRaster> {
         return Some(raster);
     }
     let pixels = compact::resize_bilinear_rgb(
-        &raster.pixels,
+        &raster.pixels.decoded(),
         raster.width as usize,
         raster.height as usize,
         width as usize,
@@ -1491,10 +1496,6 @@ fn verified_route_jobs(
     if plan.blocks.len() > MAX_JOBS {
         return None;
     }
-    let compacted = compact::compact_blocks(&analysis, &plan, &reconstruction.objects)?;
-    if compacted.len() != plan.blocks.len() {
-        return None;
-    }
     let object_kind = |index: usize| match reconstruction.objects.get(index)?.kind {
         objects::ObjectKind::Paragraph => Some(OBJECT_PARAGRAPH),
         objects::ObjectKind::List => Some(OBJECT_LIST),
@@ -1504,7 +1505,8 @@ fn verified_route_jobs(
     };
     let mut jobs = Vec::with_capacity(plan.blocks.len());
     let mut rasters = Vec::with_capacity(plan.blocks.len());
-    for (block, compacted) in plan.blocks.iter().zip(compacted) {
+    compact::visit_compacted_blocks(&analysis, &plan, &reconstruction.objects, |index, compacted| {
+        let block = &plan.blocks[index];
         let segments: Vec<Rect> = block
             .segment_indexes
             .iter()
@@ -1627,8 +1629,9 @@ fn verified_route_jobs(
                 placements,
             }
         };
-        rasters.push(bound_job_raster(raster)?);
-    }
+        rasters.push(raster);
+        Some(())
+    })?;
     let mut matrix_cells = BTreeMap::new();
     for (object_id, object) in reconstruction.objects.iter().enumerate() {
         if object.kind != objects::ObjectKind::Table { continue; }
@@ -3405,7 +3408,7 @@ pub unsafe extern "C" fn ittm_separated_job_raster_copy(
     if !raster.pixels.is_empty() {
         // SAFETY: capacity was validated and the source/destination do not overlap.
         unsafe {
-            std::ptr::copy_nonoverlapping(raster.pixels.as_ptr(), output, raster.pixels.len())
+            raster.pixels.copy_to(std::slice::from_raw_parts_mut(output, raster.pixels.len()))
         };
     }
     raster.pixels.len() as i32
@@ -3726,7 +3729,7 @@ pub unsafe extern "C" fn ittm_separated_block_raster_copy(
         return -1;
     }
     unsafe {
-        std::ptr::copy_nonoverlapping(raster.pixels.as_ptr(), output, raster.pixels.len());
+        raster.pixels.copy_to(std::slice::from_raw_parts_mut(output, raster.pixels.len()));
     }
     i32::try_from(raster.pixels.len()).unwrap_or(-1)
 }
@@ -4531,9 +4534,9 @@ mod tests {
             OBJECT_PARAGRAPH,
         );
         assert_eq!((raster.width, raster.height, raster.stride), (116, 136, 348));
-        assert_eq!(&raster.pixels[..3], &[255, 255, 255]);
+        assert_eq!(&raster.pixels.decoded()[..3], &[255, 255, 255]);
         let first_source_pixel = ((8 * raster.stride + 8 * 3) as usize)..;
-        assert_eq!(&raster.pixels[first_source_pixel][..3], &[0, 0, 0]);
+        assert_eq!(&raster.pixels.decoded()[first_source_pixel][..3], &[0, 0, 0]);
         assert_eq!(
             raster.placements[0].crop_rect,
             Rect {
@@ -4899,8 +4902,8 @@ mod tests {
         let mapping = BTreeMap::from([(0, 0), (1, 1)]);
         let child = repack_parent_placements(&parent, &expanded, &mapping).unwrap();
         assert_eq!((child.width, child.height, child.stride), (2, 10, 6));
-        assert_eq!(&child.pixels[..6], &[10, 20, 30, 40, 50, 60]);
-        assert_eq!(&child.pixels[54..60], &[70, 80, 90, 100, 110, 120]);
+        assert_eq!(&child.pixels.decoded()[..6], &[10, 20, 30, 40, 50, 60]);
+        assert_eq!(&child.pixels.decoded()[54..60], &[70, 80, 90, 100, 110, 120]);
         assert_eq!(child.placements[0].segment_indexes, vec![0]);
         assert_eq!(child.placements[1].segment_indexes, vec![1]);
         assert_eq!(

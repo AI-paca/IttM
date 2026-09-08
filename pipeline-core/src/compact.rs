@@ -382,6 +382,7 @@ pub(crate) fn resize_bilinear_rgb(
     Some(output)
 }
 
+#[allow(dead_code)] // Optional bounded raster policy; not part of canonical Python04.
 fn scaled_coordinate(value: usize, input: usize, output: usize, ceil: bool) -> usize {
     let numerator = (value as u128).saturating_mul(output as u128);
     let denominator = input as u128;
@@ -393,6 +394,7 @@ fn scaled_coordinate(value: usize, input: usize, output: usize, ceil: bool) -> u
     usize::try_from(scaled).unwrap_or(output).min(output)
 }
 
+#[allow(dead_code)] // Retained for explicitly bounded routes.
 fn bound_compacted_block(mut block: CompactedBlock) -> Option<CompactedBlock> {
     let (width, height) = bounded_ocr_dimensions(block.width, block.height)?;
     if (width, height) == (block.width, block.height) {
@@ -663,6 +665,22 @@ pub fn compact_blocks(
     plan: &BlockPlan,
     objects: &[DocumentObject],
 ) -> Option<Vec<CompactedBlock>> {
+    let mut outputs = Vec::with_capacity(plan.blocks.len());
+    visit_compacted_blocks(analysis, plan, objects, |_, block| {
+        outputs.push(block);
+        Some(())
+    })?;
+    Some(outputs)
+}
+
+// Produce one canonical block at a time so callers can store/release its pixels
+// before rendering the next. The tile cache still spans the complete plan.
+pub(crate) fn visit_compacted_blocks(
+    analysis: &GeometryAnalysis,
+    plan: &BlockPlan,
+    objects: &[DocumentObject],
+    mut visit: impl FnMut(usize, CompactedBlock) -> Option<()>,
+) -> Option<()> {
     let width = analysis.foreground.width;
     let height = analysis.foreground.height;
     let page = &analysis.foreground.pixels;
@@ -679,7 +697,6 @@ pub fn compact_blocks(
         }
     }
     let mut tile_cache = BTreeMap::<Vec<usize>, Option<Tile>>::new();
-    let mut outputs = Vec::with_capacity(plan.blocks.len());
     for (block_index, block) in plan.blocks.iter().enumerate() {
         let scope_bbox = objects.get(block.scope_index)?.bbox;
         if block.logical_segment_spans.len() != block.segment_indexes.len() {
@@ -875,17 +892,19 @@ pub fn compact_blocks(
         } else {
             pack_tiles(&tiles, canonical_shape)?
         };
-        let mut compacted = bound_compacted_block(compacted)?;
+        // Python04 returns the canonical packed pixels and placements unchanged.
+        // OCR adapter limits belong to the attempt, not this stored boundary.
+        let mut compacted = compacted;
         let mut unique_omitted = Vec::new();
-        for unit in omitted {
+        for unit in omitted.into_iter().filter(|_| !used_fallback) {
             if !unique_omitted.contains(&unit) {
                 unique_omitted.push(unit);
             }
         }
         compacted.omitted_unit_indexes = unique_omitted;
-        outputs.push(compacted);
+        visit(block_index, compacted)?;
     }
-    Some(outputs)
+    Some(())
 }
 
 #[cfg(test)]

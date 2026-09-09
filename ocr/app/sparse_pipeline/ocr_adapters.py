@@ -577,8 +577,10 @@ def make_easyocr_lane(
         },
     )
     if config.python_executable is None:
+
         def worker_factory():
             return EasyOcrWorker(config)
+
     else:
         from app.sparse_pipeline.ocr_rpc import ExternalOcrSpec, ExternalOcrWorker
 
@@ -598,8 +600,10 @@ def make_easyocr_lane(
             startup_timeout_seconds=config.rpc_startup_timeout_seconds,
             request_timeout_seconds=config.rpc_request_timeout_seconds,
         )
+
         def worker_factory():
             return ExternalOcrWorker(spec)
+
     return OcrLane(
         lane_id=lane_id,
         resource=OcrResource.GPU if config.gpu else OcrResource.CPU,
@@ -752,8 +756,10 @@ def make_glm_ocr_lane(
         },
     )
     if config.python_executable is None:
+
         def worker_factory():
             return GlmOcrWorker(config)
+
     else:
         from app.sparse_pipeline.ocr_rpc import ExternalOcrSpec, ExternalOcrWorker
 
@@ -770,8 +776,10 @@ def make_glm_ocr_lane(
             startup_timeout_seconds=config.rpc_startup_timeout_seconds,
             request_timeout_seconds=config.rpc_request_timeout_seconds,
         )
+
         def worker_factory():
             return ExternalOcrWorker(spec)
+
     return OcrLane(
         lane_id=lane_id,
         resource=OcrResource.GPU,

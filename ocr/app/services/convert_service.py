@@ -5518,13 +5518,20 @@ def _convert_page_segment(
         "pipeline:rust_separated_v1",
         *(f"pipeline_stage:{stage}" for stage in stages),
     }
+    table_cells_by_object: dict[int, int] = {}
+    for job in jobs:
+        if job.object_kind == 2:  # Shared Rust ABI: OBJECT_TABLE.
+            table_cells_by_object[job.object_id] = max(
+                table_cells_by_object.get(job.object_id, 0),
+                job.logical_row_count * job.logical_column_count,
+            )
     return PageSegmentArtifact(
         markdown=markdown,
         counters=(
             ("chunks", len(jobs)),
             ("cards_found", 0),
-            ("tables_found", 0),
-            ("table_cells", 0),
+            ("tables_found", len(table_cells_by_object)),
+            ("table_cells", sum(table_cells_by_object.values())),
         ),
         flags=tuple(sorted(runtime_flags)),
         structural_lint_pass=None,

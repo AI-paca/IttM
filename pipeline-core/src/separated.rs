@@ -3356,7 +3356,9 @@ pub extern "C" fn ittm_separated_start_ocr(handle: u32) -> i32 {
     }
     if session.pending_contexts.iter().any(|context| context.raster.pixels.is_empty()) { return 0; }
     start_next_context(session);
-    i32::from(!session.jobs.is_empty())
+    // A valid page can contain only rules or no foreground. Completing OCR
+    // without jobs is still a successful stage transition.
+    i32::from(!session.jobs.is_empty() || session.stage_mask & (1 << 5) != 0)
 }
 
 #[unsafe(no_mangle)]
@@ -4658,6 +4660,9 @@ mod tests {
                     width as u32, height as u32, width as u32, 1)
             };
             assert_ne!(handle, 0, "valid {width}x{height} raster session");
+            assert_eq!(ittm_separated_job_count(handle), 0);
+            assert_eq!(ittm_separated_render_length(handle), 0);
+            assert_eq!(ittm_separated_stage_mask(handle), ALL_STAGE_MASK);
             assert_eq!(ittm_separated_drop(handle), 0);
         }
     }

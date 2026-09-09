@@ -37,6 +37,28 @@ docker run --rm \
 It intentionally does not include `tests/quality`, `tests/recognition` or
 `tests/sparse_pipeline`; choose those explicitly when their code changes.
 
+### Shared Rust route
+
+The Node job explicitly installs Rust 1.96.1 and the WASM target, matching the
+pinned OCR builder. Both production builds run `pipeline-core` tests. The native
+and WASM ABI verifiers exercise block planning, OCR word handoff, segment assembly
+and all eight completed stage flags.
+
+`tests/pipeline/test_service_rust_route.py` checks the Python service boundary:
+page dimensions and profile options must preserve Rust's block requests, crop
+pixels, stage flags and final text. The service must propagate native errors.
+These replace the retired orchestration assertions that required Python page
+splitting, full-page OCR fallbacks or post-processing after Rust assembly.
+Standalone Python repair helpers retain their own tests.
+
+The small-raster Rust regression distinguishes valid pages with no OCR jobs from
+invalid input. ABI text fixtures use thick text bands; thin horizontal lines can
+correctly be classified as rules and produce no text jobs.
+
+Literal sample transcripts live in `ocr/tests/data/reference`, are copied into
+the test image, and must not be reformatted. Their original hash and quality
+threshold checks remain part of the corpus tests.
+
 ## Python suites
 
 | Suite                   | Responsibility                                                       |

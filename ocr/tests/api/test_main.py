@@ -500,6 +500,9 @@ def test_image_bytes_do_not_use_pdf_temp_directory(monkeypatch):
         def recognize(self, image, mode="text_mode", psm=6):
             return "image text"
 
+        def recognize_words_for_language(self, image, _languages, **_kwargs):
+            return [{"text": "image text", "bbox": (0, 0, *image.size), "conf": 100}]
+
         def info(self):
             return {"engine": "fake"}
 
@@ -509,14 +512,15 @@ def test_image_bytes_do_not_use_pdf_temp_directory(monkeypatch):
     monkeypatch.setattr(convert_service, "AutoEngine", lambda **_kwargs: FakeEngine())
     monkeypatch.setattr(convert_service.tempfile, "TemporaryDirectory", fail_temp_directory)
 
-    image = Image.new("RGB", (100, 30), color="white")
-    image.paste("black", (10, 10, 90, 20))
+    image = Image.new("RGB", (80, 60), color="white")
+    image.paste("black", (8, 7, 55, 15))
+    image.paste("black", (12, 40, 70, 48))
     content = io.BytesIO()
     image.save(content, format="PNG")
 
     markdown, meta = convert_service.convert_bytes(content.getvalue(), filename="test.png", engine_type="auto")
 
-    assert markdown == "image text"
+    assert markdown == "image text\n\nimage text"
     assert meta["pages"] == 1
     assert meta["pipeline"] == "rust_separated_v1"
     assert meta["pipeline_stages"] == list(convert_service.SEPARATED_STAGES)

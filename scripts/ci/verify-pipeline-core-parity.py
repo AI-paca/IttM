@@ -251,9 +251,10 @@ def verify(library_path: Path) -> None:
                         == expected
                     )
 
-    width, height = 80, 40
+    width, height = 80, 60
     pixels = bytearray([255] * (width * height))
-    for top, bottom, left, right in ((7, 11, 8, 55), (24, 28, 12, 70)):
+    # Thick text bands stay distinct from the finite-rule detector's thin lines.
+    for top, bottom, left, right in ((7, 15, 8, 55), (40, 48, 12, 70)):
         for y in range(top, bottom):
             pixels[y * width + left : y * width + right] = b"\0" * (right - left)
     pixel_buffer = ctypes.create_string_buffer(bytes(pixels))
@@ -275,7 +276,7 @@ def verify(library_path: Path) -> None:
         assert first_box[0] <= 8
         assert first_box[1] <= 7
         assert first_box[2] >= 55
-        assert first_box[3] >= 11
+        assert first_box[3] >= 15
         assert first_box != (0, 0, width, height)
         assert library.ittm_separated_job_field(handle, 0, 7) == 1
         first = b"first"
@@ -291,9 +292,9 @@ def verify(library_path: Path) -> None:
             library.ittm_separated_job_field(handle, 1, field) for field in range(4)
         )
         assert second_box[0] <= 12
-        assert second_box[1] <= 24
+        assert second_box[1] <= 40
         assert second_box[2] >= 70
-        assert second_box[3] >= 28
+        assert second_box[3] >= 48
         second = b"second"
         second_text = ctypes.create_string_buffer(second)
         assert library.ittm_separated_add_ocr_word(

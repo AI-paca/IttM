@@ -149,11 +149,11 @@ if (
 }
 
 const width = 80;
-const height = 40;
+const height = 60;
 const pixels = new Uint8Array(width * height).fill(255);
 for (const [top, bottom, left, right] of [
-  [7, 11, 8, 55],
-  [24, 28, 12, 70],
+  [7, 15, 8, 55],
+  [40, 48, 12, 70],
 ]) {
   for (let y = top; y < bottom; y += 1) {
     pixels.fill(0, y * width + left, y * width + right);
@@ -193,7 +193,7 @@ try {
     firstBox[0] > 8 ||
     firstBox[1] > 7 ||
     firstBox[2] < 55 ||
-    firstBox[3] < 11 ||
+    firstBox[3] < 15 ||
     firstBox.join(",") === `0,0,${width},${height}`
   ) {
     throw new Error(`WASM separated geometry parity failed: ${firstBox}`);
@@ -241,9 +241,9 @@ try {
   );
   if (
     secondBox[0] > 12 ||
-    secondBox[1] > 24 ||
+    secondBox[1] > 40 ||
     secondBox[2] < 70 ||
-    secondBox[3] < 28
+    secondBox[3] < 48
   ) {
     throw new Error(`WASM recursive geometry parity failed: ${secondBox}`);
   }

@@ -65,6 +65,9 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Prepare browser OCR languages
+        run: npm run model:browser-tessdata
+
       - name: Build application
         run: npm run build
 

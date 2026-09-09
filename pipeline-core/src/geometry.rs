@@ -4,8 +4,9 @@ use crate::local_structure::{
     LocalLine, LocalNetwork, LocalStructureConfig, detect_local_structures_with_config,
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ForegroundGeometry {
+    pub source_transform: AffineBoxTransform,
     pub width: usize,
     pub height: usize,
     pub pixels: Vec<u8>,
@@ -4886,10 +4887,10 @@ fn align_geometry(
     foreground: Vec<bool>,
     background: [u8; 3],
     correction_milli_degrees: i32,
-) -> (Vec<u8>, Vec<bool>, usize, usize) {
+) -> (Vec<u8>, Vec<bool>, usize, usize, [f64; 9]) {
     let source_rgb = rgb_pixels(pixels, width, height, stride, channels);
     if correction_milli_degrees == 0 {
-        return (source_rgb, foreground, width, height);
+        return (source_rgb, foreground, width, height, [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
     }
     let radians = -(f64::from(correction_milli_degrees) / 1_000.0).to_radians();
     let cosine = radians.cos();
@@ -4996,10 +4997,12 @@ fn align_geometry(
             }
         }
     }
-    (aligned_rgb, aligned_mask, output_width, output_height)
+    (aligned_rgb, aligned_mask, output_width, output_height,
+        [inverse[0], inverse[1], inverse[2], inverse[3], inverse[4], inverse[5], 0.0, 0.0, 1.0])
 }
 
 struct RegionPreprocess {
+    inverse: [f64; 9],
     pixels: Vec<u8>,
     width: usize,
     height: usize,
@@ -5255,6 +5258,7 @@ fn preprocess_projector_region(
 ) -> RegionPreprocess {
     let source = rgb_pixels(pixels, width, height, stride, channels);
     let identity = || RegionPreprocess {
+        inverse: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
         pixels: source.clone(),
         width,
         height,
@@ -5320,6 +5324,8 @@ fn preprocess_projector_region(
         return identity();
     };
     RegionPreprocess {
+        inverse: [coefficients[0], coefficients[1], coefficients[2], coefficients[3],
+            coefficients[4], coefficients[5], coefficients[6], coefficients[7], 1.0],
         pixels: perspective_warp(
             &source,
             width,
@@ -5580,6 +5586,7 @@ pub fn analyze_foreground(
     {
         return None;
     }
+    let original_size = [width, height];
     let region = preprocess_projector_region(pixels, width, height, stride, channels);
     let width = region.width;
     let height = region.height;
@@ -5588,7 +5595,7 @@ pub fn analyze_foreground(
     let source_physical =
         detect_physical_foreground(&region.pixels, width, height, stride, 3, background);
     let correction_milli_degrees = estimate_correction(&source_physical, width, height);
-    let (pixels, warped_physical, aligned_width, aligned_height) = align_geometry(
+    let (pixels, warped_physical, aligned_width, aligned_height, alignment_inverse) = align_geometry(
         &region.pixels,
         width,
         height,
@@ -5625,7 +5632,18 @@ pub fn analyze_foreground(
         3,
         &physical_foreground,
     );
+    // Aligned coordinates first return to the dewarped raster and then to
+    // the original input. Keep this same transform for segment provenance.
+    let mut inverse = [0.0; 9];
+    for row in 0..3 {
+        for column in 0..3 {
+            inverse[row * 3 + column] = (0..3)
+                .map(|k| region.inverse[row * 3 + k] * alignment_inverse[k * 3 + column])
+                .sum();
+        }
+    }
     Some(ForegroundGeometry {
+        source_transform: AffineBoxTransform { original_size, inverse },
         width: aligned_width,
         height: aligned_height,
         stride: aligned_width * 3,
@@ -6992,10 +7010,7 @@ pub fn analyze_geometry(
         &component_ids,
         &components.1,
         &partition_nodes,
-        AffineBoxTransform {
-            original_size: [width, height],
-            inverse: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
-        },
+        foreground.source_transform,
         width,
         height,
     )?;

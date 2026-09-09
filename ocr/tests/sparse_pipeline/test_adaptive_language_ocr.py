@@ -50,9 +50,7 @@ class _Worker:
     scores: dict[tuple[str, tuple[int, int], int], int] = {}
     texts: dict[tuple[str, tuple[int, int], int], str] = {}
     calls: list[tuple[str, tuple[int, int], int]] = []
-    call_thread_ids: list[
-        tuple[tuple[str, tuple[int, int], int], int]
-    ] = []
+    call_thread_ids: list[tuple[tuple[str, tuple[int, int], int], int]] = []
     barrier: threading.Barrier | None = None
     barrier_keys: set[tuple[str, tuple[int, int], int]] = set()
     barrier_passes = 0
@@ -77,25 +75,21 @@ class _Worker:
             self.barrier.wait(timeout=2.0)
             with self.state_lock:
                 type(self).barrier_passes += 1
-        score = (
-            type(self).score_hook(key, png_bytes)
-            if type(self).score_hook is not None
-            else self.scores.get(key, 10)
-        )
+        score = type(self).score_hook(key, png_bytes) if type(self).score_hook is not None else self.scores.get(key, 10)
         text = (
             type(self).text_hook(key, png_bytes)
             if type(self).text_hook is not None
             else self.texts.get(
-            key,
-            (
-                f"中文score{score}"
-                if key
-                in {
-                    ("rus-eng", (10, 10), 4),
-                    ("rus-eng", (5, 10), 3),
-                }
-                else f"score{score}"
-            ),
+                key,
+                (
+                    f"中文score{score}"
+                    if key
+                    in {
+                        ("rus-eng", (10, 10), 4),
+                        ("rus-eng", (5, 10), 3),
+                    }
+                    else f"score{score}"
+                ),
             )
         )
         return OcrEngineOutput(
@@ -116,9 +110,7 @@ class _Worker:
 
 class _IdentityEnhancer:
     def enhance_many(self, crops: tuple[CropInput, ...]) -> tuple[object, ...]:
-        return tuple(
-            SimpleNamespace(png_bytes=crop.png_bytes) for crop in crops
-        )
+        return tuple(SimpleNamespace(png_bytes=crop.png_bytes) for crop in crops)
 
 
 class _RelabelEnhancer:
@@ -151,9 +143,7 @@ def _png(left_label: int, right_label: int | None = None) -> bytes:
 def _fixtures(
     payloads: tuple[bytes, ...],
 ) -> tuple[BlockPlan, tuple[BlockCropPair, ...]]:
-    source_segment_ids = tuple(
-        f"segment-{index}" for index in range(len(payloads))
-    )
+    source_segment_ids = tuple(f"segment-{index}" for index in range(len(payloads)))
     blocks = tuple(
         RecognitionBlock(
             block_id=f"block-{index:06d}",
@@ -161,9 +151,7 @@ def _fixtures(
             core_segment_ids=(f"segment-{index}",),
             segment_ids=source_segment_ids,
             context_segment_ids=tuple(
-                segment_id
-                for segment_id in source_segment_ids
-                if segment_id != f"segment-{index}"
+                segment_id for segment_id in source_segment_ids if segment_id != f"segment-{index}"
             ),
             object_ids=("object-0",),
         )
@@ -229,9 +217,7 @@ def _session(
         lane_id="fake",
         resource=OcrResource.CPU,
         max_workers=max_workers,
-        worker_factory=lambda: _Worker(
-            config=_Config(("rus", "eng", "chi_sim"))
-        ),
+        worker_factory=lambda: _Worker(config=_Config(("rus", "eng", "chi_sim"))),
     )
     session = AdaptivePersistentOcrSession((lane,))
     session._enhancer = _IdentityEnhancer()
@@ -245,17 +231,14 @@ def _profile_order(
 ) -> tuple[str, ...]:
     return tuple(
         dict.fromkeys(
-            attempt.profile_id
-            for attempt in attempts
-            if attempt.block_id == block_id and attempt.unit_id == unit_id
+            attempt.profile_id for attempt in attempts if attempt.block_id == block_id and attempt.unit_id == unit_id
         )
     )
 
 
 def _output(text: str, confidence: float = 0.92) -> OcrEngineOutput:
     words = tuple(
-        OcrWord(token, Box(index * 6, 0, index * 6 + 5, 5), confidence)
-        for index, token in enumerate(text.split())
+        OcrWord(token, Box(index * 6, 0, index * 6 + 5, 5), confidence) for index, token in enumerate(text.split())
     )
     return OcrEngineOutput(
         text=text,
@@ -267,16 +250,14 @@ def _output(text: str, confidence: float = 0.92) -> OcrEngineOutput:
 def test_grammar_penalizes_dominant_script_confusables_and_orphan_pipe() -> None:
     noisy = adaptive.assess_grammar(
         _output(
-            'Then: "| already have a medical slot, and 5h means losing it" '
-            "answer: ЭВ",
+            'Then: "| already have a medical slot, and 5h means losing it" ' "answer: ЭВ",
             0.94,
         ),
         ("rus", "eng"),
     )
     clean = adaptive.assess_grammar(
         _output(
-            'Then: "I already have a medical slot, and 5h means losing it" '
-            "answer: 2h",
+            'Then: "I already have a medical slot, and 5h means losing it" ' "answer: 2h",
             0.92,
         ),
         ("eng",),
@@ -311,12 +292,8 @@ def test_latin_dominant_context_selects_english_lock_without_more_calls(
         ("eng", (10, 10), 42): 100,
     }
     texts = {
-        ("rus-eng", (10, 10), 41): (
-            'score94 Then: "| already have a medical slot" answer: ЭВ'
-        ),
-        ("eng", (10, 10), 41): (
-            'score92 Then: "I already have a medical slot" answer: 2h'
-        ),
+        ("rus-eng", (10, 10), 41): ('score94 Then: "| already have a medical slot" answer: ЭВ'),
+        ("eng", (10, 10), 41): ('score92 Then: "I already have a medical slot" answer: 2h'),
         ("eng", (10, 10), 42): "score100 You / Me 7 / 8",
     }
     with _session(monkeypatch, scores, texts) as session:
@@ -325,12 +302,15 @@ def test_latin_dominant_context_selects_english_lock_without_more_calls(
     assert session.state.locked_profile_id == "eng"
     assert session.state.lock_is_provisional is True
     assert tuple(job.lane_id for job in result.jobs) == ("eng", "eng")
-    assert _profile_order(
-        "block-000000", "full-block", tuple(session.state.attempts)
-    ) == ("rus-eng", "rus", "eng", "chi_sim", "ell", "equ")
-    assert _profile_order(
-        "block-000001", "full-block", tuple(session.state.attempts)
-    ) == ("eng",)
+    assert _profile_order("block-000000", "full-block", tuple(session.state.attempts)) == (
+        "rus-eng",
+        "rus",
+        "eng",
+        "chi_sim",
+        "ell",
+        "equ",
+    )
+    assert _profile_order("block-000001", "full-block", tuple(session.state.attempts)) == ("eng",)
     assert len(_Worker.calls) == 8
 
 
@@ -373,12 +353,15 @@ def test_low_first_block_sweeps_short_profiles_and_sets_provisional_lock(
 
         assert session.state.locked_profile_id == "chi_sim"
         assert session.state.lock_is_provisional is True
-        assert _profile_order(
-            "block-000000", "full-block", tuple(session.state.attempts)
-        ) == ("rus-eng", "rus", "eng", "chi_sim", "ell", "equ")
-        assert _profile_order(
-            "block-000001", "full-block", tuple(session.state.attempts)
-        ) == ("chi_sim",)
+        assert _profile_order("block-000000", "full-block", tuple(session.state.attempts)) == (
+            "rus-eng",
+            "rus",
+            "eng",
+            "chi_sim",
+            "ell",
+            "equ",
+        )
+        assert _profile_order("block-000001", "full-block", tuple(session.state.attempts)) == ("chi_sim",)
         assert tuple(job.lane_id for job in result.jobs) == (
             "chi_sim",
             "chi_sim",
@@ -404,13 +387,13 @@ def test_low_locked_full_block_uses_chinese_fallback_without_recursion(
 
         assert session.state.locked_profile_id == "rus-eng"
         assert result.jobs[1].lane_id == "chi_sim"
-        assert _profile_order(
-            "block-000001", "full-block", tuple(session.state.attempts)
-        ) == ("rus-eng", "rus", "eng", "chi_sim")
-        assert all(
-            attempt.unit_id == "full-block"
-            for attempt in session.state.attempts
+        assert _profile_order("block-000001", "full-block", tuple(session.state.attempts)) == (
+            "rus-eng",
+            "rus",
+            "eng",
+            "chi_sim",
         )
+        assert all(attempt.unit_id == "full-block" for attempt in session.state.attempts)
 
 
 def _many_unit_fixture(
@@ -498,10 +481,7 @@ def test_256_clean_units_use_four_context_calls_not_256(
 
     assert candidate is not None
     assert len(_Worker.calls) == 4
-    assert all(
-        "context-depth-00" in attempt.unit_id
-        for attempt in session.state.attempts
-    )
+    assert all("context-depth-00" in attempt.unit_id for attempt in session.state.attempts)
 
 
 def test_256_homogeneous_low_confidence_units_stop_at_16_context(
@@ -521,9 +501,7 @@ def test_256_homogeneous_low_confidence_units_stop_at_16_context(
         )
 
     assert candidate is not None
-    group_ids = {
-        attempt.unit_id for attempt in session.state.attempts
-    }
+    group_ids = {attempt.unit_id for attempt in session.state.attempts}
     assert len(group_ids) <= 4 + 16
     assert sum("context-depth-00" in group_id for group_id in group_ids) == 4
     assert sum("context-depth-01" in group_id for group_id in group_ids) == 16
@@ -545,9 +523,7 @@ def test_feature_only_low_confidence_context_never_reaches_leaf(
             in session._FEATURE_EVIDENCE_KINDS
         )
         assert session._fallback_script_kinds((feature_profile_id,)) == frozenset()
-        assert session._fallback_feature_kinds((feature_profile_id,)) == {
-            "math"
-        }
+        assert session._fallback_feature_kinds((feature_profile_id,)) == {"math"}
         session.state.locked_profile_id = "rus-eng"
         _Worker.score_hook = lambda _key, _payload: 96
         _Worker.confidence = 0.80
@@ -560,9 +536,7 @@ def test_feature_only_low_confidence_context_never_reaches_leaf(
         )
 
     assert candidate is not None
-    group_ids = {
-        attempt.unit_id for attempt in session.state.attempts
-    }
+    group_ids = {attempt.unit_id for attempt in session.state.attempts}
     assert len(group_ids) <= 4 + 16
     assert not any("context-depth-02" in group_id for group_id in group_ids)
     assert not any("context-depth-03" in group_id for group_id in group_ids)
@@ -618,16 +592,11 @@ def test_contextual_composite_and_group_attempt_digests_keep_provenance(
                 first_order=offset,
                 tiles=tuple(tiles[offset : offset + 64]),
             )
-            expected_group_digests[group.group_id] = hashlib.sha256(
-                group.png_bytes
-            ).hexdigest()
+            expected_group_digests[group.group_id] = hashlib.sha256(group.png_bytes).hexdigest()
 
         session.state.locked_profile_id = "rus-eng"
         _Worker.score_hook = lambda _key, payload: (
-            96
-            if hashlib.sha256(payload).hexdigest()
-            in expected_group_digests.values()
-            else 100
+            96 if hashlib.sha256(payload).hexdigest() in expected_group_digests.values() else 100
         )
         candidate = session._recursive_candidate(
             block_id="block-000000",
@@ -640,46 +609,24 @@ def test_contextual_composite_and_group_attempt_digests_keep_provenance(
     assert candidate is not None
     full_digest = hashlib.sha256(crop.raw.png_bytes).hexdigest()
     assert candidate.input_sha256 == full_digest
-    assert (
-        candidate.transform
-        is adaptive.OcrTransform.CONTEXTUAL_COMPOSITE
-    )
+    assert candidate.transform is adaptive.OcrTransform.CONTEXTUAL_COMPOSITE
     raw_attempts = tuple(
-        attempt
-        for attempt in session.state.attempts
-        if attempt.transform is adaptive.OcrTransform.RAW
+        attempt for attempt in session.state.attempts if attempt.transform is adaptive.OcrTransform.RAW
     )
-    assert {
-        attempt.unit_id: attempt.input_sha256 for attempt in raw_attempts
-    } == expected_group_digests
+    assert {attempt.unit_id: attempt.input_sha256 for attempt in raw_attempts} == expected_group_digests
     assert full_digest not in expected_group_digests.values()
     gamma_attempts = tuple(
-        attempt
-        for attempt in session.state.attempts
-        if attempt.transform is adaptive.OcrTransform.GAMMA
+        attempt for attempt in session.state.attempts if attempt.transform is adaptive.OcrTransform.GAMMA
     )
     assert gamma_attempts
-    raw_by_unit = {
-        attempt.unit_id: attempt.input_sha256 for attempt in raw_attempts
-    }
-    attempts_csv = (tmp_path / "splay-attempts.csv").read_text(
-        encoding="utf-8"
-    )
+    raw_by_unit = {attempt.unit_id: attempt.input_sha256 for attempt in raw_attempts}
+    attempts_csv = (tmp_path / "splay-attempts.csv").read_text(encoding="utf-8")
     for attempt in gamma_attempts:
         assert attempt.input_sha256 != raw_by_unit[attempt.unit_id]
-        gamma_artifact = (
-            tmp_path
-            / "splay-attempt-inputs"
-            / f"{attempt.input_sha256}.png"
-        )
+        gamma_artifact = tmp_path / "splay-attempt-inputs" / f"{attempt.input_sha256}.png"
         gamma_payload = gamma_artifact.read_bytes()
-        assert hashlib.sha256(gamma_payload).hexdigest() == (
-            attempt.input_sha256
-        )
-        assert (
-            f"splay-attempt-inputs/{attempt.input_sha256}.png"
-            in attempts_csv
-        )
+        assert hashlib.sha256(gamma_payload).hexdigest() == (attempt.input_sha256)
+        assert f"splay-attempt-inputs/{attempt.input_sha256}.png" in attempts_csv
 
 
 def test_only_one_bad_64_group_descends_to_its_four_children(
@@ -717,9 +664,7 @@ def test_only_one_bad_64_group_descends_to_its_four_children(
 
     assert candidate is not None
     assert len(_Worker.calls) == 6
-    unit_ids = tuple(
-        dict.fromkeys(attempt.unit_id for attempt in session.state.attempts)
-    )
+    unit_ids = tuple(dict.fromkeys(attempt.unit_id for attempt in session.state.attempts))
     assert sum("context-depth-00" in unit_id for unit_id in unit_ids) == 2
     assert sum("context-depth-01" in unit_id for unit_id in unit_ids) == 4
 
@@ -765,13 +710,8 @@ def test_missing_cjk_context_descends_to_leaf_units(
         )
 
     assert candidate is not None
-    unit_ids = {
-        attempt.unit_id for attempt in session.state.attempts
-    }
-    assert any(
-        "context-depth-01" in unit_id and "units-001" in unit_id
-        for unit_id in unit_ids
-    )
+    unit_ids = {attempt.unit_id for attempt in session.state.attempts}
+    assert any("context-depth-01" in unit_id and "units-001" in unit_id for unit_id in unit_ids)
     assert not any("context-depth-02" in unit_id for unit_id in unit_ids)
 
 
@@ -792,9 +732,7 @@ def test_only_mixed_script_branch_descends_below_16_context(
     with _session(monkeypatch, {}, max_workers=4) as session:
         session.state.locked_profile_id = "rus-eng"
         _Worker.score_hook = lambda _key, _payload: 96
-        _Worker.text_hook = lambda key, _payload: (
-            "中文96" if key[0] == "chi_sim" else "score96"
-        )
+        _Worker.text_hook = lambda key, _payload: ("中文96" if key[0] == "chi_sim" else "score96")
         monkeypatch.setattr(
             session,
             "_missing_evidenced_native_script",
@@ -809,17 +747,13 @@ def test_only_mixed_script_branch_descends_below_16_context(
         )
 
     assert candidate is not None
-    group_ids = {
-        attempt.unit_id for attempt in session.state.attempts
-    }
+    group_ids = {attempt.unit_id for attempt in session.state.attempts}
     assert sum("context-depth-00" in group_id for group_id in group_ids) == 1
     assert sum("context-depth-01" in group_id for group_id in group_ids) == 4
     assert sum("context-depth-02" in group_id for group_id in group_ids) == 4
     assert sum("context-depth-03" in group_id for group_id in group_ids) == 4
     assert all(
-        "order-000000" in group_id
-        or "context-depth-00" in group_id
-        or "context-depth-01" in group_id
+        "order-000000" in group_id or "context-depth-00" in group_id or "context-depth-01" in group_id
         for group_id in group_ids
         if "context-depth-02" in group_id
     )
@@ -833,9 +767,7 @@ def test_missing_native_script_selects_specialized_profile_only_at_leaf(
     with _session(monkeypatch, {}, max_workers=1) as session:
         session.state.locked_profile_id = "rus-eng"
         _Worker.score_hook = lambda _key, _payload: 96
-        _Worker.text_hook = lambda key, _payload: (
-            "中文50" if key[0] == "chi_sim" else "score96"
-        )
+        _Worker.text_hook = lambda key, _payload: ("中文50" if key[0] == "chi_sim" else "score96")
         _Worker.confidence = 0.70
         candidate = session._recursive_candidate(
             block_id="block-000000",
@@ -850,18 +782,10 @@ def test_missing_native_script_selects_specialized_profile_only_at_leaf(
     assert all("中文" in word.text for word in candidate.output.words)
     full_candidate = replace(
         candidate,
-        profile=next(
-            profile
-            for profile in session._profiles
-            if profile.profile_id == "rus-eng"
-        ),
+        profile=next(profile for profile in session._profiles if profile.profile_id == "rus-eng"),
         transform=adaptive.OcrTransform.RAW,
         output=_output("score96"),
         assessment=GrammarAssessment(96, False, ()),
-    )
-    full_block = SimpleNamespace(
-        candidate=full_candidate,
-        fallback_profile_ids=("chi_sim",),
     )
     patched = session._patch_missing_native_units(
         full_candidate,
@@ -873,9 +797,7 @@ def test_missing_native_script_selects_specialized_profile_only_at_leaf(
     assert "中文" in patched.output.text
     assert "score96" not in patched.output.text
     assert not any(
-        attempt.profile_id == "chi_sim"
-        and "context-depth-00" in attempt.unit_id
-        and attempt.grammar_percent >= 97
+        attempt.profile_id == "chi_sim" and "context-depth-00" in attempt.unit_id and attempt.grammar_percent >= 97
         for attempt in session.state.attempts
     )
 
@@ -895,10 +817,7 @@ def test_canonical_full_output_normalizes_to_bound_crop(
             compaction,
             raster_kind=adaptive.CompactionRasterKind.CANONICAL_LOCALITY,
         )
-        slots = {
-            placement.unit_id: index
-            for index, placement in enumerate(canonical.placements)
-        }
+        slots = {placement.unit_id: index for index, placement in enumerate(canonical.placements)}
         canonical_output = session._map_full_output(
             output,
             canonical,
@@ -916,9 +835,7 @@ def test_canonical_full_output_normalizes_to_bound_crop(
 
     placement = max(
         canonical.placements,
-        key=lambda item: output.words[0].bbox.intersection_area(
-            item.crop_bbox
-        ),
+        key=lambda item: output.words[0].bbox.intersection_area(item.crop_bbox),
     )
     slot = slots[placement.unit_id]
     assert canonical_output.text == output.text
@@ -941,9 +858,7 @@ def test_canonical_membership_bound_uses_crop_not_logical_window(
         bbox=Box(0, 0, 438, 101),
         raw=CropInput(
             f"{crop.block_id}-raw",
-            adaptive._png_bytes(
-                np.full((101, 438, 3), 255, dtype=np.uint8)
-            ),
+            adaptive._png_bytes(np.full((101, 438, 3), 255, dtype=np.uint8)),
         ),
     )
     canonical_block = replace(
@@ -982,10 +897,7 @@ def test_canonical_membership_bound_uses_crop_not_logical_window(
             b201_slots,
             slot_size,
         )
-        overflow_slots = {
-            f"overflow-membership-{slot:06d}": slot
-            for slot in range(slot_size[0] * slot_size[1] + 1)
-        }
+        overflow_slots = {f"overflow-membership-{slot:06d}": slot for slot in range(slot_size[0] * slot_size[1] + 1)}
         try:
             session._map_full_output(
                 output,
@@ -995,9 +907,7 @@ def test_canonical_membership_bound_uses_crop_not_logical_window(
                 slot_size,
             )
         except ValueError as error:
-            assert str(error) == (
-                "canonical locality membership slots exceed bound crop"
-            )
+            assert str(error) == ("canonical locality membership slots exceed bound crop")
         else:
             raise AssertionError("canonical crop overflow must fail closed")
 
@@ -1018,9 +928,7 @@ def test_doc_course_canonical_slots_use_forward_crop_canvas(
         bbox=Box(0, 0, 720, 1406),
         raw=CropInput(
             f"{crop.block_id}-raw",
-            adaptive._png_bytes(
-                np.full((1406, 720, 3), 255, dtype=np.uint8)
-            ),
+            adaptive._png_bytes(np.full((1406, 720, 3), 255, dtype=np.uint8)),
         ),
     )
     block = replace(plan.blocks[0], bbox=Box(0, 0, 59, 13))
@@ -1060,10 +968,7 @@ def test_doc_course_canonical_slots_use_forward_crop_canvas(
     assert slot_size == (720, 1406)
     assert max(word.bbox.right for word in mapped.words) == 87
     assert max(word.bbox.right for word in mapped.words) > block.bbox.width
-    assert all(
-        word.bbox.intersection(Box(0, 0, *slot_size)) == word.bbox
-        for word in mapped.words
-    )
+    assert all(word.bbox.intersection(Box(0, 0, *slot_size)) == word.bbox for word in mapped.words)
 
 
 def test_ucheb_small_component_does_not_inherit_document_slot_namespace(
@@ -1110,11 +1015,7 @@ def test_ucheb_small_component_does_not_inherit_document_slot_namespace(
                     matrix_segment_shape=(2, 16),
                 ),
             ),
-            local_placements=tuple(
-                placement
-                for placement in placements
-                if placement.segment_id in selected_ids
-            ),
+            local_placements=tuple(placement for placement in placements if placement.segment_id in selected_ids),
         )
 
     full_block = local_block(
@@ -1136,9 +1037,7 @@ def test_ucheb_small_component_does_not_inherit_document_slot_namespace(
         )
         for index, segment_id in enumerate(segment_ids)
     )
-    render_slots = {
-        tile.unit_id: index for index, tile in enumerate(tiles)
-    }
+    render_slots = {tile.unit_id: index for index, tile in enumerate(tiles)}
     render_slot_shape = (2, 13)
     layouts = adaptive._derive_local_region_layouts(
         tiles,
@@ -1172,13 +1071,9 @@ def test_ucheb_small_component_does_not_inherit_document_slot_namespace(
     assert rendered.size[0] < 1_000
     assert rendered.size[1] < 1_000
     assert signature_rendered.size == rendered.size
-    full_bbox_by_unit = {
-        placement.unit_id: placement.crop_bbox
-        for placement in rendered.placements
-    }
+    full_bbox_by_unit = {placement.unit_id: placement.crop_bbox for placement in rendered.placements}
     assert all(
-        placement.crop_bbox == full_bbox_by_unit[placement.unit_id]
-        for placement in signature_rendered.placements
+        placement.crop_bbox == full_bbox_by_unit[placement.unit_id] for placement in signature_rendered.placements
     )
 
     small_block_ids = tuple(f"block-small-{index}" for index in range(6))
@@ -1198,20 +1093,13 @@ def test_ucheb_small_component_does_not_inherit_document_slot_namespace(
         for index in range(4516)
     )
     plan = SimpleNamespace(
-        blocks=tuple(
-            SimpleNamespace(block_id=block_id)
-            for block_id in (large_block_id, *small_block_ids)
-        ),
+        blocks=tuple(SimpleNamespace(block_id=block_id) for block_id in (large_block_id, *small_block_ids)),
         membership_units=large_units + small_units,
     )
-    membership_by_unit = {
-        unit.unit_id: unit.block_ids for unit in small_units
-    }
+    membership_by_unit = {unit.unit_id: unit.block_ids for unit in small_units}
     small_placements_by_block = {
         block_id: tuple(
-            placement
-            for placement in rendered.placements
-            if block_id in membership_by_unit[placement.unit_id]
+            placement for placement in rendered.placements if block_id in membership_by_unit[placement.unit_id]
         )
         for block_id in small_block_ids
     }
@@ -1298,9 +1186,7 @@ def test_hierarchical_context_order_is_max_worker_independent(
         with _session(monkeypatch, {}, max_workers=max_workers) as session:
             session.state.locked_profile_id = "rus-eng"
             _Worker.score_hook = lambda _key, _payload: 100
-            _Worker.text_hook = (
-                lambda key, _payload: f"score100-label-{key[2]}"
-            )
+            _Worker.text_hook = lambda key, _payload: f"score100-label-{key[2]}"
             candidate = session._recursive_candidate(
                 block_id="block-000000",
                 block_bbox=plan.blocks[0].bbox,
@@ -1364,13 +1250,8 @@ def test_hierarchical_mapped_words_stay_inside_source_placements(
 def _multi_block_recursion_fixture(
     count: int,
 ) -> tuple[BlockPlan, tuple[BlockCropPair, ...], tuple[BlockCompaction, ...]]:
-    plan, crops = _fixtures(
-        tuple(_png(40 + index * 2, 41 + index * 2) for index in range(count))
-    )
-    compactions = tuple(
-        _two_unit_compaction(plan, block_index)
-        for block_index, _block in enumerate(plan.blocks)
-    )
+    plan, crops = _fixtures(tuple(_png(40 + index * 2, 41 + index * 2) for index in range(count)))
+    compactions = tuple(_two_unit_compaction(plan, block_index) for block_index, _block in enumerate(plan.blocks))
     return plan, crops, compactions
 
 
@@ -1427,9 +1308,7 @@ def test_parallel_recursion_blocks_preserve_output_attempt_and_splay_order(
     def execute(max_workers: int) -> tuple[object, object, object]:
         with _session(monkeypatch, {}, max_workers=max_workers) as session:
             _Worker.score_hook = lambda _key, _payload: 96
-            _Worker.text_hook = (
-                lambda key, _payload: f"score96-label-{key[2]}"
-            )
+            _Worker.text_hook = lambda key, _payload: f"score96-label-{key[2]}"
             _Worker.confidence = 0.80
             result = session.run_with_compaction(
                 plan=plan,
@@ -1466,16 +1345,10 @@ def test_parallel_recursion_blocks_preserve_output_attempt_and_splay_order(
             for node in session.state.nodes
         )
         recursive_block_order = tuple(
-            attempt.block_id
-            for attempt in session.state.attempts
-            if ":context-depth-" in attempt.unit_id
+            attempt.block_id for attempt in session.state.attempts if ":context-depth-" in attempt.unit_id
         )
-        expected_order = {
-            block.block_id: index for index, block in enumerate(plan.blocks)
-        }
-        assert tuple(
-            expected_order[block_id] for block_id in recursive_block_order
-        ) == tuple(
+        expected_order = {block.block_id: index for index, block in enumerate(plan.blocks)}
+        assert tuple(expected_order[block_id] for block_id in recursive_block_order) == tuple(
             sorted(expected_order[block_id] for block_id in recursive_block_order)
         )
         return jobs, attempts, splay
@@ -1528,12 +1401,8 @@ def test_context_mapping_uses_original_compact_placement_for_polar_blocks(
         )
 
     assert mapped.words[0].bbox == Box(41, 32, 46, 37)
-    assert original_placements["later-polar"].crop_bbox.left <= (
-        mapped.words[0].bbox.left
-    )
-    assert original_placements["later-polar"].crop_bbox.top <= (
-        mapped.words[0].bbox.top
-    )
+    assert original_placements["later-polar"].crop_bbox.left <= (mapped.words[0].bbox.left)
+    assert original_placements["later-polar"].crop_bbox.top <= (mapped.words[0].bbox.top)
 
 
 def test_context_mapping_keeps_ordinary_spatial_compact_coordinates(
@@ -1559,6 +1428,7 @@ def test_context_mapping_keeps_ordinary_spatial_compact_coordinates(
         )
 
     assert mapped == output
+
 
 def test_fallback_filter_distinguishes_none_shortlist_and_empty_tuple(
     monkeypatch: object,
@@ -1639,9 +1509,7 @@ def test_raw_at_target_skips_gamma_and_keeps_preprocess_lazy(
     assert decision.candidate is not None
     assert decision.candidate.transform is adaptive.OcrTransform.RAW
     assert enhancer.calls == 0
-    assert tuple(attempt.transform for attempt in session.state.attempts) == (
-        adaptive.OcrTransform.RAW,
-    )
+    assert tuple(attempt.transform for attempt in session.state.attempts) == (adaptive.OcrTransform.RAW,)
 
 
 def test_raw_below_target_runs_gamma(
@@ -1900,11 +1768,7 @@ def _full_block_recognition(
     confidence: float,
     fallback_profile_ids: tuple[str, ...] = (),
 ) -> adaptive._FullBlockRecognition:
-    profile = next(
-        profile
-        for profile in session._profiles
-        if profile.profile_id == "rus-eng"
-    )
+    profile = next(profile for profile in session._profiles if profile.profile_id == "rus-eng")
     output = _output(text, confidence)
     return adaptive._FullBlockRecognition(
         candidate=adaptive._Candidate(
@@ -1933,11 +1797,7 @@ def _contextual_candidate(
     grammar_percent: int,
     confidence: float,
 ) -> adaptive._Candidate:
-    profile = next(
-        profile
-        for profile in session._profiles
-        if profile.profile_id == session._DEFAULT_PROFILE_ID
-    )
+    profile = next(profile for profile in session._profiles if profile.profile_id == session._DEFAULT_PROFILE_ID)
     return adaptive._Candidate(
         profile=profile,
         transform=adaptive.OcrTransform.CONTEXTUAL_COMPOSITE,
@@ -2023,10 +1883,7 @@ def _local_plan(
 
 
 def _compactions_for(plan: BlockPlan) -> tuple[BlockCompaction, ...]:
-    return tuple(
-        _two_unit_compaction(plan, index)
-        for index in range(len(plan.blocks))
-    )
+    return tuple(_two_unit_compaction(plan, index) for index in range(len(plan.blocks)))
 
 
 def _isolated_recursive(
@@ -2070,9 +1927,7 @@ def test_ineffective_local_split_is_learned_and_skipped(
         results = session._recognize_recursive_blocks(
             plan=plan,
             crops=crops,
-            compaction_by_id={
-                item.block_id: item for item in _compactions_for(plan)
-            },
+            compaction_by_id={item.block_id: item for item in _compactions_for(plan)},
             recognized=full,
         )
 
@@ -2112,9 +1967,7 @@ def test_native_script_evidence_bypasses_local_split_learning(
         results = session._recognize_recursive_blocks(
             plan=plan,
             crops=crops,
-            compaction_by_id={
-                item.block_id: item for item in _compactions_for(plan)
-            },
+            compaction_by_id={item.block_id: item for item in _compactions_for(plan)},
             recognized=full,
         )
 
@@ -2147,9 +2000,7 @@ def test_local_split_parallel_results_are_deterministic(
             with lock:
                 active += 1
                 peak = max(peak, active)
-            if kwargs["block_id"] in {
-                block.block_id for block in plan.blocks[:3]
-            }:
+            if kwargs["block_id"] in {block.block_id for block in plan.blocks[:3]}:
                 barrier.wait(timeout=2.0)
             with lock:
                 active -= 1
@@ -2166,17 +2017,15 @@ def test_local_split_parallel_results_are_deterministic(
         results = session._recognize_recursive_blocks(
             plan=plan,
             crops=crops,
-            compaction_by_id={
-                item.block_id: item for item in _compactions_for(plan)
-            },
+            compaction_by_id={item.block_id: item for item in _compactions_for(plan)},
             recognized=full,
         )
 
     assert peak == 3
     assert tuple(results) == tuple(range(6))
-    assert tuple(
-        candidate.output.text for candidate in results.values()
-    ) == tuple(f"context {index}" for index in range(6))
+    assert tuple(candidate.output.text for candidate in results.values()) == tuple(
+        f"context {index}" for index in range(6)
+    )
 
 
 def test_local_split_learning_resets_for_new_object(
@@ -2211,9 +2060,7 @@ def test_local_split_learning_resets_for_new_object(
         kwargs = {
             "plan": plan,
             "crops": crops,
-            "compaction_by_id": {
-                item.block_id: item for item in _compactions_for(plan)
-            },
+            "compaction_by_id": {item.block_id: item for item in _compactions_for(plan)},
             "recognized": full,
         }
         first = session._recognize_recursive_blocks(**kwargs)
@@ -2253,9 +2100,7 @@ def test_ineffective_local_full_sweep_learns_primary_only(
     assert len(recognized) == 6
     assert last_profiles == ("rus-eng",)
     assert all(
-        item.candidate is not None
-        and item.candidate.transform is adaptive.OcrTransform.RAW
-        for item in recognized
+        item.candidate is not None and item.candidate.transform is adaptive.OcrTransform.RAW for item in recognized
     )
 
 
@@ -2277,10 +2122,7 @@ def test_low_quality_contextual_composite_is_not_acceptable(
         )
 
         assert session._contextual_composite_is_acceptable(low, ()) is False
-        assert (
-            session._contextual_composite_is_acceptable(acceptable, ())
-            is True
-        )
+        assert session._contextual_composite_is_acceptable(acceptable, ()) is True
 
 
 def test_low_quality_contextual_composite_does_not_replace_full_block(
@@ -2329,10 +2171,7 @@ def test_low_quality_contextual_composite_does_not_replace_full_block(
 
     assert result.jobs[0].transform is adaptive.OcrTransform.RAW
     assert result.jobs[0].output == full.candidate.output
-    assert any(
-        "recursive=contextual-composite-rejected" in diagnostic
-        for diagnostic in result.diagnostics
-    )
+    assert any("recursive=contextual-composite-rejected" in diagnostic for diagnostic in result.diagnostics)
 
 
 def test_contextual_composite_output_is_not_mapped_twice(
@@ -2379,10 +2218,7 @@ def test_contextual_composite_output_is_not_mapped_twice(
             compactions=(compaction,),
         )
 
-    assert (
-        result.jobs[0].transform
-        is adaptive.OcrTransform.CONTEXTUAL_COMPOSITE
-    )
+    assert result.jobs[0].transform is adaptive.OcrTransform.CONTEXTUAL_COMPOSITE
     assert result.jobs[0].output == recursive.output
 
 
@@ -2477,9 +2313,7 @@ def test_context_group_cache_includes_ordered_units_policy_and_transform(
     with _session(monkeypatch, {}) as session:
         _Worker.score_hook = score_hook
         _Worker.text_hook = lambda key, _payload: (
-            "测试数据100"
-            if key[0] == "chi_sim"
-            else f"score{score_hook(key, _payload)}"
+            "测试数据100" if key[0] == "chi_sim" else f"score{score_hook(key, _payload)}"
         )
         session.state.locked_profile_id = "rus-eng"
         primary_only = session._recursive_candidate(
@@ -2540,9 +2374,7 @@ def test_combined_profile_splays_engine_order_after_three_losses(
     monkeypatch: object,
 ) -> None:
     with _session(monkeypatch, {}) as session:
-        _Worker.score_hook = lambda key, _payload: (
-            90 if key[0] == "eng-rus" else 80
-        )
+        _Worker.score_hook = lambda key, _payload: (90 if key[0] == "eng-rus" else 80)
         for label in (31, 32, 33):
             decision = session._recognize_image(
                 block_id=f"block-{label}",
@@ -2569,11 +2401,7 @@ def test_combined_profile_splays_engine_order_after_three_losses(
         )
 
     assert _Worker.calls[before:] == [("eng-rus", (10, 10), 34)]
-    combined_attempts = tuple(
-        attempt
-        for attempt in session.state.attempts
-        if attempt.profile_id == "rus-eng"
-    )
+    combined_attempts = tuple(attempt for attempt in session.state.attempts if attempt.profile_id == "rus-eng")
     assert {attempt.languages for attempt in combined_attempts} == {
         ("rus", "eng"),
         ("eng", "rus"),
@@ -2664,9 +2492,11 @@ def test_new_unsupported_unicode_resets_order_and_fallback_guards(
         _Worker.text_hook = lambda key, _payload: (
             "\u6d4b\u8bd5\u6570\u636e95"
             if key[0] == "chi_sim"
-            else "\u4e2d\u6587score90"
-            if key[0] == "eng-rus" and key[2] == 54
-            else f"score{_Worker.score_hook(key, _payload)}"
+            else (
+                "\u4e2d\u6587score90"
+                if key[0] == "eng-rus" and key[2] == 54
+                else f"score{_Worker.score_hook(key, _payload)}"
+            )
         )
         before = len(_Worker.calls)
         decision = session._recognize_image(
@@ -2686,6 +2516,8 @@ def test_new_unsupported_unicode_resets_order_and_fallback_guards(
         "chi_sim",
     }
     assert decision.candidate.profile.profile_id == "chi_sim"
+
+
 def test_profile_exhaustion_is_preserved_as_unresolved_complete_evidence(
     monkeypatch: object,
 ) -> None:
@@ -2718,15 +2550,9 @@ def test_profile_exhaustion_is_preserved_as_unresolved_complete_evidence(
     assert job.capability_id == "adaptive-language-unresolved"
     assert job.input_sha256 == job.context_sha256
     assert len(job.input_sha256) == 64
-    assert (
-        "block=block-000000;outcome=unresolved;"
-        "reason=profile-exhausted"
-    ) in result.diagnostics
+    assert ("block=block-000000;outcome=unresolved;" "reason=profile-exhausted") in result.diagnostics
     assert len(_Worker.calls) == 0
-    assert {
-        (attempt.profile_id, attempt.transform.value)
-        for attempt in session.state.attempts
-    } == {
+    assert {(attempt.profile_id, attempt.transform.value) for attempt in session.state.attempts} == {
         ("rus-eng", "raw"),
         ("rus-eng", "gamma"),
         ("rus", "raw"),
@@ -2735,10 +2561,7 @@ def test_profile_exhaustion_is_preserved_as_unresolved_complete_evidence(
         ("ell", "raw"),
         ("equ", "raw"),
     }
-    assert all(
-        attempt.unit_id == "full-block"
-        for attempt in session.state.attempts
-    )
+    assert all(attempt.unit_id == "full-block" for attempt in session.state.attempts)
 
 
 def test_document_lock_survives_policy_runs_and_cache_remains_shared(
@@ -2761,16 +2584,12 @@ def test_document_lock_survives_policy_runs_and_cache_remains_shared(
         session.run(plan=next_plan, crops=next_crops)
         second_attempt_count = len(session.state.attempts)
         second_metrics = session.cache_metrics()
-        second_attempts = tuple(
-            session.state.attempts[first_attempt_count:second_attempt_count]
-        )
+        second_attempts = tuple(session.state.attempts[first_attempt_count:second_attempt_count])
 
         adapter_calls_before_repeat = len(_Worker.calls)
         session.run(plan=next_plan, crops=next_crops)
         third_metrics = session.cache_metrics()
-        repeated_attempts = tuple(
-            session.state.attempts[second_attempt_count:]
-        )
+        repeated_attempts = tuple(session.state.attempts[second_attempt_count:])
 
     assert session.state.locked_profile_id == "rus-eng"
     assert session.state.lock_is_provisional is True
@@ -2783,22 +2602,14 @@ def test_document_lock_survives_policy_runs_and_cache_remains_shared(
         "exact_duplicate_calls_avoided": 0,
         "ocr_work_seconds": first_metrics["ocr_work_seconds"],
     }
-    assert {
-        attempt.profile_id for attempt in second_attempts
-    } == {"rus-eng"}
-    assert {
-        attempt.transform.value for attempt in second_attempts
-    } == {"raw"}
+    assert {attempt.profile_id for attempt in second_attempts} == {"rus-eng"}
+    assert {attempt.transform.value for attempt in second_attempts} == {"raw"}
     assert second_metrics["requests"] == 8
     assert second_metrics["hits"] == 0
     assert second_metrics["misses"] == 8
     assert len(_Worker.calls) == adapter_calls_before_repeat
-    assert {
-        attempt.profile_id for attempt in repeated_attempts
-    } == {"rus-eng"}
-    assert {
-        attempt.status for attempt in repeated_attempts
-    } == {"cache-hit"}
+    assert {attempt.profile_id for attempt in repeated_attempts} == {"rus-eng"}
+    assert {attempt.status for attempt in repeated_attempts} == {"cache-hit"}
     assert third_metrics["requests"] == 9
     assert third_metrics["hits"] == 1
     assert third_metrics["misses"] == 8
@@ -2920,10 +2731,7 @@ def test_good_canonical_leaf_never_runs_source_fallback(
         )
 
     assert len(recognized) == 1
-    assert not any(
-        "source-placement-line" in attempt.unit_id
-        for attempt in session.state.attempts
-    )
+    assert not any("source-placement-line" in attempt.unit_id for attempt in session.state.attempts)
 
 
 def test_missing_native_script_runs_one_source_raw_and_skips_gamma(
@@ -2960,11 +2768,7 @@ def test_missing_native_script_runs_one_source_raw_and_skips_gamma(
             source_placements=artifacts,
         )
 
-    source_attempts = tuple(
-        attempt
-        for attempt in session.state.attempts
-        if "source-placement-line" in attempt.unit_id
-    )
+    source_attempts = tuple(attempt for attempt in session.state.attempts if "source-placement-line" in attempt.unit_id)
     assert len(recognized) == 1
     assert recognized[0][0].source_fallback is True
     assert recognized[0][1].transform is adaptive.OcrTransform.SOURCE_PLACEMENT_FALLBACK
@@ -2976,10 +2780,7 @@ def test_source_line_builder_is_parallel_order_deterministic(
     monkeypatch: object,
 ) -> None:
     artifacts = tuple(_source_placement(f"unit-{row}", row) for row in range(4))
-    leaves = tuple(
-        _source_leaf(artifact, first_order=index)
-        for index, artifact in enumerate(artifacts[:2])
-    )
+    leaves = tuple(_source_leaf(artifact, first_order=index) for index, artifact in enumerate(artifacts[:2]))
 
     def execute(max_workers: int) -> tuple[tuple[str, ...], tuple[str, ...]]:
         with _session(monkeypatch, {}, max_workers=max_workers) as session:
@@ -2994,11 +2795,7 @@ def test_source_line_builder_is_parallel_order_deterministic(
         assert all(line is not None for line in lines)
         return (
             tuple(line.group_id for line in lines if line is not None),
-            tuple(
-                hashlib.sha256(line.png_bytes).hexdigest()
-                for line in lines
-                if line is not None
-            ),
+            tuple(hashlib.sha256(line.png_bytes).hexdigest() for line in lines if line is not None),
         )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
@@ -3036,9 +2833,7 @@ def test_source_line_candidate_cache_resolves_parallel_key_once() -> None:
 def test_specialized_bbox_routes_only_intersecting_source_placement(
     monkeypatch: object,
 ) -> None:
-    artifacts = tuple(
-        _source_placement(f"unit-{index}", index) for index in range(2)
-    )
+    artifacts = tuple(_source_placement(f"unit-{index}", index) for index in range(2))
     compaction = BlockCompaction(
         block_id="block",
         placements=(
@@ -3062,11 +2857,7 @@ def test_specialized_bbox_routes_only_intersecting_source_placement(
         source_placements=artifacts,
     )
     with _session(monkeypatch, {}) as session:
-        profile = next(
-            profile
-            for profile in session._profiles
-            if profile.profile_id == "chi_sim"
-        )
+        profile = next(profile for profile in session._profiles if profile.profile_id == "chi_sim")
         output = _output("中文", 0.8)
         output = adaptive.replace(
             output,
@@ -3097,21 +2888,14 @@ def test_specialized_bbox_routes_only_intersecting_source_placement(
 def test_routed_native_bbox_skips_unattributed_leaf_source_fallback(
     monkeypatch: object,
 ) -> None:
-    artifacts = tuple(
-        _source_placement(f"unit-{index}", index) for index in range(4)
-    )
-    leaves = tuple(
-        _source_leaf(artifact, first_order=index)
-        for index, artifact in enumerate(artifacts[:2])
-    )
+    artifacts = tuple(_source_placement(f"unit-{index}", index) for index in range(4))
+    leaves = tuple(_source_leaf(artifact, first_order=index) for index, artifact in enumerate(artifacts[:2]))
     source_calls = []
 
     with _session(monkeypatch, {}, max_workers=2) as session:
         session.state.locked_profile_id = "rus-eng"
         _Worker.score_hook = lambda _key, _payload: 96
-        _Worker.text_hook = lambda key, _payload: (
-            "" if key[0] == "chi_sim" else "latin"
-        )
+        _Worker.text_hook = lambda key, _payload: ("" if key[0] == "chi_sim" else "latin")
 
         def source_candidate(**kwargs: object) -> None:
             group = kwargs["group"]
@@ -3129,9 +2913,7 @@ def test_routed_native_bbox_skips_unattributed_leaf_source_fallback(
             block_bbox=Box(0, 0, 120, 64),
             groups=leaves,
             fallback_profile_ids=("chi_sim",),
-            forced_native_search_group_ids=frozenset(
-                leaf.group_id for leaf in leaves
-            ),
+            forced_native_search_group_ids=frozenset(leaf.group_id for leaf in leaves),
             routed_native_unit_ids=frozenset(("unit-0",)),
             source_placements=artifacts,
         )
@@ -3147,9 +2929,7 @@ def _topology_artifact(
     column: int,
     island_id: str = "island-0",
 ) -> adaptive.SourcePlacementArtifact:
-    payload = adaptive._png_bytes(
-        np.full((bbox.height, bbox.width, 3), 255, dtype=np.uint8)
-    )
+    payload = adaptive._png_bytes(np.full((bbox.height, bbox.width, 3), 255, dtype=np.uint8))
     return adaptive.SourcePlacementArtifact(
         unit_id=unit_id,
         segment_ids=(f"segment-{unit_id}",),
@@ -3237,9 +3017,7 @@ def _topology_queue_fixture() -> tuple[
     )
     evidence = adaptive.TopologyScriptEvidence(
         script_kind="cjk",
-        matrix_sha256=adaptive._cache_fingerprint(
-            (plan.aligned_size, plan.source_segment_ids)
-        ),
+        matrix_sha256=adaptive._cache_fingerprint((plan.aligned_size, plan.source_segment_ids)),
         island_id="island-0",
         matrix_columns=(1,),
         source_left_ppm=250_000,
@@ -3299,11 +3077,7 @@ def test_topology_routes_merged_and_second_pass_header_footer_deterministically(
                 packed_canvas_pixels=16_000,
                 source_placements=(artifact,),
             )
-            text = (
-                "header FAX score70"
-                if unit_id == "header"
-                else "footer FAX score70"
-            )
+            text = "header FAX score70" if unit_id == "header" else "footer FAX score70"
             output = OcrEngineOutput(
                 text=text,
                 words=(OcrWord(text, artifact.source_bbox, 0.70),),
@@ -3357,12 +3131,8 @@ def test_topology_fusion_preserves_order_and_deduplicates_observed_spans(
     monkeypatch: object,
 ) -> None:
     with _session(monkeypatch, {}) as session:
-        combined_profile = next(
-            item for item in session._profiles if item.profile_id == "rus-eng"
-        )
-        native_profile = next(
-            item for item in session._profiles if item.profile_id == "chi_sim"
-        )
+        combined_profile = next(item for item in session._profiles if item.profile_id == "rus-eng")
+        native_profile = next(item for item in session._profiles if item.profile_id == "chi_sim")
         combined = adaptive._Candidate(
             profile=combined_profile,
             transform=adaptive.OcrTransform.RAW,

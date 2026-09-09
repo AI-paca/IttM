@@ -153,7 +153,11 @@ export function OcrProvider({ children }: { children: ReactNode }) {
   const [easyOcrInstallProgress, setEasyOcrInstallProgress] = useState(0);
   const [lastExtractedPage, setLastExtractedPage] = useState(1);
   const [totalPdfPages, setTotalPdfPages] = useState<number | null>(null);
-  const [diagnostics, setDiagnostics] = useState<AppDiagnostics | null>(null);
+  const [diagnostics, setDiagnostics] = useState<AppDiagnostics | null>(() =>
+    IS_LITE_RUNTIME
+      ? { backend: null, browser: getBrowserDiagnostics() }
+      : null,
+  );
   const [notice, setNotice] = useState<Notice | null>(null);
   const [triggerCount, setTriggerCount] = useState(0);
 
@@ -177,11 +181,8 @@ export function OcrProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
+    if (IS_LITE_RUNTIME) return;
     const browserInfo = getBrowserDiagnostics();
-    if (IS_LITE_RUNTIME) {
-      setDiagnostics({ backend: null, browser: browserInfo });
-      return;
-    }
 
     requestApiJson<BackendDiagnostics>("/api/diagnostics", "Diagnostics")
       .then((data) => {

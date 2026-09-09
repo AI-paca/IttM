@@ -35,9 +35,7 @@ def analyze(image: Image.Image) -> GeometryResult:
     return GeometryAnalyzer(GeometryConfig()).analyze(image)
 
 
-def ink_mask(
-    image: Image.Image, background: tuple[int, int, int] = BACKGROUND
-) -> np.ndarray:
+def ink_mask(image: Image.Image, background: tuple[int, int, int] = BACKGROUND) -> np.ndarray:
     pixels = np.asarray(image.convert("RGB"))
     return np.any(pixels != np.asarray(background, dtype=np.uint8), axis=2)
 
@@ -82,9 +80,7 @@ def assert_exact_foreground_count(result: GeometryResult, expected: int) -> None
 
 def draw_glyph_group(draw: ImageDraw.ImageDraw, *, left: int, top: int) -> None:
     for offset, height in ((0, 7), (5, 5), (10, 7), (15, 6)):
-        draw.rectangle(
-            (left + offset, top, left + offset + 2, top + height - 1), fill=BLACK
-        )
+        draw.rectangle((left + offset, top, left + offset + 2, top + height - 1), fill=BLACK)
 
 
 def test_blank_image_is_a_lossless_empty_geometry_result() -> None:
@@ -106,11 +102,7 @@ def test_blank_image_is_a_lossless_empty_geometry_result() -> None:
     assert result.matrix.cells == ()
     assert result.matrix.spans == ()
 
-    root = next(
-        node
-        for node in result.segmentation.nodes
-        if node.node_id == result.segmentation.root_node_id
-    )
+    root = next(node for node in result.segmentation.nodes if node.node_id == result.segmentation.root_node_id)
     assert root.bbox == Box(0, 0, 17, 13)
     assert root.parent_id is None
     assert root.child_ids == ()
@@ -126,9 +118,7 @@ def test_source_is_immutable_and_affine_matrices_are_exact_inverses() -> None:
     draw = ImageDraw.Draw(source)
     draw_glyph_group(draw, left=8, top=12)
     draw_glyph_group(draw, left=48, top=34)
-    image = source.rotate(
-        2.0, resample=Image.Resampling.NEAREST, expand=False, fillcolor=BACKGROUND
-    )
+    image = source.rotate(2.0, resample=Image.Resampling.NEAREST, expand=False, fillcolor=BACKGROUND)
     original_bytes = image.tobytes()
     original_mode = image.mode
     original_size = image.size
@@ -187,12 +177,8 @@ def test_one_pixel_rules_are_retained_and_do_not_steal_or_duplicate_ink() -> Non
 
     axes = {rule.axis for rule in result.segmentation.rules}
     assert axes == {RuleAxis.HORIZONTAL, RuleAxis.VERTICAL}
-    horizontal = [
-        rule for rule in result.segmentation.rules if rule.axis is RuleAxis.HORIZONTAL
-    ]
-    vertical = [
-        rule for rule in result.segmentation.rules if rule.axis is RuleAxis.VERTICAL
-    ]
+    horizontal = [rule for rule in result.segmentation.rules if rule.axis is RuleAxis.HORIZONTAL]
+    vertical = [rule for rule in result.segmentation.rules if rule.axis is RuleAxis.VERTICAL]
     assert any(rule.bbox.height == 1 and rule.bbox.width >= 70 for rule in horizontal)
     assert any(rule.bbox.width == 1 and rule.bbox.height >= 40 for rule in vertical)
     assert result.matrix.horizontal_rule_rows
@@ -209,9 +195,7 @@ def test_partial_page_frame_corner_stays_out_of_text_segments() -> None:
     draw.rectangle((0, 0, 2, 105), fill=BLACK)
     draw_glyph_group(draw, left=40, top=130)
 
-    result = GeometryAnalyzer(
-        GeometryConfig(deskew_max_degrees=0.0)
-    ).analyze(image)
+    result = GeometryAnalyzer(GeometryConfig(deskew_max_degrees=0.0)).analyze(image)
 
     assert {rule.axis for rule in result.segmentation.rules} == {
         RuleAxis.HORIZONTAL,
@@ -236,21 +220,13 @@ def test_recursive_safe_seams_never_cut_non_rule_ink() -> None:
     assert result.alignment.transform.aligned_size == image.size
     assert result.segmentation.rules == ()
     internal_nodes = [node for node in result.segmentation.nodes if node.child_ids]
-    assert (
-        internal_nodes
-    ), "the wide row and column gaps must trigger recursive splitting"
+    assert internal_nodes, "the wide row and column gaps must trigger recursive splitting"
     assert {node.axis for node in internal_nodes} == {SplitAxis.ROWS, SplitAxis.COLUMNS}
-    separators = [
-        separator for node in internal_nodes for separator in node.separator_boxes
-    ]
+    separators = [separator for node in internal_nodes for separator in node.separator_boxes]
     assert separators, "every recursive split must retain its safe seam"
     for separator in separators:
-        cut = known_ink[
-            separator.top : separator.bottom, separator.left : separator.right
-        ]
-        assert (
-            not cut.any()
-        ), f"separator {separator.as_tuple()} cuts non-rule foreground"
+        cut = known_ink[separator.top : separator.bottom, separator.left : separator.right]
+        assert not cut.any(), f"separator {separator.as_tuple()} cuts non-rule foreground"
     assert_exact_foreground_count(result, int(known_ink.sum()))
     assert_half_open_and_in_bounds(result)
 
@@ -272,10 +248,7 @@ def test_recursive_adaptive_crops_accumulate_both_text_polarities() -> None:
     bundle = analyzer.last_bundle
 
     assert bundle is not None
-    assert any(
-        value.startswith("foreground_mode=adaptive-dual:")
-        for value in result.diagnostics
-    )
+    assert any(value.startswith("foreground_mode=adaptive-dual:") for value in result.diagnostics)
     assert any(node.depth >= 2 for node in result.segmentation.nodes)
     assert bundle.foreground_mask[48, 40]  # light ink proved by the page
     assert bundle.foreground_mask[88, 90]  # dark ink proved by the crop
@@ -318,22 +291,14 @@ def test_column_crop_keeps_recursing_through_local_text_rows() -> None:
     for left in (78, 98, 118, 138):
         draw.rectangle((left, 50, left + 6, 69), fill=BLACK)
 
-    result = GeometryAnalyzer(
-        GeometryConfig(deskew_max_degrees=0.0)
-    ).analyze(image)
+    result = GeometryAnalyzer(GeometryConfig(deskew_max_degrees=0.0)).analyze(image)
 
     local_row_split = next(
-        node
-        for node in result.segmentation.nodes
-        if node.bbox.left > 0 and node.split_coordinate == 50
+        node for node in result.segmentation.nodes if node.bbox.left > 0 and node.split_coordinate == 50
     )
     assert local_row_split.axis is SplitAxis.ROWS
     assert local_row_split.separator_boxes == ()
-    text_boxes = tuple(
-        segment.bbox
-        for segment in result.segmentation.segments
-        if segment.bbox.left >= 70
-    )
+    text_boxes = tuple(segment.bbox for segment in result.segmentation.segments if segment.bbox.left >= 70)
     assert text_boxes == (
         Box(70, 30, 137, 50),
         Box(78, 50, 145, 70),
@@ -372,22 +337,12 @@ def test_full_width_header_is_isolated_before_body_columns() -> None:
         for left, right in ((10, 90), (150, 230)):
             draw.rectangle((left, top, right - 1, bottom - 1), fill=BLACK)
 
-    result = GeometryAnalyzer(
-        GeometryConfig(deskew_max_degrees=0.0)
-    ).analyze(image)
-    root = next(
-        node
-        for node in result.segmentation.nodes
-        if node.node_id == result.segmentation.root_node_id
-    )
+    result = GeometryAnalyzer(GeometryConfig(deskew_max_degrees=0.0)).analyze(image)
+    root = next(node for node in result.segmentation.nodes if node.node_id == result.segmentation.root_node_id)
 
     assert root.axis is SplitAxis.ROWS
     assert root.separator_boxes == (Box(0, 15, 240, 40),)
-    body = next(
-        node
-        for node in result.segmentation.nodes
-        if node.parent_id == root.node_id and node.bbox.top > 0
-    )
+    body = next(node for node in result.segmentation.nodes if node.parent_id == root.node_id and node.bbox.top > 0)
     assert any(
         node.axis is SplitAxis.COLUMNS
         for node in result.segmentation.nodes
@@ -409,27 +364,18 @@ def test_rule_partition_still_recurses_across_proven_row_seams() -> None:
 
     result = analyze(image)
 
-    horizontal_rules = tuple(
-        rule
-        for rule in result.segmentation.rules
-        if rule.axis is RuleAxis.HORIZONTAL
-    )
+    horizontal_rules = tuple(rule for rule in result.segmentation.rules if rule.axis is RuleAxis.HORIZONTAL)
     assert len(horizontal_rules) == 1
     assert len(result.segmentation.segments) == 3 * len(row_tops)
     for top in row_tops:
-        row_segments = tuple(
-            segment
-            for segment in result.segmentation.segments
-            if segment.bbox.top == top
-        )
+        row_segments = tuple(segment for segment in result.segmentation.segments if segment.bbox.top == top)
         assert len(row_segments) == 3
         assert all(segment.bbox.bottom == top + 10 for segment in row_segments)
 
     rule_partition = next(
         node
         for node in result.segmentation.nodes
-        if node.parent_id == result.segmentation.root_node_id
-        and node.bbox.top == 0
+        if node.parent_id == result.segmentation.root_node_id and node.bbox.top == 0
     )
     assert rule_partition.child_ids
     assert rule_partition.axis is SplitAxis.ROWS
@@ -460,17 +406,10 @@ def test_rule_partition_uses_row_valley_without_fragmenting_columns() -> None:
         Box(108, 35, 189, 45),
         Box(50, 100, 121, 109),
     )
-    valley_node = next(
-        node
-        for node in result.segmentation.nodes
-        if node.split_coordinate == 35
-    )
+    valley_node = next(node for node in result.segmentation.nodes if node.split_coordinate == 35)
     assert valley_node.axis is SplitAxis.ROWS
     assert valley_node.separator_boxes == ()
-    assert not any(
-        node.axis is SplitAxis.COLUMNS
-        for node in result.segmentation.nodes
-    )
+    assert not any(node.axis is SplitAxis.COLUMNS for node in result.segmentation.nodes)
     assert_exact_foreground_count(result, int(ink_mask(image).sum()))
 
 
@@ -485,9 +424,7 @@ def test_large_imbalanced_safe_gap_keeps_aligned_minor_row_separate() -> None:
     for left in range(260, 401, 16):
         draw.rectangle((left, 20, left + 9, 51), fill=BLACK)
 
-    result = GeometryAnalyzer(
-        GeometryConfig(deskew_max_degrees=0.0)
-    ).analyze(image)
+    result = GeometryAnalyzer(GeometryConfig(deskew_max_degrees=0.0)).analyze(image)
 
     assert tuple(segment.bbox for segment in result.segmentation.segments) == (
         Box(12, 12, 93, 93),
@@ -497,8 +434,7 @@ def test_large_imbalanced_safe_gap_keeps_aligned_minor_row_separate() -> None:
     minority = result.segmentation.segments[-1]
     assert len(minority.component_ids) == 4
     assert any(
-        node.axis is SplitAxis.ROWS
-        and node.separator_boxes == (Box(0, 93, 420, 220),)
+        node.axis is SplitAxis.ROWS and node.separator_boxes == (Box(0, 93, 420, 220),)
         for node in result.segmentation.nodes
     )
     assert_exact_foreground_count(result, int(ink_mask(image).sum()))
@@ -524,14 +460,10 @@ def test_two_sided_rule_band_prefers_safe_rows_over_ordinary_columns() -> None:
         Box(20, 130, 51, 136),
     )
     assert any(
-        node.axis is SplitAxis.ROWS
-        and node.separator_boxes == (Box(0, 50, 360, 55),)
+        node.axis is SplitAxis.ROWS and node.separator_boxes == (Box(0, 50, 360, 55),)
         for node in result.segmentation.nodes
     )
-    assert not any(
-        node.axis is SplitAxis.COLUMNS
-        for node in result.segmentation.nodes
-    )
+    assert not any(node.axis is SplitAxis.COLUMNS for node in result.segmentation.nodes)
     assert_exact_foreground_count(result, int(ink_mask(image).sum()))
 
 
@@ -554,26 +486,14 @@ def test_local_broken_grid_comb_recovers_columns_before_second_partition() -> No
         draw.point((boundary, 45), fill=BLACK)
         draw.rectangle((boundary, 46, boundary + 1, 130), fill=BLACK)
 
-    bundle = GeometryAnalyzer(
-        GeometryConfig(deskew_max_degrees=0.0)
-    ).analyze_bundle(image)
+    bundle = GeometryAnalyzer(GeometryConfig(deskew_max_degrees=0.0)).analyze_bundle(image)
     result = bundle.result
 
-    recovered = next(
-        item for item in result.diagnostics if item.startswith("recovered_rule_bands=")
-    )
+    recovered = next(item for item in result.diagnostics if item.startswith("recovered_rule_bands="))
     assert recovered == f"recovered_rule_bands={len(boundaries) + 1}"
     assert "thin_line_segment_count=0" in result.diagnostics
-    vertical_rules = tuple(
-        rule
-        for rule in result.segmentation.rules
-        if rule.axis is RuleAxis.VERTICAL
-    )
-    horizontal_rules = tuple(
-        rule
-        for rule in result.segmentation.rules
-        if rule.axis is RuleAxis.HORIZONTAL
-    )
+    vertical_rules = tuple(rule for rule in result.segmentation.rules if rule.axis is RuleAxis.VERTICAL)
+    horizontal_rules = tuple(rule for rule in result.segmentation.rules if rule.axis is RuleAxis.HORIZONTAL)
     assert len(vertical_rules) == len(boundaries)
     assert len(horizontal_rules) == 1
     assert horizontal_rules[0].bbox == Box(10, 45, 431, 46)
@@ -747,9 +667,7 @@ def test_repeated_thin_printed_stems_without_grid_crossings_remain_text() -> Non
     for left in (20, 160, 320):
         draw.rectangle((left, 20, left + 1, 49), fill=BLACK)
 
-    result = GeometryAnalyzer(
-        GeometryConfig(deskew_max_degrees=0.0)
-    ).analyze(image)
+    result = GeometryAnalyzer(GeometryConfig(deskew_max_degrees=0.0)).analyze(image)
 
     assert result.segmentation.rules == ()
     assert tuple(segment.bbox for segment in result.segmentation.segments) == (
@@ -766,9 +684,7 @@ def test_standalone_printed_dashes_without_underline_context_remain_text() -> No
     for top in (16, 39, 62):
         draw.rectangle((40, top, 69, top + 1), fill=BLACK)
 
-    result = GeometryAnalyzer(
-        GeometryConfig(deskew_max_degrees=0.0)
-    ).analyze(image)
+    result = GeometryAnalyzer(GeometryConfig(deskew_max_degrees=0.0)).analyze(image)
 
     assert result.segmentation.rules == ()
     assert tuple(segment.bbox for segment in result.segmentation.segments) == (
@@ -791,11 +707,7 @@ def test_every_non_rule_foreground_component_has_one_owner() -> None:
 
     assert result.segmentation.rules == ()
     assert_exact_foreground_count(result, expected_ink)
-    component_ids = [
-        component_id
-        for segment in result.segmentation.segments
-        for component_id in segment.component_ids
-    ]
+    component_ids = [component_id for segment in result.segmentation.segments for component_id in segment.component_ids]
     assert len(component_ids) == len(set(component_ids))
     assert len(component_ids) == 3
     assert all(segment.component_ids for segment in result.segmentation.segments)
@@ -825,29 +737,22 @@ def test_sparse_cells_and_spans_are_complete_canonical_and_deterministic() -> No
             key=lambda cell: (cell.row, cell.column, cell.segment_id),
         )
     )
-    assert tuple(interval.index for interval in first.matrix.rows) == tuple(
-        range(len(first.matrix.rows))
-    )
-    assert tuple(interval.index for interval in first.matrix.columns) == tuple(
-        range(len(first.matrix.columns))
-    )
+    assert tuple(interval.index for interval in first.matrix.rows) == tuple(range(len(first.matrix.rows)))
+    assert tuple(interval.index for interval in first.matrix.columns) == tuple(range(len(first.matrix.columns)))
 
     for previous, current in zip(first.matrix.rows, first.matrix.rows[1:]):
         assert previous.end <= current.start
     for previous, current in zip(first.matrix.columns, first.matrix.columns[1:]):
         assert previous.end <= current.start
     for span in first.matrix.spans:
-        cells = [
-            cell for cell in first.matrix.cells if cell.segment_id == span.segment_id
-        ]
+        cells = [cell for cell in first.matrix.cells if cell.segment_id == span.segment_id]
         assert cells
         assert min(cell.row for cell in cells) == span.row_start
         assert max(cell.row for cell in cells) + 1 == span.row_stop
         assert min(cell.column for cell in cells) == span.column_start
         assert max(cell.column for cell in cells) + 1 == span.column_stop
         assert all(
-            span.row_start <= cell.row < span.row_stop
-            and span.column_start <= cell.column < span.column_stop
+            span.row_start <= cell.row < span.row_stop and span.column_start <= cell.column < span.column_stop
             for cell in cells
         )
 

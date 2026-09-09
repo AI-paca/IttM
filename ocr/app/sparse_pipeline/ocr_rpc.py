@@ -54,10 +54,7 @@ class ExternalOcrSpec:
         if self.engine not in {"easyocr", "glm_ocr"}:
             raise ValueError("external OCR engine is unsupported")
         if type(self.config) is not tuple or any(
-            type(item) is not tuple
-            or len(item) != 2
-            or type(item[0]) is not str
-            for item in self.config
+            type(item) is not tuple or len(item) != 2 or type(item[0]) is not str for item in self.config
         ):
             raise ValueError("external OCR config must be immutable key/value pairs")
         keys = tuple(item[0] for item in self.config)
@@ -67,11 +64,7 @@ class ExternalOcrSpec:
             self.startup_timeout_seconds,
             self.request_timeout_seconds,
         ):
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not 0.0 < float(value) <= 3_600.0
-            ):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0.0 < float(value) <= 3_600.0:
                 raise ValueError("external OCR timeouts must be positive and bounded")
 
 
@@ -85,9 +78,7 @@ class ExternalOcrWorker:
         if not executable.is_absolute():
             executable = executable.absolute()
         if not executable.is_file() or not os.access(executable, os.X_OK):
-            raise OcrExecutableUnavailableError(
-                f"external OCR Python is unavailable: {executable}"
-            )
+            raise OcrExecutableUnavailableError(f"external OCR Python is unavailable: {executable}")
         self.spec = spec
         self._lock = threading.Lock()
         self._request_id = 0
@@ -97,9 +88,7 @@ class ExternalOcrWorker:
         environment = os.environ.copy()
         existing_pythonpath = environment.get("PYTHONPATH")
         environment["PYTHONPATH"] = (
-            str(package_root)
-            if not existing_pythonpath
-            else str(package_root) + os.pathsep + existing_pythonpath
+            str(package_root) if not existing_pythonpath else str(package_root) + os.pathsep + existing_pythonpath
         )
         environment["HF_HUB_OFFLINE"] = "1"
         environment["TRANSFORMERS_OFFLINE"] = "1"
@@ -130,14 +119,8 @@ class ExternalOcrWorker:
                 start_new_session=True,
             )
         except OSError as exc:
-            raise OcrExecutableUnavailableError(
-                "external OCR process could not start"
-            ) from exc
-        if (
-            self._process.stdin is None
-            or self._process.stdout is None
-            or self._process.stderr is None
-        ):
+            raise OcrExecutableUnavailableError("external OCR process could not start") from exc
+        if self._process.stdin is None or self._process.stdout is None or self._process.stderr is None:
             self._process.kill()
             raise OcrWorkerProtocolError("external OCR pipes are unavailable")
         self._writer = self._process.stdin
@@ -154,20 +137,14 @@ class ExternalOcrWorker:
                 timeout=float(spec.startup_timeout_seconds),
             )
             if payload or ready.get("type") not in {"ready", "error"}:
-                raise OcrWorkerProtocolError(
-                    "external OCR startup handshake is malformed"
-                )
+                raise OcrWorkerProtocolError("external OCR startup handshake is malformed")
             if ready.get("type") == "error":
                 raise _remote_error(ready, self.bounded_logs)
             if ready.get("engine") != spec.engine:
-                raise OcrWorkerProtocolError(
-                    "external OCR startup engine identity disagrees"
-                )
+                raise OcrWorkerProtocolError("external OCR startup engine identity disagrees")
         except (socket.timeout, TimeoutError) as exc:
             self._terminate()
-            raise OcrInferenceTimeoutError(
-                "external OCR startup timed out"
-            ) from exc
+            raise OcrInferenceTimeoutError("external OCR startup timed out") from exc
         except (EOFError, OSError) as exc:
             try:
                 self._process.wait(timeout=2.0)
@@ -176,9 +153,7 @@ class ExternalOcrWorker:
                 pass
             logs = self.bounded_logs
             self._terminate()
-            raise OcrWorkerDiedError(
-                f"external OCR worker exited during startup: {logs}"
-            ) from exc
+            raise OcrWorkerDiedError(f"external OCR worker exited during startup: {logs}") from exc
         except Exception:
             self._terminate()
             raise
@@ -189,21 +164,15 @@ class ExternalOcrWorker:
 
     def recognize(self, png_bytes: bytes) -> OcrEngineOutput:
         if type(png_bytes) is not bytes or not png_bytes:
-            raise OcrInvalidEngineOutputError(
-                "external OCR input must be non-empty immutable bytes"
-            )
+            raise OcrInvalidEngineOutputError("external OCR input must be non-empty immutable bytes")
         if len(png_bytes) > _PAYLOAD_LIMIT:
-            raise OcrInvalidEngineOutputError(
-                "external OCR input exceeds its protocol payload limit"
-            )
+            raise OcrInvalidEngineOutputError("external OCR input exceeds its protocol payload limit")
         with self._lock:
             if self._closed:
                 raise OcrWorkerDiedError("external OCR worker is closed")
             if self._process.poll() is not None:
                 self._closed = True
-                raise OcrWorkerDiedError(
-                    f"external OCR worker exited: {self.bounded_logs}"
-                )
+                raise OcrWorkerDiedError(f"external OCR worker exited: {self.bounded_logs}")
             self._request_id += 1
             request_id = self._request_id
             digest = hashlib.sha256(png_bytes).hexdigest()
@@ -223,32 +192,19 @@ class ExternalOcrWorker:
                 )
             except (socket.timeout, TimeoutError) as exc:
                 self._terminate()
-                raise OcrInferenceTimeoutError(
-                    "external OCR request timed out"
-                ) from exc
+                raise OcrInferenceTimeoutError("external OCR request timed out") from exc
             except (BrokenPipeError, ConnectionError, EOFError, OSError) as exc:
                 self._terminate()
-                raise OcrWorkerDiedError(
-                    f"external OCR worker disconnected: {self.bounded_logs}"
-                ) from exc
+                raise OcrWorkerDiedError(f"external OCR worker disconnected: {self.bounded_logs}") from exc
             if payload:
                 self._terminate()
-                raise OcrWorkerProtocolError(
-                    "external OCR response unexpectedly contains binary payload"
-                )
-            if (
-                type(response.get("request_id")) is not int
-                or response.get("request_id") != request_id
-            ):
+                raise OcrWorkerProtocolError("external OCR response unexpectedly contains binary payload")
+            if type(response.get("request_id")) is not int or response.get("request_id") != request_id:
                 self._terminate()
-                raise OcrWorkerProtocolError(
-                    "external OCR response request ID disagrees"
-                )
+                raise OcrWorkerProtocolError("external OCR response request ID disagrees")
             if response.get("payload_sha256") != digest:
                 self._terminate()
-                raise OcrWorkerProtocolError(
-                    "external OCR response payload digest disagrees"
-                )
+                raise OcrWorkerProtocolError("external OCR response payload digest disagrees")
             if response.get("type") == "error":
                 error = _remote_error(response, self.bounded_logs)
                 if error.worker_poisoned:
@@ -256,9 +212,7 @@ class ExternalOcrWorker:
                 raise error
             if response.get("type") != "result":
                 self._terminate()
-                raise OcrWorkerProtocolError(
-                    "external OCR response type is invalid"
-                )
+                raise OcrWorkerProtocolError("external OCR response type is invalid")
             try:
                 raw_geometry = response["geometry"]
                 raw_text = response["text"]
@@ -282,9 +236,7 @@ class ExternalOcrWorker:
                         or any(type(value) is not int for value in raw_bbox)
                     ):
                         raise TypeError("OCR RPC word bbox must contain four integers")
-                    if isinstance(raw_confidence, bool) or not isinstance(
-                        raw_confidence, (int, float)
-                    ):
+                    if isinstance(raw_confidence, bool) or not isinstance(raw_confidence, (int, float)):
                         raise TypeError("OCR RPC word confidence must be numeric")
                     parsed_words.append(
                         OcrWord(
@@ -301,9 +253,7 @@ class ExternalOcrWorker:
                 )
             except (KeyError, TypeError, ValueError) as exc:
                 self._terminate()
-                raise OcrWorkerProtocolError(
-                    "external OCR result schema is invalid"
-                ) from exc
+                raise OcrWorkerProtocolError("external OCR result schema is invalid") from exc
 
     def close(self) -> None:
         with self._lock:
@@ -389,25 +339,17 @@ def _receive_frame(
     timeout: float,
 ) -> tuple[dict[str, object], bytes]:
     deadline = time.monotonic() + timeout
-    header_size = struct.unpack(
-        ">I", _read_exact(connection, 4, deadline=deadline)
-    )[0]
+    header_size = struct.unpack(">I", _read_exact(connection, 4, deadline=deadline))[0]
     if header_size < 2 or header_size > _HEADER_LIMIT:
         raise OcrWorkerProtocolError("OCR RPC header size is invalid")
     try:
-        header = json.loads(
-            _read_exact(connection, header_size, deadline=deadline).decode("utf-8")
-        )
+        header = json.loads(_read_exact(connection, header_size, deadline=deadline).decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise OcrWorkerProtocolError("OCR RPC header is invalid JSON") from exc
     if not isinstance(header, dict):
         raise OcrWorkerProtocolError("OCR RPC header must be an object")
     payload_length = header.get("payload_length")
-    if (
-        type(payload_length) is not int
-        or payload_length < 0
-        or payload_length > _PAYLOAD_LIMIT
-    ):
+    if type(payload_length) is not int or payload_length < 0 or payload_length > _PAYLOAD_LIMIT:
         raise OcrWorkerProtocolError("OCR RPC payload size is invalid")
     return header, _read_exact(connection, payload_length, deadline=deadline)
 
@@ -471,10 +413,8 @@ def _remote_error(
 ) -> OcrAdapterError:
     try:
         code = OcrFailureCode(str(response["failure_code"]))
-    except (KeyError, ValueError) as exc:
-        return OcrWorkerProtocolError(
-            f"external OCR returned an invalid failure code: {logs}"
-        )
+    except (KeyError, ValueError):
+        return OcrWorkerProtocolError(f"external OCR returned an invalid failure code: {logs}")
     error_type = str(response.get("error_type", "remote-error"))[:128]
     message = " ".join(str(response.get("message", "")).split())[:512]
     bounded_logs = " ".join(logs.split())[-512:]

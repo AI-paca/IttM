@@ -37,11 +37,7 @@ class IdentifierFusionDecision:
 
 
 def _identifier_token(text: str) -> str:
-    tokens = [
-        token.strip(".,;:()[]{}'\"")
-        for token in text.translate(_DASHES).split()
-        if token.count("-") >= 2
-    ]
+    tokens = [token.strip(".,;:()[]{}'\"") for token in text.translate(_DASHES).split() if token.count("-") >= 2]
     return max(tokens, key=lambda token: (token.count("-"), len(token)), default="")
 
 
@@ -93,10 +89,7 @@ def _observed_by_cell(
 ) -> dict[tuple[int, int], tuple[ObservedIdentifier, ...]]:
     rows_by_source = {
         "primary": table_words_to_rows(table, primary_words),
-        **{
-            source: table_words_to_rows(table, words)
-            for source, words in candidate_passes
-        },
+        **{source: table_words_to_rows(table, words) for source, words in candidate_passes},
     }
     observed: dict[tuple[int, int], tuple[ObservedIdentifier, ...]] = {}
     for row in range(table.rows):
@@ -138,9 +131,20 @@ def infer_relational_identifier_rules(
         if len(identifier_rows) < 4:
             continue
         segment_count = max(
-            {len(next(candidate for candidate in observed[(row, identifier_column)] if candidate.source == "primary").segments) for row in identifier_rows},
+            {
+                len(
+                    next(
+                        candidate for candidate in observed[(row, identifier_column)] if candidate.source == "primary"
+                    ).segments
+                )
+                for row in identifier_rows
+            },
             key=lambda count: sum(
-                len(next(candidate for candidate in observed[(row, identifier_column)] if candidate.source == "primary").segments)
+                len(
+                    next(
+                        candidate for candidate in observed[(row, identifier_column)] if candidate.source == "primary"
+                    ).segments
+                )
                 == count
                 for row in identifier_rows
             ),
@@ -151,10 +155,7 @@ def infer_relational_identifier_rules(
                 if reference_column == identifier_column:
                     continue
                 max_reference_segments = max(
-                    (
-                        len(_reference_segments(primary_rows[row][reference_column]))
-                        for row in identifier_rows
-                    ),
+                    (len(_reference_segments(primary_rows[row][reference_column])) for row in identifier_rows),
                     default=0,
                 )
                 for reference_segment in range(max_reference_segments):
@@ -162,13 +163,8 @@ def infer_relational_identifier_rules(
                     for row in identifier_rows:
                         references = _reference_segments(primary_rows[row][reference_column])
                         candidates = observed[(row, identifier_column)]
-                        primary = next(
-                            candidate for candidate in candidates if candidate.source == "primary"
-                        )
-                        if (
-                            reference_segment >= len(references)
-                            or identifier_segment >= len(primary.segments)
-                        ):
+                        primary = next(candidate for candidate in candidates if candidate.source == "primary")
+                        if reference_segment >= len(references) or identifier_segment >= len(primary.segments):
                             continue
                         reference = references[reference_segment].casefold()
                         eligible += 1
@@ -180,12 +176,7 @@ def infer_relational_identifier_rules(
                             for candidate in candidates
                         ):
                             support += 1
-                    if (
-                        eligible < 4
-                        or support < 4
-                        or primary_support < 2
-                        or support / eligible < 0.60
-                    ):
+                    if eligible < 4 or support < 4 or primary_support < 2 or support / eligible < 0.60:
                         continue
                     candidate_rule = RelationalSegmentRule(
                         identifier_column=identifier_column,
@@ -240,10 +231,7 @@ def fuse_relational_identifier_candidates(
         applied_rules = []
         for rule in rules_by_column[column]:
             references = _reference_segments(primary_rows[row][rule.reference_column])
-            if (
-                rule.identifier_segment >= len(selected_segments)
-                or rule.reference_segment >= len(references)
-            ):
+            if rule.identifier_segment >= len(selected_segments) or rule.reference_segment >= len(references):
                 continue
             wanted = references[rule.reference_segment]
             if selected_segments[rule.identifier_segment] == wanted:
@@ -263,16 +251,13 @@ def fuse_relational_identifier_candidates(
                         candidate
                         for candidate in candidates
                         if rule.identifier_segment < len(candidate.segments)
-                        and candidate.segments[rule.identifier_segment].casefold()
-                        == wanted.casefold()
+                        and candidate.segments[rule.identifier_segment].casefold() == wanted.casefold()
                     ),
                     None,
                 )
             if alternative is None:
                 continue
-            selected_segments[rule.identifier_segment] = alternative.segments[
-                rule.identifier_segment
-            ]
+            selected_segments[rule.identifier_segment] = alternative.segments[rule.identifier_segment]
             selected_sources[rule.identifier_segment] = alternative.source
             applied_rules.append(rule)
         selected = "-".join(selected_segments)
@@ -344,8 +329,7 @@ def words_outside_identifier_decisions(
         x = (bbox[0] + bbox[2]) / 2
         y = (bbox[1] + bbox[3]) / 2
         if any(
-            table.x_lines[column] < x < table.x_lines[column + 1]
-            and table.y_lines[row] < y < table.y_lines[row + 1]
+            table.x_lines[column] < x < table.x_lines[column + 1] and table.y_lines[row] < y < table.y_lines[row + 1]
             for row, column in cells
         ):
             continue

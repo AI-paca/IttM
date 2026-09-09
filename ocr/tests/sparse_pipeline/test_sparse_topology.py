@@ -27,11 +27,14 @@ def test_canonical_sparse_codes_are_additive() -> None:
     assert compose_sparse_code() == 0
     assert compose_sparse_code(merge_up=True, empty=True) == 10
     assert compose_sparse_code(merge_left=True, empty=True) == 12
-    assert compose_sparse_code(
-        merge_up=True,
-        merge_left=True,
-        empty=True,
-    ) == 15
+    assert (
+        compose_sparse_code(
+            merge_up=True,
+            merge_left=True,
+            empty=True,
+        )
+        == 15
+    )
     assert sparse_code_components(8) == frozenset((3, 5))
     assert sparse_code_components(10) == frozenset((3, 7))
     assert sparse_code_components(12) == frozenset((5, 7))
@@ -154,9 +157,7 @@ def test_observed_topology_rejects_unmaterialized_left_area() -> None:
         ValueError,
         match="leading and internal coordinates",
     ):
-        encode_observed_topology(
-            (ObservedTopologyRow(payload_columns=(2,)),)
-        )
+        encode_observed_topology((ObservedTopologyRow(payload_columns=(2,)),))
 
 
 def test_explicit_blank_row_breaks_payload_merge_up() -> None:

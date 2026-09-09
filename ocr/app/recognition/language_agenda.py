@@ -120,13 +120,8 @@ class LanguageAgenda:
             score += sidecar_scores.get(language, 0.0)
             weighted[language] = score
 
-        has_alpha_evidence = any(
-            counts.get(script, 0)
-            for script in ("latin", "cyrillic", "cjk", "greek")
-        )
-        if sum(weighted.values()) < 2 and not (
-            weighted.get("equ", 0.0) > 0 and not has_alpha_evidence
-        ):
+        has_alpha_evidence = any(counts.get(script, 0) for script in ("latin", "cyrillic", "cjk", "greek"))
+        if sum(weighted.values()) < 2 and not (weighted.get("equ", 0.0) > 0 and not has_alpha_evidence):
             return {}
         return normalize_probabilities(weighted)
 
@@ -140,9 +135,7 @@ class LanguageAgenda:
 
         priors = self.probabilities()
         updated = {
-            language: (priors.get(language, 0.0) * 0.72)
-            + (evidence.get(language, 0.0) * 0.28)
-            for language in priors
+            language: (priors.get(language, 0.0) * 0.72) + (evidence.get(language, 0.0) * 0.28) for language in priors
         }
         self._probabilities = normalize_probabilities(updated)
 
@@ -155,17 +148,11 @@ class LanguageAgenda:
     ) -> tuple[str, ...]:
         priors = self.probabilities()
         languages = list(self.single_language_candidates())
-        original_order = {
-            language: index
-            for index, language in enumerate(languages)
-        }
+        original_order = {language: index for index, language in enumerate(languages)}
         context_scores = self.context_evidence(context)
 
         def candidate_score(language: str) -> float:
-            return (
-                (priors.get(language, 0.0) * 10.0)
-                + (context_scores.get(language, 0.0) * 8.0)
-            )
+            return (priors.get(language, 0.0) * 10.0) + (context_scores.get(language, 0.0) * 8.0)
 
         ranked = sorted(
             languages,

@@ -79,10 +79,7 @@
     "libsystemd0",
     {
       "package": "libtesseract5",
-      "vulnerabilities": [
-        "CVE-2026-73066",
-        "CVE-2026-73067"
-      ],
+      "vulnerabilities": ["CVE-2026-73066", "CVE-2026-73067"],
       "reason": "Debian 13 has no FixedVersion. Both findings require crafted .traineddata, while runtime models are operator-controlled pinned assets and are not accepted from document uploads."
     },
     "libtiff6",
@@ -102,10 +99,7 @@
     "tar",
     {
       "package": "tesseract-ocr",
-      "vulnerabilities": [
-        "CVE-2026-73066",
-        "CVE-2026-73067"
-      ],
+      "vulnerabilities": ["CVE-2026-73066", "CVE-2026-73067"],
       "reason": "Debian 13 has no FixedVersion. Both findings require crafted .traineddata, while runtime models are operator-controlled pinned assets and are not accepted from document uploads."
     },
     "util-linux",

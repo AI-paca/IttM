@@ -26,9 +26,7 @@ from tests.sparse_pipeline.test_document_assembly_stage7 import (
 
 def _structural_kind(name: str) -> Any:
     enum_type = getattr(document_assembly, "StructuralUnitKind", None)
-    assert enum_type is not None, (
-        "Stage 7 must expose StructuralUnitKind independently of ObjectKind"
-    )
+    assert enum_type is not None, "Stage 7 must expose StructuralUnitKind independently of ObjectKind"
     return getattr(enum_type, name)
 
 
@@ -41,9 +39,7 @@ def _assemble_words(
 
 def _assert_canonical_unit_ids(result: object) -> None:
     units = getattr(result, "structural_units")
-    assert tuple(unit.unit_id for unit in units) == tuple(
-        f"unit-{index:08d}" for index in range(len(units))
-    )
+    assert tuple(unit.unit_id for unit in units) == tuple(f"unit-{index:08d}" for index in range(len(units)))
 
 
 def _assert_payload_once_in_order(
@@ -53,11 +49,7 @@ def _assert_payload_once_in_order(
     compact = compact_ocr_text(value)
     assert compact == "".join(compact_ocr_text(item) for item in expected)
     counts = Counter(compact)
-    assert counts == Counter(
-        character
-        for item in expected
-        for character in compact_ocr_text(item)
-    )
+    assert counts == Counter(character for item in expected for character in compact_ocr_text(item))
 
 
 def _sparse_table_with_empty_cell() -> GeometryResult:
@@ -404,15 +396,13 @@ def test_paragraph_has_one_canonical_unit_per_visual_row() -> None:
         _structural_kind("PARAGRAPH_LINE"),
     )
     assert tuple(unit.segment_ids for unit in units) == (("p-0",), ("p-1",))
-    assert tuple(
-        (unit.row_start, unit.row_stop, unit.column_start, unit.column_stop)
-        for unit in units
-    ) == ((0, 1, 0, 1), (1, 2, 0, 1))
+    assert tuple((unit.row_start, unit.row_stop, unit.column_start, unit.column_stop) for unit in units) == (
+        (0, 1, 0, 1),
+        (1, 2, 0, 1),
+    )
     assert tuple(unit.text for unit in units) == tuple(texts.values())
     _assert_canonical_unit_ids(result)
-    assert result.objects[0].structural_unit_ids == tuple(
-        unit.unit_id for unit in units
-    )
+    assert result.objects[0].structural_unit_ids == tuple(unit.unit_id for unit in units)
 
 
 def test_list_has_one_marker_and_body_unit_per_visual_row() -> None:
@@ -428,9 +418,7 @@ def test_list_has_one_marker_and_body_unit_per_visual_row() -> None:
 
     units = result.structural_units
     assert len(units) == 3
-    assert all(
-        unit.unit_kind is _structural_kind("LIST_ITEM") for unit in units
-    )
+    assert all(unit.unit_kind is _structural_kind("LIST_ITEM") for unit in units)
     assert tuple(unit.segment_ids for unit in units) == (
         ("marker-0", "item-0"),
         ("marker-1", "item-1"),
@@ -444,9 +432,7 @@ def test_list_has_one_marker_and_body_unit_per_visual_row() -> None:
     for index, unit in enumerate(units):
         expected = texts[f"marker-{index}"], texts[f"item-{index}"]
         _assert_payload_once_in_order(unit.text, expected)
-    assert result.objects[0].structural_unit_ids == tuple(
-        unit.unit_id for unit in units
-    )
+    assert result.objects[0].structural_unit_ids == tuple(unit.unit_id for unit in units)
 
 
 def test_sparse_table_materializes_empty_cells_in_row_major_order() -> None:
@@ -465,9 +451,7 @@ def test_sparse_table_materializes_empty_cells_in_row_major_order() -> None:
 
     units = result.structural_units
     assert len(units) == 6
-    assert all(
-        unit.unit_kind is _structural_kind("TABLE_CELL") for unit in units
-    )
+    assert all(unit.unit_kind is _structural_kind("TABLE_CELL") for unit in units)
     assert tuple((unit.row_start, unit.column_start) for unit in units) == (
         (1, 1),
         (1, 3),
@@ -487,18 +471,13 @@ def test_sparse_table_materializes_empty_cells_in_row_major_order() -> None:
         empty.column_start,
         empty.column_stop,
     ) == (3, 4, 3, 4)
-    assert result.objects[0].structural_unit_ids == tuple(
-        unit.unit_id for unit in units
-    )
+    assert result.objects[0].structural_unit_ids == tuple(unit.unit_id for unit in units)
     assert result.candidate_markdown.splitlines() == [
         "| 甲 | Б | C |",
         "| δ |  | 五 |",
     ]
     assert "|  |" in result.candidate_markdown
-    assert all(
-        line.count("|") == 4
-        for line in result.candidate_markdown.splitlines()
-    )
+    assert all(line.count("|") == 4 for line in result.candidate_markdown.splitlines())
 
 
 def test_spanning_table_cell_is_one_unit_with_one_sparse_span() -> None:
@@ -517,11 +496,7 @@ def test_spanning_table_cell_is_one_unit_with_one_sparse_span() -> None:
         result.objects[0].table_column_indices,
     ) == ((1, 3), (1, 3, 5))
 
-    spanning = tuple(
-        unit
-        for unit in result.structural_units
-        if "s-top-wide" in unit.segment_ids
-    )
+    spanning = tuple(unit for unit in result.structural_units if "s-top-wide" in unit.segment_ids)
     assert len(spanning) == 1
     unit = spanning[0]
     assert unit.unit_kind is _structural_kind("TABLE_CELL")
@@ -529,11 +504,14 @@ def test_spanning_table_cell_is_one_unit_with_one_sparse_span() -> None:
     assert (unit.row_start, unit.row_stop) == (1, 2)
     assert (unit.column_start, unit.column_stop) == (1, 4)
     assert unit.text == texts["s-top-wide"]
-    assert sum(
-        candidate.text.count(texts["s-top-wide"])
-        for candidate in result.structural_units
-        if candidate.text is not None
-    ) == 1
+    assert (
+        sum(
+            candidate.text.count(texts["s-top-wide"])
+            for candidate in result.structural_units
+            if candidate.text is not None
+        )
+        == 1
+    )
     assert result.candidate_markdown.splitlines() == [
         "| SPAN文字 | ::merge-left:: | TOP |",
         "| L | M | R |",
@@ -598,9 +576,7 @@ def test_table_preserves_completely_empty_outer_rows_and_columns() -> None:
             {"o-11": "A", "o-12": "B", "o-21": "C", "o-22": "D"},
         ),
     )
-    assert tuple(item.kind for item in fixture.objects.objects) == (
-        ObjectKind.TABLE,
-    )
+    assert tuple(item.kind for item in fixture.objects.objects) == (ObjectKind.TABLE,)
     document_object = fixture.objects.objects[0]
     assert (
         document_object.row_start,
@@ -697,14 +673,10 @@ def test_consecutive_table_objects_keep_disjoint_ordered_unit_sets() -> None:
     first_ids = first.objects[0].structural_unit_ids
     second_ids = first.objects[1].structural_unit_ids
     assert first_ids == tuple(
-        unit.unit_id
-        for unit in first.structural_units
-        if unit.object_id == first.objects[0].object_id
+        unit.unit_id for unit in first.structural_units if unit.object_id == first.objects[0].object_id
     )
     assert second_ids == tuple(
-        unit.unit_id
-        for unit in first.structural_units
-        if unit.object_id == first.objects[1].object_id
+        unit.unit_id for unit in first.structural_units if unit.object_id == first.objects[1].object_id
     )
     assert first_ids == tuple(f"unit-{index:08d}" for index in range(4))
     assert second_ids == tuple(f"unit-{index:08d}" for index in range(4, 8))
@@ -724,9 +696,7 @@ def test_consecutive_table_objects_keep_disjoint_ordered_unit_sets() -> None:
 def test_single_line_unknown_object_is_an_unknown_fragment_unit() -> None:
     geometry = _geometry(
         aligned_size=(96, 24),
-        segments=(
-            _segment("u-0", Box(4, 4, 92, 18), row_index=0, component_id=0),
-        ),
+        segments=(_segment("u-0", Box(4, 4, 92, 18), row_index=0, component_id=0),),
         matrix=_matrix(
             row_edges=(0, 24),
             column_edges=(0, 96),
@@ -739,9 +709,6 @@ def test_single_line_unknown_object_is_an_unknown_fragment_unit() -> None:
     result = _assemble(fixture)
 
     assert len(result.structural_units) == 1
-    assert (
-        result.structural_units[0].unit_kind
-        is _structural_kind("UNKNOWN_FRAGMENT")
-    )
+    assert result.structural_units[0].unit_kind is _structural_kind("UNKNOWN_FRAGMENT")
     assert result.structural_units[0].segment_ids == ("u-0",)
     assert result.structural_units[0].text == "heading"

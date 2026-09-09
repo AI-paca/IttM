@@ -104,10 +104,7 @@ def test_runtime_executes_frozen_order_and_returns_certified_evidence() -> None:
         assert result.evidence.queue.failed == 0
         assert result.evidence.stage4 is None
         assert result.evidence.geometry.aligned_rgb_sha256
-        assert (
-            result.evidence.geometry.matrix.coordinate_mode
-            is SparseCoordinateMode.PIXEL_PARTITION
-        )
+        assert result.evidence.geometry.matrix.coordinate_mode is SparseCoordinateMode.PIXEL_PARTITION
         assert state["factory"] == 1
         assert state["recognize"] == len(result.evidence.queue.jobs) == 2
 
@@ -127,9 +124,7 @@ def test_service_reuses_one_thread_affine_worker_across_pages_and_closes_once() 
         first_result = service.convert_page(first, page_id="document-p001")
         second_result = service.convert_page(second, page_id="document-p002")
 
-        expected_jobs = len(first_result.evidence.queue.jobs) + len(
-            second_result.evidence.queue.jobs
-        )
+        expected_jobs = len(first_result.evidence.queue.jobs) + len(second_result.evidence.queue.jobs)
         assert state == {
             "factory": 1,
             "recognize": expected_jobs,

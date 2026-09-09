@@ -41,18 +41,14 @@ class ObjectArtifactWriter:
                 temporary_dir.rename(run_dir)
             except OSError as exc:
                 if run_dir.exists():
-                    raise FileExistsError(
-                        f"debug run already exists: {run_dir}"
-                    ) from exc
+                    raise FileExistsError(f"debug run already exists: {run_dir}") from exc
                 raise
             return run_dir
         except Exception:
             shutil.rmtree(temporary_dir, ignore_errors=True)
             raise
 
-    def _write_result(
-        self, stage_dir: Path, result: ObjectReconstructionResult
-    ) -> None:
+    def _write_result(self, stage_dir: Path, result: ObjectReconstructionResult) -> None:
         objects = tuple(
             sorted(
                 result.objects,
@@ -60,9 +56,7 @@ class ObjectArtifactWriter:
             )
         )
         source_segment_ids = tuple(result.source_segment_ids)
-        source_order = {
-            segment_id: index for index, segment_id in enumerate(source_segment_ids)
-        }
+        source_order = {segment_id: index for index, segment_id in enumerate(source_segment_ids)}
         ownership = tuple(
             sorted(
                 result.segment_ownership,
@@ -99,8 +93,7 @@ class ObjectArtifactWriter:
         )
         self._write_text(
             stage_dir / "reading-order.txt",
-            "\n".join(self._reading_order_line(item) for item in objects)
-            + ("\n" if objects else ""),
+            "\n".join(self._reading_order_line(item) for item in objects) + ("\n" if objects else ""),
         )
         self._write_text(
             stage_dir / "diagnostics.txt",
@@ -135,10 +128,7 @@ class ObjectArtifactWriter:
         if isinstance(value, Enum):
             return cls._json_value(value.value)
         if is_dataclass(value) and not isinstance(value, type):
-            return {
-                field.name: cls._json_value(getattr(value, field.name))
-                for field in fields(value)
-            }
+            return {field.name: cls._json_value(getattr(value, field.name)) for field in fields(value)}
         if isinstance(value, Mapping):
             return {str(key): cls._json_value(item) for key, item in value.items()}
         if isinstance(value, (tuple, list)):

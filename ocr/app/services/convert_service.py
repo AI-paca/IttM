@@ -16,7 +16,6 @@ from PIL import Image, ImageOps
 from app.chunking.dedupe import dedupe_chunks
 from app.chunking.aligned_rows import aligned_numeric_text_to_markdown
 from app.chunking.vertical import (
-    analyze_document_layout,
     erase_table_lines_for_ocr,
     LayoutRegion,
     _curriculum_title_page_grid_to_markdown,
@@ -374,17 +373,11 @@ def _parse_pdf_text_layer_bbox_pages(html: str) -> list[_PdfTextLayerPage | None
         for line in page.iter():
             if _xml_tag_name(line) != "line":
                 continue
-            line_words = [
-                word for word in line.iter() if _xml_tag_name(word) == "word"
-            ]
+            line_words = [word for word in line.iter() if _xml_tag_name(word) == "word"]
             if not line_words:
                 continue
             try:
-                text = " ".join(
-                    value
-                    for word in line_words
-                    if (value := "".join(word.itertext()).strip())
-                )
+                text = " ".join(value for word in line_words if (value := "".join(word.itertext()).strip()))
                 if not text:
                     continue
                 words.append(
@@ -1862,9 +1855,7 @@ def _pdf_text_layer_fixed_width_objects(text: str) -> tuple[list[_PdfFixedWidthO
         table_like_rows = sum(1 for row in merged_run if len(row) >= 3)
         if len(run) >= 2 and max_width >= 3 and table_like_rows >= max(1, len(run) // 3):
             rows = tuple(
-                tuple(_markdown_cell(cell) for cell in row)
-                for row in merged_run
-                if any(cell.strip() for cell in row)
+                tuple(_markdown_cell(cell) for cell in row) for row in merged_run if any(cell.strip() for cell in row)
             )
             if rows:
                 flush_plain()
@@ -1952,10 +1943,7 @@ def _pdf_text_layer_rust_markdown(page: _PdfTextLayerPage) -> tuple[str, dict]:
                     default=1,
                 ),
                 max(
-                    (
-                        int(cell["column"]) + int(cell["columnSpan"])
-                        for cell in cells
-                    ),
+                    (int(cell["column"]) + int(cell["columnSpan"]) for cell in cells),
                     default=1,
                 ),
             )
@@ -1973,9 +1961,7 @@ def _pdf_text_layer_rust_markdown(page: _PdfTextLayerPage) -> tuple[str, dict]:
         )
         for segment in parts["segments"]
     ]
-    table_objects = [
-        item for item in parts["objects"] if item.get("kind") in {"table", "small_table"}
-    ]
+    table_objects = [item for item in parts["objects"] if item.get("kind") in {"table", "small_table"}]
     return core.assemble_topology(0, layouts, segments), {
         "objects": len(parts["objects"]),
         "tables_found": len(table_objects),
@@ -2207,9 +2193,7 @@ def _render_pdf_text_layer_markdown_pages(
         return PdfTextLayerArtifact(
             pages=tuple(page_candidates),
             counters=(("tables_found", 0), ("table_cells", 0)),
-            flags=(
-                "pdf_text_layer:bbox_unavailable",
-            ),
+            flags=("pdf_text_layer:bbox_unavailable",),
             layout_step="pdf_text_layer_raw",
         )
 

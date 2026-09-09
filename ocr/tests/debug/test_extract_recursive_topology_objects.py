@@ -4,12 +4,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
-SCRIPT = (
-    Path(__file__).resolve().parents[3]
-    / "scripts"
-    / "debug"
-    / "extract_recursive_topology_objects.py"
-)
+SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "debug" / "extract_recursive_topology_objects.py"
 
 
 def _load_script():
@@ -45,9 +40,7 @@ def test_table_local_matrix_uses_only_its_rule_lattice_rows() -> None:
     # Page topology was subdivided by unrelated finite flow outside the table.
     rows = tuple(
         module.NumericRow(index, top, bottom, ())
-        for index, (top, bottom) in enumerate(
-            ((0, 4), (4, 10), (10, 15), (15, 20))
-        )
+        for index, (top, bottom) in enumerate(((0, 4), (4, 10), (10, 15), (15, 20)))
     )
     network = module.RuledNetwork(
         bbox=(0, 0, 20, 20),
@@ -148,9 +141,7 @@ def test_single_interval_uses_numeric_anchor_when_only_two_columns_have_payload(
                 for column, (left, right) in enumerate(zip(x_lines, x_lines[1:]))
             ),
         )
-        for index, (top, bottom, codes) in enumerate(
-            ((0, 5, first_codes), (5, 30, second_codes))
-        )
+        for index, (top, bottom, codes) in enumerate(((0, 5, first_codes), (5, 30, second_codes)))
     )
     network = module.RuledNetwork(
         bbox=(0, 0, 50, 30),
@@ -281,9 +272,7 @@ def test_topology_slice_does_not_invent_merge_edges_inside_one_object() -> None:
     )
     segment_by_id = {
         "left": module.PartitionSegment("left", (0, 0, 10, 20), ("geo-root",)),
-        "right": module.PartitionSegment(
-            "right", (10, 0, 20, 20), ("geo-root",)
-        ),
+        "right": module.PartitionSegment("right", (10, 0, 20, 20), ("geo-root",)),
     }
     rows = (
         module.NumericRow(
@@ -353,11 +342,6 @@ def test_owned_speck_inside_coarse_empty_cell_stays_explicit_payload() -> None:
         networks=(),
     )
 
-    payload_slots = [
-        slot
-        for row in matrix["rows"]
-        for slot in row["segments"]
-        if slot["state"] == "payload"
-    ]
+    payload_slots = [slot for row in matrix["rows"] for slot in row["segments"] if slot["state"] == "payload"]
     assert len(payload_slots) == 1
     assert payload_slots[0]["source_segment_ids"] == ["speck"]

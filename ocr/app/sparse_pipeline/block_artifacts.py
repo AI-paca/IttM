@@ -53,13 +53,10 @@ class BlockArtifactWriter:
             if crop.bbox != block.bbox or crop.segment_ids != block.segment_ids:
                 raise ValueError(f"crop {crop.block_id} disagrees with its block plan")
             if any(
-                segment_id not in plan.source_segment_ids
-                or segment_id in block.segment_ids
+                segment_id not in plan.source_segment_ids or segment_id in block.segment_ids
                 for segment_id in crop.masked_segment_ids
             ):
-                raise ValueError(
-                    f"crop {crop.block_id} isolation scope is invalid"
-                )
+                raise ValueError(f"crop {crop.block_id} isolation scope is invalid")
         self._validate_matrix(plan=plan, matrix=matrix)
         self._validate_page_crops(page, plan=plan, crops=crops)
 
@@ -140,9 +137,7 @@ class BlockArtifactWriter:
                 expected = page_rgb.crop(crop.bbox.as_tuple())
                 try:
                     if crop.isolation_mask_png is not None:
-                        with Image.open(
-                            io.BytesIO(crop.isolation_mask_png)
-                        ) as mask:
+                        with Image.open(io.BytesIO(crop.isolation_mask_png)) as mask:
                             mask.load()
                             expected.paste((255, 255, 255), mask=mask)
                     with Image.open(io.BytesIO(crop.raw.png_bytes)) as raw:
@@ -204,9 +199,7 @@ class BlockArtifactWriter:
             if crop.isolation_mask_png is not None:
                 mask_path = isolation_dir / f"{block.block_id}.png"
                 mask_path.write_bytes(crop.isolation_mask_png)
-                isolation_path = (
-                    f"isolation-masks/{block.block_id}.png"
-                )
+                isolation_path = f"isolation-masks/{block.block_id}.png"
             entries.append(
                 {
                     "block_id": block.block_id,
@@ -264,17 +257,10 @@ class BlockArtifactWriter:
         ]
         if membership_entries:
             (stage_dir / "membership-units.jsonl").write_text(
-                "".join(
-                    json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n"
-                    for entry in membership_entries
-                ),
+                "".join(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n" for entry in membership_entries),
                 encoding="utf-8",
             )
-        full_width = all(
-            item.bbox.left == 0
-            and item.bbox.right == plan.aligned_size[0]
-            for item in plan.blocks
-        )
+        full_width = all(item.bbox.left == 0 and item.bbox.right == plan.aligned_size[0] for item in plan.blocks)
         overlap_connected = BlockArtifactWriter._scope_overlap_connected(plan)
         diagnostics = (
             "stage=5 overlapping-blocks\n"
@@ -329,9 +315,7 @@ class BlockArtifactWriter:
         if not plan.blocks:
             return True
         if all(item.scope_id is None for item in plan.blocks):
-            return len(plan.blocks) <= 1 or len(plan.adjacent_algebra) >= len(
-                plan.blocks
-            ) - 1
+            return len(plan.blocks) <= 1 or len(plan.adjacent_algebra) >= len(plan.blocks) - 1
         by_scope: dict[str, list[int]] = {}
         for index, block in enumerate(plan.blocks):
             if block.scope_id is None:
@@ -348,9 +332,7 @@ class BlockArtifactWriter:
                 for neighbour in indexes:
                     if neighbour in reached:
                         continue
-                    if current_members.intersection(
-                        plan.blocks[neighbour].segment_ids
-                    ):
+                    if current_members.intersection(plan.blocks[neighbour].segment_ids):
                         reached.add(neighbour)
                         pending.append(neighbour)
             if reached != set(indexes):

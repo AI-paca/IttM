@@ -13,9 +13,7 @@ from PIL import Image, UnidentifiedImageError
 
 GAMMA_DARK = 1.2
 RECIPE_ID = "kornia-gamma-dark-v1"
-DARK_SMALL_TEXT_NORMALIZATION_ID = (
-    "dark-sparse-xheight-kornia-gamma-source-scale-v1"
-)
+DARK_SMALL_TEXT_NORMALIZATION_ID = "dark-sparse-xheight-kornia-gamma-source-scale-v1"
 CANDIDATE_ROLE = "optional-preprocessing-candidate"
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 _SAFE_CROP_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -29,13 +27,9 @@ _DARK_TEXT_X_HEIGHT_MAX = 14.0
 
 
 def _otsu_foreground(grayscale: np.ndarray) -> tuple[float, np.ndarray]:
-    histogram = np.bincount(grayscale.ravel(), minlength=256).astype(
-        np.float64
-    )
+    histogram = np.bincount(grayscale.ravel(), minlength=256).astype(np.float64)
     total = float(grayscale.size)
-    weighted_total = float(
-        np.dot(np.arange(256, dtype=np.float64), histogram)
-    )
+    weighted_total = float(np.dot(np.arange(256, dtype=np.float64), histogram))
     background_weight = 0.0
     background_sum = 0.0
     best_variance = -1.0
@@ -49,14 +43,8 @@ def _otsu_foreground(grayscale: np.ndarray) -> tuple[float, np.ndarray]:
             break
         background_sum += threshold * float(count)
         background_mean = background_sum / background_weight
-        foreground_mean = (
-            weighted_total - background_sum
-        ) / foreground_weight
-        variance = (
-            background_weight
-            * foreground_weight
-            * (background_mean - foreground_mean) ** 2
-        )
+        foreground_mean = (weighted_total - background_sum) / foreground_weight
+        variance = background_weight * foreground_weight * (background_mean - foreground_mean) ** 2
         if variance > best_variance:
             best_variance = variance
             best_threshold = threshold
@@ -97,16 +85,10 @@ def _foreground_component_stats(
             run_id = len(runs)
             parent.append(run_id)
             runs.append((left, right, top, right - left))
-            while (
-                previous_index < len(previous)
-                and previous[previous_index][1] < left - 1
-            ):
+            while previous_index < len(previous) and previous[previous_index][1] < left - 1:
                 previous_index += 1
             overlap_index = previous_index
-            while (
-                overlap_index < len(previous)
-                and previous[overlap_index][0] <= right
-            ):
+            while overlap_index < len(previous) and previous[overlap_index][0] <= right:
                 union(run_id, previous[overlap_index][2])
                 overlap_index += 1
             current.append((left, right, run_id))
@@ -124,10 +106,7 @@ def _foreground_component_stats(
         value[2] = min(value[2], top)
         value[3] = max(value[3], top + 1)
         value[4] += area
-    return tuple(
-        (right - left, bottom - top, area)
-        for left, right, top, bottom, area in aggregates.values()
-    )
+    return tuple((right - left, bottom - top, area) for left, right, top, bottom, area in aggregates.values())
 
 
 class EnhancementBackend(str, Enum):
@@ -316,29 +295,18 @@ def normalize_dark_small_text_for_ocr(
     """
 
     if type(png_bytes) is not bytes or not png_bytes:
-        raise CropEnhancementInvariantError(
-            "small-text normalization requires immutable PNG bytes"
-        )
+        raise CropEnhancementInvariantError("small-text normalization requires immutable PNG bytes")
     if type(dpi) is not int or not 1 <= dpi <= 2_400:
         raise ValueError("small-text normalization DPI is invalid")
     if type(max_input_pixels) is not int or max_input_pixels < 1:
         raise ValueError("small-text normalization pixel limit must be positive")
     try:
         with Image.open(io.BytesIO(png_bytes)) as opened:
-            if (
-                opened.format != "PNG"
-                or getattr(opened, "n_frames", 1) != 1
-            ):
-                raise CropEnhancementInvariantError(
-                    "small-text normalization requires one PNG frame"
-                )
+            if opened.format != "PNG" or getattr(opened, "n_frames", 1) != 1:
+                raise CropEnhancementInvariantError("small-text normalization requires one PNG frame")
             opened.load()
             width, height = opened.size
-            if (
-                width < 1
-                or height < 1
-                or width * height > max_input_pixels
-            ):
+            if width < 1 or height < 1 or width * height > max_input_pixels:
                 return None
             source_mode = opened.mode
             if source_mode in {"RGBA", "LA"} or "transparency" in opened.info:
@@ -363,9 +331,7 @@ def normalize_dark_small_text_for_ocr(
     except CropEnhancementInvariantError:
         raise
     except (OSError, UnidentifiedImageError, SyntaxError, ValueError) as exc:
-        raise CropEnhancementInvariantError(
-            "small-text normalization input is not a valid PNG"
-        ) from exc
+        raise CropEnhancementInvariantError("small-text normalization input is not a valid PNG") from exc
 
     background = float(np.median(grayscale))
     if background > _DARK_BACKGROUND_MAX:
@@ -373,13 +339,8 @@ def normalize_dark_small_text_for_ocr(
     _threshold, foreground = _otsu_foreground(grayscale)
     contrast = float(np.percentile(grayscale, 99.0)) - background
     foreground_ratio = float(np.mean(foreground))
-    if (
-        contrast < _DARK_TEXT_CONTRAST_MIN
-        or not (
-            _DARK_TEXT_FOREGROUND_MIN
-            <= foreground_ratio
-            <= _DARK_TEXT_FOREGROUND_MAX
-        )
+    if contrast < _DARK_TEXT_CONTRAST_MIN or not (
+        _DARK_TEXT_FOREGROUND_MIN <= foreground_ratio <= _DARK_TEXT_FOREGROUND_MAX
     ):
         return None
 
@@ -411,9 +372,7 @@ def normalize_dark_small_text_for_ocr(
         max_batch_pixels=max_input_pixels,
         dpi=dpi,
     )
-    return GammaDarkCropEnhancer(config).enhance(
-        CropInput("tesseract-dark-small-text", png_bytes)
-    ).png_bytes
+    return GammaDarkCropEnhancer(config).enhance(CropInput("tesseract-dark-small-text", png_bytes)).png_bytes
 
 
 class GammaDarkCropEnhancer:

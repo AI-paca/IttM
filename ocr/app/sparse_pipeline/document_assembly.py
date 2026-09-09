@@ -36,7 +36,6 @@ from app.sparse_pipeline.ocr_fusion import (
     OcrFusionConfig,
     OcrFusionResult,
     SegmentFusion,
-    SegmentGroupFusion,
     SegmentGroupObservation,
     SegmentObservation,
     compact_ocr_text,
@@ -157,9 +156,7 @@ class EvidenceSlice:
         )
         if any(type(value) is not str or not value for value in identifiers):
             raise ValueError("evidence slice identifiers must not be empty")
-        if self.observation_id is not None and (
-            type(self.observation_id) is not str or not self.observation_id
-        ):
+        if self.observation_id is not None and (type(self.observation_id) is not str or not self.observation_id):
             raise ValueError("evidence observation identifier is invalid")
         if not isinstance(self.transform, OcrTransform):
             raise ValueError("evidence transform is invalid")
@@ -187,11 +184,7 @@ class EvidenceSlice:
         ):
             raise ValueError("evidence output offsets are invalid")
         for digest in (self.input_sha256, self.context_sha256):
-            if (
-                type(digest) is not str
-                or len(digest) != 64
-                or any(value not in "0123456789abcdef" for value in digest)
-            ):
+            if type(digest) is not str or len(digest) != 64 or any(value not in "0123456789abcdef" for value in digest):
                 raise ValueError("evidence digest is invalid")
 
 
@@ -214,11 +207,7 @@ class SegmentTextAssembly:
             raise ValueError("segment candidate text must be a string")
         if self.text is not None and self.text != self.candidate_text:
             raise ValueError("certified segment text must equal its candidate")
-        expected = (
-            AssemblyStatus.COMPLETE
-            if self.text is not None
-            else AssemblyStatus.UNRESOLVED
-        )
+        expected = AssemblyStatus.COMPLETE if self.text is not None else AssemblyStatus.UNRESOLVED
         if self.status is not expected:
             raise ValueError("segment assembly status disagrees with text")
         if self.attribution_level is not AttributionLevel.SEGMENT:
@@ -258,19 +247,14 @@ class StructuralUnit:
         if not self.segment_ids and self.unit_kind is not StructuralUnitKind.TABLE_CELL:
             raise ValueError("only a table cell may be structurally empty")
         if min(self.row_start, self.column_start) < 0 or (
-            self.row_stop <= self.row_start
-            or self.column_stop <= self.column_start
+            self.row_stop <= self.row_start or self.column_stop <= self.column_start
         ):
             raise ValueError("structural unit sparse span is invalid")
         if type(self.candidate_text) is not str:
             raise ValueError("structural unit candidate must be a string")
         if self.text is not None and self.text != self.candidate_text:
             raise ValueError("certified unit text must equal its candidate")
-        expected = (
-            AssemblyStatus.COMPLETE
-            if self.text is not None
-            else AssemblyStatus.UNRESOLVED
-        )
+        expected = AssemblyStatus.COMPLETE if self.text is not None else AssemblyStatus.UNRESOLVED
         if self.status is not expected:
             raise ValueError("structural unit status disagrees with text")
 
@@ -326,11 +310,7 @@ class ObjectTextAssembly:
             raise ValueError("certified table Markdown disagrees with its candidate")
         if (self.text is None) != (self.markdown is None):
             raise ValueError("object text and Markdown certification disagree")
-        expected = (
-            AssemblyStatus.COMPLETE
-            if self.text is not None
-            else AssemblyStatus.UNRESOLVED
-        )
+        expected = AssemblyStatus.COMPLETE if self.text is not None else AssemblyStatus.UNRESOLVED
         if self.status is not expected:
             raise ValueError("object assembly status disagrees with text")
 
@@ -356,9 +336,7 @@ class DocumentAssemblyResult:
             raise ValueError("segment assemblies must follow canonical source order")
         if tuple(item.object_id for item in self.objects) != self.source_object_ids:
             raise ValueError("object assemblies must follow reading order")
-        if self.source_block_ids != tuple(
-            f"block-{index:06d}" for index in range(len(self.source_block_ids))
-        ):
+        if self.source_block_ids != tuple(f"block-{index:06d}" for index in range(len(self.source_block_ids))):
             raise ValueError("source block identifiers must be canonical")
         if tuple(item.slice_id for item in self.evidence_slices) != tuple(
             f"evidence-{index:08d}" for index in range(len(self.evidence_slices))
@@ -372,11 +350,7 @@ class DocumentAssemblyResult:
             raise ValueError("certified document text must equal its candidate")
         if (self.text is None) != (self.markdown is None):
             raise ValueError("document text and Markdown certification disagree")
-        expected = (
-            AssemblyStatus.COMPLETE
-            if self.text is not None
-            else AssemblyStatus.UNRESOLVED
-        )
+        expected = AssemblyStatus.COMPLETE if self.text is not None else AssemblyStatus.UNRESOLVED
         if self.status is not expected:
             raise ValueError("document assembly status disagrees with text")
         object_candidates = tuple(item.candidate_text for item in self.objects)
@@ -384,9 +358,7 @@ class DocumentAssemblyResult:
             expected_candidate = "\n\n".join(object_candidates)
             if self.candidate_text != expected_candidate:
                 raise ValueError("document candidate disagrees with object order")
-            expected_markdown = "\n\n".join(
-                item.candidate_markdown for item in self.objects
-            )
+            expected_markdown = "\n\n".join(item.candidate_markdown for item in self.objects)
         elif not self.objects:
             expected_candidate = ""
             expected_markdown = ""
@@ -408,31 +380,20 @@ class DocumentAssemblyResult:
         object_segments = {item.object_id: set(item.segment_ids) for item in self.objects}
         if set(object_segments) != source_objects:
             raise ValueError("object records disagree with source object IDs")
-        flattened_segments = tuple(
-            segment_id for item in self.objects for segment_id in item.segment_ids
-        )
-        if len(flattened_segments) != len(set(flattened_segments)) or set(
-            flattened_segments
-        ) != source_segments:
+        flattened_segments = tuple(segment_id for item in self.objects for segment_id in item.segment_ids)
+        if len(flattened_segments) != len(set(flattened_segments)) or set(flattened_segments) != source_segments:
             raise ValueError("object records must exactly partition source segments")
         for item in self.evidence_slices:
             if item.block_id not in source_blocks:
                 raise ValueError("evidence slice references foreign source records")
             if item.attribution_level is AttributionLevel.UNATTRIBUTABLE:
                 if not set(item.segment_ids).issubset(source_segments):
-                    raise ValueError(
-                        "unattributable evidence references foreign segments"
-                    )
-            elif (
-                item.object_id not in source_objects
-                or not set(item.segment_ids).issubset(
-                    object_segments[item.object_id]
-                )
+                    raise ValueError("unattributable evidence references foreign segments")
+            elif item.object_id not in source_objects or not set(item.segment_ids).issubset(
+                object_segments[item.object_id]
             ):
                 raise ValueError("evidence slice references foreign source records")
-        units_by_object: dict[str, list[StructuralUnit]] = {
-            item: [] for item in self.source_object_ids
-        }
+        units_by_object: dict[str, list[StructuralUnit]] = {item: [] for item in self.source_object_ids}
         for item in self.structural_units:
             if (
                 item.object_id not in source_objects
@@ -440,10 +401,7 @@ class DocumentAssemblyResult:
                 or not set(item.evidence_slice_ids).issubset(evidence_ids)
             ):
                 raise ValueError("structural unit references foreign records")
-            if any(
-                evidence_by_id[slice_id].object_id != item.object_id
-                for slice_id in item.evidence_slice_ids
-            ):
+            if any(evidence_by_id[slice_id].object_id != item.object_id for slice_id in item.evidence_slice_ids):
                 raise ValueError("structural unit references another object's evidence")
             units_by_object[item.object_id].append(item)
         segment_by_id = {item.segment_id: item for item in self.segments}
@@ -462,9 +420,7 @@ class DocumentAssemblyResult:
             ):
                 raise ValueError("segment assembly references unrelated evidence")
         referenced_evidence: set[str] = {
-            item.slice_id
-            for item in self.evidence_slices
-            if item.attribution_level is AttributionLevel.UNATTRIBUTABLE
+            item.slice_id for item in self.evidence_slices if item.attribution_level is AttributionLevel.UNATTRIBUTABLE
         }
         for item in self.objects:
             object_units = tuple(units_by_object[item.object_id])
@@ -473,23 +429,11 @@ class DocumentAssemblyResult:
                 raise ValueError("object structural units are incomplete or reordered")
             if not set(item.evidence_slice_ids).issubset(evidence_ids):
                 raise ValueError("object references foreign evidence")
-            if any(
-                evidence_by_id[slice_id].object_id != item.object_id
-                for slice_id in item.evidence_slice_ids
-            ):
+            if any(evidence_by_id[slice_id].object_id != item.object_id for slice_id in item.evidence_slice_ids):
                 raise ValueError("object references another object's evidence")
-            unit_segment_ids = tuple(
-                segment_id
-                for unit in object_units
-                for segment_id in unit.segment_ids
-            )
-            if (
-                len(unit_segment_ids) != len(set(unit_segment_ids))
-                or set(unit_segment_ids) != set(item.segment_ids)
-            ):
-                raise ValueError(
-                    "structural units must exactly partition object segments"
-                )
+            unit_segment_ids = tuple(segment_id for unit in object_units for segment_id in unit.segment_ids)
+            if len(unit_segment_ids) != len(set(unit_segment_ids)) or set(unit_segment_ids) != set(item.segment_ids):
+                raise ValueError("structural units must exactly partition object segments")
             expected_object_markdown = DocumentAssembler._object_markdown(
                 item.kind,
                 item.candidate_text,
@@ -500,14 +444,10 @@ class DocumentAssemblyResult:
             if item.candidate_markdown != expected_object_markdown:
                 raise ValueError("object Markdown disagrees with structural units")
             referenced_evidence.update(item.evidence_slice_ids)
-        referenced_evidence.update(
-            slice_id for item in self.segments for slice_id in item.evidence_slice_ids
-        )
+        referenced_evidence.update(slice_id for item in self.segments for slice_id in item.evidence_slice_ids)
         if referenced_evidence != evidence_ids:
             raise ValueError("document contains orphaned evidence slices")
-        if unit_ids != {
-            unit_id for item in self.objects for unit_id in item.structural_unit_ids
-        }:
+        if unit_ids != {unit_id for item in self.objects for unit_id in item.structural_unit_ids}:
             raise ValueError("document contains orphaned structural units")
         for item in self.evidence_slices:
             if item.output_stop > len(self.candidate_text):
@@ -518,9 +458,7 @@ class DocumentAssemblyResult:
             output_key = (item.output_start, item.output_stop)
             compact_output = compact_output_cache.get(output_key)
             if compact_output is None:
-                compact_output = compact_ocr_text(
-                    self.candidate_text[item.output_start : item.output_stop]
-                )
+                compact_output = compact_ocr_text(self.candidate_text[item.output_start : item.output_stop])
                 compact_output_cache[output_key] = compact_output
             compact_evidence = compact_evidence_cache.get(item.text)
             if compact_evidence is None:
@@ -537,9 +475,7 @@ class DocumentAssemblyResult:
             for index, character in enumerate(self.candidate_text):
                 active += coverage_delta[index]
                 if not character.isspace() and active < 1:
-                    raise ValueError(
-                        "certified output contains codepoints without evidence"
-                    )
+                    raise ValueError("certified output contains codepoints without evidence")
 
 
 @dataclass(frozen=True)
@@ -677,27 +613,16 @@ class DocumentAssembler:
             fusion_config=fusion_config,
         )
 
-        owner_by_segment = {
-            item.segment_id: item.object_id for item in objects.segment_ownership
-        }
+        owner_by_segment = {item.segment_id: item.object_id for item in objects.segment_ownership}
         span_by_id = {item.segment_id: item for item in geometry.matrix.spans}
-        coordinates_by_segment: dict[str, list[tuple[int, int]]] = {
-            item: [] for item in plan.source_segment_ids
-        }
+        coordinates_by_segment: dict[str, list[tuple[int, int]]] = {item: [] for item in plan.source_segment_ids}
         for cell in geometry.matrix.cells:
-            coordinates_by_segment[cell.segment_id].append(
-                (cell.row, cell.column)
-            )
+            coordinates_by_segment[cell.segment_id].append((cell.row, cell.column))
         sparse_coordinates_by_segment = {
-            segment_id: tuple(coordinates)
-            for segment_id, coordinates in coordinates_by_segment.items()
+            segment_id: tuple(coordinates) for segment_id, coordinates in coordinates_by_segment.items()
         }
-        observation_by_id = {
-            item.observation_id: item for item in fusion.observations
-        }
-        group_observation_by_id = {
-            item.observation_id: item for item in fusion.group_observations
-        }
+        observation_by_id = {item.observation_id: item for item in fusion.observations}
+        group_observation_by_id = {item.observation_id: item for item in fusion.group_observations}
         job_by_id = {item.job_id: item for item in queue.jobs}
         fused_by_id = {item.segment_id: item for item in fusion.segments}
         segment_values = self._segment_assemblies(
@@ -705,17 +630,13 @@ class DocumentAssembler:
             fusion=fusion,
             owner_by_segment=owner_by_segment,
         )
-        segment_assembly_by_id = {
-            item.segment_id: item for item in segment_values
-        }
+        segment_assembly_by_id = {item.segment_id: item for item in segment_values}
         block_decisions = self._block_decisions(
             plan=plan,
             queue=queue,
             fusion=fusion,
         )
-        direct_decisions_by_segments: dict[
-            tuple[str, ...], list[_BlockDecision]
-        ] = {}
+        direct_decisions_by_segments: dict[tuple[str, ...], list[_BlockDecision]] = {}
         for decision in block_decisions:
             if decision.candidate is not None:
                 direct_decisions_by_segments.setdefault(
@@ -763,9 +684,7 @@ class DocumentAssembler:
                     document_object.object_id,
                     (),
                 ),
-                structural_drafts=structural_drafts_by_object[
-                    document_object.object_id
-                ],
+                structural_drafts=structural_drafts_by_object[document_object.object_id],
             )
             rendered.append(value)
 
@@ -782,13 +701,9 @@ class DocumentAssembler:
         object_texts = tuple(item.candidate_text for item in rendered)
         fallback_decisions: tuple[_BlockDecision, ...] = ()
         if objects.objects and any(object_texts):
-            projected_text_characters = sum(map(len, object_texts)) + 2 * (
-                len(object_texts) - 1
-            )
+            projected_text_characters = sum(map(len, object_texts)) + 2 * (len(object_texts) - 1)
             if projected_text_characters > self.config.max_text_characters:
-                raise DocumentAssemblyLimitError(
-                    "assembled output exceeds configured character limit"
-                )
+                raise DocumentAssemblyLimitError("assembled output exceeds configured character limit")
             candidate_text, object_offsets = self._join_with_offsets(
                 object_texts,
                 separator="\n\n",
@@ -796,27 +711,15 @@ class DocumentAssembler:
         elif not objects.objects:
             candidate_text, object_offsets = "", ()
         else:
-            fallback_decisions = tuple(
-                item
-                for item in block_decisions
-                if item.candidate is not None
-            )
-            fallback = tuple(
-                item.candidate.text
-                for item in fallback_decisions
-                if item.candidate is not None
-            )
+            fallback_decisions = tuple(item for item in block_decisions if item.candidate is not None)
+            fallback = tuple(item.candidate.text for item in fallback_decisions if item.candidate is not None)
             candidate_text = "\n".join(dict.fromkeys(fallback))
             object_offsets = tuple((0, 0) for _ in objects.objects)
             document_certified = False
-            global_reasons = tuple(
-                dict.fromkeys(global_reasons + ("unattributable-block-text",))
-            )
+            global_reasons = tuple(dict.fromkeys(global_reasons + ("unattributable-block-text",)))
 
         if len(candidate_text) > self.config.max_text_characters:
-            raise DocumentAssemblyLimitError(
-                "assembled output exceeds configured character limit"
-            )
+            raise DocumentAssemblyLimitError("assembled output exceeds configured character limit")
 
         evidence_slices, slice_ids_by_object = self._finalize_evidence(
             rendered=tuple(rendered),
@@ -830,14 +733,10 @@ class DocumentAssembler:
                 first_index=len(evidence_slices),
             )
         if len(evidence_slices) > self.config.max_evidence_slices:
-            raise DocumentAssemblyLimitError(
-                "evidence slice count exceeds configured limit"
-            )
+            raise DocumentAssemblyLimitError("evidence slice count exceeds configured limit")
 
         segment_evidence_ids: dict[tuple[str, str], list[str]] = {}
-        group_evidence_ids: dict[
-            tuple[str, tuple[str, ...]], list[str]
-        ] = {}
+        group_evidence_ids: dict[tuple[str, tuple[str, ...]], list[str]] = {}
         object_evidence_ids: dict[str, list[str]] = {}
         evidence_by_id = {item.slice_id: item for item in evidence_slices}
         for item in evidence_slices:
@@ -855,19 +754,13 @@ class DocumentAssembler:
                     [],
                 ).append(item.slice_id)
             elif item.attribution_level is AttributionLevel.OBJECT:
-                object_evidence_ids.setdefault(item.object_id, []).append(
-                    item.slice_id
-                )
+                object_evidence_ids.setdefault(item.object_id, []).append(item.slice_id)
 
         structural_units: list[StructuralUnit] = []
         object_values: list[ObjectTextAssembly] = []
-        for index, (document_object, value) in enumerate(
-            zip(objects.objects, rendered)
-        ):
+        for index, (document_object, value) in enumerate(zip(objects.objects, rendered)):
             object_certified = value.certified and not global_reasons
-            combined_reasons = tuple(
-                dict.fromkeys(value.reasons + global_reasons)
-            )
+            combined_reasons = tuple(dict.fromkeys(value.reasons + global_reasons))
             drafts = structural_drafts_by_object[document_object.object_id]
             whole_object_group = (
                 document_object.kind is not ObjectKind.TABLE
@@ -893,13 +786,8 @@ class DocumentAssembler:
                         column_stop=document_object.column_stop,
                     ),
                 )
-            if (
-                len(structural_units) + len(drafts)
-                > self.config.max_structural_units
-            ):
-                raise DocumentAssemblyLimitError(
-                    "structural unit count exceeds configured limit"
-                )
+            if len(structural_units) + len(drafts) > self.config.max_structural_units:
+                raise DocumentAssemblyLimitError("structural unit count exceeds configured limit")
             object_unit_ids: list[str] = []
             object_units: list[StructuralUnit] = []
             for draft in drafts:
@@ -907,8 +795,7 @@ class DocumentAssembler:
                 object_unit_ids.append(unit_id)
                 whole_object_evidence = (
                     draft.segment_ids == document_object.segment_ids
-                    and value.attribution_level
-                    in {AttributionLevel.OBJECT, AttributionLevel.SEGMENT_GROUP}
+                    and value.attribution_level in {AttributionLevel.OBJECT, AttributionLevel.SEGMENT_GROUP}
                 )
                 matching_group_ids = tuple(
                     group_evidence_ids.get(
@@ -917,35 +804,19 @@ class DocumentAssembler:
                     )
                 )
                 if matching_group_ids:
-                    group_texts = tuple(
-                        evidence_by_id[item].text for item in matching_group_ids
-                    )
-                    compact_group_texts = {
-                        compact_ocr_text(item) for item in group_texts
-                    }
+                    group_texts = tuple(evidence_by_id[item].text for item in matching_group_ids)
+                    compact_group_texts = {compact_ocr_text(item) for item in group_texts}
                     unit_candidate = group_texts[0]
-                    unit_certified = (
-                        object_certified and len(compact_group_texts) == 1
-                    )
+                    unit_certified = object_certified and len(compact_group_texts) == 1
                 elif whole_object_evidence:
                     unit_candidate = value.candidate_text
                     unit_certified = object_certified
                 else:
-                    unit_segments = tuple(
-                        segment_assembly_by_id[item]
-                        for item in draft.segment_ids
-                    )
-                    unit_candidate = " ".join(
-                        item.candidate_text
-                        for item in unit_segments
-                        if item.candidate_text
-                    )
+                    unit_segments = tuple(segment_assembly_by_id[item] for item in draft.segment_ids)
+                    unit_candidate = " ".join(item.candidate_text for item in unit_segments if item.candidate_text)
                     unit_certified = (
                         not global_reasons
-                        and all(
-                            item.status is AssemblyStatus.COMPLETE
-                            for item in unit_segments
-                        )
+                        and all(item.status is AssemblyStatus.COMPLETE for item in unit_segments)
                         and (bool(unit_segments) or not draft.segment_ids)
                     )
                 unit_evidence_ids = {
@@ -984,11 +855,7 @@ class DocumentAssembler:
                     candidate_text=unit_candidate,
                     text=unit_text,
                     evidence_slice_ids=unit_slice_ids,
-                    status=(
-                        AssemblyStatus.COMPLETE
-                        if unit_text is not None
-                        else AssemblyStatus.UNRESOLVED
-                    ),
+                    status=(AssemblyStatus.COMPLETE if unit_text is not None else AssemblyStatus.UNRESOLVED),
                     reasons=combined_reasons,
                 )
                 structural_units.append(unit)
@@ -1016,20 +883,14 @@ class DocumentAssembler:
                     markdown=candidate_markdown if object_certified else None,
                     structural_unit_ids=tuple(object_unit_ids),
                     evidence_slice_ids=slice_ids_by_object[index],
-                    status=(
-                        AssemblyStatus.COMPLETE
-                        if object_certified
-                        else AssemblyStatus.UNRESOLVED
-                    ),
+                    status=(AssemblyStatus.COMPLETE if object_certified else AssemblyStatus.UNRESOLVED),
                     table_row_indices=table_row_indices,
                     table_column_indices=table_column_indices,
                     reasons=combined_reasons,
                 )
             )
 
-        segment_slice_ids: dict[str, list[str]] = {
-            item: [] for item in plan.source_segment_ids
-        }
+        segment_slice_ids: dict[str, list[str]] = {item: [] for item in plan.source_segment_ids}
         for item in evidence_slices:
             if item.attribution_level is AttributionLevel.SEGMENT:
                 for segment_id in item.segment_ids:
@@ -1042,14 +903,10 @@ class DocumentAssembler:
             for item in segment_values
         )
         candidate_markdown = (
-            "\n\n".join(item.candidate_markdown for item in object_values)
-            if any(object_texts)
-            else candidate_text
+            "\n\n".join(item.candidate_markdown for item in object_values) if any(object_texts) else candidate_text
         )
         if len(candidate_markdown) > self.config.max_markdown_characters:
-            raise DocumentAssemblyLimitError(
-                "assembled Markdown exceeds configured character limit"
-            )
+            raise DocumentAssemblyLimitError("assembled Markdown exceeds configured character limit")
         diagnostics = (
             "assembly=object-scoped",
             "reference-evidence=forbidden",
@@ -1071,11 +928,7 @@ class DocumentAssembler:
             text=candidate_text if document_certified else None,
             candidate_markdown=candidate_markdown,
             markdown=candidate_markdown if document_certified else None,
-            status=(
-                AssemblyStatus.COMPLETE
-                if document_certified
-                else AssemblyStatus.UNRESOLVED
-            ),
+            status=(AssemblyStatus.COMPLETE if document_certified else AssemblyStatus.UNRESOLVED),
             diagnostics=diagnostics,
         )
 
@@ -1097,35 +950,21 @@ class DocumentAssembler:
         if not isinstance(geometry, GeometryResult):
             raise DocumentAssemblyInvariantError("geometry must be a GeometryResult")
         if not isinstance(objects, ObjectReconstructionResult):
-            raise DocumentAssemblyInvariantError(
-                "objects must be an ObjectReconstructionResult"
-            )
+            raise DocumentAssemblyInvariantError("objects must be an ObjectReconstructionResult")
         if not isinstance(plan, BlockPlan):
             raise DocumentAssemblyInvariantError("plan must be a BlockPlan")
-        if type(crops) is not tuple or any(
-            not isinstance(item, BlockCropPair) for item in crops
-        ):
-            raise DocumentAssemblyInvariantError(
-                "crops must be an immutable BlockCropPair tuple"
-            )
+        if type(crops) is not tuple or any(not isinstance(item, BlockCropPair) for item in crops):
+            raise DocumentAssemblyInvariantError("crops must be an immutable BlockCropPair tuple")
         if not isinstance(queue, OcrQueueResult):
             raise DocumentAssemblyInvariantError("queue must be an OcrQueueResult")
         if not isinstance(fusion, OcrFusionResult):
             raise DocumentAssemblyInvariantError("fusion must be an OcrFusionResult")
         if (ownership is None) != (ownership_segment_ids is None):
-            raise DocumentAssemblyInvariantError(
-                "ownership raster and segment order must be supplied together"
-            )
+            raise DocumentAssemblyInvariantError("ownership raster and segment order must be supplied together")
         if ownership is not None and not isinstance(ownership, np.ndarray):
-            raise DocumentAssemblyInvariantError(
-                "ownership must be a NumPy array or None"
-            )
-        if ownership_segment_ids is not None and type(
-            ownership_segment_ids
-        ) is not tuple:
-            raise DocumentAssemblyInvariantError(
-                "ownership segment order must be an immutable tuple or None"
-            )
+            raise DocumentAssemblyInvariantError("ownership must be a NumPy array or None")
+        if ownership_segment_ids is not None and type(ownership_segment_ids) is not tuple:
+            raise DocumentAssemblyInvariantError("ownership segment order must be an immutable tuple or None")
 
     def _check_limits(
         self,
@@ -1146,59 +985,34 @@ class DocumentAssembler:
         )
         for name, value, limit in counts:
             if value > limit:
-                raise DocumentAssemblyLimitError(
-                    f"{name} count {value} exceeds configured limit {limit}"
-                )
-        observed_characters = sum(
-            len(item.output.text)
-            for item in queue.jobs
-            if item.output is not None
-        )
+                raise DocumentAssemblyLimitError(f"{name} count {value} exceeds configured limit {limit}")
+        observed_characters = sum(len(item.output.text) for item in queue.jobs if item.output is not None)
         if observed_characters > self.config.max_text_characters:
-            raise DocumentAssemblyLimitError(
-                "observed OCR text exceeds configured character limit"
-            )
+            raise DocumentAssemblyLimitError("observed OCR text exceeds configured character limit")
         routed_word_characters = sum(
-            len(word.text)
-            for item in queue.jobs
-            if item.output is not None
-            for word in item.output.words
+            len(word.text) for item in queue.jobs if item.output is not None for word in item.output.words
         )
         if routed_word_characters > self.config.max_text_characters:
-            raise DocumentAssemblyLimitError(
-                "observed OCR word text exceeds configured character limit"
-            )
+            raise DocumentAssemblyLimitError("observed OCR word text exceeds configured character limit")
         crop_sizes = tuple(
             size
             for item in crops
             for size in (
                 len(item.raw.png_bytes),
                 len(item.gamma.png_bytes),
-                (
-                    len(item.isolation_mask_png)
-                    if item.isolation_mask_png is not None
-                    else 0
-                ),
+                (len(item.isolation_mask_png) if item.isolation_mask_png is not None else 0),
             )
             if size
         )
         if any(size > self.config.max_crop_bytes for size in crop_sizes):
-            raise DocumentAssemblyLimitError(
-                "one crop payload exceeds configured byte limit"
-            )
+            raise DocumentAssemblyLimitError("one crop payload exceeds configured byte limit")
         if sum(crop_sizes) > self.config.max_total_crop_bytes:
-            raise DocumentAssemblyLimitError(
-                "aggregate crop payload exceeds configured byte limit"
-            )
+            raise DocumentAssemblyLimitError("aggregate crop payload exceeds configured byte limit")
         potential_slices = (
-            len(fusion.observations)
-            + len(fusion.group_observations)
-            + len(fusion.block_text_observations)
+            len(fusion.observations) + len(fusion.group_observations) + len(fusion.block_text_observations)
         )
         if potential_slices > self.config.max_evidence_slices:
-            raise DocumentAssemblyLimitError(
-                "potential evidence slices exceed configured limit"
-            )
+            raise DocumentAssemblyLimitError("potential evidence slices exceed configured limit")
 
     @staticmethod
     def _validate_provenance(
@@ -1226,13 +1040,9 @@ class DocumentAssembler:
                 matrix=geometry.matrix,
             )
         except Exception as exc:
-            raise DocumentAssemblyInvariantError(
-                f"stage 6 object reconstruction failed validation: {exc}"
-            ) from exc
+            raise DocumentAssemblyInvariantError(f"stage 6 object reconstruction failed validation: {exc}") from exc
         if objects != expected_objects:
-            raise DocumentAssemblyInvariantError(
-                "stage 6 object result was not reconstructed from geometry"
-            )
+            raise DocumentAssemblyInvariantError("stage 6 object result was not reconstructed from geometry")
         try:
             expected_plan = OverlappingBlockPlanner(planning_config).plan(
                 aligned_size=segmentation.aligned_size,
@@ -1241,30 +1051,19 @@ class DocumentAssembler:
                 matrix=geometry.matrix,
             )
         except Exception as exc:
-            raise DocumentAssemblyInvariantError(
-                f"stage 5 block planning failed validation: {exc}"
-            ) from exc
+            raise DocumentAssemblyInvariantError(f"stage 5 block planning failed validation: {exc}") from exc
         if plan != expected_plan:
-            raise DocumentAssemblyInvariantError(
-                "stage 5 block plan was not derived from geometry and objects"
-            )
-        owner_by_segment = {
-            item.segment_id: item.object_id for item in objects.segment_ownership
-        }
+            raise DocumentAssemblyInvariantError("stage 5 block plan was not derived from geometry and objects")
+        owner_by_segment = {item.segment_id: item.object_id for item in objects.segment_ownership}
         for block, crop in zip(plan.blocks, crops):
             block_owner = owner_by_segment[block.segment_ids[0]]
             if any(
-                segment_id not in owner_by_segment
-                or owner_by_segment[segment_id] == block_owner
+                segment_id not in owner_by_segment or owner_by_segment[segment_id] == block_owner
                 for segment_id in crop.masked_segment_ids
             ):
-                raise DocumentAssemblyInvariantError(
-                    f"stage 5 crop {crop.block_id} has invalid foreign ownership"
-                )
+                raise DocumentAssemblyInvariantError(f"stage 5 crop {crop.block_id} has invalid foreign ownership")
         try:
-            expected_crops, aligned_rgb_sha256 = BlockCropper(
-                crop_config
-            ).crop_with_rgb_sha256(
+            expected_crops, aligned_rgb_sha256 = BlockCropper(crop_config).crop_with_rgb_sha256(
                 page,
                 aligned_size=segmentation.aligned_size,
                 plan=plan,
@@ -1273,33 +1072,21 @@ class DocumentAssembler:
                 isolation_source=crops,
             )
         except Exception as exc:
-            raise DocumentAssemblyInvariantError(
-                f"stage 4 crop generation failed validation: {exc}"
-            ) from exc
+            raise DocumentAssemblyInvariantError(f"stage 4 crop generation failed validation: {exc}") from exc
         if crops != expected_crops:
-            raise DocumentAssemblyInvariantError(
-                "stage 4 crops were not derived from the supplied aligned page"
-            )
+            raise DocumentAssemblyInvariantError("stage 4 crops were not derived from the supplied aligned page")
         if geometry.aligned_rgb_sha256 != aligned_rgb_sha256:
-            raise DocumentAssemblyInvariantError(
-                "stage 1 geometry was not derived from the supplied aligned RGB page"
-            )
+            raise DocumentAssemblyInvariantError("stage 1 geometry was not derived from the supplied aligned RGB page")
         if (
             plan.aligned_size != objects.aligned_size
             or plan.source_segment_ids != objects.source_segment_ids
             or fusion.source_segment_ids != plan.source_segment_ids
         ):
-            raise DocumentAssemblyInvariantError(
-                "stage 1/6/5/2 segment order or canvas disagrees"
-            )
+            raise DocumentAssemblyInvariantError("stage 1/6/5/2 segment order or canvas disagrees")
         for block in plan.blocks:
-            expected_core_owners = tuple(
-                dict.fromkeys(owner_by_segment[item] for item in block.core_segment_ids)
-            )
+            expected_core_owners = tuple(dict.fromkeys(owner_by_segment[item] for item in block.core_segment_ids))
             if block.object_ids != expected_core_owners:
-                raise DocumentAssemblyInvariantError(
-                    "stage 5 block object IDs do not match core segment ownership"
-                )
+                raise DocumentAssemblyInvariantError("stage 5 block object IDs do not match core segment ownership")
         try:
             expected_fusion = OcrEvidenceFusion(fusion_config).fuse(
                 plan=plan,
@@ -1308,13 +1095,9 @@ class DocumentAssembler:
                 queue=queue,
             )
         except Exception as exc:
-            raise DocumentAssemblyInvariantError(
-                f"stage 2 queue/crop/fusion validation failed: {exc}"
-            ) from exc
+            raise DocumentAssemblyInvariantError(f"stage 2 queue/crop/fusion validation failed: {exc}") from exc
         if fusion != expected_fusion:
-            raise DocumentAssemblyInvariantError(
-                "stage 2 fusion was not derived from the supplied queue and crops"
-            )
+            raise DocumentAssemblyInvariantError("stage 2 fusion was not derived from the supplied queue and crops")
 
     @staticmethod
     def _segment_assemblies(
@@ -1327,9 +1110,7 @@ class DocumentAssembler:
         for item in fusion.segments:
             candidate = item.selected_text or ""
             certified = (
-                item.selected_text is not None
-                and bool(compact_ocr_text(item.selected_text))
-                and not item.unresolved
+                item.selected_text is not None and bool(compact_ocr_text(item.selected_text)) and not item.unresolved
             )
             reasons = tuple(item.uncertainty_reasons)
             if not candidate:
@@ -1343,18 +1124,12 @@ class DocumentAssembler:
                     attribution_level=AttributionLevel.SEGMENT,
                     selected_observation_id=item.selected_observation_id,
                     evidence_slice_ids=(),
-                    status=(
-                        AssemblyStatus.COMPLETE
-                        if certified
-                        else AssemblyStatus.UNRESOLVED
-                    ),
+                    status=(AssemblyStatus.COMPLETE if certified else AssemblyStatus.UNRESOLVED),
                     reasons=reasons,
                 )
             )
         if tuple(item.segment_id for item in values) != objects.source_segment_ids:
-            raise DocumentAssemblyInvariantError(
-                "segment assemblies do not follow stage 6 source order"
-            )
+            raise DocumentAssemblyInvariantError("segment assemblies do not follow stage 6 source order")
         return tuple(values)
 
     @staticmethod
@@ -1364,14 +1139,10 @@ class DocumentAssembler:
         queue: OcrQueueResult,
         fusion: OcrFusionResult,
     ) -> tuple[_BlockDecision, ...]:
-        by_block: dict[str, list[BlockTextObservation]] = {
-            item.block_id: [] for item in plan.blocks
-        }
+        by_block: dict[str, list[BlockTextObservation]] = {item.block_id: [] for item in plan.blocks}
         for item in fusion.block_text_observations:
             by_block[item.block_id].append(item)
-        jobs_by_block: dict[str, list[OcrJobResult]] = {
-            item.block_id: [] for item in plan.blocks
-        }
+        jobs_by_block: dict[str, list[OcrJobResult]] = {item.block_id: [] for item in plan.blocks}
         for item in queue.jobs:
             jobs_by_block[item.block_id].append(item)
         values = []
@@ -1379,11 +1150,7 @@ class DocumentAssembler:
             observations = tuple(by_block[block.block_id])
             scheduled_jobs = tuple(jobs_by_block[block.block_id])
             candidate = next(
-                (
-                    item
-                    for item in observations
-                    if item.transform is OcrTransform.RAW
-                ),
+                (item for item in observations if item.transform is OcrTransform.RAW),
                 observations[0] if observations else None,
             )
             reasons: list[str] = []
@@ -1394,13 +1161,9 @@ class DocumentAssembler:
                 reasons.append("capability-replica-conflict")
             if any(item.status is not OcrJobStatus.COMPLETE for item in scheduled_jobs):
                 reasons.append("capability-job-failed")
-            by_capability: dict[
-                str, dict[OcrTransform, list[BlockTextObservation]]
-            ] = {}
+            by_capability: dict[str, dict[OcrTransform, list[BlockTextObservation]]] = {}
             for item in observations:
-                by_capability.setdefault(item.capability_id, {}).setdefault(
-                    item.transform, []
-                ).append(item)
+                by_capability.setdefault(item.capability_id, {}).setdefault(item.transform, []).append(item)
             stable: list[BlockTextObservation] = []
             # A WORD_BOXES capability is represented by segment observations,
             # not by block-text observations.  Require the RAW/GAMMA pair only
@@ -1428,8 +1191,7 @@ class DocumentAssembler:
                 for item in observations
                 if stable_candidate is not None
                 and item is not stable_candidate
-                and compact_ocr_text(item.text)
-                == compact_ocr_text(stable_candidate.text)
+                and compact_ocr_text(item.text) == compact_ocr_text(stable_candidate.text)
             )
             if stable_candidate is not None:
                 candidate = stable_candidate
@@ -1455,15 +1217,11 @@ class DocumentAssembler:
         values: dict[str, list[_MembershipGroupRecovery]] = {}
         observations_by_unit: dict[str, list[SegmentGroupObservation]] = {}
         for observation in fusion.group_observations:
-            observations_by_unit.setdefault(
-                observation.unit_id, []
-            ).append(observation)
+            observations_by_unit.setdefault(observation.unit_id, []).append(observation)
         for item in fusion.segment_groups:
             owners = {owner_by_segment[value] for value in item.segment_ids}
             if len(owners) != 1:
-                raise DocumentAssemblyInvariantError(
-                    "segment-group evidence crosses Stage 6 object owners"
-                )
+                raise DocumentAssemblyInvariantError("segment-group evidence crosses Stage 6 object owners")
             object_id = next(iter(owners))
             selected = (
                 observation_by_id.get(item.selected_observation_id)
@@ -1474,9 +1232,7 @@ class DocumentAssembler:
             corroborating = tuple(
                 observation
                 for observation in observations_by_unit.get(item.unit_id, ())
-                if compact_ocr_text(observation.text)
-                == compact_ocr_text(candidate)
-                and compact_ocr_text(candidate)
+                if compact_ocr_text(observation.text) == compact_ocr_text(candidate) and compact_ocr_text(candidate)
             )
             placements = tuple(
                 _Placement(
@@ -1506,17 +1262,11 @@ class DocumentAssembler:
                     segment_ids=item.segment_ids,
                     candidate_text=candidate,
                     placements=placements,
-                    certified=(
-                        selected is not None
-                        and not item.unresolved
-                        and bool(compact_ocr_text(candidate))
-                    ),
+                    certified=(selected is not None and not item.unresolved and bool(compact_ocr_text(candidate))),
                     reasons=item.uncertainty_reasons,
                 )
             )
-        return {
-            object_id: tuple(items) for object_id, items in values.items()
-        }
+        return {object_id: tuple(items) for object_id, items in values.items()}
 
     def _recover_segment_groups(
         self,
@@ -1550,18 +1300,12 @@ class DocumentAssembler:
                 if (
                     anchor.stable is None
                     or source.stable is None
-                    or anchor.block.segment_ids
-                    != algebra.intersection_segment_ids
+                    or anchor.block.segment_ids != algebra.intersection_segment_ids
                     or not residual_segment_ids
                 ):
                     continue
-                anchor_owners = {
-                    owner_by_segment[item]
-                    for item in algebra.intersection_segment_ids
-                }
-                residual_owners = {
-                    owner_by_segment[item] for item in residual_segment_ids
-                }
+                anchor_owners = {owner_by_segment[item] for item in algebra.intersection_segment_ids}
+                residual_owners = {owner_by_segment[item] for item in residual_segment_ids}
                 if len(anchor_owners) != 1 or len(residual_owners) != 1:
                     continue
                 anchor_object = object_by_id[next(iter(anchor_owners))]
@@ -1581,9 +1325,7 @@ class DocumentAssembler:
                 for observation in supporting:
                     search_characters += len(anchor_text) + len(observation.text)
                     if search_characters > self.config.max_anchor_search_characters:
-                        raise DocumentAssemblyLimitError(
-                            "overlap anchor searches exceed configured character limit"
-                        )
+                        raise DocumentAssemblyLimitError("overlap anchor searches exceed configured character limit")
                     residual_value = self._unique_one_sided_residual(
                         source=observation.text,
                         anchor=anchor_text,
@@ -1592,16 +1334,11 @@ class DocumentAssembler:
                         residuals = []
                         break
                     residual, residual_precedes_anchor = residual_value
-                    if residual_precedes_anchor != (
-                        residual_object.reading_index
-                        < anchor_object.reading_index
-                    ):
+                    if residual_precedes_anchor != (residual_object.reading_index < anchor_object.reading_index):
                         residuals = []
                         break
                     residuals.append((observation, residual))
-                if not residuals or len(
-                    {compact_ocr_text(item[1]) for item in residuals}
-                ) != 1:
+                if not residuals or len({compact_ocr_text(item[1]) for item in residuals}) != 1:
                     continue
 
                 candidate = residuals[0][1]
@@ -1619,39 +1356,26 @@ class DocumentAssembler:
                     object_id=residual_object_id,
                     segment_ids=residual_segment_ids,
                     candidate_text=candidate,
-                    placements=tuple(
-                        _Placement(item, 0, len(candidate)) for item in drafts
-                    ),
+                    placements=tuple(_Placement(item, 0, len(candidate)) for item in drafts),
                     pair=(algebra.first_block_id, algebra.second_block_id),
-                    certified=(
-                        anchor.certified is not None
-                        and source.certified is not None
-                    ),
-                    reasons=tuple(
-                        dict.fromkeys(anchor.reasons + source.reasons)
-                    ),
+                    certified=(anchor.certified is not None and source.certified is not None),
+                    reasons=tuple(dict.fromkeys(anchor.reasons + source.reasons)),
                 )
                 proposals.setdefault(residual_object_id, []).append(recovery)
 
         recovered: dict[str, _GroupRecovery] = {}
         recovered_pairs: set[tuple[str, str]] = set()
         for object_id, values in proposals.items():
-            compact_values = {
-                compact_ocr_text(item.candidate_text) for item in values
-            }
+            compact_values = {compact_ocr_text(item.candidate_text) for item in values}
             if len(compact_values) != 1:
                 continue
             primary = values[0]
             combined = replace(
                 primary,
-                placements=tuple(
-                    placement for item in values for placement in item.placements
-                ),
+                placements=tuple(placement for item in values for placement in item.placements),
             )
             recovered[object_id] = combined
-            recovered_pairs.update(
-                item.pair for item in values if item.certified
-            )
+            recovered_pairs.update(item.pair for item in values if item.certified)
         return recovered, frozenset(recovered_pairs)
 
     @staticmethod
@@ -1672,9 +1396,7 @@ class DocumentAssembler:
         has_suffix = anchor_stop < len(compact_source)
         if has_prefix == has_suffix:
             return None
-        non_whitespace = tuple(
-            index for index, character in enumerate(source) if not character.isspace()
-        )
+        non_whitespace = tuple(index for index, character in enumerate(source) if not character.isspace())
         if has_prefix:
             anchor_raw_start = non_whitespace[start]
             raw_start = non_whitespace[0]
@@ -1688,11 +1410,7 @@ class DocumentAssembler:
         if not boundary or not any(character.isspace() for character in boundary):
             return None
         residual = source[raw_start:raw_stop]
-        return (
-            (residual, has_prefix)
-            if compact_ocr_text(residual)
-            else None
-        )
+        return (residual, has_prefix) if compact_ocr_text(residual) else None
 
     def _render_object(
         self,
@@ -1722,8 +1440,7 @@ class DocumentAssembler:
         direct = tuple(
             item
             for item in block_decisions
-            if item.candidate is not None
-            and item.block.segment_ids == document_object.segment_ids
+            if item.candidate is not None and item.block.segment_ids == document_object.segment_ids
         )
         if direct and document_object.kind is not ObjectKind.TABLE:
             compact_values = {
@@ -1745,38 +1462,24 @@ class DocumentAssembler:
                     for item in (primary, *decision.corroborating)
                     if compact_ocr_text(item.text) == compact_ocr_text(primary.text)
                 )
-                placements = tuple(
-                    _Placement(item, 0, len(primary.text)) for item in drafts
-                )
+                placements = tuple(_Placement(item, 0, len(primary.text)) for item in drafts)
                 segment_candidate, _ = self._render_segment_values(
                     document_object=document_object,
-                    segment_values=tuple(
-                        segment_assembly_by_id[item]
-                        for item in document_object.segment_ids
-                    ),
+                    segment_values=tuple(segment_assembly_by_id[item] for item in document_object.segment_ids),
                     span_by_id=span_by_id,
                     fused_by_id=fused_by_id,
                     observation_by_id=observation_by_id,
                     job_by_id=job_by_id,
                 )
                 complete_segment_evidence = all(
-                    segment_assembly_by_id[item].status
-                    is AssemblyStatus.COMPLETE
+                    segment_assembly_by_id[item].status is AssemblyStatus.COMPLETE
                     for item in document_object.segment_ids
                 )
                 if (
-                    (
-                        complete_segment_evidence
-                        and compact_ocr_text(segment_candidate)
-                        != compact_ocr_text(primary.text)
-                    )
-                    or self._explicit_segment_conflict(
-                        candidate=primary.text,
-                        segment_values=tuple(
-                            segment_assembly_by_id[item]
-                            for item in document_object.segment_ids
-                        ),
-                    )
+                    complete_segment_evidence and compact_ocr_text(segment_candidate) != compact_ocr_text(primary.text)
+                ) or self._explicit_segment_conflict(
+                    candidate=primary.text,
+                    segment_values=tuple(segment_assembly_by_id[item] for item in document_object.segment_ids),
                 ):
                     return _RenderedObject(
                         candidate_text=primary.text,
@@ -1785,25 +1488,14 @@ class DocumentAssembler:
                         placements=placements,
                         reasons=("object-text-segment-conflict",),
                     )
-                decision_reasons = tuple(
-                    dict.fromkeys(
-                        reason for item in direct for reason in item.reasons
-                    )
-                )
-                direct_certified = all(
-                    item.certified is not None for item in direct
-                )
+                decision_reasons = tuple(dict.fromkeys(reason for item in direct for reason in item.reasons))
+                direct_certified = all(item.certified is not None for item in direct)
                 return _RenderedObject(
                     candidate_text=primary.text,
                     certified=direct_certified,
                     attribution_level=AttributionLevel.OBJECT,
                     placements=placements,
-                    reasons=(
-                        ()
-                        if direct_certified
-                        else decision_reasons
-                        or ("object-text-not-fully-corroborated",)
-                    ),
+                    reasons=(() if direct_certified else decision_reasons or ("object-text-not-fully-corroborated",)),
                 )
             primary = direct[0].stable or direct[0].candidate
             assert primary is not None
@@ -1819,32 +1511,21 @@ class DocumentAssembler:
         if group_recovery is not None:
             segment_candidate, _ = self._render_segment_values(
                 document_object=document_object,
-                segment_values=tuple(
-                    segment_assembly_by_id[item]
-                    for item in document_object.segment_ids
-                ),
+                segment_values=tuple(segment_assembly_by_id[item] for item in document_object.segment_ids),
                 span_by_id=span_by_id,
                 fused_by_id=fused_by_id,
                 observation_by_id=observation_by_id,
                 job_by_id=job_by_id,
             )
             complete_segment_evidence = all(
-                segment_assembly_by_id[item].status is AssemblyStatus.COMPLETE
-                for item in document_object.segment_ids
+                segment_assembly_by_id[item].status is AssemblyStatus.COMPLETE for item in document_object.segment_ids
             )
             if (
-                (
-                    complete_segment_evidence
-                    and compact_ocr_text(segment_candidate)
-                    != compact_ocr_text(group_recovery.candidate_text)
-                )
-                or self._explicit_segment_conflict(
-                    candidate=group_recovery.candidate_text,
-                    segment_values=tuple(
-                        segment_assembly_by_id[item]
-                        for item in document_object.segment_ids
-                    ),
-                )
+                complete_segment_evidence
+                and compact_ocr_text(segment_candidate) != compact_ocr_text(group_recovery.candidate_text)
+            ) or self._explicit_segment_conflict(
+                candidate=group_recovery.candidate_text,
+                segment_values=tuple(segment_assembly_by_id[item] for item in document_object.segment_ids),
             ):
                 return _RenderedObject(
                     candidate_text=group_recovery.candidate_text,
@@ -1861,14 +1542,11 @@ class DocumentAssembler:
                 reasons=(
                     ()
                     if group_recovery.certified
-                    else group_recovery.reasons
-                    or ("segment-group-not-fully-corroborated",)
+                    else group_recovery.reasons or ("segment-group-not-fully-corroborated",)
                 ),
             )
 
-        segment_values = tuple(
-            segment_assembly_by_id[item] for item in document_object.segment_ids
-        )
+        segment_values = tuple(segment_assembly_by_id[item] for item in document_object.segment_ids)
         candidate_available = any(item.candidate_text for item in segment_values)
         certified = all(item.status is AssemblyStatus.COMPLETE for item in segment_values)
         candidate, placements = self._render_segment_values(
@@ -1879,13 +1557,7 @@ class DocumentAssembler:
             observation_by_id=observation_by_id,
             job_by_id=job_by_id,
         )
-        reasons = tuple(
-            dict.fromkeys(
-                reason
-                for item in segment_values
-                for reason in item.reasons
-            )
-        )
+        reasons = tuple(dict.fromkeys(reason for item in segment_values for reason in item.reasons))
         if not candidate_available:
             reasons = tuple(dict.fromkeys(reasons + ("no-attributable-object-text",)))
         return _RenderedObject(
@@ -1908,10 +1580,7 @@ class DocumentAssembler:
         observation_by_id: dict[str, SegmentObservation],
         job_by_id: dict[str, OcrJobResult],
     ) -> _RenderedObject:
-        object_order = {
-            segment_id: index
-            for index, segment_id in enumerate(document_object.segment_ids)
-        }
+        object_order = {segment_id: index for index, segment_id in enumerate(document_object.segment_ids)}
         draft_members = {item.segment_ids for item in structural_drafts}
         group_by_segment: dict[str, _MembershipGroupRecovery] = {}
         group_first: dict[int, _MembershipGroupRecovery] = {}
@@ -1919,25 +1588,20 @@ class DocumentAssembler:
         certified = True
         for group in groups:
             if any(item not in object_order for item in group.segment_ids):
-                raise DocumentAssemblyInvariantError(
-                    "membership group crosses its Stage 6 object"
-                )
+                raise DocumentAssemblyInvariantError("membership group crosses its Stage 6 object")
             indexes = tuple(object_order[item] for item in group.segment_ids)
             if indexes != tuple(range(min(indexes), max(indexes) + 1)):
                 reasons.append("segment-group-noncontiguous")
                 certified = False
             whole_flow_object = (
-                document_object.kind is not ObjectKind.TABLE
-                and group.segment_ids == document_object.segment_ids
+                document_object.kind is not ObjectKind.TABLE and group.segment_ids == document_object.segment_ids
             )
             if group.segment_ids not in draft_members and not whole_flow_object:
                 reasons.append("segment-group-grammar-unsplittable")
                 certified = False
             for segment_id in group.segment_ids:
                 if segment_id in group_by_segment:
-                    raise DocumentAssemblyInvariantError(
-                        "membership groups overlap inside one object"
-                    )
+                    raise DocumentAssemblyInvariantError("membership groups overlap inside one object")
                 group_by_segment[segment_id] = group
             group_first[min(indexes)] = group
             reasons.extend(group.reasons)
@@ -1963,11 +1627,13 @@ class DocumentAssembler:
                 separator = (
                     "\n"
                     if previous_row is not None and row != previous_row
-                    else "\t"
-                    if document_object.kind is ObjectKind.TABLE
-                    and previous_column is not None
-                    and column != previous_column
-                    else " "
+                    else (
+                        "\t"
+                        if document_object.kind is ObjectKind.TABLE
+                        and previous_column is not None
+                        and column != previous_column
+                        else " "
+                    )
                 )
                 pieces.append(separator)
                 cursor += len(separator)
@@ -2014,9 +1680,7 @@ class DocumentAssembler:
                 column=span.column_start,
                 local_placements=segment_placements,
             )
-            certified = certified and (
-                segment_value.status is AssemblyStatus.COMPLETE
-            )
+            certified = certified and (segment_value.status is AssemblyStatus.COMPLETE)
             reasons.extend(segment_value.reasons)
 
         candidate = "".join(pieces)
@@ -2059,7 +1723,6 @@ class DocumentAssembler:
         matrix: SparseSegmentMatrix,
         coordinates_by_segment: dict[str, tuple[tuple[int, int], ...]],
     ) -> tuple[_StructuralDraft, ...]:
-        spans = tuple(span_by_id[item] for item in document_object.segment_ids)
         if document_object.kind is ObjectKind.TABLE:
             object_segment_ids = set(document_object.segment_ids)
             local_cell_map: dict[tuple[int, int], list[str]] = {}
@@ -2069,13 +1732,9 @@ class DocumentAssembler:
             covered_coordinates = set(local_cell_map)
             for segment_id in document_object.segment_ids:
                 span = span_by_id[segment_id]
-                span_area = (span.row_stop - span.row_start) * (
-                    span.column_stop - span.column_start
-                )
+                span_area = (span.row_stop - span.row_start) * (span.column_stop - span.column_start)
                 if len(coordinates_by_segment[segment_id]) != span_area:
-                    raise DocumentAssemblyInvariantError(
-                        "a table cell has non-rectangular sparse occupancy"
-                    )
+                    raise DocumentAssemblyInvariantError("a table cell has non-rectangular sparse occupancy")
             parent = {item: item for item in document_object.segment_ids}
 
             def find(segment_id: str) -> str:
@@ -2088,14 +1747,9 @@ class DocumentAssembler:
                     segment_id = following
                 return root
 
-            source_order = {
-                segment_id: index
-                for index, segment_id in enumerate(document_object.segment_ids)
-            }
+            source_order = {segment_id: index for index, segment_id in enumerate(document_object.segment_ids)}
             for segment_ids in local_cell_map.values():
-                members = tuple(
-                    item for item in segment_ids if item in object_segment_ids
-                )
+                members = tuple(item for item in segment_ids if item in object_segment_ids)
                 if len(members) < 2:
                     continue
                 first_root = find(members[0])
@@ -2120,17 +1774,11 @@ class DocumentAssembler:
                 group_column_start = min(item.column_start for item in group_spans)
                 group_column_stop = max(item.column_stop for item in group_spans)
                 group_coordinates = {
-                    coordinate
-                    for segment_id in segment_ids
-                    for coordinate in coordinates_by_segment[segment_id]
+                    coordinate for segment_id in segment_ids for coordinate in coordinates_by_segment[segment_id]
                 }
-                group_area = (group_row_stop - group_row_start) * (
-                    group_column_stop - group_column_start
-                )
+                group_area = (group_row_stop - group_row_start) * (group_column_stop - group_column_start)
                 if len(group_coordinates) != group_area:
-                    raise DocumentAssemblyInvariantError(
-                        "overlapping table fragments do not form one rectangle"
-                    )
+                    raise DocumentAssemblyInvariantError("overlapping table fragments do not form one rectangle")
                 values.append(
                     _StructuralDraft(
                         unit_kind=StructuralUnitKind.TABLE_CELL,
@@ -2147,17 +1795,10 @@ class DocumentAssembler:
             column_stop = document_object.column_stop
             rule_rows = set(matrix.horizontal_rule_rows)
             rule_columns = set(matrix.vertical_rule_columns)
-            logical_rows = sum(
-                row not in rule_rows for row in range(row_start, row_stop)
-            )
-            logical_columns = sum(
-                column not in rule_columns
-                for column in range(column_start, column_stop)
-            )
+            logical_rows = sum(row not in rule_rows for row in range(row_start, row_stop))
+            logical_columns = sum(column not in rule_columns for column in range(column_start, column_stop))
             if logical_rows * logical_columns > self.config.max_structural_units:
-                raise DocumentAssemblyLimitError(
-                    "table structural grid exceeds configured unit limit"
-                )
+                raise DocumentAssemblyLimitError("table structural grid exceeds configured unit limit")
             values.extend(
                 _StructuralDraft(
                     unit_kind=StructuralUnitKind.TABLE_CELL,
@@ -2169,8 +1810,7 @@ class DocumentAssembler:
                 )
                 for row in range(row_start, row_stop)
                 for column in range(column_start, column_stop)
-                if row not in rule_rows
-                and column not in rule_columns
+                if row not in rule_rows and column not in rule_columns
                 if (row, column) not in covered_coordinates
             )
             return tuple(
@@ -2192,21 +1832,15 @@ class DocumentAssembler:
         }.get(document_object.kind, StructuralUnitKind.UNKNOWN_FRAGMENT)
         grouped_rows: dict[int, list[str]] = {}
         for segment_id in document_object.segment_ids:
-            grouped_rows.setdefault(span_by_id[segment_id].row_start, []).append(
-                segment_id
-            )
+            grouped_rows.setdefault(span_by_id[segment_id].row_start, []).append(segment_id)
         return tuple(
             _StructuralDraft(
                 unit_kind=unit_kind,
                 segment_ids=tuple(segment_ids),
                 row_start=min(span_by_id[item].row_start for item in segment_ids),
                 row_stop=max(span_by_id[item].row_stop for item in segment_ids),
-                column_start=min(
-                    span_by_id[item].column_start for item in segment_ids
-                ),
-                column_stop=max(
-                    span_by_id[item].column_stop for item in segment_ids
-                ),
+                column_start=min(span_by_id[item].column_start for item in segment_ids),
+                column_stop=max(span_by_id[item].column_stop for item in segment_ids),
             )
             for _, segment_ids in sorted(grouped_rows.items())
         )
@@ -2226,16 +1860,8 @@ class DocumentAssembler:
         rule_rows = set(matrix.horizontal_rule_rows)
         rule_columns = set(matrix.vertical_rule_columns)
         return (
-            tuple(
-                row
-                for row in range(row_start, row_stop)
-                if row not in rule_rows
-            ),
-            tuple(
-                column
-                for column in range(column_start, column_stop)
-                if column not in rule_columns
-            ),
+            tuple(row for row in range(row_start, row_stop) if row not in rule_rows),
+            tuple(column for column in range(column_start, column_stop) if column not in rule_columns),
         )
 
     @staticmethod
@@ -2285,19 +1911,19 @@ class DocumentAssembler:
                 separator = (
                     "\n"
                     if previous_row is not None and span.row_start != previous_row
-                    else "\t"
-                    if document_object.kind is ObjectKind.TABLE
-                    and previous_column is not None
-                    and span.column_start != previous_column
-                    else " "
+                    else (
+                        "\t"
+                        if document_object.kind is ObjectKind.TABLE
+                        and previous_column is not None
+                        and span.column_start != previous_column
+                        else " "
+                    )
                 )
                 pieces.append(separator)
                 cursor += len(separator)
             start = cursor
             if start + len(item.candidate_text) > self.config.max_text_characters:
-                raise DocumentAssemblyLimitError(
-                    "one assembled object exceeds configured character limit"
-                )
+                raise DocumentAssemblyLimitError("one assembled object exceeds configured character limit")
             pieces.append(item.candidate_text)
             stop = start + len(item.candidate_text)
             cursor = stop
@@ -2320,9 +1946,7 @@ class DocumentAssembler:
                     text=observation.text,
                 )
                 if job.output is None:
-                    raise DocumentAssemblyInvariantError(
-                        "selected observation references a failed OCR job"
-                    )
+                    raise DocumentAssemblyInvariantError("selected observation references a failed OCR job")
                 placements.append(_Placement(draft, start, stop))
             previous_row = span.row_start
             previous_column = span.column_start
@@ -2339,10 +1963,7 @@ class DocumentAssembler:
     ) -> tuple[str, ...]:
         reasons: list[str] = []
         resolved_group_segments = {
-            segment_id
-            for group in fusion.segment_groups
-            if not group.unresolved
-            for segment_id in group.segment_ids
+            segment_id for group in fusion.segment_groups if not group.unresolved for segment_id in group.segment_ids
         }
         if geometry.status is not GeometryStatus.COMPLETE:
             reasons.append("degraded-geometry")
@@ -2352,18 +1973,12 @@ class DocumentAssembler:
             reasons.append("unassigned-word-evidence")
         if fusion.replica_conflicts:
             reasons.append("capability-replica-conflict")
-        if any(
-            item.conflicting_intersection_segment_ids
-            for item in fusion.overlaps
-        ):
+        if any(item.conflicting_intersection_segment_ids for item in fusion.overlaps):
             reasons.append("overlap-text-conflict")
         if any(
             item.missing_intersection_segment_ids
-            and not set(item.missing_intersection_segment_ids).issubset(
-                resolved_group_segments
-            )
-            and (item.first_block_id, item.second_block_id)
-            not in recovered_overlap_pairs
+            and not set(item.missing_intersection_segment_ids).issubset(resolved_group_segments)
+            and (item.first_block_id, item.second_block_id) not in recovered_overlap_pairs
             for item in fusion.overlaps
         ):
             reasons.append("overlap-evidence-missing")
@@ -2411,32 +2026,15 @@ class DocumentAssembler:
                 stop = object_start + placement.stop
                 output_key = (start, stop)
                 compact_output = compact_output_cache.get(output_key)
-                if compact_output is None and 0 <= start < stop <= len(
-                    candidate_text
-                ):
-                    compact_output = compact_ocr_text(
-                        candidate_text[start:stop]
-                    )
+                if compact_output is None and 0 <= start < stop <= len(candidate_text):
+                    compact_output = compact_ocr_text(candidate_text[start:stop])
                     compact_output_cache[output_key] = compact_output
-                compact_evidence = compact_evidence_cache.get(
-                    placement.draft.text
-                )
+                compact_evidence = compact_evidence_cache.get(placement.draft.text)
                 if compact_evidence is None:
-                    compact_evidence = compact_ocr_text(
-                        placement.draft.text
-                    )
-                    compact_evidence_cache[
-                        placement.draft.text
-                    ] = compact_evidence
-                if (
-                    start < 0
-                    or stop > len(candidate_text)
-                    or stop <= start
-                    or compact_output != compact_evidence
-                ):
-                    raise DocumentAssemblyInvariantError(
-                        "assembled evidence offsets do not match observed text"
-                    )
+                    compact_evidence = compact_ocr_text(placement.draft.text)
+                    compact_evidence_cache[placement.draft.text] = compact_evidence
+                if start < 0 or stop > len(candidate_text) or stop <= start or compact_output != compact_evidence:
+                    raise DocumentAssemblyInvariantError("assembled evidence offsets do not match observed text")
                 slice_id = f"evidence-{len(evidence):08d}"
                 identifiers.append(slice_id)
                 draft = placement.draft
@@ -2471,19 +2069,13 @@ class DocumentAssembler:
     ) -> tuple[EvidenceSlice, ...]:
         offsets: dict[str, tuple[int, int]] = {}
         cursor = 0
-        for text in dict.fromkeys(
-            item.candidate.text
-            for item in decisions
-            if item.candidate is not None
-        ):
+        for text in dict.fromkeys(item.candidate.text for item in decisions if item.candidate is not None):
             if offsets:
                 cursor += 1
             offsets[text] = (cursor, cursor + len(text))
             cursor += len(text)
         if cursor != len(candidate_text):
-            raise DocumentAssemblyInvariantError(
-                "fallback evidence offsets disagree with candidate output"
-            )
+            raise DocumentAssemblyInvariantError("fallback evidence offsets disagree with candidate output")
 
         values: list[EvidenceSlice] = []
         for decision in decisions:
@@ -2493,9 +2085,7 @@ class DocumentAssembler:
             start, stop = offsets[primary.text]
             observations = (primary, *decision.corroborating)
             for observation in observations:
-                if compact_ocr_text(observation.text) != compact_ocr_text(
-                    primary.text
-                ):
+                if compact_ocr_text(observation.text) != compact_ocr_text(primary.text):
                     continue
                 values.append(
                     EvidenceSlice(
@@ -2532,9 +2122,7 @@ class DocumentAssembler:
         logical_rows = table_row_indices
         logical_columns = table_column_indices
         if not logical_rows or not logical_columns:
-            raise DocumentAssemblyInvariantError(
-                "table Markdown requires complete logical axes"
-            )
+            raise DocumentAssemblyInvariantError("table Markdown requires complete logical axes")
         cells: dict[tuple[int, int], str] = {}
         covered: set[tuple[int, int]] = set()
         for unit in units:
@@ -2547,24 +2135,15 @@ class DocumentAssembler:
                 if unit.column_start <= column < unit.column_stop
             }
             if anchor not in unit_coordinates:
-                raise DocumentAssemblyInvariantError(
-                    "table unit anchor lies outside its logical grid"
-                )
+                raise DocumentAssemblyInvariantError("table unit anchor lies outside its logical grid")
             if covered.intersection(unit_coordinates):
-                raise DocumentAssemblyInvariantError(
-                    "table structural units overlap ambiguously"
-                )
+                raise DocumentAssemblyInvariantError("table structural units overlap ambiguously")
             covered.update(unit_coordinates)
             escaped = (
-                unit.candidate_text.replace("\\", "\\\\")
-                .replace("|", "\\|")
-                .replace("\r", " ")
-                .replace("\n", " ")
+                unit.candidate_text.replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ")
             )
             if anchor in cells:
-                raise DocumentAssemblyInvariantError(
-                    "table structural units share one anchor"
-                )
+                raise DocumentAssemblyInvariantError("table structural units share one anchor")
             cells[anchor] = escaped
             for row in logical_rows:
                 if not unit.row_start <= row < unit.row_stop:
@@ -2583,26 +2162,12 @@ class DocumentAssembler:
                         marker = "::merge-up-left::"
                     existing = cells.setdefault(coordinate, marker)
                     if existing != marker:
-                        raise DocumentAssemblyInvariantError(
-                            "table structural units overlap ambiguously"
-                        )
-        expected_coordinates = {
-            (row, column)
-            for row in logical_rows
-            for column in logical_columns
-        }
+                        raise DocumentAssemblyInvariantError("table structural units overlap ambiguously")
+        expected_coordinates = {(row, column) for row in logical_rows for column in logical_columns}
         if covered != expected_coordinates:
-            raise DocumentAssemblyInvariantError(
-                "table structural units do not exactly cover the logical grid"
-            )
+            raise DocumentAssemblyInvariantError("table structural units do not exactly cover the logical grid")
         return "\n".join(
-            "| "
-            + " | ".join(
-                cells.get((row, column), "")
-                for column in logical_columns
-            )
-            + " |"
-            for row in logical_rows
+            "| " + " | ".join(cells.get((row, column), "") for column in logical_columns) + " |" for row in logical_rows
         )
 
 

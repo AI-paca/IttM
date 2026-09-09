@@ -181,9 +181,7 @@ def test_rasterize_pdf_keeps_multi_page_raster_reference_aggregate(
         "plan.pdf.page-002.raster.png",
     ]
     references = tmp_path / "probe-reference"
-    assert (
-        references / "plan.pdf.raster.png.md"
-    ).read_text(encoding="utf-8") == "representative visible raster\n"
+    assert (references / "plan.pdf.raster.png.md").read_text(encoding="utf-8") == "representative visible raster\n"
     assert not (references / "plan.pdf.page-001.raster.png.md").exists()
     assert not (references / "plan.pdf.page-002.raster.png.md").exists()
 
@@ -223,11 +221,9 @@ def test_rasterize_pdf_accepts_representative_reference_without_pdf_reference(
     assert [path.name for path in outputs] == [
         "plan.pdf.page-001.raster.png",
     ]
-    assert (
-        tmp_path
-        / "probe-reference"
-        / "plan.pdf.page-001.raster.png.md"
-    ).read_text(encoding="utf-8") == "only raster truth\n"
+    assert (tmp_path / "probe-reference" / "plan.pdf.page-001.raster.png.md").read_text(
+        encoding="utf-8"
+    ) == "only raster truth\n"
 
 
 def test_page_expected_texts_keeps_unsegmented_single_page():

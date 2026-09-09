@@ -11,7 +11,6 @@ import subprocess
 import sys
 import types
 from pathlib import Path
-from typing import Callable
 
 import pytest
 from PIL import Image
@@ -207,9 +206,7 @@ def test_tesseract_preflight_uses_exact_tessdata_and_never_falls_back(
 
     calls.clear()
 
-    def missing_language(
-        command: object, **_kwargs: object
-    ) -> subprocess.CompletedProcess[object]:
+    def missing_language(command: object, **_kwargs: object) -> subprocess.CompletedProcess[object]:
         values = tuple(command)  # type: ignore[arg-type]
         if "--version" in values:
             return _completed(command, stdout="tesseract 5.5.2\n")
@@ -287,14 +284,12 @@ def test_tesseract_tsv_ascii_quote_is_a_literal_word_and_cannot_join_rows(
     quote_tsv = (
         "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\t"
         "left\ttop\twidth\theight\tconf\ttext\n"
-        "5\t1\t1\t1\t1\t1\t1\t1\t1\t2\t99\t\"\n"
+        '5\t1\t1\t1\t1\t1\t1\t1\t1\t2\t99\t"\n'
         "5\t1\t1\t1\t1\t2\t3\t1\t4\t2\t98\tAlpha\n"
         "5\t1\t1\t1\t2\t1\t1\t5\t4\t2\t97\tBeta\n"
     )
 
-    def fake_run(
-        command: list[str], **_kwargs: object
-    ) -> subprocess.CompletedProcess[object]:
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[object]:
         return _completed(command, stdout=quote_tsv.encode(), stderr=b"")
 
     monkeypatch.setattr(adapters.subprocess, "run", fake_run)
@@ -307,8 +302,8 @@ def test_tesseract_tsv_ascii_quote_is_a_literal_word_and_cannot_join_rows(
 
     output = adapters.TesseractWorker(config, capability).recognize(_png_bytes())
 
-    assert output.text == '\" Alpha\nBeta'
-    assert tuple(word.text for word in output.words) == ('\"', "Alpha", "Beta")
+    assert output.text == '" Alpha\nBeta'
+    assert tuple(word.text for word in output.words) == ('"', "Alpha", "Beta")
     assert all("\n" not in word.text and "\t" not in word.text for word in output.words)
 
 
@@ -322,9 +317,7 @@ def test_tesseract_tsv_ascii_quote_is_a_literal_word_and_cannot_join_rows(
 )
 def test_tesseract_tsv_malformed_column_count_fails_closed(word_row: str) -> None:
     malformed = (
-        "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\t"
-        "left\ttop\twidth\theight\tconf\ttext\n"
-        + word_row
+        "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\t" "left\ttop\twidth\theight\tconf\ttext\n" + word_row
     )
 
     with pytest.raises(OcrInvalidEngineOutputError, match="exactly 12 columns"):
@@ -404,9 +397,7 @@ def test_tesseract_recognition_miss_retry_downscales_pads_and_maps_boxes(
     source = source_buffer.getvalue()
     observed: list[bytes] = []
 
-    def fake_run(
-        command: list[str], **kwargs: object
-    ) -> subprocess.CompletedProcess[object]:
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[object]:
         payload = kwargs["input"]
         assert isinstance(payload, bytes)
         observed.append(payload)
@@ -416,10 +407,7 @@ def test_tesseract_recognition_miss_retry_downscales_pads_and_maps_boxes(
                 stdout=_empty_tsv(width=120, height=80).encode(),
                 stderr=b"",
             )
-        retry_tsv = (
-            _empty_tsv(width=36, height=26)
-            + "5\t1\t1\t1\t1\t1\t8\t5\t15\t10\t99\tSAMPLE\n"
-        )
+        retry_tsv = _empty_tsv(width=36, height=26) + "5\t1\t1\t1\t1\t1\t8\t5\t15\t10\t99\tSAMPLE\n"
         return _completed(command, stdout=retry_tsv.encode(), stderr=b"")
 
     monkeypatch.setattr(adapters.subprocess, "run", fake_run)
@@ -451,9 +439,7 @@ def test_tesseract_recognition_miss_default_is_off_and_enabled_retry_runs_once(
 ) -> None:
     calls = 0
 
-    def empty(
-        command: list[str], **_kwargs: object
-    ) -> subprocess.CompletedProcess[object]:
+    def empty(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[object]:
         nonlocal calls
         calls += 1
         return _completed(command, stdout=_empty_tsv().encode(), stderr=b"")
@@ -466,9 +452,7 @@ def test_tesseract_recognition_miss_default_is_off_and_enabled_retry_runs_once(
         default_config.languages,
     )
     with pytest.raises(OcrRecognitionMissError):
-        adapters.TesseractWorker(default_config, default_capability).recognize(
-            _png_bytes()
-        )
+        adapters.TesseractWorker(default_config, default_capability).recognize(_png_bytes())
     assert calls == 1
 
     enabled_config = adapters.TesseractConfig(
@@ -481,9 +465,7 @@ def test_tesseract_recognition_miss_default_is_off_and_enabled_retry_runs_once(
         enabled_config.languages,
     )
     with pytest.raises(OcrRecognitionMissError):
-        adapters.TesseractWorker(enabled_config, enabled_capability).recognize(
-            _png_bytes()
-        )
+        adapters.TesseractWorker(enabled_config, enabled_capability).recognize(_png_bytes())
     assert calls == 3
 
 
@@ -495,23 +477,26 @@ def test_tesseract_small_context_upscale_is_bounded_and_boxes_map_back(
     tessdata.mkdir()
     observed_size: tuple[int, int] | None = None
 
-    def fake_run(
-        command: list[str], **kwargs: object
-    ) -> subprocess.CompletedProcess[object]:
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[object]:
         nonlocal observed_size
         payload = kwargs["input"]
         assert isinstance(payload, bytes)
         with Image.open(io.BytesIO(payload)) as opened:
             observed_size = opened.size
-        scaled_tsv = _tsv().replace(
-            "\t3\t1\t4\t2\t95\tAlpha",
-            "\t12\t4\t16\t8\t95\tAlpha",
-        ).replace(
-            "\t8\t1\t3\t2\t80\t17",
-            "\t32\t4\t12\t8\t80\t17",
-        ).replace(
-            "\t1\t5\t5\t2\t75\t中文",
-            "\t4\t20\t20\t8\t75\t中文",
+        scaled_tsv = (
+            _tsv()
+            .replace(
+                "\t3\t1\t4\t2\t95\tAlpha",
+                "\t12\t4\t16\t8\t95\tAlpha",
+            )
+            .replace(
+                "\t8\t1\t3\t2\t80\t17",
+                "\t32\t4\t12\t8\t80\t17",
+            )
+            .replace(
+                "\t1\t5\t5\t2\t75\t中文",
+                "\t4\t20\t20\t8\t75\t中文",
+            )
         )
         return _completed(command, stdout=scaled_tsv.encode(), stderr=b"")
 
@@ -563,10 +548,7 @@ def test_tesseract_dark_sparse_small_text_replaces_upscale_in_one_call(
         payload = kwargs["input"]
         assert isinstance(payload, bytes)
         observed.append(payload)
-        tsv = (
-            _empty_tsv(width=200, height=80)
-            + "5\t1\t1\t1\t1\t1\t8\t20\t18\t9\t99\tValue\n"
-        )
+        tsv = _empty_tsv(width=200, height=80) + "5\t1\t1\t1\t1\t1\t8\t20\t18\t9\t99\tValue\n"
         return _completed(command, stdout=tsv.encode(), stderr=b"")
 
     monkeypatch.setattr(adapters.subprocess, "run", fake_run)
@@ -580,9 +562,7 @@ def test_tesseract_dark_sparse_small_text_replaces_upscale_in_one_call(
         config.languages,
     )
 
-    output = adapters.TesseractWorker(config, capability).recognize(
-        source_buffer.getvalue()
-    )
+    output = adapters.TesseractWorker(config, capability).recognize(source_buffer.getvalue())
 
     assert len(observed) == 1
     with Image.open(io.BytesIO(observed[0])) as normalized:
@@ -705,9 +685,7 @@ def test_easyocr_rejects_confidence_outside_closed_unit_interval_instead_of_clam
         monkeypatch,
         result=[(polygon, "observed", confidence)],
     )
-    worker = adapters.EasyOcrWorker(
-        adapters.EasyOcrConfig(("en", "ru"), model_dir)
-    )
+    worker = adapters.EasyOcrWorker(adapters.EasyOcrConfig(("en", "ru"), model_dir))
 
     with pytest.raises(OcrInvalidEngineOutputError, match="metadata|confidence"):
         worker.recognize(_png_bytes())
@@ -730,9 +708,7 @@ def test_easyocr_rejects_unobserved_or_invalid_bbox(
     model_dir = tmp_path / "easy-models"
     model_dir.mkdir()
     _install_easy_runtime(monkeypatch, result=[(polygon, "word", 0.9)])
-    worker = adapters.EasyOcrWorker(
-        adapters.EasyOcrConfig(("en", "ru"), model_dir)
-    )
+    worker = adapters.EasyOcrWorker(adapters.EasyOcrConfig(("en", "ru"), model_dir))
     with pytest.raises(OcrInvalidEngineOutputError, match="metadata|bbox"):
         worker.recognize(_png_bytes())
 
@@ -755,9 +731,7 @@ def test_easyocr_model_dependency_device_miss_and_oom_are_typed(
         monkeypatch,
         result=RuntimeError("CUDA out of memory while allocating tensor"),
     )
-    worker = adapters.EasyOcrWorker(
-        adapters.EasyOcrConfig(("en", "ru"), model_dir)
-    )
+    worker = adapters.EasyOcrWorker(adapters.EasyOcrConfig(("en", "ru"), model_dir))
     with pytest.raises(OcrResourceExhaustedError) as raised:
         worker.recognize(_png_bytes())
     assert raised.value.worker_poisoned is True
@@ -943,9 +917,7 @@ def test_glm_max_new_tokens_without_eos_is_typed_truncation(
         generated=((10, 11, 20, 21, 22),),
     )
     model.generation_config = types.SimpleNamespace(eos_token_id=99)
-    worker = adapters.GlmOcrWorker(
-        adapters.GlmOcrConfig(model_dir, max_new_tokens=3)
-    )
+    worker = adapters.GlmOcrWorker(adapters.GlmOcrConfig(model_dir, max_new_tokens=3))
 
     with pytest.raises(OcrOutputTruncatedError) as raised:
         worker.recognize(_png_bytes())
@@ -964,9 +936,7 @@ def test_glm_eos_at_token_limit_is_not_reported_as_truncated(
         generated=((10, 11, 20, 21, 99),),
     )
     model.generation_config = types.SimpleNamespace(eos_token_id=(98, 99))
-    worker = adapters.GlmOcrWorker(
-        adapters.GlmOcrConfig(model_dir, max_new_tokens=3)
-    )
+    worker = adapters.GlmOcrWorker(adapters.GlmOcrConfig(model_dir, max_new_tokens=3))
 
     assert worker.recognize(_png_bytes()).text == "complete"
 
@@ -1164,13 +1134,16 @@ def test_capability_id_depends_only_on_exact_adapter_configuration_not_lane_id(
     assert tess_changed.capability_id != tess_a.capability_id
     assert easy_changed.capability_id != easy_a.capability_id
     assert glm_changed.capability_id != glm_a.capability_id
-    assert len(
-        {
-            tess_a.capability_id,
-            easy_a.capability_id,
-            glm_a.capability_id,
-        }
-    ) == 3
+    assert (
+        len(
+            {
+                tess_a.capability_id,
+                easy_a.capability_id,
+                glm_a.capability_id,
+            }
+        )
+        == 3
+    )
 
 
 def test_tesseract_retry_configuration_is_part_of_capability_provenance() -> None:
@@ -1193,10 +1166,13 @@ def test_tesseract_retry_configuration_is_part_of_capability_provenance() -> Non
         ),
     )
 
-    assert len(
-        {
-            disabled.capability_id,
-            enabled.capability_id,
-            changed_padding.capability_id,
-        }
-    ) == 3
+    assert (
+        len(
+            {
+                disabled.capability_id,
+                enabled.capability_id,
+                changed_padding.capability_id,
+            }
+        )
+        == 3
+    )

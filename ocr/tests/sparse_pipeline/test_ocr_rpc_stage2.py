@@ -24,7 +24,6 @@ from app.sparse_pipeline.ocr_adapter_contracts import (
 )
 from app.sparse_pipeline.ocr_queue import OcrResource
 
-
 _HELPER_SOURCE = r"""
 import hashlib
 import json
@@ -449,9 +448,7 @@ def test_child_logs_are_tail_bounded(
 
 
 def test_spawn_uses_exact_interpreter_immutable_config_and_offline_environment(
-    helper_launcher: Callable[
-        [str], list[tuple[tuple[str, ...], dict[str, Any]]]
-    ],
+    helper_launcher: Callable[[str], list[tuple[tuple[str, ...], dict[str, Any]]]],
 ) -> None:
     calls = helper_launcher("normal")
     spec = _spec(engine="glm_ocr")
@@ -466,15 +463,11 @@ def test_spawn_uses_exact_interpreter_immutable_config_and_offline_environment(
         "app.sparse_pipeline.ocr_rpc_worker",
     )
     assert command[command.index("--engine") + 1] == "glm_ocr"
-    assert json.loads(command[command.index("--config-json") + 1]) == {
-        "fixture": "hermetic"
-    }
+    assert json.loads(command[command.index("--config-json") + 1]) == {"fixture": "hermetic"}
     environment = kwargs["env"]
     assert environment["HF_HUB_OFFLINE"] == "1"
     assert environment["TRANSFORMERS_OFFLINE"] == "1"
-    assert environment["PYTHONPATH"].split(os.pathsep)[0] == str(
-        Path(rpc.__file__).resolve().parents[2]
-    )
+    assert environment["PYTHONPATH"].split(os.pathsep)[0] == str(Path(rpc.__file__).resolve().parents[2])
     assert kwargs["close_fds"] is True
     assert kwargs["start_new_session"] is True
     assert kwargs["stdin"] is subprocess.PIPE
@@ -486,9 +479,7 @@ def test_spawn_uses_exact_interpreter_immutable_config_and_offline_environment(
 
 def test_spawn_preserves_an_absolute_venv_python_symlink(
     tmp_path: Path,
-    helper_launcher: Callable[
-        [str], list[tuple[tuple[str, ...], dict[str, Any]]]
-    ],
+    helper_launcher: Callable[[str], list[tuple[tuple[str, ...], dict[str, Any]]]],
 ) -> None:
     venv_python = tmp_path / "venv" / "bin" / "python"
     venv_python.parent.mkdir(parents=True)

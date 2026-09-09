@@ -25,7 +25,6 @@ from app.sparse_pipeline.crop_enhancement import (
     CropInput,
     EnhancedCrop,
     EnhancementBackend,
-    EnhancementStatus,
     GammaDarkCropEnhancer,
     normalize_dark_small_text_for_ocr,
 )
@@ -164,9 +163,7 @@ def test_dark_sparse_small_text_is_gamma_normalized_at_source_scale() -> None:
         max_input_pixels=1_000_000,
     )
 
-    assert DARK_SMALL_TEXT_NORMALIZATION_ID.endswith(
-        "kornia-gamma-source-scale-v1"
-    )
+    assert DARK_SMALL_TEXT_NORMALIZATION_ID.endswith("kornia-gamma-source-scale-v1")
     assert normalized is not None
     with Image.open(io.BytesIO(normalized)) as opened:
         opened.load()

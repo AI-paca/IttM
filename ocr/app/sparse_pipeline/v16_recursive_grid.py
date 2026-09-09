@@ -35,16 +35,9 @@ class RecursiveStopFlag:
     source: str = "external-oracle"
 
     def __post_init__(self) -> None:
-        if type(self.node_path) is not tuple or any(
-            type(value) is not int or value < 0 for value in self.node_path
-        ):
-            raise ValueError(
-                "recursive stop path must contain non-negative integers"
-            )
-        if (
-            type(self.character_height_px) is not int
-            or self.character_height_px < 1
-        ):
+        if type(self.node_path) is not tuple or any(type(value) is not int or value < 0 for value in self.node_path):
+            raise ValueError("recursive stop path must contain non-negative integers")
+        if type(self.character_height_px) is not int or self.character_height_px < 1:
             raise ValueError("recursive stop character height must be positive")
         if type(self.source) is not str or not self.source:
             raise ValueError("recursive stop source must not be empty")
@@ -305,16 +298,11 @@ def _segment_recursive_grid_with_nodes(
         node_path=(),
         node_drafts=drafts,
     )
-    unused_stop_paths = {flag.node_path for flag in config.stop_flags}.difference(
-        drafts
-    )
+    unused_stop_paths = {flag.node_path for flag in config.stop_flags}.difference(drafts)
     if unused_stop_paths:
         for leaf in raw_leaves:
             leaf.image.close()
-        rendered = ",".join(
-            ".".join(str(value) for value in path) or "root"
-            for path in sorted(unused_stop_paths)
-        )
+        rendered = ",".join(".".join(str(value) for value in path) or "root" for path in sorted(unused_stop_paths))
         raise ValueError(f"recursive stop flag path was not visited: {rendered}")
     leaves = tuple(
         sorted(
@@ -326,10 +314,7 @@ def _segment_recursive_grid_with_nodes(
             ),
         )
     )
-    leaf_by_key = {
-        (leaf.source_bbox, leaf.content_bbox): index
-        for index, leaf in enumerate(leaves)
-    }
+    leaf_by_key = {(leaf.source_bbox, leaf.content_bbox): index for index, leaf in enumerate(leaves)}
 
     live_paths: set[tuple[int, ...]] = set()
 
@@ -349,29 +334,16 @@ def _segment_recursive_grid_with_nodes(
         RecursiveGridNodeTrace(
             path=path,
             source_bbox=draft.source_bbox,
-            axis=(
-                draft.axis
-                if any(child in live_paths for child in draft.child_paths)
-                else None
-            ),
-            child_paths=tuple(
-                child for child in draft.child_paths if child in live_paths
-            ),
+            axis=(draft.axis if any(child in live_paths for child in draft.child_paths) else None),
+            child_paths=tuple(child for child in draft.child_paths if child in live_paths),
             split_coordinate=(
                 draft.split_coordinate
-                if any(child in live_paths for child in draft.child_paths)
-                and not draft.separator_boxes
+                if any(child in live_paths for child in draft.child_paths) and not draft.separator_boxes
                 else None
             ),
-            separator_boxes=(
-                draft.separator_boxes
-                if any(child in live_paths for child in draft.child_paths)
-                else ()
-            ),
+            separator_boxes=(draft.separator_boxes if any(child in live_paths for child in draft.child_paths) else ()),
             leaf_index=(
-                leaf_by_key.get(draft.leaf_key)
-                if not any(child in live_paths for child in draft.child_paths)
-                else None
+                leaf_by_key.get(draft.leaf_key) if not any(child in live_paths for child in draft.child_paths) else None
             ),
             stop_flag=draft.stop_flag,
         )
@@ -650,19 +622,13 @@ def _segment_node(
 ) -> list[RecursiveGridLeaf]:
     node_drafts[node_path] = _RecursiveGridNodeDraft(source_bbox=source_bbox)
     requested_stop = next(
-        (
-            flag
-            for flag in config.stop_flags
-            if flag.node_path == node_path
-        ),
+        (flag for flag in config.stop_flags if flag.node_path == node_path),
         None,
     )
     if depth < config.max_depth and image.height > config.max_region_height:
         if requested_stop is not None:
             image.close()
-            raise ValueError(
-                "recursive stop flag cannot bypass the maximum region height"
-            )
+            raise ValueError("recursive stop flag cannot bypass the maximum region height")
         children = []
         parent_decision = RegionDecision(
             depth=depth,
@@ -742,9 +708,7 @@ def _segment_node(
         deskew_angle=deskew_angle,
         split=("stop:character-height-flag" if stop_flag is not None else "leaf"),
         stop_flag=stop_flag is not None,
-        character_height_px=(
-            stop_flag.character_height_px if stop_flag is not None else None
-        ),
+        character_height_px=(stop_flag.character_height_px if stop_flag is not None else None),
         stop_source=(stop_flag.source if stop_flag is not None else None),
     )
     structural_mask, child_edge_insets = _horizontal_projection(
@@ -911,9 +875,7 @@ def _segment_node(
     if not left_tracks or float(np.mean(structural_mask)) < 0.0005:
         aligned.close()
         if stop_flag is not None:
-            raise ValueError(
-                "recursive stop flag did not produce a non-empty text leaf"
-            )
+            raise ValueError("recursive stop flag did not produce a non-empty text leaf")
         return []
 
     source_content_bbox = _map_local_box(
@@ -926,31 +888,31 @@ def _segment_node(
         _map_x(track, aligned.width, source_bbox) for track in (*merge_left_tracks, *rule_tracks)
     )
     leaf = RecursiveGridLeaf(
-            source_bbox=source_bbox,
-            image=aligned,
-            content_bbox=source_content_bbox,
-            left_tracks=_merge_positions(
-                source_tracks,
-                tolerance=max(2, (source_bbox[2] - source_bbox[0]) // 300),
+        source_bbox=source_bbox,
+        image=aligned,
+        content_bbox=source_content_bbox,
+        left_tracks=_merge_positions(
+            source_tracks,
+            tolerance=max(2, (source_bbox[2] - source_bbox[0]) // 300),
+        ),
+        dash_track=(
+            _map_x(
+                dash_track,
+                aligned.width,
+                source_bbox,
+            )
+            if dash_track is not None
+            else None
+        ),
+        merge_left_tracks=_merge_positions(
+            source_merge_left_tracks,
+            tolerance=max(
+                2,
+                (source_bbox[2] - source_bbox[0]) // 300,
             ),
-            dash_track=(
-                _map_x(
-                    dash_track,
-                    aligned.width,
-                    source_bbox,
-                )
-                if dash_track is not None
-                else None
-            ),
-            merge_left_tracks=_merge_positions(
-                source_merge_left_tracks,
-                tolerance=max(
-                    2,
-                    (source_bbox[2] - source_bbox[0]) // 300,
-                ),
-            ),
-            decisions=history + (decision,),
-        )
+        ),
+        decisions=history + (decision,),
+    )
     node_drafts[node_path].leaf_key = (leaf.source_bbox, leaf.content_bbox)
     return [leaf]
 

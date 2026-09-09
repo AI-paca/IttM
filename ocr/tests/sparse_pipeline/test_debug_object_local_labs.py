@@ -12,12 +12,7 @@ from PIL import Image
 
 @pytest.fixture(scope="module")
 def lab() -> ModuleType:
-    path = (
-        Path(__file__).resolve().parents[3]
-        / "scripts"
-        / "debug"
-        / "debug_object_local_labs.py"
-    )
+    path = Path(__file__).resolve().parents[3] / "scripts" / "debug" / "debug_object_local_labs.py"
     name = "_debug_object_local_labs_under_test"
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
@@ -28,9 +23,7 @@ def lab() -> ModuleType:
 
 
 def _object(bundle: object, kind: str) -> object:
-    return next(
-        item for item in bundle.objects.objects if item.kind.value == kind
-    )
+    return next(item for item in bundle.objects.objects if item.kind.value == kind)
 
 
 def test_table_object_slice_produces_actual_abc_and_recovers_six_segments(
@@ -91,9 +84,7 @@ def test_list_item_policy_preserves_every_sparse_item_boundary(
     document_list = _object(bundle, "list")
     blocks = lab.list_item_blocks(bundle, document_list)
 
-    assert tuple(item.segment_ids for item in blocks) == lab._rows_for_object(
-        document_list, bundle.matrix
-    )
+    assert tuple(item.segment_ids for item in blocks) == lab._rows_for_object(document_list, bundle.matrix)
     assert len(blocks) == 3
     assert all(len(item.segment_ids) == 2 for item in blocks)
     assert not any(
@@ -113,19 +104,10 @@ def test_orxor_lab_never_calls_assembly(
             raise AssertionError("assembly was called from OR/XOR lab")
 
     monkeypatch.setattr(lab, "DocumentAssembler", ForbiddenAssembler)
-    summary = lab.run_orxor_lab(
-        lab.synthetic_frozen_bundle(), tmp_path / "orxor"
-    )
+    summary = lab.run_orxor_lab(lab.synthetic_frozen_bundle(), tmp_path / "orxor")
 
     assert summary["status"] == "exact"
-    diff = json.loads(
-        (
-            tmp_path
-            / "orxor"
-            / "object-000002"
-            / "diff.json"
-        ).read_text(encoding="utf-8")
-    )
+    diff = json.loads((tmp_path / "orxor" / "object-000002" / "diff.json").read_text(encoding="utf-8"))
     assert diff["lost_segment_ids"] == []
     assert diff["extra_segment_ids"] == []
     assert diff["merged_units"] == []
@@ -148,12 +130,8 @@ def test_assembly_only_calls_ready_production_core_without_planner_or_replay(
     summary = lab.run_assembly_only_lab(bundle, tmp_path / "assembly")
 
     assert summary["status"] == "exact"
-    assert (tmp_path / "assembly" / "document.txt").read_text(
-        encoding="utf-8"
-    ) == bundle.expected_document_text
-    assert (tmp_path / "assembly" / "document.md").read_text(
-        encoding="utf-8"
-    ) == bundle.expected_document_markdown
+    assert (tmp_path / "assembly" / "document.txt").read_text(encoding="utf-8") == bundle.expected_document_text
+    assert (tmp_path / "assembly" / "document.md").read_text(encoding="utf-8") == bundle.expected_document_markdown
     assert "Stage5.OverlappingBlockPlanner" in summary["skipped"]
     assert "Stage2.OcrEvidenceFusion" in summary["skipped"]
 
@@ -162,9 +140,7 @@ def test_granularity_lab_is_topology_only_and_real_ocr_is_fail_closed(
     lab: ModuleType,
     tmp_path: Path,
 ) -> None:
-    summary = lab.run_granularity_lab(
-        lab.synthetic_frozen_bundle(), tmp_path / "granularity"
-    )
+    summary = lab.run_granularity_lab(lab.synthetic_frozen_bundle(), tmp_path / "granularity")
 
     assert summary["status"] == "topology-exact-ocr-pending"
     assert all(summary["invariants"].values())
@@ -186,19 +162,13 @@ def test_bundle_round_trip_and_full_run_publish_actual_crops_immutably(
 
     assert lab.frozen_bundle_sha256(loaded) == lab.frozen_bundle_sha256(bundle)
     output_root = tmp_path / "runs"
-    destination = lab.run_labs(
-        loaded, output_root=output_root, run_id="isolated-v1"
-    )
-    manifest = json.loads(
-        (destination / "manifest.json").read_text(encoding="utf-8")
-    )
+    destination = lab.run_labs(loaded, output_root=output_root, run_id="isolated-v1")
+    manifest = json.loads((destination / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["immutable"] is True
     assert manifest["status"] == "complete-with-pending-ocr"
     assert manifest["labs"]["orxor"]["status"] == "exact"
     assert manifest["labs"]["assembly"]["status"] == "exact"
-    assert manifest["labs"]["granularity"]["status"] == (
-        "topology-exact-ocr-pending"
-    )
+    assert manifest["labs"]["granularity"]["status"] == ("topology-exact-ocr-pending")
     pngs = tuple(destination.rglob("*.png"))
     assert pngs
     assert not any("overlay" in item.name.lower() for item in pngs)

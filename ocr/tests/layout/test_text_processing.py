@@ -3907,12 +3907,7 @@ def test_rich_single_column_text_keeps_cell_parts_without_full_page_fallback(
     monkeypatch,
 ):
     calls = []
-    responses = iter(
-        [
-            " ".join([f"строка {row}"] * 20)
-            for row in range(4)
-        ]
-    )
+    responses = iter([" ".join([f"строка {row}"] * 20) for row in range(4)])
 
     class FakeEngine:
         def recognize(self, image, mode="text_mode", psm=6):
@@ -4123,9 +4118,7 @@ def test_dedupe_repeated_text_blocks_keeps_tables(monkeypatch):
 
 
 def test_dedupe_repeated_text_blocks_drops_overlapping_full_page_noise(monkeypatch):
-    clean = (
-        "Amazon Basics USB C charger cable black two meter pack with fast delivery"
-    )
+    clean = "Amazon Basics USB C charger cable black two meter pack with fast delivery"
     noisy_full_page = clean + " xzq"
     calls = []
 
@@ -4136,9 +4129,7 @@ def test_dedupe_repeated_text_blocks_drops_overlapping_full_page_noise(monkeypat
 
     monkeypatch.setattr(convert_service, "native_pipeline_core", lambda: OverlapCore())
 
-    deduped = convert_service._dedupe_repeated_text_blocks(
-        f"{clean}\n\n{noisy_full_page}"
-    )
+    deduped = convert_service._dedupe_repeated_text_blocks(f"{clean}\n\n{noisy_full_page}")
 
     assert deduped == clean
     assert calls == [

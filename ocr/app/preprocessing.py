@@ -14,10 +14,7 @@ REGION_DESKEW_MIN_DEGREES = 1.0
 
 def _matrix_product(first: Matrix3, second: Matrix3) -> Matrix3:
     return tuple(
-        sum(
-            first[row * 3 + inner] * second[inner * 3 + column]
-            for inner in range(3)
-        )
+        sum(first[row * 3 + inner] * second[inner * 3 + column] for inner in range(3))
         for row in range(3)
         for column in range(3)
     )
@@ -54,17 +51,11 @@ class RasterTransform(AffineTransform):
             (self.inverse, self.forward),
         ):
             product = _normalized_matrix(_matrix_product(first, second))
-            if any(
-                abs(value - expected) > 1e-7
-                for value, expected in zip(product, identity)
-            ):
+            if any(abs(value - expected) > 1e-7 for value, expected in zip(product, identity)):
                 raise ValueError("forward and inverse matrices are not inverses")
         if type(self.operation) is not str or not self.operation:
             raise ValueError("transform operation must be a non-empty string")
-        if (
-            not math.isfinite(self.confidence)
-            or not 0.0 <= self.confidence <= 1.0
-        ):
+        if not math.isfinite(self.confidence) or not 0.0 <= self.confidence <= 1.0:
             raise ValueError("transform confidence must be between zero and one")
         if not all(
             math.isfinite(value)
@@ -85,12 +76,8 @@ class RasterTransform(AffineTransform):
     ) -> "RasterTransform":
         if region.aligned_size != alignment.original_size:
             raise ValueError("transform chain has incompatible canvas sizes")
-        forward = _normalized_matrix(
-            _matrix_product(alignment.forward, region.forward)
-        )
-        inverse = _normalized_matrix(
-            _matrix_product(region.inverse, alignment.inverse)
-        )
+        forward = _normalized_matrix(_matrix_product(alignment.forward, region.forward))
+        inverse = _normalized_matrix(_matrix_product(region.inverse, alignment.inverse))
         operations = tuple(
             operation
             for operation in (
@@ -107,9 +94,7 @@ class RasterTransform(AffineTransform):
             operation="+".join(operations) if operations else "identity",
             confidence=region.confidence,
             source_angle_degrees=region.source_angle_degrees,
-            residual_angle_degrees=(
-                region.residual_angle_degrees - alignment_degrees
-            ),
+            residual_angle_degrees=(region.residual_angle_degrees - alignment_degrees),
         )
 
 
@@ -147,10 +132,7 @@ def confidence_gated_region_deskew(
         raise TypeError("image must be a Pillow Image")
     if type(enabled) is not bool:
         raise TypeError("enabled must be a boolean")
-    if (
-        not math.isfinite(minimum_confidence)
-        or not 0.0 <= minimum_confidence <= 1.0
-    ):
+    if not math.isfinite(minimum_confidence) or not 0.0 <= minimum_confidence <= 1.0:
         raise ValueError("minimum confidence must be between zero and one")
     if not math.isfinite(minimum_degrees) or not 0.0 <= minimum_degrees <= 15.0:
         raise ValueError("minimum degrees must be between zero and 15")
@@ -220,13 +202,15 @@ def _quad_metrics(
     right_height = math.dist(source[1], source[2])
     target_width = max(1, round((top_width + bottom_width) / 2))
     target_height = max(1, round((left_height + right_height) / 2))
-    polygon_area = abs(
-        sum(
-            source[index][0] * source[(index + 1) % 4][1]
-            - source[(index + 1) % 4][0] * source[index][1]
-            for index in range(4)
+    polygon_area = (
+        abs(
+            sum(
+                source[index][0] * source[(index + 1) % 4][1] - source[(index + 1) % 4][0] * source[index][1]
+                for index in range(4)
+            )
         )
-    ) / 2.0
+        / 2.0
+    )
     area_ratio = polygon_area / max(1.0, width * height)
     edge_balance = min(
         min(top_width, bottom_width) / max(top_width, bottom_width, 1.0),
@@ -296,9 +280,7 @@ def _warp_region_with_contract(
     )
     import numpy as np
 
-    forward = _normalized_matrix(
-        np.linalg.inv(np.asarray(inverse, dtype=np.float64).reshape(3, 3)).reshape(-1)
-    )
+    forward = _normalized_matrix(np.linalg.inv(np.asarray(inverse, dtype=np.float64).reshape(3, 3)).reshape(-1))
     transform = RasterTransform(
         original_size=image.size,
         aligned_size=target_size,
@@ -476,10 +458,7 @@ class ProjectorSlideDewarpStep(ImagePreprocessingStep):
 
         detected_source = _detected_projector_quad(image)
         if detected_source is None:
-            source = tuple(
-                (int(width * x), int(height * y))
-                for x, y in _projector_slide_source_ratios(gray)
-            )
+            source = tuple((int(width * x), int(height * y)) for x, y in _projector_slide_source_ratios(gray))
             target_width, target_height = 2000, 1200
         else:
             source = detected_source
@@ -761,10 +740,7 @@ def _detected_document_quad(
             rectangularity = area / max(1, bounding[2] * bounding[3])
             if rectangularity < 0.72:
                 continue
-            return tuple(
-                (float(point[0]), float(point[1]))
-                for point in corners
-            )
+            return tuple((float(point[0]), float(point[1])) for point in corners)
     return None
 
 

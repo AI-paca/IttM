@@ -40,16 +40,9 @@ from app.sparse_pipeline.v16_recursive_grid import (
 )
 from app.sparse_pipeline.v16_sparse_codes import MERGE_LEFT_CODE
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 FIXTURE_ROOT = REPOSITORY_ROOT / "debug" / "fixtures"
-ORACLE_ROOT = (
-    REPOSITORY_ROOT
-    / "debug"
-    / "labs"
-    / "legacy-grid-external-oracle-20260720-v1"
-    / "official-v16-traces"
-)
+ORACLE_ROOT = REPOSITORY_ROOT / "debug" / "labs" / "legacy-grid-external-oracle-20260720-v1" / "official-v16-traces"
 
 
 def test_external_character_height_flag_stops_one_recursive_crop() -> None:
@@ -201,9 +194,7 @@ def test_adapter_replays_literal_v16_and_keeps_exclusion_separate(
     assert matrix.projection_sha256 == trace.projection_sha256
     assert len(matrix.cells) == leaves
     assert len(matrix.structural_codes) == codes
-    assert tuple((item.row, item.column) for item in matrix.cells) == tuple(
-        item.anchor for item in trace.leaves
-    )
+    assert tuple((item.row, item.column) for item in matrix.cells) == tuple(item.anchor for item in trace.leaves)
 
     assert trace.rows == oracle["rows"]
     assert trace.columns == oracle["cols"]
@@ -221,13 +212,9 @@ def test_adapter_replays_literal_v16_and_keeps_exclusion_separate(
         assert list(actual.merge_left_tracks) == expected_leaf["merge_left_tracks"]
         assert list(actual.anchor) == expected_projection["anchor"]
         assert [list(item) for item in actual.codes] == expected_projection["codes"]
-        assert json.loads(
-            json.dumps([item.metadata() for item in actual.decisions])
-        ) == expected_leaf["decisions"]
+        assert json.loads(json.dumps([item.metadata() for item in actual.decisions])) == expected_leaf["decisions"]
 
-    assert not np.any(
-        bundle.foreground_mask & bundle.excluded_foreground_mask
-    )
+    assert not np.any(bundle.foreground_mask & bundle.excluded_foreground_mask)
     assert np.all(bundle.ownership[bundle.foreground_mask] >= 0)
     assert np.all(bundle.ownership[~bundle.foreground_mask] == -1)
     ownership_counts = np.bincount(
@@ -246,11 +233,7 @@ def test_adapter_replays_literal_v16_and_keeps_exclusion_separate(
         matrix=matrix,
     )
     assert len(objects.objects) == groups
-    assert {
-        index
-        for index, item in enumerate(objects.objects)
-        if item.kind is ObjectKind.TABLE
-    } == table_indexes
+    assert {index for index, item in enumerate(objects.objects) if item.kind is ObjectKind.TABLE} == table_indexes
 
 
 @pytest.mark.parametrize(
@@ -276,8 +259,7 @@ def test_real_logical_tables_use_overlapping_pairs_not_one_giant_block(
     target_index, target = next(
         (index, item)
         for index, item in enumerate(objects.objects)
-        if item.kind is ObjectKind.TABLE
-        and len(item.segment_ids) == table_size
+        if item.kind is ObjectKind.TABLE and len(item.segment_ids) == table_size
     )
     plan = OverlappingBlockPlanner(
         BlockPlanningConfig(
@@ -298,11 +280,7 @@ def test_real_logical_tables_use_overlapping_pairs_not_one_giant_block(
     assert len(blocks) == sliding_blocks
     assert all(len(item.segment_ids) == 2 for item in blocks)
     assert len(units) == table_size
-    assert all(
-        item.kind is MembershipUnitKind.SEGMENT
-        and len(item.segment_ids) == 1
-        for item in units
-    )
+    assert all(item.kind is MembershipUnitKind.SEGMENT and len(item.segment_ids) == 1 for item in units)
 
 
 def _segment(segment_id: str, row: int, left: int = 10) -> Segment:
@@ -328,15 +306,10 @@ def _logical_matrix(
 ) -> SparseSegmentMatrix:
     return SparseSegmentMatrix(
         rows=tuple(AxisInterval(index, index, index + 1) for index in range(rows)),
-        columns=tuple(
-            AxisInterval(index, index, index + 1) for index in range(columns)
-        ),
+        columns=tuple(AxisInterval(index, index, index + 1) for index in range(columns)),
         cells=tuple(
             sorted(
-                (
-                    SparseCell(row, column, segment_id)
-                    for segment_id, (row, column) in placements.items()
-                ),
+                (SparseCell(row, column, segment_id) for segment_id, (row, column) in placements.items()),
                 key=lambda item: (item.row, item.column, item.segment_id),
             )
         ),
@@ -347,10 +320,7 @@ def _logical_matrix(
         coordinate_mode=SparseCoordinateMode.LOGICAL_PROJECTION,
         structural_codes=tuple(
             sorted(
-                (
-                    SparseStructuralCode(row, column, code, segment_id)
-                    for segment_id, row, column, code in codes
-                ),
+                (SparseStructuralCode(row, column, code, segment_id) for segment_id, row, column, code in codes),
                 key=lambda item: (
                     item.row,
                     item.column,
@@ -376,9 +346,7 @@ def test_logical_paragraph_and_list_are_not_promoted_to_tables() -> None:
         rules=(),
         matrix=paragraph_matrix,
     )
-    assert tuple(item.kind for item in paragraph.objects) == (
-        ObjectKind.PARAGRAPH,
-    )
+    assert tuple(item.kind for item in paragraph.objects) == (ObjectKind.PARAGRAPH,)
 
     list_segments = tuple(_segment(f"l-{row}", row) for row in range(3))
     list_matrix = _logical_matrix(
@@ -445,9 +413,7 @@ def test_blank_faint_and_rgba_pages_share_canonical_source_policy() -> None:
     assert blank_bundle.result.status is GeometryStatus.COMPLETE
     assert not blank_bundle.result.segmentation.segments
     assert blank_bundle.result.segmentation.nodes[0].stop_reason is StopReason.EMPTY
-    assert blank_bundle.result.matrix.coordinate_mode is (
-        SparseCoordinateMode.LOGICAL_PROJECTION
-    )
+    assert blank_bundle.result.matrix.coordinate_mode is (SparseCoordinateMode.LOGICAL_PROJECTION)
     assert not blank_bundle.result.matrix.rows
 
     font_path = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
@@ -485,14 +451,10 @@ def test_v16_adapter_honors_component_and_node_limits(real_v16_bundles) -> None:
     path = FIXTURE_ROOT / "000041301_UchebPlan_sign000029629.pdf.raster.png"
     with Image.open(path) as image:
         with pytest.raises(GeometryLimitError, match="leaf/component count"):
-            V16GeometryAnalyzer(
-                GeometryConfig(max_components=1)
-            ).analyze_bundle(image)
+            V16GeometryAnalyzer(GeometryConfig(max_components=1)).analyze_bundle(image)
     with Image.open(path) as image:
         with pytest.raises(GeometryLimitError, match="node limit"):
-            V16GeometryAnalyzer(
-                GeometryConfig(max_nodes=1)
-            ).analyze_bundle(image)
+            V16GeometryAnalyzer(GeometryConfig(max_nodes=1)).analyze_bundle(image)
 
 
 def test_v16_artifact_writer_persists_literal_and_excluded_layers(
@@ -523,12 +485,8 @@ def test_v16_artifact_writer_persists_literal_and_excluded_layers(
     assert all((stage / item).is_file() for item in required)
     manifest = json.loads((stage / "manifest.json").read_text(encoding="utf-8"))
     matrix = json.loads((stage / "matrix.json").read_text(encoding="utf-8"))
-    legacy = json.loads(
-        (stage / "legacy-matrix.json").read_text(encoding="utf-8")
-    )
+    legacy = json.loads((stage / "legacy-matrix.json").read_text(encoding="utf-8"))
     assert matrix["coordinate_mode"] == "logical_projection"
-    assert manifest["legacy_projection"]["projection_sha256"] == (
-        bundle.v16_trace.projection_sha256
-    )
+    assert manifest["legacy_projection"]["projection_sha256"] == (bundle.v16_trace.projection_sha256)
     assert legacy["projection_sha256"] == bundle.v16_trace.projection_sha256
     assert "leaves" in legacy and "groups" in legacy and "codes" in legacy

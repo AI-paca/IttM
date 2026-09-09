@@ -70,7 +70,6 @@ silently fall back to the old Python layout route.
 When changing ABI behavior, update the Rust tests, native wrapper, browser
 wrapper, parity verifier, WASM verifier, and this document together.
 
-
 ### Frozen OCR stage inputs
 
 `export-python-ocr-checkpoint.py` exports the selected legacy Python OCR plan,
@@ -106,7 +105,6 @@ the frozen Python route. Source segments remain separately accounted, including
 structural edge residuals. Object-boundary agreement does not by itself prove
 local matrix cell construction, OCR block raster construction or OCR selection.
 
-
 Local matrices are now constructed in the shared Rust object stage from the
 page topology, rule lattice and original geometric source IDs. The complete
 row/cell representation preserves source-free empty cells, disconnected row
@@ -125,7 +123,6 @@ retains the earlier 28/28 topology and object metadata agreement. OCR block
 planning, raster packing and language selection still require their own
 isolated comparisons; local-matrix agreement does not establish full-route
 quality.
-
 
 ### Canonical block planning
 

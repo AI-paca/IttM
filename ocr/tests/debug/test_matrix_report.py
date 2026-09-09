@@ -140,9 +140,7 @@ def test_aggregate_raster_reference_scores_ordered_pages_for_all_methods(
                 encoding="utf-8",
             )
             comparison_lines.append(f"{page_name},{method},1.000,n/a")
-            summary_lines.append(
-                f"abc\t{method}\tprofile\t{page_name}\t200\t0\t1000\tflag"
-            )
+            summary_lines.append(f"abc\t{method}\tprofile\t{page_name}\t200\t0\t1000\tflag")
     (benchmark_root / "comparison.csv").write_text(
         "\n".join(comparison_lines) + "\n",
         encoding="utf-8",
@@ -167,9 +165,7 @@ def test_aggregate_raster_reference_scores_ordered_pages_for_all_methods(
             f"page {page_number}\n",
             encoding="utf-8",
         )
-        browser_summary.append(
-            f"abc\t{page_name}\t0\t500\tbrowser_profile\tbrowser_flag"
-        )
+        browser_summary.append(f"abc\t{page_name}\t0\t500\tbrowser_profile\tbrowser_flag")
     (browser_root / "summary.tsv").write_text(
         "\n".join(browser_summary) + "\n",
         encoding="utf-8",
@@ -189,9 +185,7 @@ def test_aggregate_raster_reference_scores_ordered_pages_for_all_methods(
     assert result["easyocr %"] == "100.00"
     assert result["browser-tesseract %"] == "100.00"
     assert result["tesseract gate"] == "pass"
-    assert (
-        benchmark_root / "tesseract" / "plan.pdf.raster.png.md"
-    ).read_text(encoding="utf-8") == "page 1\n\npage 2\n"
+    assert (benchmark_root / "tesseract" / "plan.pdf.raster.png.md").read_text(encoding="utf-8") == "page 1\n\npage 2\n"
 
 
 def test_aggregate_raster_reference_reports_missing_page_partial(tmp_path):
@@ -253,8 +247,7 @@ def test_exact_page_reference_disables_document_aggregate(tmp_path):
         encoding="utf-8",
     )
     (benchmark_root / "comparison.csv").write_text(
-        "file,method,wall_seconds,match_percent\n"
-        f"{page_name},tesseract,1.000,100.00\n",
+        "file,method,wall_seconds,match_percent\n" f"{page_name},tesseract,1.000,100.00\n",
         encoding="utf-8",
     )
     (benchmark_root / "summary.tsv").write_text(

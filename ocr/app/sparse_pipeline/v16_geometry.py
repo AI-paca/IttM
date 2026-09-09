@@ -104,9 +104,7 @@ class V16AdapterTrace:
             raise ValueError("v16 logical projection dimensions must be non-negative")
         if bool(self.rows) != bool(self.columns):
             raise ValueError("v16 logical projection axes must both be empty or non-empty")
-        if not self.leaves and any(
-            (self.rows, self.columns, self.x_tracks, self.codes, self.groups)
-        ):
+        if not self.leaves and any((self.rows, self.columns, self.x_tracks, self.codes, self.groups)):
             raise ValueError("empty v16 evidence cannot retain a projected matrix")
         if self.leaves and (not self.rows or not self.columns):
             raise ValueError("v16 leaf evidence requires a non-empty projection")
@@ -114,17 +112,13 @@ class V16AdapterTrace:
             raise ValueError("v16 x-track count disagrees with logical columns")
         if len(self.leaves) != len({item.segment_id for item in self.leaves}):
             raise ValueError("v16 adapter segment IDs must be unique")
-        if self.foreground_pixels != (
-            self.tracked_foreground_pixels + self.excluded_foreground_pixels
-        ):
+        if self.foreground_pixels != (self.tracked_foreground_pixels + self.excluded_foreground_pixels):
             raise ValueError("v16 foreground accounting is not exact")
         for digest in (
             self.projection_sha256,
             self.excluded_foreground_sha256,
         ):
-            if len(digest) != 64 or any(
-                character not in "0123456789abcdef" for character in digest
-            ):
+            if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
                 raise ValueError("v16 adapter digest is invalid")
 
 
@@ -152,13 +146,9 @@ class V16GeometryBundle(GeometryBundle):
             )
         ):
             raise ValueError("tracked and excluded foreground must be disjoint")
-        if int(self.excluded_foreground_mask.sum()) != (
-            self.v16_trace.excluded_foreground_pixels
-        ):
+        if int(self.excluded_foreground_mask.sum()) != (self.v16_trace.excluded_foreground_pixels):
             raise ValueError("v16 excluded foreground count disagrees with mask")
-        segment_ids = tuple(
-            item.segment_id for item in self.result.segmentation.segments
-        )
+        segment_ids = tuple(item.segment_id for item in self.result.segmentation.segments)
         if tuple(item.segment_id for item in self.v16_trace.leaves) != segment_ids:
             raise ValueError("v16 trace leaves disagree with geometry segments")
         matrix = self.result.matrix
@@ -217,14 +207,10 @@ class V16GeometryAnalyzer:
             raise ValueError("image dimensions must be positive")
         pixels = image.width * image.height
         if pixels > self.config.max_input_pixels:
-            raise GeometryLimitError(
-                f"input pixel limit exceeded: {pixels} > "
-                f"{self.config.max_input_pixels}"
-            )
+            raise GeometryLimitError(f"input pixel limit exceeded: {pixels} > " f"{self.config.max_input_pixels}")
         if pixels > self.config.max_aligned_pixels:
             raise GeometryLimitError(
-                f"aligned pixel limit exceeded before allocation: {pixels} > "
-                f"{self.config.max_aligned_pixels}"
+                f"aligned pixel limit exceeded before allocation: {pixels} > " f"{self.config.max_aligned_pixels}"
             )
 
         source_rgb = _source_rgb(image, self.config.alpha_background_rgb)
@@ -247,13 +233,11 @@ class V16GeometryAnalyzer:
         try:
             if len(analysis.leaves) > self.config.max_components:
                 raise GeometryLimitError(
-                    "v16 leaf/component count exceeds configured limit "
-                    f"{self.config.max_components}"
+                    "v16 leaf/component count exceeds configured limit " f"{self.config.max_components}"
                 )
             if len(analysis.leaves) + 1 > self.config.max_nodes:
                 raise GeometryLimitError(
-                    "v16 recursive evidence exceeds configured node limit "
-                    f"{self.config.max_nodes}"
+                    "v16 recursive evidence exceeds configured node limit " f"{self.config.max_nodes}"
                 )
             bundle = self._adapt(
                 source_rgb=source_rgb,
@@ -284,13 +268,9 @@ class V16GeometryAnalyzer:
                 stop_reason=StopReason.EMPTY,
             )
         height, width = foreground.shape
-        leaf_ids = {
-            id(leaf): f"segment-{index:06d}"
-            for index, leaf in enumerate(analysis.leaves)
-        }
+        leaf_ids = {id(leaf): f"segment-{index:06d}" for index, leaf in enumerate(analysis.leaves)}
         projection_by_leaf = {
-            id(leaf): (anchor, tuple(sorted(codes)))
-            for leaf, anchor, codes in analysis.projection.leaf_projection
+            id(leaf): (anchor, tuple(sorted(codes))) for leaf, anchor, codes in analysis.projection.leaf_projection
         }
         coverage = np.zeros((height, width), dtype=np.uint16)
         for leaf in analysis.leaves:
@@ -318,10 +298,7 @@ class V16GeometryAnalyzer:
                 source_rgb=source_rgb,
                 foreground=foreground,
                 background=background,
-                reason=(
-                    "unowned-contextual-leaves="
-                    + ",".join(str(item) for item in missing[:8])
-                ),
+                reason=("unowned-contextual-leaves=" + ",".join(str(item) for item in missing[:8])),
                 stop_reason=StopReason.LIMIT,
             )
 
@@ -393,14 +370,8 @@ class V16GeometryAnalyzer:
             )
         )
         matrix = SparseSegmentMatrix(
-            rows=tuple(
-                AxisInterval(index, index, index + 1)
-                for index in range(analysis.signature.rows)
-            ),
-            columns=tuple(
-                AxisInterval(index, index, index + 1)
-                for index in range(analysis.signature.cols)
-            ),
+            rows=tuple(AxisInterval(index, index, index + 1) for index in range(analysis.signature.rows)),
+            columns=tuple(AxisInterval(index, index, index + 1) for index in range(analysis.signature.cols)),
             cells=cells,
             spans=spans,
             coordinate_mode=SparseCoordinateMode.LOGICAL_PROJECTION,
@@ -408,26 +379,15 @@ class V16GeometryAnalyzer:
             projection_sha256=projection_sha256,
         )
         node_id_by_path = {
-            node.path: (
-                "geo-root"
-                + "".join(f".{child_index}" for child_index in node.path)
-            )
-            for node in analysis.nodes
+            node.path: ("geo-root" + "".join(f".{child_index}" for child_index in node.path)) for node in analysis.nodes
         }
-        leaf_path_by_index = {
-            node.leaf_index: node.path
-            for node in analysis.nodes
-            if node.leaf_index is not None
-        }
+        leaf_path_by_index = {node.leaf_index: node.path for node in analysis.nodes if node.leaf_index is not None}
 
         def parent_path(leaf_index: int) -> tuple[str, ...]:
             path = leaf_path_by_index.get(leaf_index)
             if path is None:
                 raise ValueError("v16 recursive leaf lost its owning node")
-            return tuple(
-                node_id_by_path[path[:depth]]
-                for depth in range(len(path) + 1)
-            )
+            return tuple(node_id_by_path[path[:depth]] for depth in range(len(path) + 1))
 
         segments = tuple(
             Segment(
@@ -442,10 +402,7 @@ class V16GeometryAnalyzer:
             )
             for index, trace in enumerate(leaf_traces)
         )
-        segment_ids = tuple(item.segment_id for item in segments)
-        segment_id_by_leaf = {
-            index: segment.segment_id for index, segment in enumerate(segments)
-        }
+        segment_id_by_leaf = {index: segment.segment_id for index, segment in enumerate(segments)}
         trace_node_by_path = {node.path: node for node in analysis.nodes}
 
         def descendant_segment_ids(path: tuple[int, ...]) -> tuple[str, ...]:
@@ -453,9 +410,7 @@ class V16GeometryAnalyzer:
             if node.leaf_index is not None:
                 return (segment_id_by_leaf[node.leaf_index],)
             return tuple(
-                segment_id
-                for child_path in node.child_paths
-                for segment_id in descendant_segment_ids(child_path)
+                segment_id for child_path in node.child_paths for segment_id in descendant_segment_ids(child_path)
             )
 
         nodes = tuple(
@@ -463,30 +418,16 @@ class V16GeometryAnalyzer:
                 node_id=node_id_by_path[node.path],
                 bbox=Box(*node.source_bbox),
                 depth=len(node.path),
-                parent_id=(
-                    node_id_by_path[node.path[:-1]] if node.path else None
-                ),
+                parent_id=(node_id_by_path[node.path[:-1]] if node.path else None),
                 axis=(SplitAxis(node.axis) if node.child_paths else None),
-                child_ids=tuple(
-                    node_id_by_path[child] for child in node.child_paths
-                ),
+                child_ids=tuple(node_id_by_path[child] for child in node.child_paths),
                 segment_ids=descendant_segment_ids(node.path),
-                separator_boxes=tuple(
-                    Box(*separator) for separator in node.separator_boxes
-                ),
-                split_coordinate=(
-                    node.split_coordinate
-                    if node.child_paths and not node.separator_boxes
-                    else None
-                ),
+                separator_boxes=tuple(Box(*separator) for separator in node.separator_boxes),
+                split_coordinate=(node.split_coordinate if node.child_paths and not node.separator_boxes else None),
                 stop_reason=(
                     None
                     if node.child_paths
-                    else (
-                        StopReason.CHARACTER_HEIGHT
-                        if node.stop_flag is not None
-                        else StopReason.ATOMIC
-                    )
+                    else (StopReason.CHARACTER_HEIGHT if node.stop_flag is not None else StopReason.ATOMIC)
                 ),
             )
             for node in analysis.nodes
@@ -518,9 +459,7 @@ class V16GeometryAnalyzer:
             alignment=alignment,
             segmentation=segmentation,
             matrix=matrix,
-            aligned_rgb_sha256=hashlib.sha256(
-                memoryview(np.ascontiguousarray(aligned_rgb))
-            ).hexdigest(),
+            aligned_rgb_sha256=hashlib.sha256(memoryview(np.ascontiguousarray(aligned_rgb))).hexdigest(),
             status=GeometryStatus.COMPLETE,
             diagnostics=(
                 f"v16_leaves={len(segments)}",
@@ -551,9 +490,7 @@ class V16GeometryAnalyzer:
             tracked_foreground_pixels=tracked_pixels,
             excluded_foreground_pixels=int(excluded.sum()),
             excluded_foreground_sha256=excluded_sha256,
-            duplicated_foreground_pixels=int(
-                np.logical_and(foreground, coverage > 1).sum()
-            ),
+            duplicated_foreground_pixels=int(np.logical_and(foreground, coverage > 1).sum()),
             maximum_bbox_multiplicity=int(coverage.max(initial=0)),
             background_rgb=background,
         )
@@ -632,18 +569,12 @@ def _empty_bundle(
         content_bbox=None,
         foreground_pixels=0,
     )
-    status = (
-        GeometryStatus.DEGRADED
-        if stop_reason is StopReason.LIMIT
-        else GeometryStatus.COMPLETE
-    )
+    status = GeometryStatus.DEGRADED if stop_reason is StopReason.LIMIT else GeometryStatus.COMPLETE
     result = GeometryResult(
         alignment=alignment,
         segmentation=segmentation,
         matrix=matrix,
-        aligned_rgb_sha256=hashlib.sha256(
-            memoryview(np.ascontiguousarray(aligned_rgb))
-        ).hexdigest(),
+        aligned_rgb_sha256=hashlib.sha256(memoryview(np.ascontiguousarray(aligned_rgb))).hexdigest(),
         status=status,
         diagnostics=(
             "v16_leaves=0",
@@ -663,10 +594,7 @@ def _empty_bundle(
         leaves=(),
         groups=(),
         projection_sha256=projection_sha256,
-        foreground_definition=(
-            "max RGB distance >=24 from median 16px page border; "
-            "no segmentable contextual leaf"
-        ),
+        foreground_definition=("max RGB distance >=24 from median 16px page border; " "no segmentable contextual leaf"),
         foreground_pixels=int(excluded.sum()),
         tracked_foreground_pixels=0,
         excluded_foreground_pixels=int(excluded.sum()),
@@ -706,10 +634,13 @@ def _rescue_faint_leaf_foreground(
         return expanded, 0
 
     background_array = np.asarray(background, dtype=np.int16)
-    weak = np.max(
-        np.abs(source_rgb.astype(np.int16) - background_array),
-        axis=2,
-    ) >= 10
+    weak = (
+        np.max(
+            np.abs(source_rgb.astype(np.int16) - background_array),
+            axis=2,
+        )
+        >= 10
+    )
     for leaf in missing:
         left, top, right, bottom = leaf.content_bbox
         local = weak[top:bottom, left:right]
@@ -845,8 +776,6 @@ def _canonical_sha256(payload: object) -> str:
 
 def _mask_sha256(mask: np.ndarray) -> str:
     digest = hashlib.sha256()
-    digest.update(
-        f"{mask.shape[0]}x{mask.shape[1]}:packbits-big".encode("ascii")
-    )
+    digest.update(f"{mask.shape[0]}x{mask.shape[1]}:packbits-big".encode("ascii"))
     digest.update(np.packbits(mask, bitorder="big").tobytes())
     return digest.hexdigest()

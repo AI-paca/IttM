@@ -62,12 +62,8 @@ def test_table_is_recognized_only_from_local_upper_left_anchor() -> None:
 
 
 def test_numeric_cycle_without_independent_lattice_is_not_a_table() -> None:
-    segments = (
-        PartitionSegment("payload", (1, 1, 19, 19), ("geo-root",)),
-    )
-    nodes = (
-        PartitionNode("geo-root", (0, 0, 20, 20), None, (), ("payload",)),
-    )
+    segments = (PartitionSegment("payload", (1, 1, 19, 19), ("geo-root",)),)
+    nodes = (PartitionNode("geo-root", (0, 0, 20, 20), None, (), ("payload",)),)
 
     result = partition_recursive_objects(
         segments=segments,
@@ -231,10 +227,7 @@ def test_two_ruled_tables_remain_two_objects_across_empty_ten() -> None:
     rows = (
         *_table_rows(0),
         NumericRow(2, 20, 30, (NumericCell((0, 20, 20, 30), 10, True),)),
-        *(
-            NumericRow(row.row + 3, row.top + 30, row.bottom + 30, row.cells)
-            for row in _table_rows(0)
-        ),
+        *(NumericRow(row.row + 3, row.top + 30, row.bottom + 30, row.cells) for row in _table_rows(0)),
     )
     # Translate the second table's cells as well as its row band.
     rows = (
@@ -288,10 +281,7 @@ def test_two_ruled_tables_remain_two_objects_across_empty_ten() -> None:
 
     assert tuple(item.kind for item in result) == ("table", "table")
     assert tuple(item.segment_ids for item in result) == (("a",), ("b",))
-    assert all(
-        item.matrix_basis is PartitionMatrixBasis.RULE_LATTICE
-        for item in result
-    )
+    assert all(item.matrix_basis is PartitionMatrixBasis.RULE_LATTICE for item in result)
 
 
 def test_long_numeric_empty_wall_forms_header_flank_and_table() -> None:
@@ -432,12 +422,8 @@ def test_empty_corridor_splits_two_non_table_columns_before_typing() -> None:
         ("left-a", "left-b"),
         ("right-a", "right-b"),
     )
-    assert all(
-        "spanning-finite-empty-corridor" in item.evidence for item in result
-    )
-    assert all(
-        "opposite-finite-table-cycle" not in item.evidence for item in result
-    )
+    assert all("spanning-finite-empty-corridor" in item.evidence for item in result)
+    assert all("opposite-finite-table-cycle" not in item.evidence for item in result)
 
 
 def test_marker_body_rows_win_over_an_aligned_parallel_grid() -> None:
@@ -866,9 +852,7 @@ def test_list_survives_rows_with_fused_and_separate_markers() -> None:
 
     assert len(result) == 1
     assert result[0].kind == "list"
-    assert set(result[0].segment_ids) == {
-        item.segment_id for item in segments
-    }
+    assert set(result[0].segment_ids) == {item.segment_id for item in segments}
 
 
 def test_first_line_indent_remains_a_paragraph() -> None:
@@ -932,9 +916,7 @@ def test_degenerate_geometry_is_accounted_for_but_is_not_an_object() -> None:
 
 
 def test_wide_thin_page_edge_fill_is_a_structural_residual() -> None:
-    segments = (
-        PartitionSegment("bottom-edge", (8, 95, 100, 100), ("geo-root",)),
-    )
+    segments = (PartitionSegment("bottom-edge", (8, 95, 100, 100), ("geo-root",)),)
     nodes = (
         PartitionNode(
             "geo-root",
@@ -981,9 +963,7 @@ def test_tall_page_edge_fringe_is_not_attached_to_paragraph_crop() -> None:
     )
 
     paragraph = next(item for item in result if item.kind == "paragraph")
-    residual = next(
-        item for item in result if item.kind == "structural-residual"
-    )
+    residual = next(item for item in result if item.kind == "structural-residual")
     assert paragraph.bbox == (10, 5, 100, 30)
     assert paragraph.segment_ids == ("line-0", "line-1")
     assert residual.segment_ids == ("left-edge",)

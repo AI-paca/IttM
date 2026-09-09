@@ -150,11 +150,7 @@ def looks_like_cyrillic_tech_ocr_noise(text: str) -> bool:
         return False
 
     cyrillic_words = [word for word in words if re.search(r"[\u0400-\u04ff]", word)]
-    embedded_digit_words = [
-        word
-        for word in cyrillic_words
-        if any(character.isdigit() for character in word)
-    ]
+    embedded_digit_words = [word for word in cyrillic_words if any(character.isdigit() for character in word)]
     tech_punctuation = sum(character in "/_{}[]?\\|" for character in text)
     if embedded_digit_words and tech_punctuation >= 1:
         return True
@@ -204,13 +200,7 @@ def _code_path_token_score(token: str) -> float:
     has_mixed_code_marker = (
         (latin > 0 or digits > 0 or "_" in lowered or has_code_extension)
         and cyrillic > 0
-        and (
-            has_code_extension
-            or has_code_root
-            or "_" in lowered
-            or "/" in lowered
-            or "\\" in lowered
-        )
+        and (has_code_extension or has_code_root or "_" in lowered or "/" in lowered or "\\" in lowered)
     )
     if not (
         has_code_extension
@@ -241,10 +231,7 @@ def _code_path_token_score(token: str) -> float:
         score -= min(18.0, 2.2 * cyrillic)
         if has_mixed_code_marker:
             score -= 4.0
-    odd = sum(
-        not character.isalnum() and character not in "._-/\\"
-        for character in token
-    )
+    odd = sum(not character.isalnum() and character not in "._-/\\" for character in token)
     score -= min(8.0, odd * 2.0)
     return score
 

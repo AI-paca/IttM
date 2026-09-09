@@ -198,15 +198,11 @@ def test_workers_load_once_and_remain_thread_affine_across_pages() -> None:
             return _output()
 
         def close() -> None:
-            state["close_threads"].append(  # type: ignore[union-attr]
-                threading.get_ident()
-            )
+            state["close_threads"].append(threading.get_ident())  # type: ignore[union-attr]
 
         return _Worker(recognize, close)
 
-    session = PersistentOcrSession(
-        (_lane("persistent", factory, max_workers=2),)
-    )
+    session = PersistentOcrSession((_lane("persistent", factory, max_workers=2),))
     first = session.run(plan=first_plan, crops=first_crops)
     second = session.run(plan=second_plan, crops=second_crops)
 
@@ -214,10 +210,7 @@ def test_workers_load_once_and_remain_thread_affine_across_pages() -> None:
     _assert_complete(second, 8)
     assert len(states) == 2
     assert all(len(state["calls"]) == 8 for state in states)
-    assert all(
-        set(state["calls"]) == {state["creator"]}  # type: ignore[arg-type]
-        for state in states
-    )
+    assert all(set(state["calls"]) == {state["creator"]} for state in states)  # type: ignore[arg-type]
     session.close()
     assert all(state["close_threads"] == [state["creator"]] for state in states)
 
@@ -241,9 +234,7 @@ def test_each_persistent_shard_keeps_raw_gamma_pairs_atomic() -> None:
 
         return _Worker(recognize)
 
-    with PersistentOcrSession(
-        (_lane("atomic", factory, max_workers=2),)
-    ) as session:
+    with PersistentOcrSession((_lane("atomic", factory, max_workers=2),)) as session:
         result = session.run(plan=plan, crops=crops)
 
     _assert_complete(result, 10)
@@ -337,9 +328,7 @@ def test_poisoned_worker_is_replaced_without_disturbing_other_shard() -> None:
 
         return _Worker(recognize, close)
 
-    session = PersistentOcrSession(
-        (_lane("replace", factory, max_workers=2),)
-    )
+    session = PersistentOcrSession((_lane("replace", factory, max_workers=2),))
     result = session.run(plan=plan, crops=crops)
 
     assert result.status is OcrQueueStatus.PARTIAL
@@ -348,9 +337,7 @@ def test_poisoned_worker_is_replaced_without_disturbing_other_shard() -> None:
     assert len(failed) == 1
     assert failed[0].transform is OcrTransform.RAW
     assert failed[0].error_type == "_PoisonedWorkerError"
-    failed_block_jobs = tuple(
-        job for job in result.jobs if job.block_id == failed[0].block_id
-    )
+    failed_block_jobs = tuple(job for job in result.jobs if job.block_id == failed[0].block_id)
     assert tuple(job.status for job in failed_block_jobs) == (
         OcrJobStatus.FAILED,
         OcrJobStatus.COMPLETE,
@@ -380,9 +367,7 @@ def test_close_is_idempotent_and_closed_session_rejects_new_work() -> None:
             lambda: calls.__setitem__("close", calls["close"] + 1),
         )
 
-    session = PersistentOcrSession(
-        (_lane("closed", factory, max_workers=1),)
-    )
+    session = PersistentOcrSession((_lane("closed", factory, max_workers=1),))
     _assert_complete(session.run(plan=plan, crops=crops), 2)
     session.close()
     session.close()

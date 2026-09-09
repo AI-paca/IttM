@@ -299,8 +299,7 @@ def test_tesseract_t9_keeps_cyrillic_prose_with_foreign_parenthetical():
         "и падежам (DER ARTIKEL)."
     )
     transliteration = (
-        "Artikl — sluzhebnaya chast rechi, kotoraya yavlyaetsya "
-        "grammaticheskim priznakom (DER ARTIKEL)."
+        "Artikl — sluzhebnaya chast rechi, kotoraya yavlyaetsya " "grammaticheskim priznakom (DER ARTIKEL)."
     )
 
     assert not looks_like_mixed_script_ocr_noise(primary)

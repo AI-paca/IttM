@@ -13,12 +13,7 @@ import pytest
 
 @pytest.fixture(scope="module")
 def lab() -> ModuleType:
-    path = (
-        Path(__file__).resolve().parents[3]
-        / "scripts"
-        / "debug"
-        / "debug_v16_matrix_handoff_lab.py"
-    )
+    path = Path(__file__).resolve().parents[3] / "scripts" / "debug" / "debug_v16_matrix_handoff_lab.py"
     name = "_debug_v16_matrix_handoff_lab_under_test"
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
@@ -60,22 +55,19 @@ def test_literal_loader_preserves_frozen_identity_and_matrix_payload(
     assert snapshot.source_sha256 == source_sha256
     assert snapshot.matrix_shape == shape
     assert len(snapshot.records) == segments
-    assert snapshot.segment_ids == tuple(
-        f"leaf-{index:06d}" for index in range(segments)
-    )
+    assert snapshot.segment_ids == tuple(f"leaf-{index:06d}" for index in range(segments))
     assert snapshot.records[0].source_crop_sha256 == first_crop_sha256
     assert snapshot.source_sha256 == lab.FROZEN_INPUT_DIGESTS[source_key]["source"]
-    assert snapshot.recursion_sha256 == lab.FROZEN_INPUT_DIGESTS[source_key][
-        "recursion"
-    ]
-    assert snapshot.matrix_tsv_sha256 == lab.FROZEN_INPUT_DIGESTS[source_key][
-        "matrix_tsv"
-    ]
+    assert snapshot.recursion_sha256 == lab.FROZEN_INPUT_DIGESTS[source_key]["recursion"]
+    assert snapshot.matrix_tsv_sha256 == lab.FROZEN_INPUT_DIGESTS[source_key]["matrix_tsv"]
     assert len(snapshot.x_tracks) == shape[1]
-    assert all(len(value) == 64 for value in (
-        snapshot.recursion_sha256,
-        snapshot.matrix_tsv_sha256,
-    ))
+    assert all(
+        len(value) == 64
+        for value in (
+            snapshot.recursion_sha256,
+            snapshot.matrix_tsv_sha256,
+        )
+    )
 
 
 @pytest.mark.parametrize(
@@ -93,11 +85,7 @@ def test_serialized_group_boundary_replay_is_exact_but_not_object_detection(
     # The replay API cannot receive the metadata. Comparison is subsequent,
     # but historical v16 encoded the gaps from these same groups; this proves
     # serialization integrity only.
-    assert tuple(
-        inspect.signature(lab.replay_serialized_matrix_groups).parameters
-    ) == (
-        "snapshot",
-    )
+    assert tuple(inspect.signature(lab.replay_serialized_matrix_groups).parameters) == ("snapshot",)
     replay = lab.replay_serialized_matrix_groups(snapshot)
     comparison = lab.compare_with_serialized_group_metadata(replay, metadata)
 
@@ -107,11 +95,7 @@ def test_serialized_group_boundary_replay_is_exact_but_not_object_detection(
     assert comparison["membership_exact"] is True
     assert comparison["independent_object_detection"] is False
     assert comparison["object_extraction_status"] == "not-tested"
-    assert tuple(
-        segment_id
-        for item in replay.groups
-        for segment_id in item.segment_ids
-    ) == snapshot.segment_ids
+    assert tuple(segment_id for item in replay.groups for segment_id in item.segment_ids) == snapshot.segment_ids
 
 
 @pytest.mark.parametrize(
@@ -166,16 +150,9 @@ def test_sliding_windows_are_group_scoped_and_four_is_supplemental_only(
                 for index in range(len(serialized_group.segment_ids) - width + 1)
             )
             assert all(item.scope_id == serialized_group.group_id for item in blocks)
-            assert all(
-                set(item.segment_ids) <= set(serialized_group.segment_ids)
-                for item in blocks
-            )
-            signatures = lab.topology_signatures(
-                serialized_group.segment_ids, blocks
-            )
-            unresolved_by_strategy[strategy] += len(
-                signatures["unresolved_groups"]
-            )
+            assert all(set(item.segment_ids) <= set(serialized_group.segment_ids) for item in blocks)
+            signatures = lab.topology_signatures(serialized_group.segment_ids, blocks)
+            unresolved_by_strategy[strategy] += len(signatures["unresolved_groups"])
 
     assert unresolved_by_strategy == {
         "sliding-2": 0,
@@ -189,13 +166,10 @@ def test_sliding_windows_are_group_scoped_and_four_is_supplemental_only(
         exposures = lab.foreign_bbox_exposure(
             snapshot,
             first,
-            lab.plan_sliding_blocks(
-                snapshot, first, window_size=2, strategy="sliding-2"
-            ),
+            lab.plan_sliding_blocks(snapshot, first, window_size=2, strategy="sliding-2"),
         )
         assert any(
-            item["segment_id"] == "leaf-000012"
-            and item["scope_relation"] == "cross-serialized-group"
+            item["segment_id"] == "leaf-000012" and item["scope_relation"] == "cross-serialized-group"
             for exposure in exposures
             for item in exposure["foreign"]
         )
@@ -204,9 +178,7 @@ def test_sliding_windows_are_group_scoped_and_four_is_supplemental_only(
 def test_synthetic_decoder_uses_lattice_not_segment_bbox_and_keeps_real_pipe(
     lab: ModuleType,
 ) -> None:
-    page, blocks, segment_ids, observations, expected = (
-        lab.synthetic_observed_word_case()
-    )
+    page, blocks, segment_ids, observations, expected = lab.synthetic_observed_word_case()
     page.close()
 
     assert tuple(inspect.signature(lab.decode_observed_word_lattice).parameters) == (
@@ -233,14 +205,10 @@ def test_synthetic_decoder_uses_lattice_not_segment_bbox_and_keeps_real_pipe(
 def test_observed_word_ids_are_global_and_local_boxes_must_fit_bound_crop(
     lab: ModuleType,
 ) -> None:
-    page, blocks, segment_ids, observations, _expected = (
-        lab.synthetic_observed_word_case()
-    )
+    page, blocks, segment_ids, observations, _expected = lab.synthetic_observed_word_case()
     page.close()
     first = observations[0]
-    later_in_another_block = next(
-        item for item in observations if item.block_id != first.block_id
-    )
+    later_in_another_block = next(item for item in observations if item.block_id != first.block_id)
     duplicate_global_id = replace(
         later_in_another_block,
         observation_id=first.observation_id,
@@ -274,9 +242,7 @@ def test_ready_text_stage7_is_exact_candidate_but_never_certified(
         raise AssertionError("public provenance replay must not run")
 
     monkeypatch.setattr(lab.DocumentAssembler, "assemble", forbidden_assemble)
-    page, blocks, segment_ids, observations, _expected = (
-        lab.synthetic_observed_word_case()
-    )
+    page, blocks, segment_ids, observations, _expected = lab.synthetic_observed_word_case()
     page.close()
     decoded = lab.decode_observed_word_lattice(
         blocks=blocks,
@@ -295,12 +261,8 @@ def test_ready_text_stage7_is_exact_candidate_but_never_certified(
     assert summary["production_certification"] == "unresolved-no-ocr-provenance"
     assert summary["segment_assembly_statuses"] == ["unresolved"]
     assert summary["structural_unit_statuses"] == ["unresolved"]
-    assert (root / "candidate-document.txt").read_text(encoding="utf-8") == (
-        "item\tbeta\ngamma\t|\nitem\tzeta"
-    )
-    assert "\\|" in (root / "candidate-document.md").read_text(
-        encoding="utf-8"
-    )
+    assert (root / "candidate-document.txt").read_text(encoding="utf-8") == ("item\tbeta\ngamma\t|\nitem\tzeta")
+    assert "\\|" in (root / "candidate-document.md").read_text(encoding="utf-8")
     assert not (root / "document.txt").exists()
     on_disk = json.loads((root / "summary.json").read_text(encoding="utf-8"))
     assert on_disk == summary
@@ -310,9 +272,7 @@ def test_ready_text_stage7_rejects_candidate_that_differs_from_explicit_oracle(
     lab: ModuleType,
     tmp_path: Path,
 ) -> None:
-    page, blocks, segment_ids, observations, _expected = (
-        lab.synthetic_observed_word_case()
-    )
+    page, blocks, segment_ids, observations, _expected = lab.synthetic_observed_word_case()
     page.close()
     decoded = lab.decode_observed_word_lattice(
         blocks=blocks,
@@ -335,13 +295,9 @@ def test_one_source_full_lab_publishes_fail_closed_contract_immutably(
         source_keys=("000041",),
         manual_review_status="first-eight-inspected",
     )
-    manifest = json.loads(
-        (destination / "manifest.json").read_text(encoding="utf-8")
-    )
+    manifest = json.loads((destination / "manifest.json").read_text(encoding="utf-8"))
     source = manifest["sources"][0]
-    strategies = {
-        item["strategy"]: item for item in source["topology_strategies"]
-    }
+    strategies = {item["strategy"]: item for item in source["topology_strategies"]}
 
     assert manifest["status"] == "fixture-integrity-pass-production-handoff-reject"
     assert manifest["manual_review_status"] == "first-eight-inspected"
@@ -369,9 +325,7 @@ def test_one_source_full_lab_publishes_fail_closed_contract_immutably(
         assert reviewed_path.is_file()
         assert lab._sha256_path(reviewed_path) == item["sha256"]
         assert "contact-sheet" not in item["path"]
-    assert source["matrix_group_integrity"] == (
-        "serialized-group-boundary-replay-exact"
-    )
+    assert source["matrix_group_integrity"] == ("serialized-group-boundary-replay-exact")
     assert source["independent_object_extraction"] == "not-tested"
     assert source["production_handoff"] == "rejected"
     assert strategies["sliding-2"]["topology_signature_eligible"] is True
@@ -382,12 +336,8 @@ def test_one_source_full_lab_publishes_fail_closed_contract_immutably(
     assert strategies["sliding-4"]["topology_signature_eligible"] is False
     assert strategies["sliding-4"]["physical_crop_membership_eligible"] is False
     assert strategies["sliding-4"]["sole_decoder_eligible"] is False
-    assert strategies["sliding-4"]["role"] == (
-        "supplemental-context-only-rejected-as-sole-decoder"
-    )
-    assert manifest["ready_text_stage7"]["production_certification"] == (
-        "unresolved-no-ocr-provenance"
-    )
+    assert strategies["sliding-4"]["role"] == ("supplemental-context-only-rejected-as-sole-decoder")
+    assert manifest["ready_text_stage7"]["production_certification"] == ("unresolved-no-ocr-provenance")
     first_crop = (
         destination
         / "sources"
@@ -396,9 +346,7 @@ def test_one_source_full_lab_publishes_fail_closed_contract_immutably(
         / "actual-segments"
         / "leaf-000000.png"
     )
-    assert lab._sha256_path(first_crop) == (
-        "4209041b671a3764e94278a19793bab5fa0ed798fbccfdeefa9de28fb2a697ea"
-    )
+    assert lab._sha256_path(first_crop) == ("4209041b671a3764e94278a19793bab5fa0ed798fbccfdeefa9de28fb2a697ea")
     assert not any("overlay" in path.name.casefold() for path in destination.rglob("*"))
 
     with pytest.raises(FileExistsError):

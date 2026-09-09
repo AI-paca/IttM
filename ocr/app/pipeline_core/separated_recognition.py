@@ -19,7 +19,6 @@ from app.sparse_pipeline.ocr_adapter_contracts import (
     OcrRecognitionMissError,
 )
 
-
 TextFallback: type = Callable[..., str]
 
 
@@ -109,9 +108,11 @@ def recognize_separated_block(
             min_conf=0,
         )
         if callable(recognize_for_language)
-        else recognize_words(crop, psm=psm, min_conf=20)
-        if callable(recognize_words) and job.languages == "rus+eng"
-        else []
+        else (
+            recognize_words(crop, psm=psm, min_conf=20)
+            if callable(recognize_words) and job.languages == "rus+eng"
+            else []
+        )
     )
     if words:
         # Tesseract already emits TSV words in block/paragraph/line/word order.
@@ -125,9 +126,7 @@ def recognize_separated_block(
         )
         tolerance = max(
             4,
-            (line_heights[len(line_heights) // 2] // 2)
-            if line_heights
-            else 4,
+            (line_heights[len(line_heights) // 2] // 2) if line_heights else 4,
         )
         lines: list[list[str]] = []
         line_centers: list[int] = []

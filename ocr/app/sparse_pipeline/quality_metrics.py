@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-
 DEFAULT_MINIMUM_ACCURACY_PERCENT = 91.0
 _DEFAULT_MAX_EDIT_WORK = 16_000_000
 _EDIT_WORD_BITS = 64
@@ -54,11 +53,7 @@ def exact_levenshtein(
         prefix += 1
     left_stop = len(left)
     right_stop = len(right)
-    while (
-        left_stop > prefix
-        and right_stop > prefix
-        and left[left_stop - 1] == right[right_stop - 1]
-    ):
+    while left_stop > prefix and right_stop > prefix and left[left_stop - 1] == right[right_stop - 1]:
         left_stop -= 1
         right_stop -= 1
     left = left[prefix:left_stop]
@@ -76,16 +71,11 @@ def exact_levenshtein(
     word_columns = (len(left) + _EDIT_WORD_BITS - 1) // _EDIT_WORD_BITS
     work = len(right) * word_columns
     if work > max_cells:
-        raise ValueError(
-            "exact metric alignment exceeds configured bit-vector work limit: "
-            f"{work} > {max_cells}"
-        )
+        raise ValueError("exact metric alignment exceeds configured bit-vector work limit: " f"{work} > {max_cells}")
 
     character_masks: dict[str, int] = {}
     for index, character in enumerate(left):
-        character_masks[character] = character_masks.get(character, 0) | (
-            1 << index
-        )
+        character_masks[character] = character_masks.get(character, 0) | (1 << index)
 
     width = len(left)
     full_mask = (1 << width) - 1
@@ -105,9 +95,7 @@ def exact_levenshtein(
             distance -= 1
         positive_horizontal = ((positive_horizontal << 1) | 1) & full_mask
         negative_horizontal = (negative_horizontal << 1) & full_mask
-        positive = (
-            negative_horizontal | ~(vertical | positive_horizontal)
-        ) & full_mask
+        positive = (negative_horizontal | ~(vertical | positive_horizontal)) & full_mask
         negative = positive_horizontal & vertical
     return distance
 
@@ -158,11 +146,7 @@ class QualityGatePolicy:
 
     @property
     def mode(self) -> str:
-        return (
-            "strict"
-            if self.require_full_scoring and self.require_resolved
-            else "exploratory"
-        )
+        return "strict" if self.require_full_scoring and self.require_resolved else "exploratory"
 
 
 @dataclass(frozen=True)
@@ -211,17 +195,12 @@ def evaluate_quality_gate(
 
     full_scoring = images > 0 and scored_images == images
     zero_unresolved = unresolved == 0
-    accuracy_satisfied = (
-        micro_accuracy_percent is not None
-        and float(micro_accuracy_percent) >= float(policy.minimum_accuracy_percent)
+    accuracy_satisfied = micro_accuracy_percent is not None and float(micro_accuracy_percent) >= float(
+        policy.minimum_accuracy_percent
     )
     mandatory = images > 0 and failures == 0 and exact_execution_order and all_artifacts
-    strict_accepted = (
-        mandatory and full_scoring and zero_unresolved and accuracy_satisfied
-    )
-    exploratory_accuracy = accuracy_satisfied or (
-        not policy.require_full_scoring and micro_accuracy_percent is None
-    )
+    strict_accepted = mandatory and full_scoring and zero_unresolved and accuracy_satisfied
+    exploratory_accuracy = accuracy_satisfied or (not policy.require_full_scoring and micro_accuracy_percent is None)
     policy_accepted = (
         mandatory
         and (full_scoring or not policy.require_full_scoring)
@@ -248,13 +227,7 @@ def evaluate_quality_gate(
         reasons.append("micro-accuracy-below-threshold")
 
     return QualityGateDecision(
-        status=(
-            "GREEN"
-            if strict_accepted
-            else "EXPLORATORY"
-            if policy_accepted
-            else "RED"
-        ),
+        status=("GREEN" if strict_accepted else "EXPLORATORY" if policy_accepted else "RED"),
         reasons=tuple(reasons),
         full_scoring=full_scoring,
         zero_unresolved=zero_unresolved,

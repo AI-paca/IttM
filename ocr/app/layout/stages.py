@@ -105,6 +105,7 @@ def _table_region_with_outer_bands(
 
     _, top, _, bottom = table_region.bbox
     regions: list[LayoutRegion] = []
+
     def append_band(
         bbox: tuple[int, int, int, int],
         position: str,
@@ -2090,12 +2091,7 @@ def _is_decorative_narrow_table(
     left, top, right, bottom = table.bbox
     width_ratio = max(0, right - left) / max(1, image.width)
     height_ratio = max(0, bottom - top) / max(1, image.height)
-    return (
-        table.cols <= 2
-        and table.rows >= 20
-        and width_ratio < 0.15
-        and height_ratio >= 0.70
-    )
+    return table.cols <= 2 and table.rows >= 20 and width_ratio < 0.15 and height_ratio >= 0.70
 
 
 def _recursive_grid_regions(
@@ -2162,11 +2158,7 @@ def _recursive_grid_regions(
     )
     if not table_regions:
         return _recursive_grid_image_regions(image, stage)
-    if any(
-        _is_decorative_partition_table(region, image.size)
-        for region in table_regions
-        if region.kind == "table"
-    ):
+    if any(_is_decorative_partition_table(region, image.size) for region in table_regions if region.kind == "table"):
         for region in table_regions:
             if region.image is not image:
                 region.image.close()

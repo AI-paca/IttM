@@ -165,9 +165,7 @@ def _script_consistency_milli(source: str, text: str) -> int:
     if alpha == 0:
         return 0
     scripts = {
-        language_script(language)
-        for language in source.split("+")
-        if language_script(language) in SCRIPT_PATTERNS
+        language_script(language) for language in source.split("+") if language_script(language) in SCRIPT_PATTERNS
     }
     matching = max((counts.get(script, 0) for script in scripts), default=max(counts.values()))
     return round(1000 * matching / alpha)
@@ -177,9 +175,7 @@ def _context_consistency_milli(text: str, phrase_count: int, modal_count: int) -
     visible = [character for character in text if not character.isspace()]
     if not visible:
         return 0
-    acceptable = sum(
-        character.isalnum() or character in "-_.()," for character in visible
-    )
+    acceptable = sum(character.isalnum() or character in "-_.()," for character in visible)
     shape = 1000 if phrase_count == modal_count else 400
     return round((acceptable / len(visible)) * shape)
 
@@ -260,11 +256,7 @@ def fuse_horizontal_span_candidates(
                             context_consistency_milli=_context_consistency_milli(
                                 phrase.text,
                                 len(
-                                    next(
-                                        phrases
-                                        for observed_source, phrases in observed
-                                        if observed_source == source
-                                    )
+                                    next(phrases for observed_source, phrases in observed if observed_source == source)
                                 ),
                                 modal_count,
                             )
@@ -284,10 +276,7 @@ def fuse_horizontal_span_candidates(
 
         selected_text = " / ".join(selected_phrases)
         primary_text = " / ".join(
-            phrase.text
-            for source, phrases in observed
-            if source == "primary"
-            for phrase in phrases
+            phrase.text for source, phrases in observed if source == "primary" for phrase in phrases
         )
         if not selected_text or selected_text == primary_text:
             continue
@@ -320,11 +309,7 @@ def fuse_horizontal_span_candidates(
             continue
         y = (bbox[1] + bbox[3]) / 2
         row = next(
-            (
-                index
-                for index in replacement_rows
-                if table.y_lines[index] < y < table.y_lines[index + 1]
-            ),
+            (index for index in replacement_rows if table.y_lines[index] < y < table.y_lines[index + 1]),
             None,
         )
         if row is None:
@@ -361,11 +346,7 @@ def apply_slash_bounded_cjk_crops(
             ),
             key=lambda word: word["bbox"][0],
         )
-        separators = [
-            word
-            for word in row_words
-            if "/" in str(word.get("text", ""))
-        ]
+        separators = [word for word in row_words if "/" in str(word.get("text", ""))]
         if len(separators) != 4:
             continue
         crop_bbox = (
@@ -399,9 +380,7 @@ def apply_slash_bounded_cjk_crops(
                 if word.get("text") == span.selected_text
                 and (bbox := word.get("bbox"))
                 and len(bbox) == 4
-                and table.y_lines[span.row]
-                <= (bbox[1] + bbox[3]) / 2
-                <= table.y_lines[span.row + 1]
+                and table.y_lines[span.row] <= (bbox[1] + bbox[3]) / 2 <= table.y_lines[span.row + 1]
             ),
             None,
         )
@@ -452,9 +431,7 @@ def apply_repeated_span_identifier_crops(
                 for word in fused_words
                 if (bbox := word.get("bbox"))
                 and len(bbox) == 4
-                and table.y_lines[span.row]
-                <= (bbox[1] + bbox[3]) / 2
-                <= table.y_lines[span.row + 1]
+                and table.y_lines[span.row] <= (bbox[1] + bbox[3]) / 2 <= table.y_lines[span.row + 1]
                 and "/" in str(word.get("text", ""))
             ),
             None,
@@ -514,9 +491,7 @@ def apply_repeated_span_identifier_crops(
         calls += 1
         if crop_confidence < minimum_confidence or crop_text.strip().upper() != label:
             continue
-        selected_identifier = "-".join(
-            (identifier_parts[0], label, identifier_parts[2])
-        )
+        selected_identifier = "-".join((identifier_parts[0], label, identifier_parts[2]))
         selected_text = " / ".join((*parts[:4], selected_identifier))
         replacements[id(fused_word)] = {
             **fused_word,

@@ -38,7 +38,6 @@ from app.sparse_pipeline.crop_enhancement import (
     EnhancementBackend,
 )
 from app.sparse_pipeline.ocr_adapter_contracts import (
-    OcrAttributionStatus,
     OcrFailureCode,
     OcrOutputGeometry,
     OcrResource,
@@ -117,9 +116,7 @@ def _plan() -> BlockPlan:
 
 
 def _crops(plan: BlockPlan) -> tuple[BlockCropPair, ...]:
-    return BlockCropper(
-        BlockCropConfig(enhancement_backend=EnhancementBackend.NUMPY)
-    ).crop(
+    return BlockCropper(BlockCropConfig(enhancement_backend=EnhancementBackend.NUMPY)).crop(
         CropInput("artifact-page", _page_png()),
         aligned_size=plan.aligned_size,
         plan=plan,
@@ -135,11 +132,7 @@ def _complete_job(
     lane_id: str = "lane-a",
     capability_id: str = "capability-a",
 ) -> OcrJobResult:
-    payload = (
-        crop.raw.png_bytes
-        if transform is OcrTransform.RAW
-        else crop.gamma.png_bytes
-    )
+    payload = crop.raw.png_bytes if transform is OcrTransform.RAW else crop.gamma.png_bytes
     return OcrJobResult(
         job_id=job_id,
         block_id=crop.block_id,
@@ -204,11 +197,7 @@ def _evidence() -> tuple[
         for transform in (OcrTransform.RAW, OcrTransform.GAMMA):
             for lane_id in lane_ids:
                 job_id = f"ocr-job-{len(jobs):08d}"
-                if (
-                    block_index == 1
-                    and transform is OcrTransform.GAMMA
-                    and lane_id == "lane-b"
-                ):
+                if block_index == 1 and transform is OcrTransform.GAMMA and lane_id == "lane-b":
                     payload = crop.gamma.png_bytes
                     jobs.append(
                         OcrJobResult(
@@ -223,9 +212,7 @@ def _evidence() -> tuple[
                             error_message="fixture failed safely",
                             elapsed_seconds=0.25,
                             input_sha256=hashlib.sha256(payload).hexdigest(),
-                            context_sha256=hashlib.sha256(
-                                crop.raw.png_bytes
-                            ).hexdigest(),
+                            context_sha256=hashlib.sha256(crop.raw.png_bytes).hexdigest(),
                             failure_code=OcrFailureCode.ENGINE_ERROR,
                             capability_id="capability-shared",
                         )
@@ -287,10 +274,7 @@ def _evidence() -> tuple[
 
 
 def _jsonl(path: Path) -> tuple[dict[str, object], ...]:
-    return tuple(
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-    )
+    return tuple(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines())
 
 
 _OVERLAP_CATEGORY_FIELDS = (
@@ -404,10 +388,7 @@ def _typed_overlap_evidence(
         if category == "conflicting":
             assert jobs[1].output is not None
             shifted_words = tuple(
-                replace(word, bbox=Box(1, 0, 99, 10))
-                if word.text == "abce"
-                else word
-                for word in jobs[1].output.words
+                replace(word, bbox=Box(1, 0, 99, 10)) if word.text == "abce" else word for word in jobs[1].output.words
             )
             jobs = (
                 jobs[0],
@@ -451,11 +432,7 @@ def test_writer_roundtrips_each_nonempty_overlap_category_as_exact_json_bytes(
     plan, segments, crops, queue, fusion = _typed_overlap_evidence(category)
     overlap = fusion.overlaps[0]
     assert getattr(overlap, field) == ("segment-000001",)
-    assert all(
-        not getattr(overlap, other)
-        for other in _OVERLAP_CATEGORY_FIELDS
-        if other != field
-    )
+    assert all(not getattr(overlap, other) for other in _OVERLAP_CATEGORY_FIELDS if other != field)
     destination = OcrArtifactWriter().write(
         tmp_path,
         run_id=f"typed-{category}",
@@ -472,16 +449,11 @@ def test_writer_roundtrips_each_nonempty_overlap_category_as_exact_json_bytes(
         "intersection_segment_ids": list(overlap.intersection_segment_ids),
         "union_segment_ids": list(overlap.union_segment_ids),
         "xor_segment_ids": list(overlap.xor_segment_ids),
-        **{
-            name: list(getattr(overlap, name))
-            for name in _OVERLAP_CATEGORY_FIELDS
-        },
+        **{name: list(getattr(overlap, name)) for name in _OVERLAP_CATEGORY_FIELDS},
         "observed_union_segment_ids": list(overlap.observed_union_segment_ids),
         "observed_xor_segment_ids": list(overlap.observed_xor_segment_ids),
     }
-    expected_bytes = (
-        json.dumps(expected_record, ensure_ascii=False, sort_keys=True) + "\n"
-    ).encode("utf-8")
+    expected_bytes = (json.dumps(expected_record, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
     actual_bytes = (stage / "overlaps.jsonl").read_bytes()
     assert actual_bytes == expected_bytes
     assert json.loads(actual_bytes) == expected_record
@@ -506,23 +478,17 @@ def test_writer_publishes_every_stage2_evidence_category_exactly(
     stage = destination / "02-ocr"
 
     segment_inputs = _jsonl(stage / "inputs" / "segments.jsonl")
-    assert tuple(record["segment_id"] for record in segment_inputs) == (
-        plan.source_segment_ids
-    )
+    assert tuple(record["segment_id"] for record in segment_inputs) == (plan.source_segment_ids)
     assert tuple(tuple(record["bbox"]) for record in segment_inputs) == tuple(
         segment.bbox.as_tuple() for segment in segments
     )
-    assert tuple(
-        tuple(record["source_bbox"]) for record in segment_inputs
-    ) == tuple(segment.source_bbox.as_tuple() for segment in segments)
-    plan_record = json.loads(
-        (stage / "inputs" / "plan.json").read_text(encoding="utf-8")
+    assert tuple(tuple(record["source_bbox"]) for record in segment_inputs) == tuple(
+        segment.source_bbox.as_tuple() for segment in segments
     )
+    plan_record = json.loads((stage / "inputs" / "plan.json").read_text(encoding="utf-8"))
     assert plan_record["aligned_size"] == list(plan.aligned_size)
     assert plan_record["source_segment_ids"] == list(plan.source_segment_ids)
-    assert [record["block_id"] for record in plan_record["blocks"]] == [
-        block.block_id for block in plan.blocks
-    ]
+    assert [record["block_id"] for record in plan_record["blocks"]] == [block.block_id for block in plan.blocks]
     assert [record["bbox"] for record in plan_record["blocks"]] == [
         list(block.bbox.as_tuple()) for block in plan.blocks
     ]
@@ -550,9 +516,7 @@ def test_writer_publishes_every_stage2_evidence_category_exactly(
         assert raw_path.read_bytes() == crop.raw.png_bytes
         assert gamma_path.read_bytes() == crop.gamma.png_bytes
         assert record["raw_sha256"] == hashlib.sha256(raw_path.read_bytes()).hexdigest()
-        assert record["gamma_sha256"] == hashlib.sha256(
-            gamma_path.read_bytes()
-        ).hexdigest()
+        assert record["gamma_sha256"] == hashlib.sha256(gamma_path.read_bytes()).hexdigest()
 
     job_records = _jsonl(stage / "jobs" / "jobs.jsonl")
     assert len(job_records) == len(queue.jobs)
@@ -578,13 +542,9 @@ def test_writer_publishes_every_stage2_evidence_category_exactly(
     selected = _jsonl(stage / "segments" / "selected.jsonl")
     assert len(selected) == len(fusion.segments)
     for index, (segment, record) in enumerate(zip(fusion.segments, selected)):
-        assert Path(str(record["selected_text"])).name == (
-            f"segment-{index:08d}.txt"
-        )
+        assert Path(str(record["selected_text"])).name == (f"segment-{index:08d}.txt")
         text_path = stage / str(record["selected_text"])
-        assert text_path.read_text(encoding="utf-8") == (
-            (segment.selected_text or "") + "\n"
-        )
+        assert text_path.read_text(encoding="utf-8") == ((segment.selected_text or "") + "\n")
         assert record["unresolved"] is segment.unresolved
     observations = _jsonl(stage / "segments" / "observations.jsonl")
     assert [record["observation_id"] for record in observations] == [
@@ -604,12 +564,8 @@ def test_writer_publishes_every_stage2_evidence_category_exactly(
     assert [record["evidence_sha256"] for record in replicas] == [
         list(item.evidence_sha256) for item in fusion.replica_conflicts
     ]
-    assert overlaps[0]["missing_intersection_segment_ids"] == list(
-        fusion.overlaps[0].missing_intersection_segment_ids
-    )
-    assert overlaps[0][
-        "cross_transform_confirmed_intersection_segment_ids"
-    ] == list(
+    assert overlaps[0]["missing_intersection_segment_ids"] == list(fusion.overlaps[0].missing_intersection_segment_ids)
+    assert overlaps[0]["cross_transform_confirmed_intersection_segment_ids"] == list(
         fusion.overlaps[0].cross_transform_confirmed_intersection_segment_ids
     )
     assert overlaps[0]["near_confirmed_intersection_segment_ids"] == list(
@@ -626,34 +582,24 @@ def test_writer_publishes_every_stage2_evidence_category_exactly(
     assert manifest["complete_jobs"] == queue.complete
     assert manifest["failed_jobs"] == queue.failed
     assert manifest["segment_observations"] == len(fusion.observations)
-    assert manifest["block_text_observations"] == len(
-        fusion.block_text_observations
-    )
-    assert manifest["unassigned_words"] == len(
-        fusion.unassigned_word_observations
-    )
+    assert manifest["block_text_observations"] == len(fusion.block_text_observations)
+    assert manifest["unassigned_words"] == len(fusion.unassigned_word_observations)
     assert manifest["replica_conflicts"] == len(fusion.replica_conflicts)
     assert manifest["overlap_pairs"] == len(fusion.overlaps)
     assert manifest["overlap_exact_confirmed"] == sum(
         len(item.confirmed_intersection_segment_ids) for item in fusion.overlaps
     )
     assert manifest["overlap_cross_transform_confirmed"] == sum(
-        len(item.cross_transform_confirmed_intersection_segment_ids)
-        for item in fusion.overlaps
+        len(item.cross_transform_confirmed_intersection_segment_ids) for item in fusion.overlaps
     )
     assert manifest["overlap_near_confirmed"] == sum(
-        len(item.near_confirmed_intersection_segment_ids)
-        for item in fusion.overlaps
+        len(item.near_confirmed_intersection_segment_ids) for item in fusion.overlaps
     )
-    assert manifest["overlap_deferred"] == sum(
-        len(item.deferred_intersection_segment_ids) for item in fusion.overlaps
-    )
+    assert manifest["overlap_deferred"] == sum(len(item.deferred_intersection_segment_ids) for item in fusion.overlaps)
     assert manifest["overlap_conflicts"] == sum(
         len(item.conflicting_intersection_segment_ids) for item in fusion.overlaps
     )
-    assert manifest["overlap_missing"] == sum(
-        len(item.missing_intersection_segment_ids) for item in fusion.overlaps
-    )
+    assert manifest["overlap_missing"] == sum(len(item.missing_intersection_segment_ids) for item in fusion.overlaps)
     assert manifest["invariants"]["reference_evidence_forbidden"] is True
     assert manifest["invariants"]["overlap_consensus_categories_typed"] is True
     assert manifest["invariants"]["near_consensus_candidate_preserving"] is True
@@ -741,9 +687,7 @@ def test_writer_publishes_typed_subblock_evidence_without_forging_segments(
                 OcrOutputGeometry.WORD_BOXES,
             ),
         )
-        for index, transform in enumerate(
-            (OcrTransform.RAW, OcrTransform.GAMMA)
-        )
+        for index, transform in enumerate((OcrTransform.RAW, OcrTransform.GAMMA))
     )
     queue = OcrQueueResult(
         jobs=jobs,
@@ -793,9 +737,7 @@ def test_writer_publishes_typed_subblock_evidence_without_forging_segments(
     selected = _jsonl(stage / "groups" / "selected.jsonl")
     observations = _jsonl(stage / "groups" / "observations.jsonl")
     assert selected[0]["segment_ids"] == list(source_ids)
-    assert (stage / str(selected[0]["selected_text"])).read_text(
-        encoding="utf-8"
-    ) == "Left Right\n"
+    assert (stage / str(selected[0]["selected_text"])).read_text(encoding="utf-8") == "Left Right\n"
     assert len(observations) == 2
     assert all(record["segment_ids"] == list(source_ids) for record in observations)
     manifest = json.loads((stage / "manifest.json").read_bytes())

@@ -8,9 +8,7 @@ import {
 
 const input = process.argv[2];
 if (!input) {
-  console.error(
-    "Usage: assemble-segment-topology-handoff.ts HANDOFF.json",
-  );
+  console.error("Usage: assemble-segment-topology-handoff.ts HANDOFF.json");
   process.exit(2);
 }
 

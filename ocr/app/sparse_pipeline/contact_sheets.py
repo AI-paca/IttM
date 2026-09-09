@@ -70,14 +70,8 @@ def _write_paired_contact_sheets(
                             (half_width - 14, tile_height - 52),
                             Image.Resampling.LANCZOS,
                         )
-                        paste_left = (
-                            left
-                            + side * half_width
-                            + (half_width - preview.width) // 2
-                        )
-                        paste_top = top + 43 + (
-                            tile_height - 48 - preview.height
-                        ) // 2
+                        paste_left = left + side * half_width + (half_width - preview.width) // 2
+                        paste_top = top + 43 + (tile_height - 48 - preview.height) // 2
                         sheet.paste(preview, (paste_left, paste_top))
                 finally:
                     first.close()
@@ -157,9 +151,7 @@ def write_paired_contact_sheets_from_archive(
                 ),
                 '<rect width="100%" height="100%" fill="white"/>',
             ]
-            for offset, (item_id, first_member, second_member) in enumerate(
-                page_items
-            ):
+            for offset, (item_id, first_member, second_member) in enumerate(page_items):
                 column = offset % columns
                 row = offset // columns
                 left = column * tile_width
@@ -173,12 +165,12 @@ def write_paired_contact_sheets_from_archive(
                         (
                             f'<text x="{left + 6}" y="{top + 16}" '
                             f'font-family="monospace" font-size="12">'
-                            f'{escape(item_id)}</text>'
+                            f"{escape(item_id)}</text>"
                         ),
                         (
                             f'<text x="{left + 6}" y="{top + 34}" '
                             f'font-family="sans-serif" font-size="11" fill="#464646">'
-                            f'{escape(first_label)} | {escape(second_label)}</text>'
+                            f"{escape(first_label)} | {escape(second_label)}</text>"
                         ),
                     )
                 )

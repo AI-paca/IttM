@@ -26,9 +26,7 @@ def rename_no_replace(source: Path, destination: Path) -> None:
     library = ctypes.CDLL(None, use_errno=True)
     renameat2 = getattr(library, "renameat2", None)
     if renameat2 is None:
-        raise AtomicPublishUnavailableError(
-            "renameat2(RENAME_NOREPLACE) is required for atomic publication"
-        )
+        raise AtomicPublishUnavailableError("renameat2(RENAME_NOREPLACE) is required for atomic publication")
     renameat2.argtypes = (
         ctypes.c_int,
         ctypes.c_char_p,
@@ -58,9 +56,7 @@ def rename_no_replace(source: Path, destination: Path) -> None:
             destination,
         )
     if error_number in {errno.ENOSYS, errno.EINVAL, errno.ENOTSUP}:
-        raise AtomicPublishUnavailableError(
-            "host filesystem cannot guarantee no-replace publication"
-        )
+        raise AtomicPublishUnavailableError("host filesystem cannot guarantee no-replace publication")
     raise OSError(error_number, os.strerror(error_number), destination)
 
 

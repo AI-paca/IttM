@@ -48,9 +48,7 @@ def repair_text_from_aligned_word_candidates(
         (source, word)
         for source, words in candidate_passes
         for word in words
-        if str(word.get("text", "")).strip()
-        and (bbox := word.get("bbox"))
-        and len(bbox) == 4
+        if str(word.get("text", "")).strip() and (bbox := word.get("bbox")) and len(bbox) == 4
     ]
     clusters: list[list[tuple[str, dict]]] = []
     for source, word in observations:
@@ -58,8 +56,7 @@ def repair_text_from_aligned_word_candidates(
             cluster
             for cluster in clusters
             if any(
-                _same_word_box(tuple(word["bbox"]), tuple(existing["bbox"]))
-                for _existing_source, existing in cluster
+                _same_word_box(tuple(word["bbox"]), tuple(existing["bbox"])) for _existing_source, existing in cluster
             )
         ]
         if not matching:
@@ -70,11 +67,7 @@ def repair_text_from_aligned_word_candidates(
     result = primary_text
     decisions = []
     for cluster_index, cluster in enumerate(clusters):
-        primary_observations = [
-            (source, word)
-            for source, word in cluster
-            if str(word["text"]).strip() in result
-        ]
+        primary_observations = [(source, word) for source, word in cluster if str(word["text"]).strip() in result]
         if not primary_observations:
             continue
         current_source, current_word = max(
@@ -112,8 +105,7 @@ def repair_text_from_aligned_word_candidates(
         selected_confidence = next(
             float(word.get("conf", 0))
             for source, word in cluster
-            if source == selected.source
-            and str(word.get("text", "")).strip() == selected.text
+            if source == selected.source and str(word.get("text", "")).strip() == selected.text
         )
         current_confidence = float(current_word.get("conf", 0))
         if (

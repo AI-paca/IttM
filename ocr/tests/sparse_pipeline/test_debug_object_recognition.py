@@ -10,18 +10,14 @@ from types import ModuleType, SimpleNamespace
 import pytest
 from PIL import Image
 
+from app.sparse_pipeline.contracts import Box
 from app.sparse_pipeline.ocr_fusion import OcrFusionLimitError
 from app.sparse_pipeline.ocr_queue import OcrJobStatus
 
 
 @pytest.fixture(scope="module")
 def recognition() -> ModuleType:
-    path = (
-        Path(__file__).resolve().parents[3]
-        / "scripts"
-        / "debug"
-        / "debug_object_recognition.py"
-    )
+    path = Path(__file__).resolve().parents[3] / "scripts" / "debug" / "debug_object_recognition.py"
     name = "_debug_object_recognition_under_test"
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
@@ -36,9 +32,7 @@ def _stored_table(tmp_path: Path) -> tuple[Path, Path]:
     geometry_dir = tmp_path / "01-geometry"
     object_dir.mkdir(parents=True)
     geometry_dir.mkdir(parents=True)
-    segment_ids = tuple(
-        f"table-{row}-{column}" for row in range(3) for column in range(2)
-    )
+    segment_ids = tuple(f"table-{row}-{column}" for row in range(3) for column in range(2))
     (object_dir / "object.json").write_text(
         json.dumps(
             {
@@ -67,15 +61,7 @@ def _stored_table(tmp_path: Path) -> tuple[Path, Path]:
                 "segments": [
                     {
                         "column": column,
-                        "code": (
-                            0
-                            if (row, column) == (0, 0)
-                            else 5
-                            if row == 0
-                            else 3
-                            if column == 0
-                            else 8
-                        ),
+                        "code": (0 if (row, column) == (0, 0) else 5 if row == 0 else 3 if column == 0 else 8),
                         "state": "payload",
                         "source_segment_ids": [f"table-{row}-{column}"],
                         "matrix_x": [column * 100, (column + 1) * 100],
@@ -141,42 +127,25 @@ def test_saved_object_matrix_drives_real_overlapping_planner(
     )
     plan = recognition.matrix_orxor_plan(stored)
 
-    assert stored.matrix.segment_ids() == frozenset(
-        item.segment_id for item in stored.segments
-    )
+    assert stored.matrix.segment_ids() == frozenset(item.segment_id for item in stored.segments)
     memberships = tuple(item.segment_ids for item in plan.blocks)
     assert all(len(segment_ids) >= 2 for segment_ids in memberships)
-    assert {
-        segment_id
-        for segment_ids in memberships
-        for segment_id in segment_ids
-    } == {item.segment_id for item in stored.segments}
+    assert {segment_id for segment_ids in memberships for segment_id in segment_ids} == {
+        item.segment_id for item in stored.segments
+    }
     signatures = {
-        segment.segment_id: tuple(
-            segment.segment_id in segment_ids
-            for segment_ids in memberships
-        )
+        segment.segment_id: tuple(segment.segment_id in segment_ids for segment_ids in memberships)
         for segment in stored.segments
     }
     assert len(set(signatures.values())) == len(stored.segments)
-    segment_by_id = {
-        segment.segment_id: segment for segment in stored.segments
-    }
+    segment_by_id = {segment.segment_id: segment for segment in stored.segments}
     assert len({item.bbox.as_tuple() for item in plan.blocks}) > 1
     assert all(
-        item.bbox
-        == type(item.bbox).union(
-            segment_by_id[segment_id].bbox
-            for segment_id in item.segment_ids
-        )
+        item.bbox == Box.union(segment_by_id[segment_id].bbox for segment_id in item.segment_ids)
         for item in plan.blocks
     )
     signatures = {
-        segment_id: tuple(
-            index
-            for index, block in enumerate(plan.blocks)
-            if segment_id in block.segment_ids
-        )
+        segment_id: tuple(index for index, block in enumerate(plan.blocks) if segment_id in block.segment_ids)
         for segment_id in plan.source_segment_ids
     }
     assert all(signatures.values())
@@ -188,14 +157,8 @@ def test_saved_object_matrix_drives_real_overlapping_planner(
     assert len(plan.membership_units) == 6
     assert all(len(item.segment_ids) == 1 for item in plan.membership_units)
     assert plan.adjacent_algebra
-    assert {
-        item.matrix_window_kind for item in plan.blocks
-    } == {"dyadic-mask"}
-    assert (
-        "matrix-table-dyadic-codes="
-        "scope-000000:units=6,bits=3,context-width=1"
-        in plan.diagnostics
-    )
+    assert {item.matrix_window_kind for item in plan.blocks} == {"dyadic-mask"}
+    assert "matrix-table-dyadic-codes=" "scope-000000:units=6,bits=3,context-width=1" in plan.diagnostics
 
 
 def test_whole_object_is_a_single_context_control(
@@ -211,9 +174,7 @@ def test_whole_object_is_a_single_context_control(
 
     assert len(plan.blocks) == 1
     assert plan.blocks[0].bbox.as_tuple() == (0, 0, 200, 120)
-    assert plan.blocks[0].segment_ids == tuple(
-        item.segment_id for item in stored.segments
-    )
+    assert plan.blocks[0].segment_ids == tuple(item.segment_id for item in stored.segments)
     assert plan.membership_units[0].kind.value == "subblock"
 
 
@@ -248,15 +209,9 @@ def test_line_window_ab_uses_overlapping_rows_without_singletons(
         "whole-object",
         "line-windows",
     )
-    assert recognition._object_policies(
-        replace(stored, source_kind="list")
-    ) == ("whole-object", "line-windows")
-    assert recognition._object_policies(
-        replace(stored, source_kind="table")
-    ) == ("matrix-orxor",)
-    assert recognition._object_policies(
-        replace(stored, source_kind="flow")
-    ) == ("fixed-flow",)
+    assert recognition._object_policies(replace(stored, source_kind="list")) == ("whole-object", "line-windows")
+    assert recognition._object_policies(replace(stored, source_kind="table")) == ("matrix-orxor",)
+    assert recognition._object_policies(replace(stored, source_kind="flow")) == ("fixed-flow",)
 
 
 def test_lazy_selection_keeps_stronger_computed_whole_object_evidence(
@@ -299,9 +254,7 @@ def test_lazy_selection_keeps_stronger_computed_whole_object_evidence(
             ),
             queue=SimpleNamespace(
                 jobs=(job,),
-                diagnostics=(
-                    f"block={block.block_id};grammar={grammar};transform=raw",
-                ),
+                diagnostics=(f"block={block.block_id};grammar={grammar};transform=raw",),
             ),
             result_text=text,
             unresolved_units=unresolved_units,
@@ -329,9 +282,7 @@ def test_lazy_selection_keeps_stronger_computed_whole_object_evidence(
         },
     )
 
-    assert recognition.lazy_paragraph_list_fallback_reason(
-        whole_object
-    ) is None
+    assert recognition.lazy_paragraph_list_fallback_reason(whole_object) is None
     assert selected is whole_object
     payload = recognition._paragraph_list_selection_payload(
         stored,
@@ -341,10 +292,7 @@ def test_lazy_selection_keeps_stronger_computed_whole_object_evidence(
         },
     )
     assert payload["selected_policy"] == "whole-object"
-    assert (
-        payload["policies"]["whole-object"]["evidence_score"]
-        > payload["policies"]["line-windows"]["evidence_score"]
-    )
+    assert payload["policies"]["whole-object"]["evidence_score"] > payload["policies"]["line-windows"]["evidence_score"]
     assert recognition._object_policies(
         stored,
         paragraph_list_ab=True,
@@ -356,22 +304,23 @@ def test_lazy_selection_keeps_stronger_computed_whole_object_evidence(
         grammar=94,
         fusion_status="failed",
     )
-    assert recognition.select_paragraph_list_policy_run(
-        stored,
-        {
-            failed_whole_object.policy: failed_whole_object,
-            line_windows.policy: line_windows,
-        },
-    ) is line_windows
+    assert (
+        recognition.select_paragraph_list_policy_run(
+            stored,
+            {
+                failed_whole_object.policy: failed_whole_object,
+                line_windows.policy: line_windows,
+            },
+        )
+        is line_windows
+    )
 
     empty_whole_object = policy_run(
         "whole-object",
         text="",
         grammar=100,
     )
-    assert recognition.lazy_paragraph_list_fallback_reason(
-        empty_whole_object
-    ) == "empty-evidence"
+    assert recognition.lazy_paragraph_list_fallback_reason(empty_whole_object) == "empty-evidence"
 
 
 def test_saved_table_crop_may_retain_structural_margin(
@@ -604,10 +553,10 @@ def test_compact_atlas_uses_original_block_bbox_for_fusion(
             recognition.BlockCompaction(
                 block_id=block.block_id,
                 placements=(),
-                    omitted_empty_units=(),
-                    occupied_pixels_before=1,
-                    occupied_pixels_after=1,
-                    packed_canvas_pixels=1,
+                omitted_empty_units=(),
+                occupied_pixels_before=1,
+                occupied_pixels_after=1,
+                packed_canvas_pixels=1,
             ),
         ),
     )

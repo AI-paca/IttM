@@ -57,9 +57,7 @@ class EasyOcrEngine(OcrEngine):
             grayscale = image.astype(np.float32)
         else:
             grayscale = image[..., :3].astype(np.float32).mean(axis=2)
-        border = np.concatenate(
-            (grayscale[0], grayscale[-1], grayscale[:, 0], grayscale[:, -1])
-        )
+        border = np.concatenate((grayscale[0], grayscale[-1], grayscale[:, 0], grayscale[:, -1]))
         background = float(np.median(border))
         foreground = np.abs(grayscale - background) >= 24.0
         ys, xs = np.nonzero(foreground)
@@ -69,9 +67,7 @@ class EasyOcrEngine(OcrEngine):
         height, width = grayscale.shape
         foreground_width = int(xs.max() - xs.min() + 1)
         foreground_height = int(ys.max() - ys.min() + 1)
-        row_density = float(
-            np.median(foreground[ys.min() : ys.max() + 1].mean(axis=1))
-        )
+        row_density = float(np.median(foreground[ys.min() : ys.max() + 1].mean(axis=1)))
         foreground_density = float(foreground.mean())
         return (
             foreground_width >= width * 0.70
@@ -90,16 +86,10 @@ class EasyOcrEngine(OcrEngine):
         pad_x = max(8, round(width * 0.05))
 
         if image.ndim == 2:
-            border = np.concatenate(
-                (image[0], image[-1], image[:, 0], image[:, -1])
-            )
-            padded = np.empty(
-                (height + 2 * pad_y, width + 2 * pad_x), dtype=image.dtype
-            )
+            border = np.concatenate((image[0], image[-1], image[:, 0], image[:, -1]))
+            padded = np.empty((height + 2 * pad_y, width + 2 * pad_x), dtype=image.dtype)
         else:
-            border = np.concatenate(
-                (image[0], image[-1], image[:, 0], image[:, -1]), axis=0
-            )
+            border = np.concatenate((image[0], image[-1], image[:, 0], image[:, -1]), axis=0)
             padded = np.empty(
                 (height + 2 * pad_y, width + 2 * pad_x, image.shape[2]),
                 dtype=image.dtype,
@@ -139,19 +129,13 @@ class EasyOcrEngine(OcrEngine):
         return [(box, best[0], best[1])]
 
     def _readtext(self, reader, image):
-        direct = (
-            self._recognize_dense_slot(reader, image)
-            if self._is_dense_ocr_slot(image)
-            else []
-        )
+        direct = self._recognize_dense_slot(reader, image) if self._is_dense_ocr_slot(image) else []
         if direct and direct[0][2] >= 0.97:
             return direct
 
         detected = reader.readtext(image)
         if direct and len(detected) <= 1:
-            detected_confidence = max(
-                (float(row[2]) for row in detected), default=0.0
-            )
+            detected_confidence = max((float(row[2]) for row in detected), default=0.0)
             if direct[0][2] >= detected_confidence + 0.10:
                 return direct
         return detected

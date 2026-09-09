@@ -75,7 +75,8 @@ if (exports.ittm_should_drop_text_block(100, 100, 8, 10, 10, 879) !== 0) {
 }
 
 const nativePdfHandle = exports.ittm_pdf_native_begin();
-if (!nativePdfHandle) throw new Error("WASM native PDF route rejected a session");
+if (!nativePdfHandle)
+  throw new Error("WASM native PDF route rejected a session");
 try {
   for (const [index, [text, x, y]] of [
     ["A", 10, 100],
@@ -85,7 +86,9 @@ try {
   ].entries()) {
     const encoded = new TextEncoder().encode(text);
     const pointer = exports.ittm_alloc(encoded.byteLength);
-    new Uint8Array(exports.memory.buffer, pointer, encoded.byteLength).set(encoded);
+    new Uint8Array(exports.memory.buffer, pointer, encoded.byteLength).set(
+      encoded,
+    );
     const status = exports.ittm_pdf_native_add_item(
       nativePdfHandle,
       pointer,
@@ -102,7 +105,9 @@ try {
     );
     exports.ittm_dealloc(pointer, encoded.byteLength);
     if (status !== 0) {
-      throw new Error(`WASM native PDF item ${index} failed with status ${status}`);
+      throw new Error(
+        `WASM native PDF item ${index} failed with status ${status}`,
+      );
     }
   }
   if (exports.ittm_pdf_native_build(nativePdfHandle) !== 0) {
@@ -110,9 +115,15 @@ try {
   }
   const length = exports.ittm_pdf_native_render_length(nativePdfHandle);
   const pointer = exports.ittm_alloc(length);
-  const copied = exports.ittm_pdf_native_render_copy(nativePdfHandle, pointer, length);
+  const copied = exports.ittm_pdf_native_render_copy(
+    nativePdfHandle,
+    pointer,
+    length,
+  );
   const artifact = JSON.parse(
-    new TextDecoder().decode(new Uint8Array(exports.memory.buffer, pointer, length)),
+    new TextDecoder().decode(
+      new Uint8Array(exports.memory.buffer, pointer, length),
+    ),
   );
   exports.ittm_dealloc(pointer, length);
   if (

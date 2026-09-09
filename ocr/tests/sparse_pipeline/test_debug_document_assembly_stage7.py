@@ -19,12 +19,7 @@ from app.sparse_pipeline.ocr_fusion import OcrFusionStatus
 
 @pytest.fixture(scope="module")
 def runner() -> ModuleType:
-    path = (
-        Path(__file__).resolve().parents[3]
-        / "scripts"
-        / "debug"
-        / "debug_document_assembly.py"
-    )
+    path = Path(__file__).resolve().parents[3] / "scripts" / "debug" / "debug_document_assembly.py"
     name = "_stage7_debug_document_assembly_under_test"
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
@@ -87,9 +82,7 @@ def test_metric_scores_long_alignment_without_quadratic_matrix(
 
 
 @pytest.mark.parametrize("value", (-1.0, 100.1, float("nan"), float("inf")))
-def test_quality_gate_rejects_invalid_accuracy_thresholds(
-    runner: ModuleType, value: float
-) -> None:
+def test_quality_gate_rejects_invalid_accuracy_thresholds(runner: ModuleType, value: float) -> None:
     with pytest.raises(ValueError, match="minimum accuracy percent"):
         runner.QualityGatePolicy(minimum_accuracy_percent=value)
 
@@ -99,9 +92,7 @@ def test_stage3_control_gate_completes_before_image_work(runner: ModuleType) -> 
     assert runner.PIPELINE_ORDER == (3, 1, 6, 4, 5, 2, 7)
 
 
-def test_discovery_uses_source_pngs_and_excludes_debug_masks(
-    runner: ModuleType, tmp_path: Path
-) -> None:
+def test_discovery_uses_source_pngs_and_excludes_debug_masks(runner: ModuleType, tmp_path: Path) -> None:
     for name in (
         "page.png",
         "page.mask.png",
@@ -285,9 +276,7 @@ def test_all_ocr_jobs_failed_is_red_but_stage7_artifact_remains_auditable(
     assert (corpus_dir / item.artifact / "evidence-was-published.txt").is_file()
 
 
-def test_summary_uses_micro_loss_and_rejects_accuracy_below_default_gate(
-    runner: ModuleType, tmp_path: Path
-) -> None:
+def test_summary_uses_micro_loss_and_rejects_accuracy_below_default_gate(runner: ModuleType, tmp_path: Path) -> None:
     items = (
         runner.CorpusItem(
             source="large.png",
@@ -331,9 +320,7 @@ def test_summary_uses_micro_loss_and_rejects_accuracy_below_default_gate(
     assert summary["minimum_accuracy_percent"] == 91.0
     assert summary["scored_images"] == summary["images"] == 2
     assert summary["gate_reasons"] == ["micro-accuracy-below-threshold"]
-    assert summary["accuracy_percent_micro"] == pytest.approx(
-        100.0 * (1.0 - 11 / 101)
-    )
+    assert summary["accuracy_percent_micro"] == pytest.approx(100.0 * (1.0 - 11 / 101))
     assert summary["accuracy_percent_mean"] == 45.0
     assert summary["totals"]["lost_characters"] == 11
     assert summary["totals"]["reference_characters"] == 101
@@ -345,9 +332,7 @@ def test_summary_uses_micro_loss_and_rejects_accuracy_below_default_gate(
     assert not tuple(tmp_path.glob(".*.partial"))
 
 
-def test_summary_green_requires_full_scoring_zero_unresolved_and_threshold(
-    runner: ModuleType, tmp_path: Path
-) -> None:
+def test_summary_green_requires_full_scoring_zero_unresolved_and_threshold(runner: ModuleType, tmp_path: Path) -> None:
     item = runner.CorpusItem(
         source="page.png",
         status="complete",
@@ -378,9 +363,7 @@ def test_summary_green_requires_full_scoring_zero_unresolved_and_threshold(
     assert summary["invariants"]["micro_accuracy_threshold_met"] is True
 
 
-def test_summary_never_calls_relaxed_missing_or_unresolved_evidence_green(
-    runner: ModuleType, tmp_path: Path
-) -> None:
+def test_summary_never_calls_relaxed_missing_or_unresolved_evidence_green(runner: ModuleType, tmp_path: Path) -> None:
     unscored = runner.CorpusItem(
         source="unscored.png",
         status="complete",
@@ -493,9 +476,7 @@ def test_evidence_only_item_must_reach_stage7_but_is_not_in_quality_denominator(
     assert summary["invariants"]["zero_unresolved_items"] is False
 
 
-def test_reference_lookup_rejects_disagreeing_ground_truth_files(
-    runner: ModuleType, tmp_path: Path
-) -> None:
+def test_reference_lookup_rejects_disagreeing_ground_truth_files(runner: ModuleType, tmp_path: Path) -> None:
     inputs = tmp_path / "input"
     references = tmp_path / "reference"
     inputs.mkdir()
@@ -525,17 +506,14 @@ def test_v20_wrapper_is_syntax_valid_fail_closed_and_bounded() -> None:
     assert 'v20_limit="${V20_LIMIT:-24}"' in source
     assert 'if ! mkdir "$gate_dir"' in source
     assert 'mkdir -p "$gate_dir/logs"' not in source
-    assert "--limit \"$v20_limit\"" in source
+    assert '--limit "$v20_limit"' in source
     assert "--fail-on-unresolved" in source
     assert '--minimum-accuracy-percent "$v20_minimum_accuracy"' in source
     assert "V20_FAIL_ON_UNRESOLVED" not in source
     assert "stage7-summary-exists" in source
     assert "scripts/debug/validate_v20_summary.py" in source
     assert 'summary_validator_args+=(--required-source "$required_source")' in source
-    assert (
-        'summary_validator_args+=(--evidence-only-source "$evidence_source")'
-        in source
-    )
+    assert 'summary_validator_args+=(--evidence-only-source "$evidence_source")' in source
     assert 'evidence_only_source = "Adobe Scan' not in source
     assert 'tutorial_set="${V20_TUTORIAL_SET:-problem}"' in source
     assert "000041301_UchebPlan_sign000029629.pdf.raster.png" in source

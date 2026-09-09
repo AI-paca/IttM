@@ -204,32 +204,16 @@ def _render(**kwargs: object):
 def test_local_full_preserves_rows_holes_mapping_and_digest() -> None:
     crop, compaction, block, bboxes = _render()
     repeated, repeated_compaction, _block, _bboxes = _render()
-    by_segment = {
-        placement.segment_ids[0]: placement
-        for placement in compaction.placements
-    }
+    by_segment = {placement.segment_ids[0]: placement for placement in compaction.placements}
 
     assert len(compaction.placements) == 4
-    assert hashlib.sha256(crop.raw.png_bytes).hexdigest() == hashlib.sha256(
-        repeated.raw.png_bytes
-    ).hexdigest()
+    assert hashlib.sha256(crop.raw.png_bytes).hexdigest() == hashlib.sha256(repeated.raw.png_bytes).hexdigest()
     assert compaction == repeated_compaction
-    assert (
-        compaction.raster_kind
-        is CompactionRasterKind.CANONICAL_LOCALITY
-    )
-    assert compaction.raw_sha256 == hashlib.sha256(
-        crop.raw.png_bytes
-    ).hexdigest()
-    assert by_segment["segment-a"].crop_bbox.top == by_segment[
-        "segment-b"
-    ].crop_bbox.top
-    assert by_segment["segment-c"].crop_bbox.top == by_segment[
-        "segment-d"
-    ].crop_bbox.top
-    assert by_segment["segment-c"].crop_bbox.top > by_segment[
-        "segment-a"
-    ].crop_bbox.bottom
+    assert compaction.raster_kind is CompactionRasterKind.CANONICAL_LOCALITY
+    assert compaction.raw_sha256 == hashlib.sha256(crop.raw.png_bytes).hexdigest()
+    assert by_segment["segment-a"].crop_bbox.top == by_segment["segment-b"].crop_bbox.top
+    assert by_segment["segment-c"].crop_bbox.top == by_segment["segment-d"].crop_bbox.top
+    assert by_segment["segment-c"].crop_bbox.top > by_segment["segment-a"].crop_bbox.bottom
     assert by_segment["segment-c"].crop_bbox.left == 0
     for segment_id, placement in by_segment.items():
         assert placement.source_bbox == bboxes[segment_id]
@@ -242,39 +226,23 @@ def test_local_full_preserves_rows_holes_mapping_and_digest() -> None:
 
 
 def test_local_full_omits_empty_position_without_fake_tile_or_row_glue() -> None:
-    _crop, compaction, _block, _bboxes = _render(
-        empty_segment_id="segment-b"
-    )
-    by_segment = {
-        placement.segment_ids[0]: placement
-        for placement in compaction.placements
-    }
+    _crop, compaction, _block, _bboxes = _render(empty_segment_id="segment-b")
+    by_segment = {placement.segment_ids[0]: placement for placement in compaction.placements}
 
     assert set(by_segment) == {"segment-a", "segment-c", "segment-d"}
     assert compaction.omitted_empty_units == ("membership-unit-000000",)
-    assert by_segment["segment-c"].crop_bbox.top == by_segment[
-        "segment-a"
-    ].crop_bbox.top
-    assert by_segment["segment-c"].crop_bbox.left > by_segment[
-        "segment-a"
-    ].crop_bbox.right
-    assert by_segment["segment-d"].crop_bbox.top > by_segment[
-        "segment-a"
-    ].crop_bbox.bottom
+    assert by_segment["segment-c"].crop_bbox.top == by_segment["segment-a"].crop_bbox.top
+    assert by_segment["segment-c"].crop_bbox.left > by_segment["segment-a"].crop_bbox.right
+    assert by_segment["segment-d"].crop_bbox.top > by_segment["segment-a"].crop_bbox.bottom
     assert by_segment["segment-d"].crop_bbox.left == 0
 
 
 def test_giant_overlap_chain_uses_only_bounded_block_local_slots() -> None:
     block_count = 130
     private_ids = tuple(f"private-{index:03d}" for index in range(block_count))
-    overlap_ids = tuple(
-        f"overlap-{index:03d}" for index in range(block_count - 1)
-    )
+    overlap_ids = tuple(f"overlap-{index:03d}" for index in range(block_count - 1))
     all_unit_ids = (*private_ids, *overlap_ids)
-    source_bboxes = {
-        unit_id: Box(index * 10, 0, index * 10 + 8, 6)
-        for index, unit_id in enumerate(all_unit_ids)
-    }
+    source_bboxes = {unit_id: Box(index * 10, 0, index * 10 + 8, 6) for index, unit_id in enumerate(all_unit_ids)}
     covered: set[str] = set()
     source_boxes_by_unit: dict[str, set[Box]] = {}
     crop_boxes_by_unit: dict[str, list[Box]] = {}
@@ -347,19 +315,12 @@ def test_giant_overlap_chain_uses_only_bounded_block_local_slots() -> None:
         assert {item.unit_id for item in rendered.placements} == set(member_ids)
         covered.update(item.unit_id for item in rendered.placements)
         for item in rendered.placements:
-            source_boxes_by_unit.setdefault(item.unit_id, set()).add(
-                item.source_bbox
-            )
-            crop_boxes_by_unit.setdefault(item.unit_id, []).append(
-                item.crop_bbox
-            )
+            source_boxes_by_unit.setdefault(item.unit_id, set()).add(item.source_bbox)
+            crop_boxes_by_unit.setdefault(item.unit_id, []).append(item.crop_bbox)
 
     assert covered == set(all_unit_ids)
     assert all(len(boxes) == 1 for boxes in source_boxes_by_unit.values())
-    assert any(
-        len(set(crop_boxes_by_unit[unit_id])) > 1
-        for unit_id in overlap_ids
-    )
+    assert any(len(set(crop_boxes_by_unit[unit_id])) > 1 for unit_id in overlap_ids)
     for index, overlap_id in enumerate(overlap_ids):
         first = block_members[index]
         second = block_members[index + 1]
@@ -369,45 +330,24 @@ def test_giant_overlap_chain_uses_only_bounded_block_local_slots() -> None:
 
 def test_local_full_preserves_raw_gutter_inside_exact_segment_bbox() -> None:
     crop, compaction, _block, _bboxes = _render(unowned_gutter=True)
-    placement = next(
-        item
-        for item in compaction.placements
-        if item.segment_ids == ("segment-a",)
-    )
+    placement = next(item for item in compaction.placements if item.segment_ids == ("segment-a",))
     with Image.open(io.BytesIO(crop.raw.png_bytes)) as rendered:
         rendered.load()
-        pixel = rendered.convert("RGB").getpixel(
-            (placement.crop_bbox.left + 1, placement.crop_bbox.top + 1)
-        )
+        pixel = rendered.convert("RGB").getpixel((placement.crop_bbox.left + 1, placement.crop_bbox.top + 1))
 
     assert max(pixel) < 100
 
 
 def test_two_island_signature_has_adaptive_visual_separator() -> None:
     _crop, compaction, _block, _bboxes = _render(two_islands=True)
-    by_segment = {
-        placement.segment_ids[0]: placement
-        for placement in compaction.placements
-    }
-    first_bottom = max(
-        by_segment[segment_id].crop_bbox.bottom
-        for segment_id in ("segment-a", "segment-b")
-    )
-    second_top = min(
-        by_segment[segment_id].crop_bbox.top
-        for segment_id in ("segment-c", "segment-d")
-    )
-    tile_height = by_segment["segment-a"].crop_bbox.bottom - by_segment[
-        "segment-a"
-    ].crop_bbox.top
+    by_segment = {placement.segment_ids[0]: placement for placement in compaction.placements}
+    first_bottom = max(by_segment[segment_id].crop_bbox.bottom for segment_id in ("segment-a", "segment-b"))
+    second_top = min(by_segment[segment_id].crop_bbox.top for segment_id in ("segment-c", "segment-d"))
+    tile_height = by_segment["segment-a"].crop_bbox.bottom - by_segment["segment-a"].crop_bbox.top
 
     assert second_top - first_bottom >= tile_height
-    assert by_segment["segment-a"].crop_bbox.top == by_segment[
-        "segment-b"
-    ].crop_bbox.top
-    assert by_segment["segment-c"].crop_bbox.top == by_segment[
-        "segment-d"
-    ].crop_bbox.top
+    assert by_segment["segment-a"].crop_bbox.top == by_segment["segment-b"].crop_bbox.top
+    assert by_segment["segment-c"].crop_bbox.top == by_segment["segment-d"].crop_bbox.top
 
 
 def test_local_layout_pixel_limit_fails_without_shrinking_tiles() -> None:
@@ -442,9 +382,7 @@ def test_canonical_locality_tiles_cannot_use_generic_repacking() -> None:
                 placement.unit_id,
                 placement.segment_ids,
                 placement.source_bbox,
-                np.asarray(
-                    image.crop(placement.crop_bbox.as_tuple())
-                ).copy(),
+                np.asarray(image.crop(placement.crop_bbox.as_tuple())).copy(),
                 placement.crop_bbox,
                 crop.raw.png_bytes,
             )
@@ -463,9 +401,7 @@ def test_canonical_locality_tiles_cannot_use_generic_repacking() -> None:
         first_order=0,
         tiles=tiles,
     )
-    assert hashlib.sha256(group.png_bytes).hexdigest() == hashlib.sha256(
-        crop.raw.png_bytes
-    ).hexdigest()
+    assert hashlib.sha256(group.png_bytes).hexdigest() == hashlib.sha256(crop.raw.png_bytes).hexdigest()
     assert group.placements == compaction.placements
 
 
@@ -534,9 +470,7 @@ def test_direct_and_adaptive_queue_share_canonical_locality_raster(
         lane_id="canonical-locality-test",
         resource=OcrResource.CPU,
         max_workers=1,
-        worker_factory=lambda: _RecordingWorker(
-            config=_Config(("rus", "eng"))
-        ),
+        worker_factory=lambda: _RecordingWorker(config=_Config(("rus", "eng"))),
     )
     enhancer = _RecordingEnhancer()
     session = AdaptivePersistentOcrSession((lane,))
@@ -567,9 +501,7 @@ def test_direct_and_adaptive_queue_share_canonical_locality_raster(
     finally:
         session.close()
 
-    assert hashlib.sha256(_RecordingWorker.payloads[0]).hexdigest() == (
-        direct_digest
-    )
+    assert hashlib.sha256(_RecordingWorker.payloads[0]).hexdigest() == (direct_digest)
     assert enhancer.sources == [crop.raw.png_bytes]
     with Image.open(io.BytesIO(_RecordingWorker.payloads[1])) as gamma:
         gamma.load()

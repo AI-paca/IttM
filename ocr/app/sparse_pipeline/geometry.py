@@ -142,13 +142,9 @@ class GeometryConfig:
         if type(self.region_deskew_enabled) is not bool:
             raise ValueError("region_deskew_enabled must be a boolean")
         if not 0.0 <= self.region_deskew_min_confidence <= 1.0:
-            raise ValueError(
-                "region_deskew_min_confidence must be between zero and one"
-            )
+            raise ValueError("region_deskew_min_confidence must be between zero and one")
         if not 0.0 <= self.region_deskew_min_degrees <= 15.0:
-            raise ValueError(
-                "region_deskew_min_degrees must be between zero and 15"
-            )
+            raise ValueError("region_deskew_min_degrees must be between zero and 15")
         if len(self.alpha_background_rgb) != 3 or any(
             type(value) is not int or not 0 <= value <= 255 for value in self.alpha_background_rgb
         ):
@@ -272,13 +268,10 @@ class GeometryAnalyzer:
                 preprocessed.image.close()
         else:
             geometry_source_rgb = source_rgb
-        geometry_source_pixels = (
-            geometry_source_rgb.shape[0] * geometry_source_rgb.shape[1]
-        )
+        geometry_source_pixels = geometry_source_rgb.shape[0] * geometry_source_rgb.shape[1]
         if geometry_source_pixels > self.config.max_aligned_pixels:
             raise GeometryLimitError(
-                "region-aligned pixel limit exceeded: "
-                f"{geometry_source_pixels} > {self.config.max_aligned_pixels}"
+                "region-aligned pixel limit exceeded: " f"{geometry_source_pixels} > {self.config.max_aligned_pixels}"
             )
         background = _estimate_background(geometry_source_rgb)
         source_foreground = _detect_foreground(
@@ -371,11 +364,7 @@ class GeometryAnalyzer:
             diacritic_guard=diacritic_guard,
             row_grid=row_grid,
             cover_separators=adaptive_partition,
-            partition_rgb=(
-                aligned_rgb
-                if adaptive_partition
-                else None
-            ),
+            partition_rgb=(aligned_rgb if adaptive_partition else None),
             physical_fallback=non_rule_foreground,
         )
         if adaptive_partition:
@@ -402,17 +391,11 @@ class GeometryAnalyzer:
             components,
             self.config,
         )
-        recursive_residual_rule_drafts = tuple(
-            draft for draft in residual_rule_drafts if draft.partition_evidence
-        )
-        deferred_ownership_rule_drafts = tuple(
-            draft for draft in residual_rule_drafts if not draft.partition_evidence
-        )
+        recursive_residual_rule_drafts = tuple(draft for draft in residual_rule_drafts if draft.partition_evidence)
+        deferred_ownership_rule_drafts = tuple(draft for draft in residual_rule_drafts if not draft.partition_evidence)
         if recursive_residual_rule_drafts:
             ownership_only_horizontal_boxes = frozenset(
-                draft.bbox
-                for draft in recursive_residual_rule_drafts
-                if draft.axis is RuleAxis.HORIZONTAL
+                draft.bbox for draft in recursive_residual_rule_drafts if draft.axis is RuleAxis.HORIZONTAL
             )
             rule_drafts = tuple(
                 sorted(
@@ -479,11 +462,7 @@ class GeometryAnalyzer:
                 row_grid=row_grid,
                 nonstructural_rule_boxes=ownership_only_horizontal_boxes,
                 cover_separators=adaptive_partition,
-                partition_rgb=(
-                    aligned_rgb
-                    if adaptive_partition
-                    else None
-                ),
+                partition_rgb=(aligned_rgb if adaptive_partition else None),
                 physical_fallback=non_rule_foreground,
             )
             if adaptive_partition:
@@ -683,9 +662,7 @@ class GeometryAnalyzer:
             alignment=alignment,
             segmentation=segmentation,
             matrix=matrix,
-            aligned_rgb_sha256=hashlib.sha256(
-                memoryview(np.ascontiguousarray(aligned_rgb))
-            ).hexdigest(),
+            aligned_rgb_sha256=hashlib.sha256(memoryview(np.ascontiguousarray(aligned_rgb))).hexdigest(),
             status=status,
             diagnostics=(
                 f"region_transform={transform.operation}",
@@ -699,8 +676,7 @@ class GeometryAnalyzer:
                 f"segments={len(segments)}",
                 f"rules={len(rules)}",
                 f"rule_evidence_pixels={int(rule_evidence.sum())}",
-                "recovered_rule_bands="
-                f"{len(residual_rule_drafts) + len(final_line_drafts)}",
+                "recovered_rule_bands=" f"{len(residual_rule_drafts) + len(final_line_drafts)}",
                 f"thin_line_segment_count={thin_line_segment_count}",
                 f"nodes={len(nodes)}",
                 f"limit_leaves={limit_leaf_count}",
@@ -924,13 +900,8 @@ def _select_layout_foreground(
             candidates.append((score, delta, mask))
         _, delta, mask = min(candidates, key=lambda value: value[0])
         selected_by_mode.append((polarity, delta, clean(mask)))
-    selected = np.logical_or.reduce(
-        tuple(mask for _, _, mask in selected_by_mode)
-    )
-    mode = "adaptive-dual:" + "+".join(
-        f"{polarity}:{delta}"
-        for polarity, delta, _ in selected_by_mode
-    )
+    selected = np.logical_or.reduce(tuple(mask for _, _, mask in selected_by_mode))
+    mode = "adaptive-dual:" + "+".join(f"{polarity}:{delta}" for polarity, delta, _ in selected_by_mode)
     if not selected.any():
         if force_adaptive:
             return np.zeros_like(physical_foreground, dtype=bool), "adaptive-empty"
@@ -944,9 +915,7 @@ def _select_layout_foreground(
         )
         selected_pixels = int(selected.sum())
         suppressed_pixels = int(suppressed.sum())
-        anchored_fraction = int(
-            np.logical_and(selected, physical_foreground).sum()
-        ) / max(1, selected_pixels)
+        anchored_fraction = int(np.logical_and(selected, physical_foreground).sum()) / max(1, selected_pixels)
         selected_delta = min(delta for _, delta, _ in selected_by_mode)
         signed_rgb = rgb.astype(np.int16, copy=False)
         local_variation = np.zeros(rgb.shape[:2], dtype=np.int16)
@@ -958,18 +927,10 @@ def _select_layout_foreground(
             np.abs(signed_rgb[1:] - signed_rgb[:-1]),
             axis=2,
         )
-        local_variation[:, 1:] = np.maximum(
-            local_variation[:, 1:], horizontal_variation
-        )
-        local_variation[:, :-1] = np.maximum(
-            local_variation[:, :-1], horizontal_variation
-        )
-        local_variation[1:] = np.maximum(
-            local_variation[1:], vertical_variation
-        )
-        local_variation[:-1] = np.maximum(
-            local_variation[:-1], vertical_variation
-        )
+        local_variation[:, 1:] = np.maximum(local_variation[:, 1:], horizontal_variation)
+        local_variation[:, :-1] = np.maximum(local_variation[:, :-1], horizontal_variation)
+        local_variation[1:] = np.maximum(local_variation[1:], vertical_variation)
+        local_variation[:-1] = np.maximum(local_variation[:-1], vertical_variation)
         flat_suppressed_fraction = int(
             np.logical_and(
                 suppressed,
@@ -983,11 +944,7 @@ def _select_layout_foreground(
             and flat_suppressed_fraction >= 2.0 / 3.0
         )
         quantized_rgb = rgb.astype(np.uint16, copy=False) // 8
-        quantized_keys = (
-            quantized_rgb[:, :, 0] * 1024
-            + quantized_rgb[:, :, 1] * 32
-            + quantized_rgb[:, :, 2]
-        )
+        quantized_keys = quantized_rgb[:, :, 0] * 1024 + quantized_rgb[:, :, 1] * 32 + quantized_rgb[:, :, 2]
         dominant_quantized_fraction = float(
             np.bincount(
                 quantized_keys.ravel(),
@@ -1285,12 +1242,8 @@ def _guard_diacritic_gaps(mask: np.ndarray, components: tuple[_Component, ...]) 
             x_bins.setdefault(bin_index, []).append(component)
     x_bin_tops: dict[int, tuple[int, ...]] = {}
     for bin_index, candidates in x_bins.items():
-        candidates.sort(
-            key=lambda component: (component.bbox.top, component.bbox.left)
-        )
-        x_bin_tops[bin_index] = tuple(
-            component.bbox.top for component in candidates
-        )
+        candidates.sort(key=lambda component: (component.bbox.top, component.bbox.left))
+        x_bin_tops[bin_index] = tuple(component.bbox.top for component in candidates)
     for upper in components:
         candidates: dict[int, _Component] = {}
         first_bin = upper.bbox.left // bin_width
@@ -1453,28 +1406,16 @@ def _local_line_bands(
     source = network.horizontal_lines if horizontal else network.vertical_lines
     ordered = sorted(
         source,
-        key=lambda line: (
-            (line.bbox[1] + line.bbox[3]) / 2.0
-            if horizontal
-            else (line.bbox[0] + line.bbox[2]) / 2.0
-        ),
+        key=lambda line: ((line.bbox[1] + line.bbox[3]) / 2.0 if horizontal else (line.bbox[0] + line.bbox[2]) / 2.0),
     )
     groups: list[list[LocalLine]] = []
     centers: list[float] = []
     for line in ordered:
-        center = (
-            (line.bbox[1] + line.bbox[3]) / 2.0
-            if horizontal
-            else (line.bbox[0] + line.bbox[2]) / 2.0
-        )
+        center = (line.bbox[1] + line.bbox[3]) / 2.0 if horizontal else (line.bbox[0] + line.bbox[2]) / 2.0
         if groups and abs(center - centers[-1]) <= tolerance:
             groups[-1].append(line)
             centers[-1] = sum(
-                (
-                    (member.bbox[1] + member.bbox[3]) / 2.0
-                    if horizontal
-                    else (member.bbox[0] + member.bbox[2]) / 2.0
-                )
+                ((member.bbox[1] + member.bbox[3]) / 2.0 if horizontal else (member.bbox[0] + member.bbox[2]) / 2.0)
                 for member in groups[-1]
             ) / len(groups[-1])
         else:
@@ -1550,15 +1491,9 @@ def _edge_open_grid_lines(
         crossbars = tuple(
             line
             for line in lines
-            if line.axis == crossbar_axis
-            and line.length >= minimum_crossbar
-            and line.thickness <= maximum_thickness
+            if line.axis == crossbar_axis and line.length >= minimum_crossbar and line.thickness <= maximum_thickness
         )
-        rails = tuple(
-            line
-            for line in lines
-            if line.axis == rail_axis and line.thickness <= maximum_thickness
-        )
+        rails = tuple(line for line in lines if line.axis == rail_axis and line.thickness <= maximum_thickness)
         values: list[_EdgeOpenCell] = []
         for crossbar in crossbars:
             if horizontal_crossbar:
@@ -1599,22 +1534,14 @@ def _edge_open_grid_lines(
                             for rail in eligible
                             if interval_gap(
                                 endpoint,
-                                (
-                                    (rail.bbox[0], rail.bbox[2])
-                                    if horizontal_crossbar
-                                    else (rail.bbox[1], rail.bbox[3])
-                                ),
+                                ((rail.bbox[0], rail.bbox[2]) if horizontal_crossbar else (rail.bbox[1], rail.bbox[3])),
                             )
                             <= 2 * tolerance
                         ),
                         key=lambda rail: (
                             interval_gap(
                                 endpoint,
-                                (
-                                    (rail.bbox[0], rail.bbox[2])
-                                    if horizontal_crossbar
-                                    else (rail.bbox[1], rail.bbox[3])
-                                ),
+                                ((rail.bbox[0], rail.bbox[2]) if horizontal_crossbar else (rail.bbox[1], rail.bbox[3])),
                             ),
                             -rail.length,
                             rail.bbox[1],
@@ -1644,11 +1571,7 @@ def _edge_open_grid_lines(
     # one spatial witness and must not satisfy the repetition requirement by
     # themselves.
     distinct: list[_EdgeOpenCell] = []
-    candidates = tuple(
-        cell
-        for edge in ("top", "bottom", "left", "right")
-        for cell in cell_candidates(edge)
-    )
+    candidates = tuple(cell for edge in ("top", "bottom", "left", "right") for cell in cell_candidates(edge))
     for cell in sorted(
         candidates,
         key=lambda value: (
@@ -1660,10 +1583,7 @@ def _edge_open_grid_lines(
     ):
         duplicate = False
         for accepted in distinct:
-            if (
-                accepted.edge != cell.edge
-                or abs(accepted.cross_coordinate - cell.cross_coordinate) > 2 * tolerance
-            ):
+            if accepted.edge != cell.edge or abs(accepted.cross_coordinate - cell.cross_coordinate) > 2 * tolerance:
                 continue
             overlap = min(accepted.span_stop, cell.span_stop) - max(
                 accepted.span_start,
@@ -1711,13 +1631,7 @@ def _edge_open_grid_lines(
     families: dict[int, list[_EdgeOpenCell]] = {}
     for index, cell in enumerate(distinct):
         families.setdefault(find(index), []).append(cell)
-    selected = {
-        line
-        for family in families.values()
-        if len(family) >= 3
-        for cell in family
-        for line in cell.lines
-    }
+    selected = {line for family in families.values() if len(family) >= 3 for cell in family for line in cell.lines}
     return tuple(
         sorted(
             selected,
@@ -1801,12 +1715,8 @@ def _local_structure_rule_drafts(
         horizontal_coordinate = horizontal[0]
         vertical_coordinate = vertical[0]
         return any(
-            horizontal_line.bbox[0] - tolerance
-            <= vertical_coordinate
-            <= horizontal_line.bbox[2] + tolerance
-            and vertical_line.bbox[1] - tolerance
-            <= horizontal_coordinate
-            <= vertical_line.bbox[3] + tolerance
+            horizontal_line.bbox[0] - tolerance <= vertical_coordinate <= horizontal_line.bbox[2] + tolerance
+            and vertical_line.bbox[1] - tolerance <= horizontal_coordinate <= vertical_line.bbox[3] + tolerance
             for horizontal_line in horizontal[2]
             for vertical_line in vertical[2]
         )
@@ -1832,12 +1742,8 @@ def _local_structure_rule_drafts(
         ]
     ] = []
     for core, horizontal_bands, vertical_bands in descriptors:
-        horizontal_candidates = tuple(
-            band for band in horizontal_bands if band[1] >= 0.55
-        )
-        vertical_candidates = tuple(
-            band for band in vertical_bands if band[1] >= 0.55
-        )
+        horizontal_candidates = tuple(band for band in horizontal_bands if band[1] >= 0.55)
+        vertical_candidates = tuple(band for band in vertical_bands if band[1] >= 0.55)
         # Coverage alone is not structural proof: an underline or the flat
         # edge of a glyph may span most of a small connected network after it
         # touches one table rail.  A finite grid line needs two independently
@@ -1846,20 +1752,15 @@ def _local_structure_rule_drafts(
         strong_horizontal = tuple(
             band
             for band in horizontal_candidates
-            if sum(bands_cross(band, vertical) for vertical in vertical_candidates)
-            >= 2
+            if sum(bands_cross(band, vertical) for vertical in vertical_candidates) >= 2
         )
         strong_vertical = tuple(
             band
             for band in vertical_candidates
-            if sum(bands_cross(horizontal, band) for horizontal in strong_horizontal)
-            >= 2
+            if sum(bands_cross(horizontal, band) for horizontal in strong_horizontal) >= 2
         )
         strong_horizontal = tuple(
-            band
-            for band in strong_horizontal
-            if sum(bands_cross(band, vertical) for vertical in strong_vertical)
-            >= 2
+            band for band in strong_horizontal if sum(bands_cross(band, vertical) for vertical in strong_vertical) >= 2
         )
         if len(strong_horizontal) < 3 or len(strong_vertical) < 3:
             continue
@@ -1898,20 +1799,12 @@ def _local_structure_rule_drafts(
             repeated_horizontal = tuple(
                 band
                 for band in repeated_horizontal
-                if sum(
-                    bands_cross(band, vertical)
-                    for vertical in flank_vertical_support
-                )
-                >= 2
+                if sum(bands_cross(band, vertical) for vertical in flank_vertical_support) >= 2
             )
             flank_vertical_support = tuple(
                 band
                 for band in flank_vertical_support
-                if sum(
-                    bands_cross(horizontal, band)
-                    for horizontal in repeated_horizontal
-                )
-                >= 2
+                if sum(bands_cross(horizontal, band) for horizontal in repeated_horizontal) >= 2
             )
             if len(repeated_horizontal) < 2 or len(flank_vertical_support) < 2:
                 continue
@@ -2019,11 +1912,7 @@ def _local_structure_rule_drafts(
         candidate_mask[top:bottom, left:right] = True
     return tuple(
         _RuleDraft(
-            axis=(
-                RuleAxis.HORIZONTAL
-                if line.axis == "horizontal"
-                else RuleAxis.VERTICAL
-            ),
+            axis=(RuleAxis.HORIZONTAL if line.axis == "horizontal" else RuleAxis.VERTICAL),
             bbox=Box(*line.bbox),
             candidate_mask=candidate_mask,
             claim_full_bbox=True,
@@ -2079,22 +1968,12 @@ def _is_photographic_rule_region(
     dense_gradient_fraction = float(np.mean(gradients >= 32))
 
     quantized = sample.astype(np.uint16, copy=False) // 16
-    keys = (
-        quantized[:, :, 0] * 256
-        + quantized[:, :, 1] * 16
-        + quantized[:, :, 2]
-    )
+    keys = quantized[:, :, 0] * 256 + quantized[:, :, 1] * 16 + quantized[:, :, 2]
     counts = np.bincount(keys.reshape(-1), minlength=4096)
     occupied = counts[counts > 0].astype(np.float64)
     probabilities = occupied / max(1.0, float(occupied.sum()))
-    entropy = float(
-        -np.sum(probabilities * np.log2(probabilities))
-    )
-    return (
-        len(occupied) >= 256
-        and entropy >= 5.0
-        and dense_gradient_fraction >= 0.12
-    )
+    entropy = float(-np.sum(probabilities * np.log2(probabilities)))
+    return len(occupied) >= 256 and entropy >= 5.0 and dense_gradient_fraction >= 0.12
 
 
 def _page_edge_band(
@@ -2208,18 +2087,13 @@ def _detect_rules(
                 thickness = component.bbox.height if horizontal else component.bbox.width
                 length = component.bbox.width if horizontal else component.bbox.height
                 aspect_ratio = length / max(1, thickness)
-                perpendicular_size = height if horizontal else width
                 frame_thickness_limit = max(16, 4 * effective_thickness)
                 frame_bbox = _page_edge_band(
                     candidate,
                     component.bbox,
                     horizontal=horizontal,
                 )
-                frame_thickness = (
-                    0
-                    if frame_bbox is None
-                    else frame_bbox.height if horizontal else frame_bbox.width
-                )
+                frame_thickness = 0 if frame_bbox is None else frame_bbox.height if horizontal else frame_bbox.width
                 is_frame_edge = (
                     length
                     >= max(
@@ -2242,28 +2116,16 @@ def _detect_rules(
                     # halo is not left behind as a narrow text segment.  A
                     # component joined to a real glyph exceeds the guarded
                     # thickness above and is therefore never accepted here.
-                    component_thickness = (
-                        component.bbox.height
-                        if horizontal
-                        else component.bbox.width
-                    )
-                    complete_component_is_bounded = (
-                        component_thickness <= frame_thickness_limit
-                    )
+                    component_thickness = component.bbox.height if horizontal else component.bbox.width
+                    complete_component_is_bounded = component_thickness <= frame_thickness_limit
                     axis_size = width if horizontal else height
                     partial_axis = length < round(axis_size * 0.80)
                     values.append(
                         _RuleDraft(
                             axis,
-                            (
-                                component.bbox
-                                if complete_component_is_bounded and partial_axis
-                                else frame_bbox
-                            ),
+                            (component.bbox if complete_component_is_bounded and partial_axis else frame_bbox),
                             source,
-                            claim_full_bbox=(
-                                complete_component_is_bounded and partial_axis
-                            ),
+                            claim_full_bbox=(complete_component_is_bounded and partial_axis),
                         )
                     )
                 elif not frame_edges and is_structural_rule:
@@ -2383,11 +2245,7 @@ def _detect_rules(
                     return True
             return False
 
-        drafts.extend(
-            draft
-            for draft in local_drafts
-            if not covered_by_proven_rule(draft)
-        )
+        drafts.extend(draft for draft in local_drafts if not covered_by_proven_rule(draft))
     return tuple(
         sorted(
             drafts,
@@ -2433,9 +2291,7 @@ def _expand_rule_bands(
             search_left:search_right,
         ]
         minimum_pixels = math.ceil(local.shape[0] * 0.8)
-        dense_columns = np.flatnonzero(
-            local.sum(axis=0, dtype=np.int64) >= minimum_pixels
-        )
+        dense_columns = np.flatnonzero(local.sum(axis=0, dtype=np.int64) >= minimum_pixels)
         if dense_columns.size:
             # A rasterized border can leave a one-pixel, low-contrast corner
             # immediately beside the projection-dense band.  Claim exactly
@@ -2460,9 +2316,7 @@ def _expand_rule_bands(
                 claim_full_bbox=True,
             )
         )
-    vertical = tuple(
-        draft for draft in values if draft.axis is RuleAxis.VERTICAL
-    )
+    vertical = tuple(draft for draft in values if draft.axis is RuleAxis.VERTICAL)
     completed: list[_RuleDraft] = []
     for draft in values:
         if draft.axis is RuleAxis.VERTICAL:
@@ -2581,16 +2435,16 @@ def _near_collinear_rule(
             )
         if perpendicular_distance > perpendicular_tolerance:
             continue
-        candidate_length = (
-            candidate.width
-            if axis is RuleAxis.HORIZONTAL
-            else candidate.height
-        )
+        candidate_length = candidate.width if axis is RuleAxis.HORIZONTAL else candidate.height
         bbox_length = bbox.width if axis is RuleAxis.HORIZONTAL else bbox.height
-        if min(candidate_length, bbox_length) / max(
-            candidate_length,
-            bbox_length,
-        ) < 0.25:
+        if (
+            min(candidate_length, bbox_length)
+            / max(
+                candidate_length,
+                bbox_length,
+            )
+            < 0.25
+        ):
             continue
         aligned.append(candidate)
         axial_length = bbox.width if axis is RuleAxis.HORIZONTAL else bbox.height
@@ -2688,10 +2542,7 @@ def _unsupported_horizontal_line_component(
         and bbox.left < candidate.bbox.right
         for candidate in components
     )
-    return (
-        upper_components >= 2
-        and above_pixels >= max(4, round(0.05 * bbox.width))
-    )
+    return upper_components >= 2 and above_pixels >= max(4, round(0.05 * bbox.width))
 
 
 def _component_has_rule_evidence(
@@ -2769,9 +2620,7 @@ def _vertical_network_supported(
     horizontal = tuple(
         candidate
         for axis, candidate in structural_bands
-        if axis is RuleAxis.HORIZONTAL
-        and candidate.left < bbox.right
-        and bbox.left < candidate.right
+        if axis is RuleAxis.HORIZONTAL and candidate.left < bbox.right and bbox.left < candidate.right
     )
 
     def touches(endpoint: int) -> bool:
@@ -2794,32 +2643,28 @@ def _vertical_network_supported(
     peers = tuple(
         candidate
         for candidate in components
-        if candidate.component_id != component.component_id
-        and _pure_vertical_line_component(candidate, config)
+        if candidate.component_id != component.component_id and _pure_vertical_line_component(candidate, config)
     )
-    repeated_column = sum(
-        max(
-            candidate.bbox.left - bbox.right,
-            bbox.left - candidate.bbox.right,
-            0,
+    repeated_column = (
+        sum(
+            max(
+                candidate.bbox.left - bbox.right,
+                bbox.left - candidate.bbox.right,
+                0,
+            )
+            <= tolerance
+            for candidate in peers
         )
-        <= tolerance
-        for candidate in peers
-    ) >= 1
+        >= 1
+    )
     row_peers = tuple(
         candidate
         for candidate in peers
-        if abs(candidate.bbox.top - bbox.top) <= tolerance
-        and abs(candidate.bbox.bottom - bbox.bottom) <= tolerance
+        if abs(candidate.bbox.top - bbox.top) <= tolerance and abs(candidate.bbox.bottom - bbox.bottom) <= tolerance
     )
     row_boxes = (bbox, *(candidate.bbox for candidate in row_peers))
-    row_span = max(box.right for box in row_boxes) - min(
-        box.left for box in row_boxes
-    )
-    repeated_row = (
-        len(row_boxes) >= 3
-        and row_span >= max(2 * config.min_rule_length, 4 * bbox.height)
-    )
+    row_span = max(box.right for box in row_boxes) - min(box.left for box in row_boxes)
+    repeated_row = len(row_boxes) >= 3 and row_span >= max(2 * config.min_rule_length, 4 * bbox.height)
     return repeated_column or repeated_row
 
 
@@ -2834,14 +2679,8 @@ def _recover_residual_line_drafts(
     structural_bands = tuple(
         (rule.axis, rule.bbox)
         for rule in rules
-        if not (
-            rule.axis is RuleAxis.HORIZONTAL
-            and (rule.bbox.top == 0 or rule.bbox.bottom == height)
-        )
-        and not (
-            rule.axis is RuleAxis.VERTICAL
-            and (rule.bbox.left == 0 or rule.bbox.right == width)
-        )
+        if not (rule.axis is RuleAxis.HORIZONTAL and (rule.bbox.top == 0 or rule.bbox.bottom == height))
+        and not (rule.axis is RuleAxis.VERTICAL and (rule.bbox.left == 0 or rule.bbox.right == width))
     )
     body_height = _body_component_height(components, 50)
     values: list[_RuleDraft] = []
@@ -2927,9 +2766,7 @@ def _recover_leaf_rule_networks(
     )
     leaves = tuple(node for node in drafts if not node.child_ids)
     drafts_by_id = {node.node_id: node for node in drafts}
-    components_by_leaf: dict[str, list[_Component]] = {
-        leaf.node_id: [] for leaf in leaves
-    }
+    components_by_leaf: dict[str, list[_Component]] = {leaf.node_id: [] for leaf in leaves}
     for component in components:
         leaf = _leaf_for_run(component.runs[0], drafts_by_id)
         components_by_leaf[leaf.node_id].append(component)
@@ -2948,10 +2785,7 @@ def _recover_leaf_rule_networks(
             continue
         content = Box.union(component.bbox for component in local_components)
         leaf_contents[leaf.node_id] = content
-        if (
-            content.width < 2 * config.min_rule_length
-            or content.height < max(8, config.min_rule_length // 3)
-        ):
+        if content.width < 2 * config.min_rule_length or content.height < max(8, config.min_rule_length // 3):
             continue
         local = residual[
             content.top : content.bottom,
@@ -2969,35 +2803,24 @@ def _recover_leaf_rule_networks(
             4,
             math.ceil(content.height * 0.55),
         )
-        row_bands = tuple(
-            (start, stop)
-            for start, stop in _true_runs(dense_rows)
-            if stop - start <= maximum_thickness
-        )
+        row_bands = tuple((start, stop) for start, stop in _true_runs(dense_rows) if stop - start <= maximum_thickness)
         column_bands = tuple(
             (start, stop)
             for start, stop in _true_runs(dense_columns)
-            if stop - start <= maximum_thickness
-            and start > 0
-            and stop < content.width
+            if stop - start <= maximum_thickness and start > 0 and stop < content.width
         )
         if len(column_bands) < 3:
             continue
         crossed_rows = tuple(
             band
             for band in row_bands
-            if sum(
-                bool(local[band[0] : band[1], left:right].any())
-                for left, right in column_bands
-            )
-            >= 3
+            if sum(bool(local[band[0] : band[1], left:right].any()) for left, right in column_bands) >= 3
         )
         if not crossed_rows:
             guided_bands = tuple(
                 (start, stop)
                 for start, stop in column_bands
-                if int(local[:, start:stop].any(axis=1).sum())
-                >= math.ceil(content.height * 0.8)
+                if int(local[:, start:stop].any(axis=1).sum()) >= math.ceil(content.height * 0.8)
                 if _supports_projected_column_gap(
                     rules,
                     content,
@@ -3018,14 +2841,9 @@ def _recover_leaf_rule_networks(
                 key = (RuleAxis.VERTICAL, box)
                 if key not in seen:
                     seen.add(key)
-                    recovered.append(
-                        _RuleDraft(RuleAxis.VERTICAL, box, residual)
-                    )
+                    recovered.append(_RuleDraft(RuleAxis.VERTICAL, box, residual))
             continue
-        global_column_bands = tuple(
-            (content.left + start, content.left + stop)
-            for start, stop in column_bands
-        )
+        global_column_bands = tuple((content.left + start, content.left + stop) for start, stop in column_bands)
         networks.append((leaf.node_id, content, global_column_bands))
 
         # A dense row crossed by several independent column traces is itself
@@ -3055,10 +2873,7 @@ def _recover_leaf_rule_networks(
                 )
 
         for start, stop in column_bands:
-            if not any(
-                local[row_start:row_stop, start:stop].any()
-                for row_start, row_stop in crossed_rows
-            ):
+            if not any(local[row_start:row_stop, start:stop].any() for row_start, row_stop in crossed_rows):
                 continue
             box = Box(
                 content.left + start,
@@ -3095,9 +2910,7 @@ def _recover_leaf_rule_networks(
             ):
                 continue
             overlapping_bands = tuple(
-                (left, right)
-                for left, right in bands
-                if content.left < left and right < content.right
+                (left, right) for left, right in bands if content.left < left and right < content.right
             )
             if len(overlapping_bands) >= 3:
                 candidates.append((vertical_distance, source, overlapping_bands))
@@ -3133,14 +2946,8 @@ def _recover_leaf_rule_networks(
     structural_bands = tuple(
         (rule.axis, rule.bbox)
         for rule in rules
-        if not (
-            rule.axis is RuleAxis.HORIZONTAL
-            and (rule.bbox.top == 0 or rule.bbox.bottom == height)
-        )
-        and not (
-            rule.axis is RuleAxis.VERTICAL
-            and (rule.bbox.left == 0 or rule.bbox.right == width)
-        )
+        if not (rule.axis is RuleAxis.HORIZONTAL and (rule.bbox.top == 0 or rule.bbox.bottom == height))
+        and not (rule.axis is RuleAxis.VERTICAL and (rule.bbox.left == 0 or rule.bbox.right == width))
     ) + tuple((draft.axis, draft.bbox) for draft in recovered)
     body_height = _body_component_height(components, 50)
     for component in components:
@@ -3257,13 +3064,16 @@ def _protected_upper_boundary(
     # earlier rows.  Follow the already-proven bridge backwards in the same
     # columns and anchor the evidence window at its true upper edge.
     bridge_start = guard_start
-    while bridge_start > bbox.top and np.logical_and(
-        diacritic_guard[
-            bridge_start - 1,
-            bbox.left : bbox.right,
-        ],
-        bridge_columns,
-    ).any():
+    while (
+        bridge_start > bbox.top
+        and np.logical_and(
+            diacritic_guard[
+                bridge_start - 1,
+                bbox.left : bbox.right,
+            ],
+            bridge_columns,
+        ).any()
+    ):
         bridge_start -= 1
     lookback = max(3, 2 * (guard_stop - bridge_start))
     upper_window = mask[
@@ -3323,11 +3133,7 @@ def _supports_imbalanced_row_gap(
         component
         for component in components
         if component.bbox.intersection(bbox) is not None
-        and (
-            component.bbox.bottom <= gap_start
-            if minority_before
-            else component.bbox.top >= gap_stop
-        )
+        and (component.bbox.bottom <= gap_start if minority_before else component.bbox.top >= gap_stop)
         and component.pixels >= 4
         and component.bbox.height >= 2
     )
@@ -3355,10 +3161,7 @@ def _supports_projected_column_gap(
     matching = tuple(
         rule
         for rule in rules
-        if rule.axis is RuleAxis.VERTICAL
-        and gap_start
-        <= (rule.bbox.left + rule.bbox.right) / 2.0
-        <= gap_stop
+        if rule.axis is RuleAxis.VERTICAL and gap_start <= (rule.bbox.left + rule.bbox.right) / 2.0 <= gap_stop
     )
     if not matching:
         return False
@@ -3397,19 +3200,9 @@ def _best_separator(
     column_projection = local.sum(axis=0)
     occupied_rows = np.flatnonzero(row_projection)
     occupied_columns = np.flatnonzero(column_projection)
-    content_height = (
-        bbox.height
-        if occupied_rows.size == 0
-        else int(occupied_rows[-1] - occupied_rows[0] + 1)
-    )
-    content_width = (
-        bbox.width
-        if occupied_columns.size == 0
-        else int(occupied_columns[-1] - occupied_columns[0] + 1)
-    )
-    candidates: list[
-        tuple[int, int, float, int, int, SplitAxis, Box, bool]
-    ] = []
+    content_height = bbox.height if occupied_rows.size == 0 else int(occupied_rows[-1] - occupied_rows[0] + 1)
+    content_width = bbox.width if occupied_columns.size == 0 else int(occupied_columns[-1] - occupied_columns[0] + 1)
+    candidates: list[tuple[int, int, float, int, int, SplitAxis, Box, bool]] = []
     total_ink = int(local.sum())
     if total_ink == 0:
         return None
@@ -3428,8 +3221,7 @@ def _best_separator(
                     and rule.bbox.top < stop
                     and start < rule.bbox.bottom
                     and rule.bbox.intersection(bbox) is not None
-                    and rule.bbox.intersection(bbox).width
-                    >= round(content_width * 0.8)
+                    and rule.bbox.intersection(bbox).width >= round(content_width * 0.8)
                 )
                 or (
                     axis is SplitAxis.COLUMNS
@@ -3437,8 +3229,7 @@ def _best_separator(
                     and rule.bbox.left < stop
                     and start < rule.bbox.right
                     and rule.bbox.intersection(bbox) is not None
-                    and rule.bbox.intersection(bbox).height
-                    >= round(content_height * 0.8)
+                    and rule.bbox.intersection(bbox).height >= round(content_height * 0.8)
                 )
                 for rule in rules
             )
@@ -3519,11 +3310,7 @@ def _best_separator(
     if not candidates:
         return None
     if prefer_rows:
-        row_candidates = tuple(
-            candidate
-            for candidate in candidates
-            if candidate[5] is SplitAxis.ROWS
-        )
+        row_candidates = tuple(candidate for candidate in candidates if candidate[5] is SplitAxis.ROWS)
         if row_candidates:
             # Restore the v16 guillotine order: finish the horizontal page
             # bands before looking for layout columns.  Balance is useful for
@@ -3536,10 +3323,7 @@ def _best_separator(
                 row_candidates,
                 key=lambda value: (
                     value[6].height,
-                    -abs(
-                        (value[6].top + value[6].bottom) / 2.0
-                        - (bbox.top + bbox.bottom) / 2.0
-                    ),
+                    -abs((value[6].top + value[6].bottom) / 2.0 - (bbox.top + bbox.bottom) / 2.0),
                     value[0],
                     value[2],
                     value[4],
@@ -3660,11 +3444,7 @@ def _best_row_grid_boundary(
         bbox.left : bbox.right,
     ].any(axis=1)
     occupied_rows = np.flatnonzero(local_projection)
-    if (
-        occupied_rows.size
-        and int(occupied_rows[-1]) - int(occupied_rows[0]) + 1
-        <= row_grid.pitch
-    ):
+    if occupied_rows.size and int(occupied_rows[-1]) - int(occupied_rows[0]) + 1 <= row_grid.pitch:
         # The estimated grid describes inter-line cadence.  Once a recursive
         # leaf contains no more than one cadence of actual ink, another grid
         # cut can only pass through a glyph or its underline.  This is the
@@ -3845,11 +3625,7 @@ def _layout_partition_evidence(
 
     if len(components) <= maximum_evidence_components:
         return np.array(mask, copy=True), components
-    meaningful = tuple(
-        component
-        for component in components
-        if component.pixels >= 4 and component.bbox.height >= 3
-    )
+    meaningful = tuple(component for component in components if component.pixels >= 4 and component.bbox.height >= 3)
     if not meaningful:
         return np.array(mask, copy=True), components
     evidence = np.zeros_like(mask, dtype=bool)
@@ -3883,13 +3659,9 @@ def _recursive_partition(
         components,
         maximum_evidence_components=config.max_nodes,
     )
-    cover_separators = (
-        cover_separators or len(components) != original_component_count
-    )
+    cover_separators = cover_separators or len(components) != original_component_count
     working_guard = (
-        np.array(diacritic_guard, copy=True)
-        if diacritic_guard is not None
-        else np.zeros_like(mask, dtype=bool)
+        np.array(diacritic_guard, copy=True) if diacritic_guard is not None else np.zeros_like(mask, dtype=bool)
     )
     root_body_component_height = _body_component_height(components, 75)
     root_valley_body_height = _body_component_height(components, 50)
@@ -3968,14 +3740,10 @@ def _recursive_partition(
                 node.bbox.left : node.bbox.right,
             ] = np.logical_and(local_guard_mask, np.logical_not(local_mask))
         body_component_height = (
-            _body_component_height(local_components, 75)
-            if partition_rgb is not None
-            else root_body_component_height
+            _body_component_height(local_components, 75) if partition_rgb is not None else root_body_component_height
         )
         valley_body_height = (
-            _body_component_height(local_components, 50)
-            if partition_rgb is not None
-            else root_valley_body_height
+            _body_component_height(local_components, 50) if partition_rgb is not None else root_valley_body_height
         )
         effective_column_gap = max(
             config.min_safe_gap,
@@ -4115,11 +3883,7 @@ def _recursive_partition(
             and decision[2]
             and axis is SplitAxis.ROWS
             and separator is not None
-            and not any(
-                box.top < separator.bottom
-                and separator.top < box.bottom
-                for box in nonstructural_rule_boxes
-            )
+            and not any(box.top < separator.bottom and separator.top < box.bottom for box in nonstructural_rule_boxes)
         )
         if horizontal_rule_split:
             child_row_boundaries = (
@@ -4145,8 +3909,7 @@ def _recursive_partition(
                 depth=node.depth + 1,
                 parent_id=node.node_id,
                 path=node.path + (f"{node.node_id}.{index}",),
-                rule_partition=node.rule_partition
-                or (row_rule_top and row_rule_bottom),
+                rule_partition=node.rule_partition or (row_rule_top and row_rule_bottom),
                 row_rule_top=row_rule_top,
                 row_rule_bottom=row_rule_bottom,
             )
@@ -4215,14 +3978,7 @@ def _fragment_components_for_leaves(
                 ):
                     continue
                 if node.child_ids:
-                    stack.extend(
-                        reversed(
-                            tuple(
-                                drafts_by_id[child_id]
-                                for child_id in node.child_ids
-                            )
-                        )
-                    )
+                    stack.extend(reversed(tuple(drafts_by_id[child_id] for child_id in node.child_ids)))
                 else:
                     row_leaves.append(node)
             owned = 0
@@ -4269,9 +4025,7 @@ def _best_component_boundary(
     # creating another OCR segment.  Let meaningful glyph bodies choose the
     # seam; all components are assigned to the resulting children below.
     decision_components = tuple(
-        component
-        for component in components
-        if component.pixels >= 4 and component.bbox.height >= 3
+        component for component in components if component.pixels >= 4 and component.bbox.height >= 3
     )
     if len(decision_components) < 2:
         return None
@@ -4324,10 +4078,7 @@ def _best_component_boundary(
     required_width = max(1, round(content_box.width * 0.15))
     for index in range(1, count):
         coordinate = prefix_bottoms[index - 1]
-        if (
-            not bbox.top < coordinate < bbox.bottom
-            or coordinate > ordered[index].bbox.top
-        ):
+        if not bbox.top < coordinate < bbox.bottom or coordinate > ordered[index].bbox.top:
             continue
         upper_pixels = prefix_pixels[index - 1]
         lower_pixels = total_pixels - upper_pixels
@@ -4340,9 +4091,7 @@ def _best_component_boundary(
             continue
         component_balance = min(index, count - index) / max(index, count - index)
         score = pixel_balance + 0.25 * component_balance
-        candidates.append(
-            (score, -coordinate, index, upper_pixels, lower_pixels)
-        )
+        candidates.append((score, -coordinate, index, upper_pixels, lower_pixels))
     if not candidates:
         return None
     for _, negative_coordinate, index, upper_pixels, lower_pixels in sorted(
@@ -4351,21 +4100,9 @@ def _best_component_boundary(
         reverse=True,
     ):
         coordinate = -negative_coordinate
-        upper = tuple(
-            component
-            for component in components
-            if component.bbox.bottom <= coordinate
-        )
-        lower = tuple(
-            component
-            for component in components
-            if component.bbox.top >= coordinate
-        )
-        if (
-            not upper
-            or not lower
-            or len(upper) + len(lower) != len(components)
-        ):
+        upper = tuple(component for component in components if component.bbox.bottom <= coordinate)
+        lower = tuple(component for component in components if component.bbox.top >= coordinate)
+        if not upper or not lower or len(upper) + len(lower) != len(components):
             continue
         if upper_pixels < lower_pixels:
             guard_top = max(bbox.top, coordinate - 1)
@@ -4396,9 +4133,7 @@ def _best_component_boundary(
                 upper_window,
                 bridge_columns,
             )
-            guard_coverage = int(
-                np.logical_and(bridge_columns, upper_columns).sum()
-            ) / max(1, int(upper_columns.sum()))
+            guard_coverage = int(np.logical_and(bridge_columns, upper_columns).sum()) / max(1, int(upper_columns.sum()))
             if guard_coverage >= 0.6:
                 continue
         return coordinate, upper, lower
@@ -4415,9 +4150,7 @@ def _best_component_rule_boundary(
     if len(components) < 2:
         return None
     content = Box.union(component.bbox for component in components)
-    candidates: list[
-        tuple[float, float, int, Box, tuple[_Component, ...], tuple[_Component, ...]]
-    ] = []
+    candidates: list[tuple[float, float, int, Box, tuple[_Component, ...], tuple[_Component, ...]]] = []
     for rule in rules:
         if rule.axis is not RuleAxis.VERTICAL:
             continue
@@ -4429,16 +4162,8 @@ def _best_component_rule_boundary(
             or rule.bbox.right >= bbox.right
         ):
             continue
-        left = tuple(
-            component
-            for component in components
-            if component.bbox.right <= rule.bbox.left
-        )
-        right = tuple(
-            component
-            for component in components
-            if component.bbox.left >= rule.bbox.right
-        )
+        left = tuple(component for component in components if component.bbox.right <= rule.bbox.left)
+        right = tuple(component for component in components if component.bbox.left >= rule.bbox.right)
         if not left or not right or len(left) + len(right) != len(components):
             continue
         left_pixels = sum(component.pixels for component in left)
@@ -4487,19 +4212,14 @@ def _refine_component_boundaries(
     nodes = list(drafts)
     leaves = tuple(node for node in nodes if not node.child_ids)
     drafts_by_id = {node.node_id: node for node in nodes}
-    components_by_leaf: dict[str, list[_Component]] = {
-        leaf.node_id: [] for leaf in leaves
-    }
+    components_by_leaf: dict[str, list[_Component]] = {leaf.node_id: [] for leaf in leaves}
     for component in components:
         # ``components`` were already fragmented by the same recursive tree.
         # Re-scanning every leaf for every component is O(C * leaves); descend
         # the tree once from a component's first physical run instead.
         leaf = _leaf_for_run(component.runs[0], drafts_by_id)
         components_by_leaf[leaf.node_id].append(component)
-    stack = [
-        (leaf, tuple(components_by_leaf[leaf.node_id]))
-        for leaf in reversed(leaves)
-    ]
+    stack = [(leaf, tuple(components_by_leaf[leaf.node_id])) for leaf in reversed(leaves)]
     while stack:
         node, local_components = stack.pop()
         row_decision = _best_component_boundary(
@@ -4744,9 +4464,7 @@ def _project_sparse_matrix(
     cells = tuple(
         SparseCell(row=row, column=column, segment_id=segment_id) for row, column, segment_id in sorted(cell_entries)
     )
-    cells_by_segment: dict[str, list[SparseCell]] = {
-        segment.segment_id: [] for segment in segments
-    }
+    cells_by_segment: dict[str, list[SparseCell]] = {segment.segment_id: [] for segment in segments}
     for cell in cells:
         cells_by_segment[cell.segment_id].append(cell)
     spans: list[SegmentSpan] = []

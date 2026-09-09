@@ -115,10 +115,7 @@ class LanguageCandidateSelector:
         self,
         context: tuple[str, ...] = (),
     ) -> float:
-        return (
-            2.5
-            + (self.candidate_prior_score(REVIEWER_EMPTY_STATE, context) * 10.0)
-        )
+        return 2.5 + (self.candidate_prior_score(REVIEWER_EMPTY_STATE, context) * 10.0)
 
     def _with_empty_text_candidate(
         self,

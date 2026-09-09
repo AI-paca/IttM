@@ -184,9 +184,7 @@ def _complete_output(
     geometry: GeometryResult,
     text_by_segment: dict[str, str],
 ) -> OcrEngineOutput:
-    segment_by_id = {
-        item.segment_id: item for item in geometry.segmentation.segments
-    }
+    segment_by_id = {item.segment_id: item for item in geometry.segmentation.segments}
     bbox = getattr(block, "bbox")
     words = tuple(
         OcrWord(
@@ -222,11 +220,7 @@ def _queue(
         crop = crop_by_id[block.block_id]
         context_sha256 = hashlib.sha256(crop.raw.png_bytes).hexdigest()
         for transform in (OcrTransform.RAW, OcrTransform.GAMMA):
-            payload = (
-                crop.raw.png_bytes
-                if transform is OcrTransform.RAW
-                else crop.gamma.png_bytes
-            )
+            payload = crop.raw.png_bytes if transform is OcrTransform.RAW else crop.gamma.png_bytes
             common = {
                 "job_id": f"ocr-job-{len(jobs):08d}",
                 "block_id": block.block_id,
@@ -266,9 +260,7 @@ def _queue(
     failed = sum(item.status is OcrJobStatus.FAILED for item in jobs)
     return OcrQueueResult(
         jobs=tuple(jobs),
-        status=(
-            OcrQueueStatus.PARTIAL if failed else OcrQueueStatus.COMPLETE
-        ),
+        status=(OcrQueueStatus.PARTIAL if failed else OcrQueueStatus.COMPLETE),
         complete=len(jobs) - failed,
         failed=failed,
         diagnostics=("real-partial-queue",) if failed else (),
@@ -283,9 +275,7 @@ def _bundle(
     assembly_config = DocumentAssemblyConfig()
     object_config = ObjectReconstructionConfig()
     planning_config = BlockPlanningConfig(padding=2)
-    crop_config = BlockCropConfig(
-        enhancement_backend=EnhancementBackend.NUMPY
-    )
+    crop_config = BlockCropConfig(enhancement_backend=EnhancementBackend.NUMPY)
     fusion_config = OcrFusionConfig()
     geometry = _geometry(segment_ids)
     objects = ObjectReconstructor(object_config).reconstruct(
@@ -300,9 +290,7 @@ def _bundle(
         objects_result=objects,
     )
     page = CropInput("stage7-artifact-page", _page_png())
-    crops, aligned_rgb_sha256 = BlockCropper(
-        crop_config
-    ).crop_with_rgb_sha256(
+    crops, aligned_rgb_sha256 = BlockCropper(crop_config).crop_with_rgb_sha256(
         page,
         aligned_size=geometry.segmentation.aligned_size,
         plan=plan,
@@ -339,9 +327,7 @@ def _bundle(
         "fusion_config": fusion_config,
     }
     result = DocumentAssembler(assembly_config).assemble(**assemble_kwargs)
-    expected_status = (
-        AssemblyStatus.UNRESOLVED if partial else AssemblyStatus.COMPLETE
-    )
+    expected_status = AssemblyStatus.UNRESOLVED if partial else AssemblyStatus.COMPLETE
     assert result.status is expected_status
     return _ArtifactBundle(
         page=page,
@@ -393,10 +379,7 @@ def _publish(
 
 
 def _jsonl(path: Path) -> tuple[dict[str, object], ...]:
-    return tuple(
-        json.loads(line)
-        for line in path.read_text(encoding="utf-8").splitlines()
-    )
+    return tuple(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines())
 
 
 def _tsv(path: Path) -> tuple[dict[str, str], ...]:
@@ -405,11 +388,7 @@ def _tsv(path: Path) -> tuple[dict[str, str], ...]:
 
 
 def _tree_bytes(root: Path) -> dict[str, bytes]:
-    return {
-        path.relative_to(root).as_posix(): path.read_bytes()
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-    }
+    return {path.relative_to(root).as_posix(): path.read_bytes() for path in sorted(root.rglob("*")) if path.is_file()}
 
 
 def test_writer_publishes_real_complete_stage7_result_deterministically(
@@ -422,56 +401,34 @@ def test_writer_publishes_real_complete_stage7_result_deterministically(
     stage = run / "07-document"
     result = bundle.result
 
-    assert (stage / "candidate" / "document.txt").read_text(
-        encoding="utf-8"
-    ) == result.candidate_text
-    assert (stage / "candidate" / "document.md").read_text(
-        encoding="utf-8"
-    ) == result.candidate_markdown
-    assert (stage / "certified" / "document.txt").read_text(
-        encoding="utf-8"
-    ) == result.text
-    assert (stage / "certified" / "document.md").read_text(
-        encoding="utf-8"
-    ) == result.markdown
+    assert (stage / "candidate" / "document.txt").read_text(encoding="utf-8") == result.candidate_text
+    assert (stage / "candidate" / "document.md").read_text(encoding="utf-8") == result.candidate_markdown
+    assert (stage / "certified" / "document.txt").read_text(encoding="utf-8") == result.text
+    assert (stage / "certified" / "document.md").read_text(encoding="utf-8") == result.markdown
 
     evidence = _jsonl(stage / "records" / "evidence-slices.jsonl")
     segments = _jsonl(stage / "records" / "segments.jsonl")
     units = _jsonl(stage / "records" / "structural-units.jsonl")
     objects = _jsonl(stage / "records" / "objects.jsonl")
-    assert [record["slice_id"] for record in evidence] == [
+    assert [record["slice_id"] for record in evidence] == [item.slice_id for item in result.evidence_slices]
+    assert [record["output_start"] for record in evidence] == [item.output_start for item in result.evidence_slices]
+    assert [record["output_stop"] for record in evidence] == [item.output_stop for item in result.evidence_slices]
+    assert [record["segment_id"] for record in segments] == [item.segment_id for item in result.segments]
+    assert [record["unit_id"] for record in units] == [item.unit_id for item in result.structural_units]
+    assert [record["object_id"] for record in objects] == [item.object_id for item in result.objects]
+    assert [record["slice_id"] for record in _tsv(stage / "records" / "evidence-slices.tsv")] == [
         item.slice_id for item in result.evidence_slices
     ]
-    assert [record["output_start"] for record in evidence] == [
-        item.output_start for item in result.evidence_slices
-    ]
-    assert [record["output_stop"] for record in evidence] == [
-        item.output_stop for item in result.evidence_slices
-    ]
-    assert [record["segment_id"] for record in segments] == [
+    assert [record["segment_id"] for record in _tsv(stage / "records" / "segments.tsv")] == [
         item.segment_id for item in result.segments
     ]
-    assert [record["unit_id"] for record in units] == [
+    assert [record["unit_id"] for record in _tsv(stage / "records" / "structural-units.tsv")] == [
         item.unit_id for item in result.structural_units
     ]
-    assert [record["object_id"] for record in objects] == [
+    assert [record["object_id"] for record in _tsv(stage / "records" / "objects.tsv")] == [
         item.object_id for item in result.objects
     ]
-    assert [record["slice_id"] for record in _tsv(
-        stage / "records" / "evidence-slices.tsv"
-    )] == [item.slice_id for item in result.evidence_slices]
-    assert [record["segment_id"] for record in _tsv(
-        stage / "records" / "segments.tsv"
-    )] == [item.segment_id for item in result.segments]
-    assert [record["unit_id"] for record in _tsv(
-        stage / "records" / "structural-units.tsv"
-    )] == [item.unit_id for item in result.structural_units]
-    assert [record["object_id"] for record in _tsv(
-        stage / "records" / "objects.tsv"
-    )] == [item.object_id for item in result.objects]
-    assert (stage / "diagnostics.txt").read_text(
-        encoding="utf-8"
-    ) == "\n".join(result.diagnostics) + "\n"
+    assert (stage / "diagnostics.txt").read_text(encoding="utf-8") == "\n".join(result.diagnostics) + "\n"
 
     second = tmp_path / "same-result"
     _publish(second, bundle)
@@ -486,32 +443,18 @@ def test_writer_publishes_indexed_per_object_and_per_segment_text_trees(
 
     object_dirs = tuple(sorted((stage / "objects").iterdir()))
     segment_dirs = tuple(sorted((stage / "segments").iterdir()))
-    assert [path.name for path in object_dirs] == [
-        f"object-{index:08d}" for index in range(len(bundle.result.objects))
-    ]
+    assert [path.name for path in object_dirs] == [f"object-{index:08d}" for index in range(len(bundle.result.objects))]
     assert [path.name for path in segment_dirs] == [
         f"segment-{index:08d}" for index in range(len(bundle.result.segments))
     ]
     for directory, item in zip(object_dirs, bundle.result.objects):
-        assert (directory / "candidate.txt").read_text(
-            encoding="utf-8"
-        ) == item.candidate_text
-        assert (directory / "candidate.md").read_text(
-            encoding="utf-8"
-        ) == item.candidate_markdown
-        assert (directory / "certified.txt").read_text(
-            encoding="utf-8"
-        ) == item.text
-        assert (directory / "certified.md").read_text(
-            encoding="utf-8"
-        ) == item.markdown
+        assert (directory / "candidate.txt").read_text(encoding="utf-8") == item.candidate_text
+        assert (directory / "candidate.md").read_text(encoding="utf-8") == item.candidate_markdown
+        assert (directory / "certified.txt").read_text(encoding="utf-8") == item.text
+        assert (directory / "certified.md").read_text(encoding="utf-8") == item.markdown
     for directory, item in zip(segment_dirs, bundle.result.segments):
-        assert (directory / "candidate.txt").read_text(
-            encoding="utf-8"
-        ) == item.candidate_text
-        assert (directory / "certified.txt").read_text(
-            encoding="utf-8"
-        ) == item.text
+        assert (directory / "candidate.txt").read_text(encoding="utf-8") == item.candidate_text
+        assert (directory / "certified.txt").read_text(encoding="utf-8") == item.text
 
 
 def test_manifest_binds_sources_status_diagnostics_and_every_payload_file(
@@ -533,9 +476,7 @@ def test_manifest_binds_sources_status_diagnostics_and_every_payload_file(
 
     inventory = manifest["files"]
     assert isinstance(inventory, list)
-    assert [entry["path"] for entry in inventory] == sorted(
-        entry["path"] for entry in inventory
-    )
+    assert [entry["path"] for entry in inventory] == sorted(entry["path"] for entry in inventory)
     actual_payloads = {
         path.relative_to(stage).as_posix(): path
         for path in stage.rglob("*")
@@ -558,12 +499,8 @@ def test_real_partial_queue_publishes_candidate_but_no_certified_document(
     run = _publish(tmp_path / "unresolved-run", bundle)
     stage = run / "07-document"
 
-    assert (stage / "candidate" / "document.txt").read_text(
-        encoding="utf-8"
-    ) == bundle.result.candidate_text
-    assert (stage / "candidate" / "document.md").read_text(
-        encoding="utf-8"
-    ) == bundle.result.candidate_markdown
+    assert (stage / "candidate" / "document.txt").read_text(encoding="utf-8") == bundle.result.candidate_text
+    assert (stage / "candidate" / "document.md").read_text(encoding="utf-8") == bundle.result.candidate_markdown
     assert not (stage / "certified" / "document.txt").exists()
     assert not (stage / "certified" / "document.md").exists()
     manifest = json.loads((stage / "manifest.json").read_text(encoding="utf-8"))
@@ -755,9 +692,7 @@ def test_real_untrusted_segment_ids_are_data_never_filesystem_components(
     bundle = _bundle(segment_ids=segment_ids)
     run = _publish(tmp_path / "safe-run", bundle)
 
-    manifest = json.loads(
-        (run / "07-document" / "manifest.json").read_text(encoding="utf-8")
-    )
+    manifest = json.loads((run / "07-document" / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["source_segment_ids"] == list(segment_ids)
     assert not any(token in path.name for path in tmp_path.rglob("*"))
     assert not (tmp_path.parent / f"{token}-a").exists()

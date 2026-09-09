@@ -89,11 +89,9 @@ test("table markdown formats only complete numeric ratio cells", () => {
   assert.equal(artifact.objects[0].cells[0].text, "7/8");
   assert.equal(
     artifact.markdown,
-    [
-      "| 7 / 8 | docs/7/8 |",
-      "| --- | --- |",
-      "| 2026/07/31 | 7/8% |",
-    ].join("\n"),
+    ["| 7 / 8 | docs/7/8 |", "| --- | --- |", "| 2026/07/31 | 7/8% |"].join(
+      "\n",
+    ),
   );
 });
 
@@ -220,9 +218,7 @@ test("assembler validates and resolves compact OCR evidence references", () => {
       deserializeSegmentTopologyHandoff(
         JSON.stringify({
           ...value,
-          segments: [
-            { ...value.segments[0], evidence: { ocr_job_refs: [2] } },
-          ],
+          segments: [{ ...value.segments[0], evidence: { ocr_job_refs: [2] } }],
         }),
       ),
     /Invalid evidence/,

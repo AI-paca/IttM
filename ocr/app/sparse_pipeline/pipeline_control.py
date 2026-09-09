@@ -59,9 +59,7 @@ class _PipelineControlSplitter:
                 rank=(2,),
                 scope_id="sparse-pipeline",
                 order_key=(0,),
-                coverage_atom_ids=tuple(
-                    atom_id for node in first for atom_id in node.coverage_atom_ids
-                ),
+                coverage_atom_ids=tuple(atom_id for node in first for atom_id in node.coverage_atom_ids),
             ),
             WorkNode(
                 node_id="control-context-back",
@@ -69,9 +67,7 @@ class _PipelineControlSplitter:
                 rank=(2,),
                 scope_id="sparse-pipeline",
                 order_key=(1,),
-                coverage_atom_ids=tuple(
-                    atom_id for node in second for atom_id in node.coverage_atom_ids
-                ),
+                coverage_atom_ids=tuple(atom_id for node in second for atom_id in node.coverage_atom_ids),
             ),
         )
         self.root = WorkNode(

@@ -9,12 +9,7 @@ import pytest
 
 
 def _load_validator() -> ModuleType:
-    path = (
-        Path(__file__).resolve().parents[3]
-        / "scripts"
-        / "debug"
-        / "validate_v20_summary.py"
-    )
+    path = Path(__file__).resolve().parents[3] / "scripts" / "debug" / "validate_v20_summary.py"
     name = "_validate_v20_summary_under_test"
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
@@ -78,9 +73,7 @@ def test_validator_uses_the_configured_evidence_scope_not_adobe_literal() -> Non
     ):
         validator.validate_summary(
             _summary(),
-            evidence_only_sources=(
-                "Adobe Scan Jun 20, 2026.pdf.raster.png",
-            ),
+            evidence_only_sources=("Adobe Scan Jun 20, 2026.pdf.raster.png",),
         )
 
 

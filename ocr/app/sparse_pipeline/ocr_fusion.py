@@ -140,24 +140,15 @@ class OcrFusionConfig:
             ):
                 raise ValueError(f"{name} must be between zero and one")
         if self.minimum_exact_context_majority_fraction <= 0.5:
-            raise ValueError(
-                "minimum_exact_context_majority_fraction must be greater than one half"
-            )
+            raise ValueError("minimum_exact_context_majority_fraction must be greater than one half")
         if not isinstance(self.routing_mode, OcrRoutingMode):
             raise ValueError("routing_mode must be an OcrRoutingMode")
         if type(self.membership_assume_complete_observations) is not bool:
-            raise ValueError(
-                "membership_assume_complete_observations must be a boolean"
-            )
+            raise ValueError("membership_assume_complete_observations must be a boolean")
         if type(self.require_exact_job_matrix) is not bool:
             raise ValueError("require_exact_job_matrix must be a boolean")
-        if (
-            self.membership_assume_complete_observations
-            and not self.require_exact_job_matrix
-        ):
-            raise ValueError(
-                "complete membership observations require an exact job matrix"
-            )
+        if self.membership_assume_complete_observations and not self.require_exact_job_matrix:
+            raise ValueError("complete membership observations require an exact job matrix")
 
 
 @dataclass(frozen=True)
@@ -211,9 +202,7 @@ class ExactTextAlignment:
     def __post_init__(self) -> None:
         if type(self.left) is not str or type(self.right) is not str:
             raise ValueError("alignment inputs must be strings")
-        if type(self.operations) is not tuple or any(
-            not isinstance(item, EditOperation) for item in self.operations
-        ):
+        if type(self.operations) is not tuple or any(not isinstance(item, EditOperation) for item in self.operations):
             raise ValueError("alignment operations must be immutable")
         if type(self.distance) is not int or self.distance < 0:
             raise ValueError("alignment distance must be non-negative")
@@ -259,9 +248,7 @@ class SegmentObservation:
             or not 0.0 <= float(self.confidence) <= 1.0
         ):
             raise ValueError("segment observation confidence is invalid")
-        if type(self.page_bboxes) is not tuple or any(
-            not isinstance(item, Box) for item in self.page_bboxes
-        ):
+        if type(self.page_bboxes) is not tuple or any(not isinstance(item, Box) for item in self.page_bboxes):
             raise ValueError("segment observation boxes must be immutable")
         for name, value in (
             ("input_sha256", self.input_sha256),
@@ -299,10 +286,7 @@ class SegmentGroupObservation:
     source_replica_conflict: bool
 
     def __post_init__(self) -> None:
-        if (
-            type(self.unit_id) is not str
-            or not self.unit_id.startswith("membership-unit-")
-        ):
+        if type(self.unit_id) is not str or not self.unit_id.startswith("membership-unit-"):
             raise ValueError("group observation membership unit ID is invalid")
         if (
             type(self.segment_ids) is not tuple
@@ -463,10 +447,7 @@ class OcrReplicaConflict:
         if (
             type(self.context_sha256) is not str
             or len(self.context_sha256) != 64
-            or any(
-                character not in "0123456789abcdef"
-                for character in self.context_sha256
-            )
+            or any(character not in "0123456789abcdef" for character in self.context_sha256)
         ):
             raise ValueError("OCR replica conflict context digest is invalid")
         if type(self.capability_id) is not str or not self.capability_id:
@@ -536,9 +517,7 @@ class SegmentFusion:
             "transform_conflict",
             "unstable_raw_text",
         }
-        return self.selected_text is None or bool(
-            blocking.intersection(self.uncertainty_reasons)
-        )
+        return self.selected_text is None or bool(blocking.intersection(self.uncertainty_reasons))
 
 
 @dataclass(frozen=True)
@@ -589,9 +568,7 @@ class SegmentGroupFusion:
             "transform_conflict",
             "unstable_raw_text",
         }
-        return self.selected_text is None or bool(
-            blocking.intersection(self.uncertainty_reasons)
-        )
+        return self.selected_text is None or bool(blocking.intersection(self.uncertainty_reasons))
 
 
 @dataclass(frozen=True)
@@ -648,11 +625,7 @@ class OverlapConsensus:
             raise ValueError("overlap consensus must classify every intersection")
         category_sets = tuple(set(values) for values in categories)
         for values, value_set in zip(categories, category_sets):
-            if values != tuple(
-                value
-                for value in self.intersection_segment_ids
-                if value in value_set
-            ):
+            if values != tuple(value for value in self.intersection_segment_ids if value in value_set):
                 raise ValueError("overlap consensus categories must be canonical")
         union = set(self.union_segment_ids)
         if not intersection.issubset(union):
@@ -661,9 +634,7 @@ class OverlapConsensus:
             raise ValueError("overlap xor must be inside its union")
         if not set(self.observed_union_segment_ids).issubset(union):
             raise ValueError("observed overlap union contains an unknown segment")
-        if not set(self.observed_xor_segment_ids).issubset(
-            set(self.xor_segment_ids)
-        ):
+        if not set(self.observed_xor_segment_ids).issubset(set(self.xor_segment_ids)):
             raise ValueError("observed overlap xor contains an unknown segment")
 
 
@@ -685,48 +656,33 @@ class OcrFusionResult:
         if type(self.source_segment_ids) is not tuple:
             raise ValueError("fusion source IDs must be immutable")
         if type(self.group_observations) is not tuple or any(
-            not isinstance(item, SegmentGroupObservation)
-            for item in self.group_observations
+            not isinstance(item, SegmentGroupObservation) for item in self.group_observations
         ):
             raise ValueError("group observations must be immutable")
         if type(self.segment_groups) is not tuple or any(
-            not isinstance(item, SegmentGroupFusion)
-            for item in self.segment_groups
+            not isinstance(item, SegmentGroupFusion) for item in self.segment_groups
         ):
             raise ValueError("segment group fusions must be immutable")
         group_ids = tuple(item.unit_id for item in self.segment_groups)
         if len(group_ids) != len(set(group_ids)):
             raise ValueError("segment group fusion IDs must be unique")
-        grouped_segment_ids = tuple(
-            segment_id
-            for item in self.segment_groups
-            for segment_id in item.segment_ids
-        )
-        if (
-            len(grouped_segment_ids) != len(set(grouped_segment_ids))
-            or not set(grouped_segment_ids).issubset(self.source_segment_ids)
+        grouped_segment_ids = tuple(segment_id for item in self.segment_groups for segment_id in item.segment_ids)
+        if len(grouped_segment_ids) != len(set(grouped_segment_ids)) or not set(grouped_segment_ids).issubset(
+            self.source_segment_ids
         ):
             raise ValueError("segment group fusions must be a source partition")
-        group_observation_by_id = {
-            item.observation_id: item for item in self.group_observations
-        }
+        group_observation_by_id = {item.observation_id: item for item in self.group_observations}
         if len(group_observation_by_id) != len(self.group_observations):
             raise ValueError("group observation IDs must be unique")
-        group_observations_by_unit: dict[
-            str, list[SegmentGroupObservation]
-        ] = {}
+        group_observations_by_unit: dict[str, list[SegmentGroupObservation]] = {}
         for observation in self.group_observations:
-            group_observations_by_unit.setdefault(
-                observation.unit_id, []
-            ).append(observation)
+            group_observations_by_unit.setdefault(observation.unit_id, []).append(observation)
         for item in self.segment_groups:
             observed = tuple(group_observations_by_unit.get(item.unit_id, ()))
             if item.observation_count != len(observed):
                 raise ValueError("segment group observation count disagrees")
             if item.selected_observation_id is not None:
-                selected = group_observation_by_id.get(
-                    item.selected_observation_id
-                )
+                selected = group_observation_by_id.get(item.selected_observation_id)
                 if (
                     selected is None
                     or selected.unit_id != item.unit_id
@@ -737,75 +693,47 @@ class OcrFusionResult:
         if tuple(item.segment_id for item in self.segments) != self.source_segment_ids:
             raise ValueError("segment fusions must follow canonical source order")
         if type(self.block_text_observations) is not tuple or any(
-            not isinstance(item, BlockTextObservation)
-            for item in self.block_text_observations
+            not isinstance(item, BlockTextObservation) for item in self.block_text_observations
         ):
             raise ValueError("block text observations must be immutable")
         if type(self.unassigned_word_observations) is not tuple or any(
-            not isinstance(item, UnassignedWordObservation)
-            for item in self.unassigned_word_observations
+            not isinstance(item, UnassignedWordObservation) for item in self.unassigned_word_observations
         ):
             raise ValueError("unassigned OCR word observations must be immutable")
         if type(self.replica_conflicts) is not tuple or any(
-            not isinstance(item, OcrReplicaConflict)
-            for item in self.replica_conflicts
+            not isinstance(item, OcrReplicaConflict) for item in self.replica_conflicts
         ):
             raise ValueError("OCR replica conflicts must be immutable")
-        if type(self.overlaps) is not tuple or any(
-            not isinstance(item, OverlapConsensus) for item in self.overlaps
-        ):
+        if type(self.overlaps) is not tuple or any(not isinstance(item, OverlapConsensus) for item in self.overlaps):
             raise ValueError("OCR overlap consensus must be immutable")
         fusion_by_id = {item.segment_id: item for item in self.segments}
         for overlap in self.overlaps:
-            if any(
-                segment_id not in fusion_by_id
-                for segment_id in overlap.intersection_segment_ids
-            ):
+            if any(segment_id not in fusion_by_id for segment_id in overlap.intersection_segment_ids):
                 raise ValueError("overlap consensus references an unknown segment")
             for segment_id in (
                 overlap.cross_transform_confirmed_intersection_segment_ids
                 + overlap.near_confirmed_intersection_segment_ids
             ):
                 if fusion_by_id[segment_id].unresolved:
-                    raise ValueError(
-                        "resolved overlap consensus references an unresolved segment"
-                    )
+                    raise ValueError("resolved overlap consensus references an unresolved segment")
             for segment_id in overlap.deferred_intersection_segment_ids:
                 if not fusion_by_id[segment_id].unresolved:
-                    raise ValueError(
-                        "deferred overlap consensus requires an unresolved segment"
-                    )
+                    raise ValueError("deferred overlap consensus requires an unresolved segment")
         resolved_group_segments = {
-            segment_id
-            for item in self.segment_groups
-            if not item.unresolved
-            for segment_id in item.segment_ids
+            segment_id for item in self.segment_groups if not item.unresolved for segment_id in item.segment_ids
         }
-        canonical_membership_slots = (
-            "overlap-contract=canonical-membership-slots"
-            in self.diagnostics
-        )
+        canonical_membership_slots = "overlap-contract=canonical-membership-slots" in self.diagnostics
         expected = (
             OcrFusionStatus.COMPLETE
-            if all(
-                not item.unresolved
-                or item.segment_id in resolved_group_segments
-                for item in self.segments
-            )
+            if all(not item.unresolved or item.segment_id in resolved_group_segments for item in self.segments)
             and not self.unassigned_word_observations
             and not self.replica_conflicts
             and (
                 canonical_membership_slots
                 or all(
                     not item.conflicting_intersection_segment_ids
-                    and not (
-                        set(item.missing_intersection_segment_ids)
-                        - resolved_group_segments
-                    )
-                    and not (
-                        set(item.deferred_intersection_segment_ids)
-                        - resolved_group_segments
-                    )
+                    and not (set(item.missing_intersection_segment_ids) - resolved_group_segments)
+                    and not (set(item.deferred_intersection_segment_ids) - resolved_group_segments)
                     for item in self.overlaps
                 )
             )
@@ -862,29 +790,20 @@ def _reading_order_words(
             representative = min(
                 (member[2] for member in line),
                 key=lambda value: (
-                    abs(
-                        (value.top + value.bottom)
-                        - (box.top + box.bottom)
-                    ),
+                    abs((value.top + value.bottom) - (box.top + box.bottom)),
                     value.top,
                     value.left,
                 ),
             )
             overlap = max(
                 0,
-                min(representative.bottom, box.bottom)
-                - max(representative.top, box.top),
+                min(representative.bottom, box.bottom) - max(representative.top, box.top),
             )
             smaller_height = min(representative.height, box.height)
             overlap_fraction = overlap / smaller_height
             if overlap_fraction >= 0.25:
-                center_distance = abs(
-                    (representative.top + representative.bottom)
-                    - (box.top + box.bottom)
-                )
-                candidates.append(
-                    (overlap_fraction, -float(center_distance), line_index)
-                )
+                center_distance = abs((representative.top + representative.bottom) - (box.top + box.bottom))
+                candidates.append((overlap_fraction, -float(center_distance), line_index))
         if candidates:
             lines[max(candidates)[2]].append(item)
         else:
@@ -928,9 +847,7 @@ def align_exact_text(
     compact_right = compact_ocr_text(right)
     cells = (len(compact_left) + 1) * (len(compact_right) + 1)
     if cells > max_cells:
-        raise OcrFusionLimitError(
-            f"exact alignment needs {cells} cells, above limit {max_cells}"
-        )
+        raise OcrFusionLimitError(f"exact alignment needs {cells} cells, above limit {max_cells}")
     distances = [[0] * (len(compact_right) + 1) for _ in range(len(compact_left) + 1)]
     for left_index in range(len(compact_left) + 1):
         distances[left_index][0] = left_index
@@ -952,8 +869,7 @@ def align_exact_text(
             left_index
             and right_index
             and compact_left[left_index - 1] == compact_right[right_index - 1]
-            and distances[left_index][right_index]
-            == distances[left_index - 1][right_index - 1]
+            and distances[left_index][right_index] == distances[left_index - 1][right_index - 1]
         ):
             operations.append(
                 EditOperation(
@@ -969,8 +885,7 @@ def align_exact_text(
         elif (
             left_index
             and right_index
-            and distances[left_index][right_index]
-            == distances[left_index - 1][right_index - 1] + 1
+            and distances[left_index][right_index] == distances[left_index - 1][right_index - 1] + 1
         ):
             operations.append(
                 EditOperation(
@@ -983,11 +898,7 @@ def align_exact_text(
             )
             left_index -= 1
             right_index -= 1
-        elif (
-            left_index
-            and distances[left_index][right_index]
-            == distances[left_index - 1][right_index] + 1
-        ):
+        elif left_index and distances[left_index][right_index] == distances[left_index - 1][right_index] + 1:
             operations.append(
                 EditOperation(
                     EditKind.DELETE,
@@ -1057,9 +968,7 @@ class _RoutingBudget:
 
     def consume(self, count: int) -> None:
         if self.comparisons + count > self.maximum:
-            raise OcrFusionLimitError(
-                f"{self.operation} exceeds its comparison limit"
-            )
+            raise OcrFusionLimitError(f"{self.operation} exceeds its comparison limit")
         self.comparisons += count
 
 
@@ -1085,20 +994,14 @@ class OcrEvidenceFusion:
             crops=crops,
             queue=queue,
         )
-        membership_mode = (
-            self.config.routing_mode is OcrRoutingMode.BLOCK_MEMBERSHIP
-        )
+        membership_mode = self.config.routing_mode is OcrRoutingMode.BLOCK_MEMBERSHIP
         routing_budget = _RoutingBudget(
             (
                 self.config.max_membership_geometry_comparisons
                 if membership_mode
                 else self.config.max_routing_comparisons
             ),
-            operation=(
-                "membership geometry correlation"
-                if membership_mode
-                else "word-to-segment routing"
-            ),
+            operation=("membership geometry correlation" if membership_mode else "word-to-segment routing"),
         )
         membership_sweep_budget = _RoutingBudget(
             self.config.max_membership_sweep_checks,
@@ -1134,13 +1037,9 @@ class OcrEvidenceFusion:
             )
             for segment_id in plan.source_segment_ids
         )
-        group_observations_by_unit: dict[
-            str, list[SegmentGroupObservation]
-        ] = {}
+        group_observations_by_unit: dict[str, list[SegmentGroupObservation]] = {}
         for observation in group_observations:
-            group_observations_by_unit.setdefault(
-                observation.unit_id, []
-            ).append(observation)
+            group_observations_by_unit.setdefault(observation.unit_id, []).append(observation)
         group_fusions = tuple(
             self._fuse_group(
                 unit,
@@ -1157,45 +1056,22 @@ class OcrEvidenceFusion:
             budget=budget,
         )
         resolved_group_segments = {
-            segment_id
-            for item in group_fusions
-            if not item.unresolved
-            for segment_id in item.segment_ids
+            segment_id for item in group_fusions if not item.unresolved for segment_id in item.segment_ids
         }
-        unresolved = sum(
-            item.unresolved and item.segment_id not in resolved_group_segments
-            for item in fusions
-        )
-        conflicts = sum(
-            len(item.conflicting_intersection_segment_ids) for item in overlaps
-        )
+        unresolved = sum(item.unresolved and item.segment_id not in resolved_group_segments for item in fusions)
+        conflicts = sum(len(item.conflicting_intersection_segment_ids) for item in overlaps)
         missing = sum(len(item.missing_intersection_segment_ids) for item in overlaps)
         uncovered_missing = sum(
-            len(
-                set(item.missing_intersection_segment_ids)
-                - resolved_group_segments
-            )
-            for item in overlaps
+            len(set(item.missing_intersection_segment_ids) - resolved_group_segments) for item in overlaps
         )
-        exact_confirmed = sum(
-            len(item.confirmed_intersection_segment_ids) for item in overlaps
-        )
+        exact_confirmed = sum(len(item.confirmed_intersection_segment_ids) for item in overlaps)
         cross_transform_confirmed = sum(
-            len(item.cross_transform_confirmed_intersection_segment_ids)
-            for item in overlaps
+            len(item.cross_transform_confirmed_intersection_segment_ids) for item in overlaps
         )
-        near_confirmed = sum(
-            len(item.near_confirmed_intersection_segment_ids) for item in overlaps
-        )
-        deferred = sum(
-            len(item.deferred_intersection_segment_ids) for item in overlaps
-        )
+        near_confirmed = sum(len(item.near_confirmed_intersection_segment_ids) for item in overlaps)
+        deferred = sum(len(item.deferred_intersection_segment_ids) for item in overlaps)
         uncovered_deferred = sum(
-            len(
-                set(item.deferred_intersection_segment_ids)
-                - resolved_group_segments
-            )
-            for item in overlaps
+            len(set(item.deferred_intersection_segment_ids) - resolved_group_segments) for item in overlaps
         )
         canonical_membership_slots = self._canonical_membership_slots(
             plan,
@@ -1204,14 +1080,7 @@ class OcrEvidenceFusion:
         status = (
             OcrFusionStatus.COMPLETE
             if unresolved == 0
-            and (
-                canonical_membership_slots
-                or (
-                    conflicts == 0
-                    and uncovered_missing == 0
-                    and uncovered_deferred == 0
-                )
-            )
+            and (canonical_membership_slots or (conflicts == 0 and uncovered_missing == 0 and uncovered_deferred == 0))
             and not unassigned_word_observations
             and not replica_conflicts
             else OcrFusionStatus.UNRESOLVED
@@ -1229,27 +1098,24 @@ class OcrEvidenceFusion:
                 "reference-evidence=forbidden",
                 "text-comparison=exact-codepoints-without-whitespace",
                 f"routing-mode={self.config.routing_mode.value}",
-                (
-                    "or-xor=observed-block-membership-signatures"
-                    if membership_mode
-                    else "or-xor=geometry-only"
-                ),
+                ("or-xor=observed-block-membership-signatures" if membership_mode else "or-xor=geometry-only"),
                 (
                     "membership-completeness=explicit-complete-job-matrix"
-                    if membership_mode
-                    and self.config.membership_assume_complete_observations
-                    else "membership-completeness=omission-safe"
-                    if membership_mode
-                    else "membership-completeness=not-applicable"
+                    if membership_mode and self.config.membership_assume_complete_observations
+                    else (
+                        "membership-completeness=omission-safe"
+                        if membership_mode
+                        else "membership-completeness=not-applicable"
+                    )
                 ),
                 (
-                    "membership-per-word-omission-risk="
-                    "accepted-by-explicit-profile"
-                    if membership_mode
-                    and self.config.membership_assume_complete_observations
-                    else "membership-per-word-omission-risk=not-accepted"
-                    if membership_mode
-                    else "membership-per-word-omission-risk=not-applicable"
+                    "membership-per-word-omission-risk=" "accepted-by-explicit-profile"
+                    if membership_mode and self.config.membership_assume_complete_observations
+                    else (
+                        "membership-per-word-omission-risk=not-accepted"
+                        if membership_mode
+                        else "membership-per-word-omission-risk=not-applicable"
+                    )
                 ),
                 (
                     "overlap-contract=canonical-membership-slots"
@@ -1260,10 +1126,8 @@ class OcrEvidenceFusion:
                 f"alignment-logical-comparisons={budget.logical_comparisons}",
                 f"alignment-unique-pairs={budget.unique_alignments}",
                 f"routing-comparisons={routing_budget.comparisons}",
-                "membership-sweep-checks="
-                f"{membership_sweep_budget.comparisons}",
-                "reading-order-checks="
-                f"{reading_order_budget.comparisons}",
+                "membership-sweep-checks=" f"{membership_sweep_budget.comparisons}",
+                "reading-order-checks=" f"{reading_order_budget.comparisons}",
                 f"unassigned-words={len(unassigned_word_observations)}",
                 f"segment-group-observations={len(group_observations)}",
                 f"segment-groups={len(group_fusions)}",
@@ -1286,13 +1150,8 @@ class OcrEvidenceFusion:
         plan: BlockPlan,
         queue: OcrQueueResult,
     ) -> bool:
-        return any(
-            "geometry=canonical-membership-slots-v1" in diagnostic
-            for diagnostic in queue.diagnostics
-        ) and all(
-            block.matrix_window_kind
-            in {"polar-local-full", "polar-local-signature"}
-            for block in plan.blocks
+        return any("geometry=canonical-membership-slots-v1" in diagnostic for diagnostic in queue.diagnostics) and all(
+            block.matrix_window_kind in {"polar-local-full", "polar-local-signature"} for block in plan.blocks
         )
 
     @classmethod
@@ -1305,11 +1164,7 @@ class OcrEvidenceFusion:
             return None
         sizes: set[tuple[int, int]] = set()
         for diagnostic in queue.diagnostics:
-            fields = dict(
-                field.split("=", 1)
-                for field in diagnostic.split(";")
-                if "=" in field
-            )
+            fields = dict(field.split("=", 1) for field in diagnostic.split(";") if "=" in field)
             if fields.get("geometry") != "canonical-membership-slots-v1":
                 continue
             width_text = fields.get("width")
@@ -1320,25 +1175,17 @@ class OcrEvidenceFusion:
                 width = int(width_text or "")
                 height = int(height_text or "")
             except ValueError as error:
-                raise OcrFusionInvariantError(
-                    "canonical membership slot bound is malformed"
-                ) from error
+                raise OcrFusionInvariantError("canonical membership slot bound is malformed") from error
             if width <= 0 or height <= 0:
-                raise OcrFusionInvariantError(
-                    "canonical membership slot bound must be positive"
-                )
+                raise OcrFusionInvariantError("canonical membership slot bound must be positive")
             sizes.add((width, height))
         if len(sizes) > 1:
-            raise OcrFusionInvariantError(
-                "canonical membership slot bounds disagree"
-            )
+            raise OcrFusionInvariantError("canonical membership slot bounds disagree")
         if not sizes:
             return None
         size = next(iter(sizes))
         if len(plan.membership_units) > size[0] * size[1]:
-            raise OcrFusionInvariantError(
-                "canonical membership slots exceed their declared bound"
-            )
+            raise OcrFusionInvariantError("canonical membership slots exceed their declared bound")
         return size
 
     @staticmethod
@@ -1346,20 +1193,12 @@ class OcrEvidenceFusion:
         """Read the immutable hash-bound PNG canvas without decoding pixels."""
 
         payload = crop.raw.png_bytes
-        if (
-            len(payload) < 24
-            or payload[:8] != b"\x89PNG\r\n\x1a\n"
-            or payload[12:16] != b"IHDR"
-        ):
-            raise OcrFusionInvariantError(
-                "canonical membership crop has invalid PNG geometry"
-            )
+        if len(payload) < 24 or payload[:8] != b"\x89PNG\r\n\x1a\n" or payload[12:16] != b"IHDR":
+            raise OcrFusionInvariantError("canonical membership crop has invalid PNG geometry")
         width = int.from_bytes(payload[16:20], "big")
         height = int.from_bytes(payload[20:24], "big")
         if width < 1 or height < 1:
-            raise OcrFusionInvariantError(
-                "canonical membership crop has invalid PNG geometry"
-            )
+            raise OcrFusionInvariantError("canonical membership crop has invalid PNG geometry")
         return width, height
 
     def _validate_inputs(
@@ -1372,41 +1211,27 @@ class OcrEvidenceFusion:
     ) -> dict[str, Segment]:
         if not isinstance(plan, BlockPlan):
             raise OcrFusionInvariantError("plan must be a BlockPlan")
-        if type(segments) is not tuple or any(
-            not isinstance(segment, Segment) for segment in segments
-        ):
+        if type(segments) is not tuple or any(not isinstance(segment, Segment) for segment in segments):
             raise OcrFusionInvariantError("segments must be an immutable Segment tuple")
         if not isinstance(queue, OcrQueueResult):
             raise OcrFusionInvariantError("queue must be an OcrQueueResult")
         if len(queue.jobs) > self.config.max_jobs:
-            raise OcrFusionLimitError(
-                "OCR job count exceeds configured fusion limit"
-            )
-        if type(crops) is not tuple or any(
-            not isinstance(crop, BlockCropPair) for crop in crops
-        ):
+            raise OcrFusionLimitError("OCR job count exceeds configured fusion limit")
+        if type(crops) is not tuple or any(not isinstance(crop, BlockCropPair) for crop in crops):
             raise OcrFusionInvariantError("crops must be an immutable BlockCropPair tuple")
         if len(segments) > self.config.max_segments:
             raise OcrFusionLimitError("segment count exceeds configured limit")
         segment_by_id = {segment.segment_id: segment for segment in segments}
-        if len(segment_by_id) != len(segments) or set(segment_by_id) != set(
-            plan.source_segment_ids
-        ):
+        if len(segment_by_id) != len(segments) or set(segment_by_id) != set(plan.source_segment_ids):
             raise OcrFusionInvariantError("segments and block plan disagree")
         if len(crops) != len(plan.blocks):
             raise OcrFusionInvariantError("block plan and crop count disagree")
         for block, crop in zip(plan.blocks, crops):
-            if (
-                crop.block_id != block.block_id
-                or crop.bbox != block.bbox
-                or crop.segment_ids != block.segment_ids
-            ):
+            if crop.block_id != block.block_id or crop.bbox != block.bbox or crop.segment_ids != block.segment_ids:
                 raise OcrFusionInvariantError("block plan and crop provenance disagree")
         for index, job in enumerate(queue.jobs):
             if job.job_id != f"ocr-job-{index:08d}":
-                raise OcrFusionInvariantError(
-                    "OCR queue jobs are not in canonical order"
-                )
+                raise OcrFusionInvariantError("OCR queue jobs are not in canonical order")
         if self.config.require_exact_job_matrix:
             self._validate_job_matrix(plan=plan, crops=crops, queue=queue)
         else:
@@ -1436,63 +1261,43 @@ class OcrEvidenceFusion:
         lane_contract: dict[str, tuple[object, str]] = {}
         for job in queue.jobs:
             if job.block_id not in block_by_id:
-                raise OcrFusionInvariantError(
-                    "sparse OCR job is outside the block plan"
-                )
+                raise OcrFusionInvariantError("sparse OCR job is outside the block plan")
             key = (job.block_id, job.transform, job.lane_id)
             if key in seen:
-                raise OcrFusionInvariantError(
-                    "sparse OCR jobs contain a duplicate block-transform-lane"
-                )
+                raise OcrFusionInvariantError("sparse OCR jobs contain a duplicate block-transform-lane")
             seen.add(key)
             contract = (job.resource, job.capability_id)
             previous = lane_contract.setdefault(job.lane_id, contract)
             if previous != contract:
-                raise OcrFusionInvariantError(
-                    "OCR lane capability changed within one sparse queue"
-                )
+                raise OcrFusionInvariantError("OCR lane capability changed within one sparse queue")
             if len(lane_contract) > self.config.max_lanes:
-                raise OcrFusionLimitError(
-                    "OCR lane count exceeds configured fusion limit"
-                )
+                raise OcrFusionLimitError("OCR lane count exceeds configured fusion limit")
             crop = crop_by_id[job.block_id]
             expected_input = (
                 crop.raw.png_bytes
-                if job.transform in (
+                if job.transform
+                in (
                     OcrTransform.RAW,
                     OcrTransform.CONTEXTUAL_COMPOSITE,
                 )
-                else crop.gamma.png_bytes
-                if crop.gamma is not None
-                else None
+                else crop.gamma.png_bytes if crop.gamma is not None else None
             )
             context_sha256 = hashlib.sha256(crop.raw.png_bytes).hexdigest()
             if (
-                (
-                    expected_input is not None
-                    and job.input_sha256
-                    != hashlib.sha256(expected_input).hexdigest()
-                )
-                or job.context_sha256 != context_sha256
-            ):
-                raise OcrFusionInvariantError(
-                    "sparse OCR job is not bound to its block crop"
-                )
+                expected_input is not None and job.input_sha256 != hashlib.sha256(expected_input).hexdigest()
+            ) or job.context_sha256 != context_sha256:
+                raise OcrFusionInvariantError("sparse OCR job is not bound to its block crop")
             if job.status is OcrJobStatus.COMPLETE:
                 if job.output is None:
-                    raise OcrFusionInvariantError(
-                        "complete sparse OCR job lost its output"
-                    )
+                    raise OcrFusionInvariantError("complete sparse OCR job lost its output")
                 if job.output.geometry is OcrOutputGeometry.WORD_BOXES:
                     if canonical_membership:
                         bound_width, bound_height = self._bound_png_size(crop)
                         if canonical_slot_size is not None and (
-                            canonical_slot_size[0] > bound_width
-                            or canonical_slot_size[1] > bound_height
+                            canonical_slot_size[0] > bound_width or canonical_slot_size[1] > bound_height
                         ):
                             raise OcrFusionInvariantError(
-                                "canonical membership slot canvas exceeds "
-                                "bound crop raster"
+                                "canonical membership slot canvas exceeds " "bound crop raster"
                             )
                         canvas_size = canonical_slot_size or (
                             bound_width,
@@ -1505,13 +1310,8 @@ class OcrEvidenceFusion:
                         0,
                         *canvas_size,
                     )
-                    if any(
-                        word.bbox.intersection(canvas) != word.bbox
-                        for word in job.output.words
-                    ):
-                        raise OcrFusionInvariantError(
-                            "sparse OCR word bbox is outside its bound block crop"
-                        )
+                    if any(word.bbox.intersection(canvas) != word.bbox for word in job.output.words):
+                        raise OcrFusionInvariantError("sparse OCR word bbox is outside its bound block crop")
 
     @staticmethod
     def _validate_complete_membership_job_matrix(
@@ -1536,9 +1336,7 @@ class OcrEvidenceFusion:
         queue: OcrQueueResult,
     ) -> None:
         if len(queue.jobs) > self.config.max_jobs:
-            raise OcrFusionLimitError(
-                "OCR job count exceeds configured fusion limit"
-            )
+            raise OcrFusionLimitError("OCR job count exceeds configured fusion limit")
         if not plan.blocks:
             if queue.jobs:
                 raise OcrFusionInvariantError("empty plan cannot contain OCR jobs")
@@ -1547,19 +1345,12 @@ class OcrEvidenceFusion:
         lane_values: list[str] = []
         lane_set: set[str] = set()
         for job in queue.jobs:
-            if (
-                job.block_id != first_block_id
-                or job.transform is not OcrTransform.RAW
-            ):
+            if job.block_id != first_block_id or job.transform is not OcrTransform.RAW:
                 continue
             if job.lane_id in lane_set:
-                raise OcrFusionInvariantError(
-                    "OCR job matrix has invalid lane scope"
-                )
+                raise OcrFusionInvariantError("OCR job matrix has invalid lane scope")
             if len(lane_values) + 1 > self.config.max_lanes:
-                raise OcrFusionLimitError(
-                    "OCR lane count exceeds configured fusion limit"
-                )
+                raise OcrFusionLimitError("OCR lane count exceeds configured fusion limit")
             lane_values.append(job.lane_id)
             lane_set.add(job.lane_id)
         lane_ids = tuple(lane_values)
@@ -1568,32 +1359,22 @@ class OcrEvidenceFusion:
         jobs_per_block = 2 * len(lane_ids)
         expected_job_count = len(plan.blocks) * jobs_per_block
         if expected_job_count > self.config.max_jobs:
-            raise OcrFusionLimitError(
-                "OCR block-transform-lane matrix exceeds configured fusion limit"
-            )
+            raise OcrFusionLimitError("OCR block-transform-lane matrix exceeds configured fusion limit")
         if len(queue.jobs) != expected_job_count:
-            raise OcrFusionInvariantError(
-                "OCR jobs are not the exact block-transform-lane matrix"
-            )
+            raise OcrFusionInvariantError("OCR jobs are not the exact block-transform-lane matrix")
         for index, job in enumerate(queue.jobs):
             block_index, within_block = divmod(index, jobs_per_block)
             transform_index, lane_index = divmod(
                 within_block,
                 len(lane_ids),
             )
-            expected_transform = (
-                OcrTransform.RAW
-                if transform_index == 0
-                else OcrTransform.GAMMA
-            )
+            expected_transform = OcrTransform.RAW if transform_index == 0 else OcrTransform.GAMMA
             if (
                 job.block_id != plan.blocks[block_index].block_id
                 or job.transform is not expected_transform
                 or job.lane_id != lane_ids[lane_index]
             ):
-                raise OcrFusionInvariantError(
-                    "OCR jobs are not the exact block-transform-lane matrix"
-                )
+                raise OcrFusionInvariantError("OCR jobs are not the exact block-transform-lane matrix")
         lane_contract: dict[str, tuple[object, str]] = {}
         crop_by_id = {crop.block_id: crop for crop in crops}
         for job in queue.jobs:
@@ -1604,7 +1385,8 @@ class OcrEvidenceFusion:
             crop = crop_by_id[job.block_id]
             expected_input = (
                 crop.raw.png_bytes
-                if job.transform in (
+                if job.transform
+                in (
                     OcrTransform.RAW,
                     OcrTransform.CONTEXTUAL_COMPOSITE,
                 )
@@ -1612,25 +1394,15 @@ class OcrEvidenceFusion:
             )
             input_sha256 = hashlib.sha256(expected_input).hexdigest()
             context_sha256 = hashlib.sha256(crop.raw.png_bytes).hexdigest()
-            if (
-                job.input_sha256 != input_sha256
-                or job.context_sha256 != context_sha256
-            ):
+            if job.input_sha256 != input_sha256 or job.context_sha256 != context_sha256:
                 raise OcrFusionInvariantError("OCR job is not bound to its block crop")
             if job.status is OcrJobStatus.COMPLETE:
                 if job.output is None:
-                    raise OcrFusionInvariantError(
-                        "complete OCR job lost its output"
-                    )
+                    raise OcrFusionInvariantError("complete OCR job lost its output")
                 if job.output.geometry is OcrOutputGeometry.WORD_BOXES:
                     canvas = Box(0, 0, crop.bbox.width, crop.bbox.height)
-                    if any(
-                        word.bbox.intersection(canvas) != word.bbox
-                        for word in job.output.words
-                    ):
-                        raise OcrFusionInvariantError(
-                            "OCR word bbox is outside its bound block crop"
-                        )
+                    if any(word.bbox.intersection(canvas) != word.bbox for word in job.output.words):
+                        raise OcrFusionInvariantError("OCR word bbox is outside its bound block crop")
 
     def _route(
         self,
@@ -1691,12 +1463,8 @@ class OcrEvidenceFusion:
                 )
                 continue
             if not job.output.words or not job.output.text.strip():
-                raise OcrFusionInvariantError(
-                    "complete bbox OCR job contains no attributable words"
-                )
-            routed: dict[str, list[tuple[int, OcrWord, Box]]] = {
-                segment_id: [] for segment_id in block.segment_ids
-            }
+                raise OcrFusionInvariantError("complete bbox OCR job contains no attributable words")
+            routed: dict[str, list[tuple[int, OcrWord, Box]]] = {segment_id: [] for segment_id in block.segment_ids}
             members = tuple(segment_by_id[item] for item in block.segment_ids)
             for word_index, word in enumerate(job.output.words):
                 page_bbox = Box(
@@ -1737,11 +1505,7 @@ class OcrEvidenceFusion:
                 text = " ".join(word.text for _, word, _ in words)
                 if len(text) > self.config.max_text_chars:
                     raise OcrFusionLimitError("routed segment text exceeds configured limit")
-                confidence = (
-                    sum(float(word.confidence) for _, word, _ in words) / len(words)
-                    if words
-                    else 0.0
-                )
+                confidence = sum(float(word.confidence) for _, word, _ in words) / len(words) if words else 0.0
                 observations.append(
                     SegmentObservation(
                         observation_id=f"observation-{len(observations):08d}",
@@ -1832,9 +1596,7 @@ class OcrEvidenceFusion:
                 )
                 continue
             if not job.output.words or not job.output.text.strip():
-                raise OcrFusionInvariantError(
-                    "complete bbox OCR job contains no attributable words"
-                )
+                raise OcrFusionInvariantError("complete bbox OCR job contains no attributable words")
             for word_index, word in enumerate(job.output.words):
                 projected.append(
                     _ProjectedWordObservation(
@@ -1856,101 +1618,58 @@ class OcrEvidenceFusion:
                     )
                 )
                 if len(projected) > self.config.max_observations:
-                    raise OcrFusionLimitError(
-                        "projected membership words exceed configured observation limit"
-                    )
+                    raise OcrFusionLimitError("projected membership words exceed configured observation limit")
 
         if not plan.membership_units and plan.source_segment_ids:
-            raise OcrFusionInvariantError(
-                "block-membership routing requires canonical membership units"
-            )
+            raise OcrFusionInvariantError("block-membership routing requires canonical membership units")
         membership_assignments = 0
         for block in plan.blocks:
             membership_assignments += len(block.segment_ids)
-            if (
-                membership_assignments
-                > self.config.max_membership_block_assignments
-            ):
-                raise OcrFusionLimitError(
-                    "block membership assignments exceed configured limit"
-                )
+            if membership_assignments > self.config.max_membership_block_assignments:
+                raise OcrFusionLimitError("block membership assignments exceed configured limit")
         expected_by_signature: dict[frozenset[str], MembershipUnit] = {
             frozenset(unit.block_ids): unit for unit in plan.membership_units
         }
         if len(expected_by_signature) != len(plan.membership_units):
-            raise OcrFusionInvariantError(
-                "membership unit signatures are not unique"
-            )
-        expected_transforms: dict[
-            tuple[str, str], set[OcrTransform]
-        ] = {}
+            raise OcrFusionInvariantError("membership unit signatures are not unique")
+        expected_transforms: dict[tuple[str, str], set[OcrTransform]] = {}
         for job in queue.jobs:
-            expected_transforms.setdefault(
-                (job.block_id, job.capability_id), set()
-            ).add(job.transform)
+            expected_transforms.setdefault((job.block_id, job.capability_id), set()).add(job.transform)
 
         canonical_membership_slots = self._canonical_membership_slots(
             plan,
             queue,
         )
         decisions: dict[int, tuple[MembershipUnit | None, str | None]] = {}
-        signature_decisions: dict[
-            frozenset[str], tuple[MembershipUnit | None, str | None]
-        ] = {}
+        signature_decisions: dict[frozenset[str], tuple[MembershipUnit | None, str | None]] = {}
         signature_comparisons = 0
         for members, geometry_ambiguous in self._membership_geometry_clusters(
             tuple(projected),
             budget=routing_budget,
             sweep_budget=membership_sweep_budget,
         ):
-            signature = frozenset(
-                projected[index].job.block_id for index in members
-            )
+            signature = frozenset(projected[index].job.block_id for index in members)
             candidate = expected_by_signature.get(signature)
             if geometry_ambiguous:
                 decision = (None, "membership-geometry-ambiguous")
                 for index in members:
                     decisions[index] = decision
                 continue
-            observed_transforms: dict[
-                tuple[str, str], set[OcrTransform]
-            ] = {}
+            observed_transforms: dict[tuple[str, str], set[OcrTransform]] = {}
             for index in members:
                 job = projected[index].job
-                observed_transforms.setdefault(
-                    (job.block_id, job.capability_id), set()
-                ).add(job.transform)
-            observed_capabilities = {
-                capability_id
-                for _block_id, capability_id in observed_transforms
-            }
+                observed_transforms.setdefault((job.block_id, job.capability_id), set()).add(job.transform)
+            observed_capabilities = {capability_id for _block_id, capability_id in observed_transforms}
             complete_observation_lattice = False
-            if (
-                candidate is not None
-                and self.config.membership_assume_complete_observations
-            ):
+            if candidate is not None and self.config.membership_assume_complete_observations:
                 for capability_id in sorted(observed_capabilities):
                     capability_complete = True
                     for block_id in candidate.block_ids:
                         signature_comparisons += 1
-                        if (
-                            signature_comparisons
-                            > self.config.max_membership_signature_comparisons
-                        ):
-                            raise OcrFusionLimitError(
-                                "membership signature comparisons exceed "
-                                "configured limit"
-                            )
-                        expected = expected_transforms.get(
-                            (block_id, capability_id), set()
-                        )
-                        if (
-                            not expected
-                            or observed_transforms.get(
-                                (block_id, capability_id), set()
-                            )
-                            != expected
-                        ):
+                        if signature_comparisons > self.config.max_membership_signature_comparisons:
+                            raise OcrFusionLimitError("membership signature comparisons exceed " "configured limit")
+                        expected = expected_transforms.get((block_id, capability_id), set())
+                        if not expected or observed_transforms.get((block_id, capability_id), set()) != expected:
                             capability_complete = False
                             break
                     if capability_complete:
@@ -1965,21 +1684,14 @@ class OcrEvidenceFusion:
             ):
                 for expected_signature in expected_by_signature:
                     signature_comparisons += 1
-                    if (
-                        signature_comparisons
-                        > self.config.max_membership_signature_comparisons
-                    ):
-                        raise OcrFusionLimitError(
-                            "membership signature comparisons exceed "
-                            "configured limit"
-                        )
+                    if signature_comparisons > self.config.max_membership_signature_comparisons:
+                        raise OcrFusionLimitError("membership signature comparisons exceed " "configured limit")
                     if not signature < expected_signature:
                         continue
                     additional_blocks = tuple(
                         block_id
                         for block_id in block_by_id
-                        if block_id in expected_signature
-                        and block_id not in signature
+                        if block_id in expected_signature and block_id not in signature
                     )
                     all_missing_crops_contain_word = True
                     for block_id in additional_blocks:
@@ -1987,9 +1699,7 @@ class OcrEvidenceFusion:
                         for index in members:
                             routing_budget.consume(1)
                             if (
-                                block_by_id[block_id].bbox.intersection(
-                                    projected[index].page_bbox
-                                )
+                                block_by_id[block_id].bbox.intersection(projected[index].page_bbox)
                                 == projected[index].page_bbox
                             ):
                                 crop_contains_word = True
@@ -2031,20 +1741,11 @@ class OcrEvidenceFusion:
                     decision = (None, "membership-signature-unmatched")
                 else:
                     omission_ambiguous = False
-                    if (
-                        not self.config.membership_assume_complete_observations
-                        and not canonical_membership_slots
-                    ):
+                    if not self.config.membership_assume_complete_observations and not canonical_membership_slots:
                         for expected_signature in expected_by_signature:
                             signature_comparisons += 1
-                            if (
-                                signature_comparisons
-                                > self.config.max_membership_signature_comparisons
-                            ):
-                                raise OcrFusionLimitError(
-                                    "membership signature comparisons exceed "
-                                    "configured limit"
-                                )
+                            if signature_comparisons > self.config.max_membership_signature_comparisons:
+                                raise OcrFusionLimitError("membership signature comparisons exceed " "configured limit")
                             if signature < expected_signature:
                                 omission_ambiguous = True
                                 break
@@ -2061,17 +1762,13 @@ class OcrEvidenceFusion:
             for index in members:
                 decisions[index] = decision
 
-        assigned: dict[
-            tuple[str, str], list[tuple[int, OcrWord, Box]]
-        ] = {}
+        assigned: dict[tuple[str, str], list[tuple[int, OcrWord, Box]]] = {}
         unassigned_word_observations: list[UnassignedWordObservation] = []
         for item in projected:
             unit, reason = decisions[item.ordinal]
             job = item.job
             if unit is not None:
-                assigned.setdefault((job.job_id, unit.unit_id), []).append(
-                    (item.word_index, item.word, item.page_bbox)
-                )
+                assigned.setdefault((job.job_id, unit.unit_id), []).append((item.word_index, item.word, item.page_bbox))
                 continue
             unassigned_word_observations.append(
                 UnassignedWordObservation(
@@ -2090,9 +1787,7 @@ class OcrEvidenceFusion:
                 )
             )
 
-        units_by_block: dict[str, list[MembershipUnit]] = {
-            block.block_id: [] for block in plan.blocks
-        }
+        units_by_block: dict[str, list[MembershipUnit]] = {block.block_id: [] for block in plan.blocks}
         for unit in plan.membership_units:
             for block_id in unit.block_ids:
                 units_by_block[block_id].append(unit)
@@ -2118,36 +1813,25 @@ class OcrEvidenceFusion:
                 )
                 text = " ".join(word.text for _, word, _ in words)
                 if len(text) > self.config.max_text_chars:
-                    raise OcrFusionLimitError(
-                        "routed segment text exceeds configured limit"
-                    )
-                confidence = (
-                    sum(float(word.confidence) for _, word, _ in words)
-                    / len(words)
-                    if words
-                    else 0.0
-                )
+                    raise OcrFusionLimitError("routed segment text exceeds configured limit")
+                confidence = sum(float(word.confidence) for _, word, _ in words) / len(words) if words else 0.0
                 common = {
-                        "job_id": job.job_id,
-                        "block_id": block.block_id,
-                        "transform": job.transform,
-                        "lane_id": job.lane_id,
-                        "capability_id": job.capability_id,
-                        "text": text,
-                        "confidence": confidence,
-                        "page_bboxes": tuple(
-                            page_bbox for _, _, page_bbox in words
-                        ),
-                        "input_sha256": job.input_sha256,
-                        "context_sha256": job.context_sha256,
-                        "source_replica_conflict": source_replica_conflict,
+                    "job_id": job.job_id,
+                    "block_id": block.block_id,
+                    "transform": job.transform,
+                    "lane_id": job.lane_id,
+                    "capability_id": job.capability_id,
+                    "text": text,
+                    "confidence": confidence,
+                    "page_bboxes": tuple(page_bbox for _, _, page_bbox in words),
+                    "input_sha256": job.input_sha256,
+                    "context_sha256": job.context_sha256,
+                    "source_replica_conflict": source_replica_conflict,
                 }
                 if unit.kind is MembershipUnitKind.SEGMENT:
                     observations.append(
                         SegmentObservation(
-                            observation_id=(
-                                f"observation-{len(observations):08d}"
-                            ),
+                            observation_id=(f"observation-{len(observations):08d}"),
                             segment_id=unit.segment_ids[0],
                             **common,
                         )
@@ -2155,22 +1839,14 @@ class OcrEvidenceFusion:
                 else:
                     group_observations.append(
                         SegmentGroupObservation(
-                            observation_id=(
-                                "group-observation-"
-                                f"{len(group_observations):08d}"
-                            ),
+                            observation_id=("group-observation-" f"{len(group_observations):08d}"),
                             unit_id=unit.unit_id,
                             segment_ids=unit.segment_ids,
                             **common,
                         )
                     )
-                if (
-                    len(observations) + len(group_observations)
-                    > self.config.max_observations
-                ):
-                    raise OcrFusionLimitError(
-                        "routed observations exceed configured limit"
-                    )
+                if len(observations) + len(group_observations) > self.config.max_observations:
+                    raise OcrFusionLimitError("routed observations exceed configured limit")
         return (
             tuple(observations),
             tuple(group_observations),
@@ -2246,10 +1922,7 @@ class OcrEvidenceFusion:
             for other in active:
                 sweep_budget.consume(1)
                 other_box = projected[other].page_bbox
-                if (
-                    min(other_box.bottom, box.bottom)
-                    <= max(other_box.top, box.top)
-                ):
+                if min(other_box.bottom, box.bottom) <= max(other_box.top, box.top):
                     continue
                 if compatible(other, index):
                     union(other, index)
@@ -2261,18 +1934,13 @@ class OcrEvidenceFusion:
             components.setdefault(find(index), []).append(index)
 
         result: list[tuple[tuple[int, ...], bool]] = []
-        for members_list in sorted(
-            components.values(), key=lambda values: min(values)
-        ):
+        for members_list in sorted(components.values(), key=lambda values: min(values)):
             members = tuple(sorted(members_list))
             job_ids = tuple(projected[index].job.job_id for index in members)
             ambiguous = len(job_ids) != len(set(job_ids))
             if not ambiguous:
                 for position, first in enumerate(members):
-                    if any(
-                        not compatible(first, second)
-                        for second in members[position + 1 :]
-                    ):
+                    if any(not compatible(first, second) for second in members[position + 1 :]):
                         ambiguous = True
                         break
             result.append((members, ambiguous))
@@ -2287,13 +1955,10 @@ class OcrEvidenceFusion:
             return False
         first_center_x, first_center_y = first.center
         second_center_x, second_center_y = second.center
-        return (
-            abs(first_center_x - second_center_x)
-            <= self.config.maximum_membership_center_distance_fraction
-            * min(first.width, second.width)
-            and abs(first_center_y - second_center_y)
-            <= self.config.maximum_membership_center_distance_fraction
-            * min(first.height, second.height)
+        return abs(first_center_x - second_center_x) <= self.config.maximum_membership_center_distance_fraction * min(
+            first.width, second.width
+        ) and abs(first_center_y - second_center_y) <= self.config.maximum_membership_center_distance_fraction * min(
+            first.height, second.height
         )
 
     @staticmethod
@@ -2310,9 +1975,7 @@ class OcrEvidenceFusion:
         for job in queue.jobs:
             if job.status is OcrJobStatus.COMPLETE:
                 if job.output is None:
-                    raise OcrFusionInvariantError(
-                        "complete OCR job lost its output"
-                    )
+                    raise OcrFusionInvariantError("complete OCR job lost its output")
                 evidence: dict[str, object] = {
                     "status": job.status.value,
                     "input_sha256": job.input_sha256,
@@ -2331,11 +1994,7 @@ class OcrEvidenceFusion:
                 evidence = {
                     "status": job.status.value,
                     "input_sha256": job.input_sha256,
-                    "failure_code": (
-                        job.failure_code.value
-                        if job.failure_code is not None
-                        else None
-                    ),
+                    "failure_code": (job.failure_code.value if job.failure_code is not None else None),
                     "error_type": job.error_type,
                 }
             digest = hashlib.sha256(
@@ -2389,20 +2048,13 @@ class OcrEvidenceFusion:
             return None, "no-segment-intersection"
         word_area = page_bbox.width * page_bbox.height
         significant = tuple(
-            item
-            for item in positive
-            if item[0] / word_area
-            >= self.config.minimum_significant_overlap_fraction
+            item for item in positive if item[0] / word_area >= self.config.minimum_significant_overlap_fraction
         )
         candidates = significant or positive
         if len(candidates) == 1:
             return candidates[0][2], None
         center_x, center_y = page_bbox.center
-        center_owners = tuple(
-            item
-            for item in candidates
-            if item[2].bbox.contains_point(center_x, center_y)
-        )
+        center_owners = tuple(item for item in candidates if item[2].bbox.contains_point(center_x, center_y))
         if len(center_owners) == 1:
             return center_owners[0][2], None
         return None, "ambiguous-segment-intersection"
@@ -2415,11 +2067,7 @@ class OcrEvidenceFusion:
         budget: _AlignmentBudget,
     ) -> SegmentFusion:
         raw = self._independent_observations(
-            tuple(
-            item
-            for item in observations
-            if item.transform is OcrTransform.RAW and item.comparison_text
-            )
+            tuple(item for item in observations if item.transform is OcrTransform.RAW and item.comparison_text)
         )
         raw_choice, raw_confidence, stability = self._observed_medoid(raw, budget)
         exact_context_majority = self._has_exact_context_majority(
@@ -2427,13 +2075,8 @@ class OcrEvidenceFusion:
             selected=raw_choice,
         )
         script_confidence_override = self._script_confidence_override(raw)
-        if (
-            script_confidence_override is not None
-            and (
-                raw_choice is None
-                or script_confidence_override[0].observation_id
-                != raw_choice.observation_id
-            )
+        if script_confidence_override is not None and (
+            raw_choice is None or script_confidence_override[0].observation_id != raw_choice.observation_id
         ):
             raw_choice, raw_confidence = script_confidence_override
         else:
@@ -2446,18 +2089,13 @@ class OcrEvidenceFusion:
         selected = raw_choice
         selected_confidence = raw_confidence if raw_choice is not None else None
         selected_capability_raw = tuple(
-            item
-            for item in raw
-            if raw_choice is not None
-            and item.capability_id == raw_choice.capability_id
+            item for item in raw if raw_choice is not None and item.capability_id == raw_choice.capability_id
         )
         _, _, selected_capability_stability = self._observed_medoid(
             selected_capability_raw,
             budget,
         )
-        selected_capability_contexts = {
-            item.context_sha256 for item in selected_capability_raw
-        }
+        selected_capability_contexts = {item.context_sha256 for item in selected_capability_raw}
         transform_conflict = (
             alternative is not None
             and raw_choice is not None
@@ -2494,18 +2132,11 @@ class OcrEvidenceFusion:
         elif script_confidence_override is not None:
             selected_stability = 1.0
             reasons.append("script_confidence_override")
-        elif (
-            len(raw) > 1
-            and stability < self.config.minimum_stability
-            and not exact_context_majority
-        ):
+        elif len(raw) > 1 and stability < self.config.minimum_stability and not exact_context_majority:
             reasons.append("unstable_raw_text")
         if transform_conflict and not gamma_override:
             reasons.append("transform_conflict")
-        if (
-            selected_confidence is not None
-            and selected_confidence < self.config.minimum_confidence
-        ):
+        if selected_confidence is not None and selected_confidence < self.config.minimum_confidence:
             exact_contexts = {
                 item.context_sha256
                 for item in nonempty
@@ -2516,9 +2147,7 @@ class OcrEvidenceFusion:
                 and item.comparison_text == selected.comparison_text
             }
             stable_exact_context_consensus = (
-                len(exact_contexts) >= 2
-                and selected_capability_stability
-                >= self.config.minimum_stability
+                len(exact_contexts) >= 2 and selected_capability_stability >= self.config.minimum_stability
             )
             if stable_exact_context_consensus:
                 reasons.append("low_confidence_stable_context_consensus")
@@ -2538,9 +2167,7 @@ class OcrEvidenceFusion:
         return SegmentFusion(
             segment_id=segment_id,
             selected_text=selected.text if selected is not None else None,
-            selected_observation_id=(
-                selected.observation_id if selected is not None else None
-            ),
+            selected_observation_id=(selected.observation_id if selected is not None else None),
             selected_transform=selected.transform if selected is not None else None,
             selected_lane_id=selected.lane_id if selected is not None else None,
             confidence=selected_confidence,
@@ -2548,9 +2175,7 @@ class OcrEvidenceFusion:
             independent_context_count=len(contexts),
             stability=selected_stability,
             uncertainty_reasons=tuple(reasons),
-            script_scores=exact_script_scores(
-                selected.text if selected is not None else ""
-            ),
+            script_scores=exact_script_scores(selected.text if selected is not None else ""),
             alignments=alignments,
         )
 
@@ -2562,9 +2187,7 @@ class OcrEvidenceFusion:
         budget: _AlignmentBudget,
     ) -> SegmentGroupFusion:
         if unit.kind is not MembershipUnitKind.SUBBLOCK:
-            raise OcrFusionInvariantError(
-                "only a subblock can produce group OCR evidence"
-            )
+            raise OcrFusionInvariantError("only a subblock can produce group OCR evidence")
         adapted = tuple(
             SegmentObservation(
                 observation_id=item.observation_id,
@@ -2606,9 +2229,7 @@ class OcrEvidenceFusion:
     ) -> tuple[SegmentObservation, ...]:
         """Give each capability/context/transform source exactly one vote."""
 
-        representatives: dict[
-            tuple[str, str, OcrTransform], tuple[int, SegmentObservation]
-        ] = {}
+        representatives: dict[tuple[str, str, OcrTransform], tuple[int, SegmentObservation]] = {}
         for index, observation in enumerate(observations):
             key = (
                 observation.context_sha256,
@@ -2637,9 +2258,7 @@ class OcrEvidenceFusion:
                 observation.capability_id,
                 observation.transform,
             )
-            observed_texts.setdefault(key, set()).add(
-                observation.comparison_text
-            )
+            observed_texts.setdefault(key, set()).add(observation.comparison_text)
         return any(len(values) > 1 for values in observed_texts.values())
 
     def _has_exact_context_majority(
@@ -2652,34 +2271,19 @@ class OcrEvidenceFusion:
 
         if selected is None or len(observations) < 2:
             return False
-        if any(
-            item.capability_id != selected.capability_id
-            for item in observations
-        ):
+        if any(item.capability_id != selected.capability_id for item in observations):
             return False
         contexts = {item.context_sha256 for item in observations}
         if len(contexts) != len(observations):
             return False
-        agreeing = tuple(
-            item
-            for item in observations
-            if item.comparison_text == selected.comparison_text
-        )
-        disagreeing = tuple(
-            item
-            for item in observations
-            if item.comparison_text != selected.comparison_text
-        )
+        agreeing = tuple(item for item in observations if item.comparison_text == selected.comparison_text)
+        disagreeing = tuple(item for item in observations if item.comparison_text != selected.comparison_text)
         agreement_fraction = len(agreeing) / len(observations)
         return (
             len(agreeing) > len(disagreeing)
-            and agreement_fraction
-            >= self.config.minimum_exact_context_majority_fraction
+            and agreement_fraction >= self.config.minimum_exact_context_majority_fraction
             and bool(disagreeing)
-            and all(
-                item.confidence < self.config.minimum_confidence
-                for item in disagreeing
-            )
+            and all(item.confidence < self.config.minimum_confidence for item in disagreeing)
         )
 
     def _observed_medoid(
@@ -2692,12 +2296,8 @@ class OcrEvidenceFusion:
         indexed = tuple(enumerate(observations))
         grouped: dict[str, list[tuple[int, SegmentObservation]]] = {}
         for index, observation in indexed:
-            grouped.setdefault(observation.comparison_text, []).append(
-                (index, observation)
-            )
-        groups: list[
-            tuple[str, int, int, float, SegmentObservation]
-        ] = []
+            grouped.setdefault(observation.comparison_text, []).append((index, observation))
+        groups: list[tuple[str, int, int, float, SegmentObservation]] = []
         for comparison_text, members in grouped.items():
             _, representative = max(
                 members,
@@ -2715,8 +2315,7 @@ class OcrEvidenceFusion:
         candidates: list[tuple[float, int, float, int, SegmentObservation]] = []
         for text, count, first_index, mean_confidence, representative in groups:
             agreement = sum(
-                budget.align(text, other_text).similarity * other_count
-                for other_text, other_count, _, _, _ in groups
+                budget.align(text, other_text).similarity * other_count for other_text, other_count, _, _, _ in groups
             ) / len(observations)
             candidates.append(
                 (
@@ -2729,14 +2328,10 @@ class OcrEvidenceFusion:
             )
         winner = max(candidates, key=lambda item: item[:4])
         pair_count = len(observations) * (len(observations) - 1) // 2
-        weighted_similarity = sum(
-            count * (count - 1) / 2 for _, count, _, _, _ in groups
-        )
+        weighted_similarity = sum(count * (count - 1) / 2 for _, count, _, _, _ in groups)
         for index, (text, count, _, _, _) in enumerate(groups):
             for other_text, other_count, _, _, _ in groups[index + 1 :]:
-                weighted_similarity += (
-                    budget.align(text, other_text).similarity * count * other_count
-                )
+                weighted_similarity += budget.align(text, other_text).similarity * count * other_count
         stability = weighted_similarity / pair_count if pair_count else 0.0
         return winner[4], winner[2], stability
 
@@ -2751,31 +2346,19 @@ class OcrEvidenceFusion:
         scripts_by_observation: dict[str, frozenset[str]] = {}
         for observation in observations:
             scripts = frozenset(
-                script
-                for script, density in exact_script_scores(observation.text)
-                if density >= minimum_script_density
+                script for script, density in exact_script_scores(observation.text) if density >= minimum_script_density
             )
             scripts_by_observation[observation.observation_id] = scripts
             for script in scripts:
-                script_contexts.setdefault(script, set()).add(
-                    observation.context_sha256
-                )
-        supported_scripts = frozenset(
-            script
-            for script, contexts in script_contexts.items()
-            if len(contexts) >= 2
-        )
+                script_contexts.setdefault(script, set()).add(observation.context_sha256)
+        supported_scripts = frozenset(script for script, contexts in script_contexts.items() if len(contexts) >= 2)
         if len(supported_scripts) < 2:
             return None
 
         grouped: dict[str, list[SegmentObservation]] = {}
         for observation in observations:
-            grouped.setdefault(observation.comparison_text, []).append(
-                observation
-            )
-        visually_confusable_latin = frozenset(
-            "ABCEHKMOPTXYabcehkmoptxyl"
-        )
+            grouped.setdefault(observation.comparison_text, []).append(observation)
+        visually_confusable_latin = frozenset("ABCEHKMOPTXYabcehkmoptxyl")
 
         def minority_confusables(text: str) -> int:
             if not any("\u0400" <= character <= "\u04ff" for character in text):
@@ -2783,10 +2366,7 @@ class OcrEvidenceFusion:
             tokens = []
             current = []
             for character in text:
-                if (
-                    "A" <= character <= "Z"
-                    or "a" <= character <= "z"
-                ):
+                if "A" <= character <= "Z" or "a" <= character <= "z":
                     current.append(character)
                 elif current:
                     tokens.append("".join(current))
@@ -2794,11 +2374,7 @@ class OcrEvidenceFusion:
             if current:
                 tokens.append("".join(current))
             return sum(
-                len(token) <= 2
-                and all(
-                    character in visually_confusable_latin
-                    for character in token
-                )
+                len(token) <= 2 and all(character in visually_confusable_latin for character in token)
                 for token in tokens
             )
 
@@ -2808,13 +2384,8 @@ class OcrEvidenceFusion:
                 members,
                 key=lambda item: item.confidence,
             )
-            mean_confidence = sum(
-                item.confidence for item in members
-            ) / len(members)
-            coverage = len(
-                scripts_by_observation[representative.observation_id]
-                & supported_scripts
-            )
+            mean_confidence = sum(item.confidence for item in members) / len(members)
+            coverage = len(scripts_by_observation[representative.observation_id] & supported_scripts)
             candidates.append(
                 (
                     coverage,
@@ -2827,16 +2398,10 @@ class OcrEvidenceFusion:
                 )
             )
         minimum_confusables = min(item[5] for item in candidates)
-        clean_candidates = tuple(
-            item for item in candidates if item[5] == minimum_confusables
-        )
-        if len(clean_candidates) == 1 and any(
-            item[5] > minimum_confusables for item in candidates
-        ):
+        clean_candidates = tuple(item for item in candidates if item[5] == minimum_confusables)
+        if len(clean_candidates) == 1 and any(item[5] > minimum_confusables for item in candidates):
             clean = clean_candidates[0]
-            runner_confidence = max(
-                item[1] for item in candidates if item is not clean
-            )
+            runner_confidence = max(item[1] for item in candidates if item is not clean)
             clean_text = clean[4].comparison_text
             similar_to_runner = any(
                 sum(
@@ -2851,14 +2416,8 @@ class OcrEvidenceFusion:
                 for item in candidates
                 if item is not clean
             )
-            runner_punctuation = min(
-                item[6] for item in candidates if item is not clean
-            )
-            if (
-                clean[1] >= runner_confidence - 0.02
-                and clean[6] <= runner_punctuation
-                and similar_to_runner
-            ):
+            runner_punctuation = min(item[6] for item in candidates if item is not clean)
+            if clean[1] >= runner_confidence - 0.02 and clean[6] <= runner_punctuation and similar_to_runner:
                 return clean[4], clean[1]
         candidates.sort(key=lambda item: item[:4], reverse=True)
         winner = candidates[0]
@@ -2889,8 +2448,7 @@ class OcrEvidenceFusion:
             )
         )
         comparable_control_confidence = (
-            sum(item.confidence for item in same_capability_raw)
-            / len(same_capability_raw)
+            sum(item.confidence for item in same_capability_raw) / len(same_capability_raw)
             if same_capability_raw
             else control_confidence
         )
@@ -2903,16 +2461,11 @@ class OcrEvidenceFusion:
             ):
                 by_text.setdefault(observation.comparison_text, []).append(observation)
         candidates: list[tuple[float, int, int, SegmentObservation]] = []
-        observation_order = {
-            observation.observation_id: index
-            for index, observation in enumerate(observations)
-        }
+        observation_order = {observation.observation_id: index for index, observation in enumerate(observations)}
         for text_index, text_observations in enumerate(by_text.values()):
             independent = self._independent_observations(tuple(text_observations))
             bbox_coverage = all(item.page_bboxes for item in independent)
-            mean_confidence = sum(item.confidence for item in independent) / len(
-                independent
-            )
+            mean_confidence = sum(item.confidence for item in independent) / len(independent)
             if (
                 len(independent) < self.config.minimum_alternative_contexts
                 or not bbox_coverage
@@ -2926,9 +2479,7 @@ class OcrEvidenceFusion:
                     -observation_order[item.observation_id],
                 ),
             )
-            candidates.append(
-                (mean_confidence, len(independent), -text_index, representative)
-            )
+            candidates.append((mean_confidence, len(independent), -text_index, representative))
         winner = max(
             candidates,
             default=(0.0, 0, 0, None),
@@ -2958,9 +2509,7 @@ class OcrEvidenceFusion:
         }
         by_context: dict[tuple[str, str], list[SegmentObservation]] = {}
         for observation in observations:
-            by_context.setdefault(
-                (observation.block_id, observation.segment_id), []
-            ).append(observation)
+            by_context.setdefault((observation.block_id, observation.segment_id), []).append(observation)
         values: list[OverlapConsensus] = []
         for algebra in plan.adjacent_algebra:
             confirmed: list[str] = []
@@ -3004,38 +2553,23 @@ class OcrEvidenceFusion:
                         and not item.source_replica_conflict
                     )
 
-                first_evidence = self._independent_observations(
-                    selected_evidence(algebra.first_block_id)
-                )
-                second_evidence = self._independent_observations(
-                    selected_evidence(algebra.second_block_id)
-                )
-                first_contexts = {
-                    item.context_sha256 for item in first_evidence
-                }
-                second_contexts = {
-                    item.context_sha256 for item in second_evidence
-                }
+                first_evidence = self._independent_observations(selected_evidence(algebra.first_block_id))
+                second_evidence = self._independent_observations(selected_evidence(algebra.second_block_id))
+                first_contexts = {item.context_sha256 for item in first_evidence}
+                second_contexts = {item.context_sha256 for item in second_evidence}
                 if not first_contexts.isdisjoint(second_contexts):
                     missing.append(segment_id)
                     continue
                 first_exact = exact_selected_evidence(algebra.first_block_id)
                 second_exact = exact_selected_evidence(algebra.second_block_id)
-                first_exact_contexts = {
-                    item.context_sha256 for item in first_exact
-                }
-                second_exact_contexts = {
-                    item.context_sha256 for item in second_exact
-                }
+                first_exact_contexts = {item.context_sha256 for item in first_exact}
+                second_exact_contexts = {item.context_sha256 for item in second_exact}
                 exact_cross_transform = bool(
                     not fusion.unresolved
                     and first_exact_contexts
                     and second_exact_contexts
                     and first_exact_contexts.isdisjoint(second_exact_contexts)
-                    and any(
-                        item.transform is not selected.transform
-                        for item in first_exact + second_exact
-                    )
+                    and any(item.transform is not selected.transform for item in first_exact + second_exact)
                 )
                 first, _, _ = self._observed_medoid(
                     first_evidence,
@@ -3050,27 +2584,17 @@ class OcrEvidenceFusion:
                         cross_transform_confirmed.append(segment_id)
                     else:
                         missing.append(segment_id)
-                elif (
-                    first.comparison_text
-                    == second.comparison_text
-                    == selected_text
-                ):
+                elif first.comparison_text == second.comparison_text == selected_text:
                     confirmed.append(segment_id)
                 else:
                     core_block_ids = tuple(
-                        block.block_id
-                        for block in plan.blocks
-                        if segment_id in block.core_segment_ids
+                        block.block_id for block in plan.blocks if segment_id in block.core_segment_ids
                     )
-                    selected_is_unique_core = core_block_ids == (
-                        selected.block_id,
-                    )
+                    selected_is_unique_core = core_block_ids == (selected.block_id,)
                     core_medoid = (
                         first
                         if selected.block_id == algebra.first_block_id
-                        else second
-                        if selected.block_id == algebra.second_block_id
-                        else None
+                        else second if selected.block_id == algebra.second_block_id else None
                     )
                     near_core_consensus = (
                         not fusion.unresolved
@@ -3121,14 +2645,10 @@ class OcrEvidenceFusion:
                 ):
                     pair_observed_segment_ids.add(segment_id)
             observed_union = tuple(
-                segment_id
-                for segment_id in algebra.union_segment_ids
-                if segment_id in pair_observed_segment_ids
+                segment_id for segment_id in algebra.union_segment_ids if segment_id in pair_observed_segment_ids
             )
             observed_xor = tuple(
-                segment_id
-                for segment_id in algebra.xor_segment_ids
-                if segment_id in pair_observed_segment_ids
+                segment_id for segment_id in algebra.xor_segment_ids if segment_id in pair_observed_segment_ids
             )
             values.append(
                 OverlapConsensus(
@@ -3138,12 +2658,8 @@ class OcrEvidenceFusion:
                     union_segment_ids=algebra.union_segment_ids,
                     xor_segment_ids=algebra.xor_segment_ids,
                     confirmed_intersection_segment_ids=tuple(confirmed),
-                    cross_transform_confirmed_intersection_segment_ids=tuple(
-                        cross_transform_confirmed
-                    ),
-                    near_confirmed_intersection_segment_ids=tuple(
-                        near_confirmed
-                    ),
+                    cross_transform_confirmed_intersection_segment_ids=tuple(cross_transform_confirmed),
+                    near_confirmed_intersection_segment_ids=tuple(near_confirmed),
                     deferred_intersection_segment_ids=tuple(deferred),
                     conflicting_intersection_segment_ids=tuple(conflicting),
                     missing_intersection_segment_ids=tuple(missing),
@@ -3184,9 +2700,7 @@ def exact_script_scores(value: str) -> tuple[tuple[str, float], ...]:
     total = sum(counts.values())
     if not total:
         return ()
-    return tuple(
-        (script, count / total) for script, count in sorted(counts.items())
-    )
+    return tuple((script, count / total) for script, count in sorted(counts.items()))
 
 
 __all__ = [

@@ -107,13 +107,7 @@ def horizontal_rule_table_regions(
     if page_width <= 0:
         raise ValueError("page bbox must have positive width")
     ordered = sorted(
-        (
-            box
-            for box in rules
-            if box[0] < box[2]
-            and box[1] < box[3]
-            and box[2] - box[0] >= page_width * 0.90
-        ),
+        (box for box in rules if box[0] < box[2] and box[1] < box[3] and box[2] - box[0] >= page_width * 0.90),
         key=lambda box: (box[1], box[0]),
     )
     groups: list[list[BoxTuple]] = []
@@ -132,15 +126,9 @@ def horizontal_rule_table_regions(
     for group in groups:
         if len(group) < 3:
             continue
-        steps = tuple(
-            second[1] - first[1]
-            for first, second in zip(group, group[1:])
-        )
+        steps = tuple(second[1] - first[1] for first, second in zip(group, group[1:]))
         cadence = sorted(steps)[len(steps) // 2]
-        if (
-            cadence < 8
-            or max(steps) - min(steps) > max(3.0, cadence * 0.20)
-        ):
+        if cadence < 8 or max(steps) - min(steps) > max(3.0, cadence * 0.20):
             continue
         regions.append(
             HorizontalRuleTableRegion(
@@ -184,10 +172,7 @@ def has_two_dimensional_object_extent(value: PartitionedObject) -> bool:
     is geometry to account for, but is not a document object.
     """
 
-    if (
-        value.kind == "table"
-        and value.matrix_basis is PartitionMatrixBasis.RULE_LATTICE
-    ):
+    if value.kind == "table" and value.matrix_basis is PartitionMatrixBasis.RULE_LATTICE:
         return True
     if value.kind == "structural-residual":
         return False
@@ -260,10 +245,7 @@ def _validate_box(box: BoxTuple, name: str) -> None:
 
 
 def _intersects(first: BoxTuple, second: BoxTuple) -> bool:
-    return (
-        max(first[0], second[0]) < min(first[2], second[2])
-        and max(first[1], second[1]) < min(first[3], second[3])
-    )
+    return max(first[0], second[0]) < min(first[2], second[2]) and max(first[1], second[1]) < min(first[3], second[3])
 
 
 def _union_boxes(boxes: tuple[BoxTuple, ...]) -> BoxTuple:
@@ -327,11 +309,7 @@ def _mixed_axis_cycle_components(
             if current is None or not _code_has(cell.code, MERGE_LEFT):
                 continue
             previous = index_by_position.get((row_index, cell_index - 1))
-            if (
-                cell_index == 0
-                or previous is None
-                or row.cells[cell_index - 1].bbox[2] != cell.bbox[0]
-            ):
+            if cell_index == 0 or previous is None or row.cells[cell_index - 1].bbox[2] != cell.bbox[0]:
                 invalid_edges.add(current)
                 continue
             disjoint.union(previous, current)
@@ -349,8 +327,7 @@ def _mixed_axis_cycle_components(
                 index_by_position[(row_index - 1, upper_index)]
                 for upper_index, upper_cell in enumerate(rows[row_index - 1].cells)
                 if (row_index - 1, upper_index) in index_by_position
-                and max(upper_cell.bbox[0], cell.bbox[0])
-                < min(upper_cell.bbox[2], cell.bbox[2])
+                and max(upper_cell.bbox[0], cell.bbox[0]) < min(upper_cell.bbox[2], cell.bbox[2])
             )
             if not upper_candidates:
                 invalid_edges.add(current)
@@ -385,11 +362,7 @@ def _mixed_axis_cycle_components(
         # is the two-dimensional topology invariant promised downstream.  A
         # filled illustration can have this same footprint, so classification
         # still requires an independent structural lattice.
-        if (
-            root not in invalid_roots
-            and len(component_edges) >= len(members)
-            and axes == {"horizontal", "vertical"}
-        ):
+        if root not in invalid_roots and len(component_edges) >= len(members) and axes == {"horizontal", "vertical"}:
             cycle_roots.add(root)
     boxes_by_root: dict[int, list[BoxTuple]] = {}
     for index, (_, _, cell) in enumerate(payload):
@@ -398,10 +371,7 @@ def _mixed_axis_cycle_components(
             boxes_by_root.setdefault(root, []).append(cell.bbox)
     return tuple(
         sorted(
-            (
-                _union_boxes(tuple(boxes))
-                for boxes in boxes_by_root.values()
-            ),
+            (_union_boxes(tuple(boxes)) for boxes in boxes_by_root.values()),
             key=lambda value: (value[1], value[0], value[3], value[2]),
         )
     )
@@ -413,10 +383,7 @@ def _payload_row_count(
     bbox: BoxTuple,
 ) -> int:
     return sum(
-        any(
-            not cell.empty and _intersects(cell.bbox, bbox)
-            for cell in row.cells
-        )
+        any(not cell.empty and _intersects(cell.bbox, bbox) for cell in row.cells)
         for row in rows
         if max(row.top, bbox[1]) < min(row.bottom, bbox[3])
     )
@@ -439,11 +406,7 @@ def _spanning_empty_corridors(
     """
 
     left, top, right, bottom = node.bbox
-    relevant_rows = tuple(
-        row
-        for row in rows
-        if max(row.top, top) < min(row.bottom, bottom)
-    )
+    relevant_rows = tuple(row for row in rows if max(row.top, top) < min(row.bottom, bottom))
     if not relevant_rows:
         return ()
     boundaries = {left, right}
@@ -451,9 +414,7 @@ def _spanning_empty_corridors(
         for cell in row.cells:
             if cell.bbox[2] <= left or cell.bbox[0] >= right:
                 continue
-            boundaries.update(
-                (max(left, cell.bbox[0]), min(right, cell.bbox[2]))
-            )
+            boundaries.update((max(left, cell.bbox[0]), min(right, cell.bbox[2])))
     ordered = tuple(sorted(boundaries))
     empty_slabs: list[tuple[int, int]] = []
     for slab_left, slab_right in zip(ordered, ordered[1:]):
@@ -462,12 +423,7 @@ def _spanning_empty_corridors(
         slab = (slab_left, top, slab_right, bottom)
         if any(_intersects(segment.bbox, slab) for segment in active_segments):
             continue
-        intersecting_cells = tuple(
-            cell
-            for row in relevant_rows
-            for cell in row.cells
-            if _intersects(cell.bbox, slab)
-        )
+        intersecting_cells = tuple(cell for row in relevant_rows for cell in row.cells if _intersects(cell.bbox, slab))
         if not intersecting_cells or any(not cell.empty for cell in intersecting_cells):
             continue
         if empty_slabs and empty_slabs[-1][1] == slab_left:
@@ -519,45 +475,30 @@ def _table_upper_left_anchor_pair(
     local_rows: list[tuple[int, int, tuple[int, ...]]] = []
     for (row_top, row_bottom), cells in sorted(cells_by_band.items()):
         codes: list[int] = []
-        for column, (slot_left, slot_right) in enumerate(
-            zip(network.x_lines, network.x_lines[1:])
-        ):
+        for column, (slot_left, slot_right) in enumerate(zip(network.x_lines, network.x_lines[1:])):
             if not left <= slot_left < slot_right <= right:
                 continue
-            overlapping = tuple(
-                cell
-                for cell in cells
-                if max(slot_left, cell.bbox[0]) < min(slot_right, cell.bbox[2])
-            )
+            overlapping = tuple(cell for cell in cells if max(slot_left, cell.bbox[0]) < min(slot_right, cell.bbox[2]))
             if not overlapping:
                 continue
             payload = tuple(cell for cell in overlapping if not cell.empty)
             source = payload or overlapping
             source_components = frozenset(
-                component
-                for cell in source
-                for component in sparse_code_components(cell.code)
+                component for cell in source for component in sparse_code_components(cell.code)
             )
             codes.append(
                 compose_sparse_code(
                     merge_up=MERGE_UP in source_components,
-                    merge_left=(
-                        column > 0 and MERGE_LEFT in source_components
-                    ),
+                    merge_left=(column > 0 and MERGE_LEFT in source_components),
                     empty=not payload,
                 )
             )
         if codes:
             local_rows.append((row_top, row_bottom, tuple(codes)))
-    for index, (first_row, second_row) in enumerate(
-        zip(local_rows, local_rows[1:])
-    ):
+    for index, (first_row, second_row) in enumerate(zip(local_rows, local_rows[1:])):
         if local_rows[index][1] != local_rows[index + 1][0]:
             continue
-        first = tuple(
-            code - MERGE_UP if _code_has(code, MERGE_UP) else code
-            for code in first_row[2]
-        )
+        first = tuple(code - MERGE_UP if _code_has(code, MERGE_UP) else code for code in first_row[2])
         second = second_row[2]
         if (
             len(first) >= 2
@@ -602,10 +543,7 @@ def table_upper_left_witness(
 def _center_inside(box: BoxTuple, container: BoxTuple) -> bool:
     center_x = (box[0] + box[2]) / 2.0
     center_y = (box[1] + box[3]) / 2.0
-    return (
-        container[0] <= center_x < container[2]
-        and container[1] <= center_y < container[3]
-    )
+    return container[0] <= center_x < container[2] and container[1] <= center_y < container[3]
 
 
 def _row_link(first: _Draft, second: _Draft, typical_height: float) -> bool:
@@ -647,11 +585,7 @@ def _has_empty_row_separator(
         )
         and any(not cell.empty for cell in row.cells)
     )
-    local_scale = (
-        float(median(topology_heights))
-        if topology_heights
-        else typical_height
-    )
+    local_scale = float(median(topology_heights)) if topology_heights else typical_height
     for separator in node.separator_boxes:
         separator_height = separator[3] - separator[1]
         if separator_height < max(8.0, local_scale):
@@ -687,18 +621,10 @@ def _has_empty_row_separator(
             # seam.  Exact retained segment boxes decide whether real payload
             # reaches the separator core; topology rows remain the fallback
             # for callers that do not carry segment geometry.
-            if not any(
-                _intersects(segment.bbox, separator_core)
-                for segment in active_segments
-            ):
+            if not any(_intersects(segment.bbox, separator_core) for segment in active_segments):
                 return True
             continue
-        candidates = tuple(
-            row
-            for row in rows
-            if max(row.top, separator_core[1])
-            < min(row.bottom, separator_core[3])
-        )
+        candidates = tuple(row for row in rows if max(row.top, separator_core[1]) < min(row.bottom, separator_core[3]))
         # A retained recursive separator is itself blank-seam evidence.  The
         # canonical sparse projection may omit that physical band entirely,
         # so the absence of a materialized topology row must not erase the
@@ -706,9 +632,7 @@ def _has_empty_row_separator(
         # stricter check and reject it when any payload crosses the separator.
         if not candidates or all(
             not any(
-                not cell.empty
-                and max(cell.bbox[0], separator_core[0])
-                < min(cell.bbox[2], separator_core[2])
+                not cell.empty and max(cell.bbox[0], separator_core[0]) < min(cell.bbox[2], separator_core[2])
                 for cell in row.cells
             )
             for row in candidates
@@ -729,11 +653,7 @@ def _merge_drafts(
         groups.setdefault(disjoint.find(index), []).append(draft)
     return [
         _Draft(
-            segment_ids={
-                segment_id
-                for member in members
-                for segment_id in member.segment_ids
-            },
+            segment_ids={segment_id for member in members for segment_id in member.segment_ids},
             bbox=_union_boxes(tuple(member.bbox for member in members)),
         )
         for members in groups.values()
@@ -756,12 +676,8 @@ def _flow_body_height(
 def _is_flow_fringe(box: BoxTuple, body_height: float) -> bool:
     width = box[2] - box[0]
     height = box[3] - box[1]
-    return (
-        width <= max(3.0, body_height * 0.20)
-        and height >= body_height * 1.5
-    ) or (
-        width <= max(3.0, body_height * 0.25)
-        and height <= max(2.0, body_height * 0.18)
+    return (width <= max(3.0, body_height * 0.20) and height >= body_height * 1.5) or (
+        width <= max(3.0, body_height * 0.25) and height <= max(2.0, body_height * 0.18)
     )
 
 
@@ -769,9 +685,7 @@ def _same_flow_row(
     members: list[PartitionSegment],
     candidate: PartitionSegment,
 ) -> bool:
-    center = float(
-        median((item.bbox[1] + item.bbox[3]) / 2.0 for item in members)
-    )
+    center = float(median((item.bbox[1] + item.bbox[3]) / 2.0 for item in members))
     height = float(median(item.bbox[3] - item.bbox[1] for item in members))
     candidate_center = (candidate.bbox[1] + candidate.bbox[3]) / 2.0
     candidate_height = float(candidate.bbox[3] - candidate.bbox[1])
@@ -797,16 +711,8 @@ def _visual_flow_rows(
             ),
         )
     )
-    primary = tuple(
-        item
-        for item in ordered
-        if not _is_flow_fringe(item.bbox, body_height)
-    )
-    fringe = tuple(
-        item.segment_id
-        for item in ordered
-        if _is_flow_fringe(item.bbox, body_height)
-    )
+    primary = tuple(item for item in ordered if not _is_flow_fringe(item.bbox, body_height))
+    fringe = tuple(item.segment_id for item in ordered if _is_flow_fringe(item.bbox, body_height))
     if not primary:
         return (), fringe, body_height
     groups: list[list[PartitionSegment]] = []
@@ -845,9 +751,7 @@ def _marker_list_span(
         body = _union_boxes(tuple(item.bbox for item in members[1:]))
         marker_width = marker[2] - marker[0]
         body_width = body[2] - body[0]
-        local_scale = float(
-            median(item.bbox[3] - item.bbox[1] for item in members)
-        )
+        local_scale = float(median(item.bbox[3] - item.bbox[1] for item in members))
         if (
             marker_width <= max(2.0 * local_scale, body_width * 0.35)
             and body_width >= 2.0 * marker_width
@@ -862,8 +766,7 @@ def _marker_list_span(
     stable = tuple(
         value
         for value in witnesses
-        if abs(value[1][0] - marker_left) <= tolerance
-        and abs(value[2][0] - body_left) <= tolerance
+        if abs(value[1][0] - marker_left) <= tolerance and abs(value[2][0] - body_left) <= tolerance
     )
     if len(stable) < 2:
         return None
@@ -876,10 +779,7 @@ def _split_flow_rows(
 ) -> tuple[tuple[_FlowRow, ...], ...]:
     if len(rows) < 2:
         return (rows,) if rows else ()
-    gaps = tuple(
-        max(0, current.bbox[1] - previous.bbox[3])
-        for previous, current in zip(rows, rows[1:])
-    )
+    gaps = tuple(max(0, current.bbox[1] - previous.bbox[3]) for previous, current in zip(rows, rows[1:]))
     positive = tuple(sorted(value for value in gaps if value > 0))
     if positive:
         lower = positive[: max(1, (len(positive) + 1) // 2)]
@@ -913,10 +813,7 @@ def _indented_list(
     if len(inner) < 3 or len(inner) * 2 < len(rows):
         return False
     inner_track = float(median(inner))
-    return (
-        abs(lefts[0] - outer) <= tolerance
-        and max(abs(value - inner_track) for value in inner) <= tolerance
-    )
+    return abs(lefts[0] - outer) <= tolerance and max(abs(value - inner_track) for value in inner) <= tolerance
 
 
 def _mixed_marker_body_list(
@@ -938,11 +835,7 @@ def _mixed_marker_body_list(
     tolerance = max(4.0, body_height * 0.20)
     minimum_indent = max(5.0, body_height * 0.75)
     outer_track = float(min(row.bbox[0] for row in rows))
-    inner_values = tuple(
-        row.bbox[0]
-        for row in rows
-        if row.bbox[0] >= outer_track + minimum_indent
-    )
+    inner_values = tuple(row.bbox[0] for row in rows if row.bbox[0] >= outer_track + minimum_indent)
     if len(inner_values) < 2:
         return False
     inner_track = float(median(inner_values))
@@ -967,15 +860,8 @@ def _mixed_marker_body_list(
         value == "outer" and row.bbox[2] >= inner_track + crossing
         for row, value in zip(rows[1:], item_tracks, strict=True)
     )
-    transitions = sum(
-        first != second
-        for first, second in zip(item_tracks, item_tracks[1:])
-    )
-    return (
-        inner_count >= 2
-        and combined_outer_count >= 2
-        and transitions >= 2
-    )
+    transitions = sum(first != second for first, second in zip(item_tracks, item_tracks[1:]))
+    return inner_count >= 2 and combined_outer_count >= 2 and transitions >= 2
 
 
 def _geometry_list_witness(
@@ -992,14 +878,10 @@ def _draft_from_rows(
     rows: tuple[_FlowRow, ...],
     segment_by_id: dict[str, PartitionSegment],
 ) -> _Draft:
-    segment_ids = {
-        segment_id for row in rows for segment_id in row.segment_ids
-    }
+    segment_ids = {segment_id for row in rows for segment_id in row.segment_ids}
     return _Draft(
         segment_ids=segment_ids,
-        bbox=_union_boxes(
-            tuple(segment_by_id[value].bbox for value in segment_ids)
-        ),
+        bbox=_union_boxes(tuple(segment_by_id[value].bbox for value in segment_ids)),
     )
 
 
@@ -1014,9 +896,7 @@ def _semantic_flow_parts(
         page_height = page_bbox[3] - page_bbox[1]
         width = only[2] - only[0]
         height = only[3] - only[1]
-        touches_horizontal_edge = (
-            only[1] == page_bbox[1] or only[3] == page_bbox[3]
-        )
+        touches_horizontal_edge = only[1] == page_bbox[1] or only[3] == page_bbox[3]
         if (
             touches_horizontal_edge
             and width >= page_width * 0.80
@@ -1051,21 +931,10 @@ def _semantic_flow_parts(
     structural_fringe_ids = tuple(
         segment_id
         for segment_id in fringe_ids
-        if (
-            segment_by_id[segment_id].bbox[0] == page_bbox[0]
-            or segment_by_id[segment_id].bbox[2] == page_bbox[2]
-        )
-        and (
-            segment_by_id[segment_id].bbox[3]
-            - segment_by_id[segment_id].bbox[1]
-            >= body_height * 1.5
-        )
+        if (segment_by_id[segment_id].bbox[0] == page_bbox[0] or segment_by_id[segment_id].bbox[2] == page_bbox[2])
+        and (segment_by_id[segment_id].bbox[3] - segment_by_id[segment_id].bbox[1] >= body_height * 1.5)
     )
-    attachable_fringe_ids = tuple(
-        segment_id
-        for segment_id in fringe_ids
-        if segment_id not in structural_fringe_ids
-    )
+    attachable_fringe_ids = tuple(segment_id for segment_id in fringe_ids if segment_id not in structural_fringe_ids)
 
     marker_span = _marker_list_span(rows, segment_by_id, body_height)
     groups: list[tuple[str | None, tuple[_FlowRow, ...]]] = []
@@ -1079,24 +948,16 @@ def _semantic_flow_parts(
         groups.extend((None, value) for value in _split_flow_rows(rows, body_height))
     else:
         start, stop = marker_span
-        groups.extend(
-            (None, value)
-            for value in _split_flow_rows(rows[:start], body_height)
-        )
+        groups.extend((None, value) for value in _split_flow_rows(rows[:start], body_height))
         groups.append(("list", rows[start:stop]))
-        groups.extend(
-            (None, value)
-            for value in _split_flow_rows(rows[stop:], body_height)
-        )
+        groups.extend((None, value) for value in _split_flow_rows(rows[stop:], body_height))
 
     parts: list[tuple[str, _Draft, tuple[str, ...]]] = []
     for forced_kind, group in groups:
         if forced_kind == "list" or _geometry_list_witness(group, body_height):
             kind = "list"
             evidence = (
-                "repeated-marker-body-rows"
-                if forced_kind == "list"
-                else "repeated-indented-rows",
+                "repeated-marker-body-rows" if forced_kind == "list" else "repeated-indented-rows",
                 "geometry-only-visual-rows",
             )
         elif len(group) >= 2:
@@ -1123,20 +984,14 @@ def _semantic_flow_parts(
             key=lambda index: (
                 max(
                     0,
-                    min(segment.bbox[3], parts[index][1].bbox[3])
-                    - max(segment.bbox[1], parts[index][1].bbox[1]),
+                    min(segment.bbox[3], parts[index][1].bbox[3]) - max(segment.bbox[1], parts[index][1].bbox[1]),
                 ),
-                -abs(
-                    (segment.bbox[1] + segment.bbox[3])
-                    - (parts[index][1].bbox[1] + parts[index][1].bbox[3])
-                ),
+                -abs((segment.bbox[1] + segment.bbox[3]) - (parts[index][1].bbox[1] + parts[index][1].bbox[3])),
             ),
         )
         kind, member, evidence = parts[selected]
         member.segment_ids.add(segment_id)
-        member.bbox = _union_boxes(
-            tuple(segment_by_id[value].bbox for value in member.segment_ids)
-        )
+        member.bbox = _union_boxes(tuple(segment_by_id[value].bbox for value in member.segment_ids))
         parts[selected] = (kind, member, evidence)
     parts.extend(
         (
@@ -1183,9 +1038,7 @@ def _merge_indented_flow_sections(
             segment_by_id,
         )
         vertical_gap = max(0, second.bbox[1] - first.bbox[3])
-        horizontal_overlap = min(first.bbox[2], second.bbox[2]) - max(
-            first.bbox[0], second.bbox[0]
-        )
+        horizontal_overlap = min(first.bbox[2], second.bbox[2]) - max(first.bbox[0], second.bbox[0])
         if (
             len(first_rows) == 1
             and len(combined_rows) >= 4
@@ -1232,9 +1085,7 @@ def _parallel_grid_witness(
         _visual_flow_rows(
             _Draft(
                 segment_ids=group,
-                bbox=_union_boxes(
-                    tuple(segment_by_id[value].bbox for value in group)
-                ),
+                bbox=_union_boxes(tuple(segment_by_id[value].bbox for value in group)),
             ),
             segment_by_id,
         )[0]
@@ -1246,8 +1097,7 @@ def _parallel_grid_witness(
     if len(row_counts) == 1:
         row_count = next(iter(row_counts))
         if all(
-            max(rows[row_index].bbox[1] for rows in lane_rows)
-            < min(rows[row_index].bbox[3] for rows in lane_rows)
+            max(rows[row_index].bbox[1] for rows in lane_rows) < min(rows[row_index].bbox[3] for rows in lane_rows)
             for row_index in range(row_count)
         ):
             return True
@@ -1270,9 +1120,7 @@ def _parallel_grid_witness(
         while first_index < len(first) and second_index < len(second):
             first_box = first[first_index].bbox
             second_box = second[second_index].bbox
-            if max(first_box[1], second_box[1]) < min(
-                first_box[3], second_box[3]
-            ):
+            if max(first_box[1], second_box[1]) < min(first_box[3], second_box[3]):
                 matches += 1
                 first_index += 1
                 second_index += 1
@@ -1315,10 +1163,7 @@ def _stable_topology_table_witness(
     at least five physical rows.
     """
 
-    if (
-        candidate.kind not in {"paragraph", "list"}
-        or candidate.matrix_basis is not PartitionMatrixBasis.TOPOLOGY_SLICE
-    ):
+    if candidate.kind not in {"paragraph", "list"} or candidate.matrix_basis is not PartitionMatrixBasis.TOPOLOGY_SLICE:
         return None
     left, top, right, bottom = candidate.matrix_bbox
     if bottom - top < 100:
@@ -1330,8 +1175,7 @@ def _stable_topology_table_witness(
         signature = tuple(
             (max(cell.bbox[0], left), min(cell.bbox[2], right))
             for cell in row.cells
-            if not cell.empty
-            and max(cell.bbox[0], left) < min(cell.bbox[2], right)
+            if not cell.empty and max(cell.bbox[0], left) < min(cell.bbox[2], right)
         )
         if len(signature) < 3:
             continue
@@ -1363,18 +1207,12 @@ def _aligned_table_fragment_pair(
     if first.kind != "table" or second.kind != "table":
         table_anchor = first if first.kind == "table" else second
         column_counts = tuple(
-            int(value.partition("=")[2])
-            for value in table_anchor.evidence
-            if value.startswith("column-count=")
+            int(value.partition("=")[2]) for value in table_anchor.evidence if value.startswith("column-count=")
         )
         if not column_counts or max(column_counts) < 3:
             return False
-    first_corridors = {
-        value for value in first.evidence if value.startswith("empty-corridor=")
-    }
-    second_corridors = {
-        value for value in second.evidence if value.startswith("empty-corridor=")
-    }
+    first_corridors = {value for value in first.evidence if value.startswith("empty-corridor=")}
+    second_corridors = {value for value in second.evidence if value.startswith("empty-corridor=")}
     if not first_corridors.intersection(second_corridors):
         return False
     first_box = first.draft.bbox
@@ -1402,14 +1240,12 @@ def _aligned_table_fragment_pair(
     for first_row in first_rows:
         candidates = tuple(
             (
-                min(first_row.bbox[3], second_row.bbox[3])
-                - max(first_row.bbox[1], second_row.bbox[1]),
+                min(first_row.bbox[3], second_row.bbox[3]) - max(first_row.bbox[1], second_row.bbox[1]),
                 index,
             )
             for index, second_row in enumerate(second_rows)
             if index not in used
-            and max(first_row.bbox[1], second_row.bbox[1])
-            < min(first_row.bbox[3], second_row.bbox[3])
+            and max(first_row.bbox[1], second_row.bbox[1]) < min(first_row.bbox[3], second_row.bbox[3])
         )
         if not candidates:
             continue
@@ -1428,10 +1264,7 @@ def _merge_aligned_topology_table_fragments(
         index
         for index, value in enumerate(objects)
         if value.matrix_basis is PartitionMatrixBasis.TOPOLOGY_SLICE
-        and any(
-            evidence.startswith("empty-corridor=")
-            for evidence in value.evidence
-        )
+        and any(evidence.startswith("empty-corridor=") for evidence in value.evidence)
     )
     adjacency: dict[int, set[int]] = {index: set() for index in candidate_indices}
     for offset, first_index in enumerate(candidate_indices):
@@ -1465,27 +1298,13 @@ def _merge_aligned_topology_table_fragments(
     consumed: set[int] = set()
     for component in components:
         members = tuple(objects[index] for index in component)
-        first_index = min(
-            index
-            for index in component
-            if objects[index].kind == "table"
-        )
+        first_index = min(index for index in component if objects[index].kind == "table")
         first = objects[first_index]
-        evidence = tuple(
-            dict.fromkeys(
-                value
-                for member in members
-                for value in member.evidence
-            )
-        )
+        evidence = tuple(dict.fromkeys(value for member in members for value in member.evidence))
         replacements[first_index] = replace(
             first,
             draft=_Draft(
-                segment_ids={
-                    segment_id
-                    for member in members
-                    for segment_id in member.draft.segment_ids
-                },
+                segment_ids={segment_id for member in members for segment_id in member.draft.segment_ids},
                 bbox=_union_boxes(tuple(member.draft.bbox for member in members)),
             ),
             crop_bbox=_union_boxes(tuple(member.crop_bbox for member in members)),
@@ -1493,11 +1312,7 @@ def _merge_aligned_topology_table_fragments(
             evidence=(*evidence, "merged-aligned-table-fragments"),
         )
         consumed.update(index for index in component if index != first_index)
-    return [
-        replacements.get(index, value)
-        for index, value in enumerate(objects)
-        if index not in consumed
-    ]
+    return [replacements.get(index, value) for index, value in enumerate(objects) if index not in consumed]
 
 
 def _merge_contained_topology_tables(
@@ -1506,10 +1321,7 @@ def _merge_contained_topology_tables(
     consumed: set[int] = set()
     replacements: dict[int, _ObjectDraft] = {}
     for parent_index, parent in enumerate(objects):
-        if (
-            parent.kind != "table"
-            or parent.matrix_basis is not PartitionMatrixBasis.RULE_LATTICE
-        ):
+        if parent.kind != "table" or parent.matrix_basis is not PartitionMatrixBasis.RULE_LATTICE:
             continue
         left, top, right, bottom = parent.matrix_bbox
         child_indices = tuple(
@@ -1530,22 +1342,14 @@ def _merge_contained_topology_tables(
         replacements[parent_index] = replace(
             parent,
             draft=_Draft(
-                segment_ids={
-                    segment_id
-                    for member in members
-                    for segment_id in member.draft.segment_ids
-                },
+                segment_ids={segment_id for member in members for segment_id in member.draft.segment_ids},
                 bbox=_union_boxes(tuple(member.draft.bbox for member in members)),
             ),
             crop_bbox=_union_boxes(tuple(member.crop_bbox for member in members)),
             evidence=(*parent.evidence, "absorbed-contained-table-fragments"),
         )
         consumed.update(child_indices)
-    return [
-        replacements.get(index, value)
-        for index, value in enumerate(objects)
-        if index not in consumed
-    ]
+    return [replacements.get(index, value) for index, value in enumerate(objects) if index not in consumed]
 
 
 def _merge_table_fragments(
@@ -1570,15 +1374,12 @@ def _merge_overlapping_structural_grid_tables(
     structural = tuple(
         index
         for index, value in enumerate(objects)
-        if value.kind == "table"
-        and "stable-fragmented-rule-grid" in value.evidence
+        if value.kind == "table" and "stable-fragmented-rule-grid" in value.evidence
     )
     if not structural:
         return objects
     structural_set = set(structural)
-    candidates = tuple(
-        index for index, value in enumerate(objects) if value.kind == "table"
-    )
+    candidates = tuple(index for index, value in enumerate(objects) if value.kind == "table")
     parents = {index: index for index in candidates}
 
     def find(index: int) -> int:
@@ -1597,23 +1398,16 @@ def _merge_overlapping_structural_grid_tables(
         first_box = objects[first].matrix_bbox
         for second in candidates[offset + 1 :]:
             second_box = objects[second].matrix_bbox
-            horizontal_overlap = min(first_box[2], second_box[2]) - max(
-                first_box[0], second_box[0]
-            )
+            horizontal_overlap = min(first_box[2], second_box[2]) - max(first_box[0], second_box[0])
             shorter_width = min(
                 first_box[2] - first_box[0],
                 second_box[2] - second_box[0],
             )
             vertical_gap = max(
                 0,
-                max(first_box[1], second_box[1])
-                - min(first_box[3], second_box[3]),
+                max(first_box[1], second_box[1]) - min(first_box[3], second_box[3]),
             )
-            if (
-                horizontal_overlap > 0
-                and horizontal_overlap * 4 >= shorter_width * 3
-                and vertical_gap <= 4
-            ):
+            if horizontal_overlap > 0 and horizontal_overlap * 4 >= shorter_width * 3 and vertical_gap <= 4:
                 union(first, second)
 
     groups: dict[int, list[int]] = {}
@@ -1624,21 +1418,13 @@ def _merge_overlapping_structural_grid_tables(
     for indexes in groups.values():
         if not any(index in structural_set for index in indexes):
             continue
-        table_box = _union_boxes(
-            tuple(objects[index].matrix_bbox for index in indexes)
-        )
+        table_box = _union_boxes(tuple(objects[index].matrix_bbox for index in indexes))
         selected = tuple(
             index
             for index, value in enumerate(objects)
             if index not in consumed
-            and table_box[1]
-            <= (value.draft.bbox[1] + value.draft.bbox[3]) / 2.0
-            < table_box[3]
-            and (
-                min(table_box[2], value.draft.bbox[2])
-                - max(table_box[0], value.draft.bbox[0])
-            )
-            * 2
+            and table_box[1] <= (value.draft.bbox[1] + value.draft.bbox[3]) / 2.0 < table_box[3]
+            and (min(table_box[2], value.draft.bbox[2]) - max(table_box[0], value.draft.bbox[0])) * 2
             >= min(
                 table_box[2] - table_box[0],
                 value.draft.bbox[2] - value.draft.bbox[0],
@@ -1650,20 +1436,12 @@ def _merge_overlapping_structural_grid_tables(
             continue
         first_index = min(selected)
         first = objects[next(index for index in indexes if index in structural_set)]
-        member_ids = {
-            segment_id
-            for index in selected
-            for segment_id in objects[index].draft.segment_ids
-        }
-        member_bbox = _union_boxes(
-            tuple(segment_by_id[value].bbox for value in member_ids)
-        )
+        member_ids = {segment_id for index in selected for segment_id in objects[index].draft.segment_ids}
+        member_bbox = _union_boxes(tuple(segment_by_id[value].bbox for value in member_ids))
         replacements[first_index] = _ObjectDraft(
             kind="table",
             draft=_Draft(segment_ids=member_ids, bbox=member_bbox),
-            crop_bbox=_union_boxes(
-                tuple(objects[index].crop_bbox for index in selected)
-            ),
+            crop_bbox=_union_boxes(tuple(objects[index].crop_bbox for index in selected)),
             matrix_bbox=_union_boxes((table_box, member_bbox)),
             evidence=(
                 *first.evidence,
@@ -1676,11 +1454,7 @@ def _merge_overlapping_structural_grid_tables(
         consumed.update(index for index in selected if index != first_index)
     if not replacements:
         return objects
-    result = [
-        replacements.get(index, value)
-        for index, value in enumerate(objects)
-        if index not in consumed
-    ]
+    result = [replacements.get(index, value) for index, value in enumerate(objects) if index not in consumed]
     result.sort(key=lambda value: (value.draft.bbox[1], value.draft.bbox[0]))
     return result
 
@@ -1699,8 +1473,7 @@ def _merge_stacked_wide_table_sections(
     candidates = tuple(
         index
         for index, value in enumerate(objects)
-        if value.kind == "table"
-        and value.matrix_bbox[2] - value.matrix_bbox[0] >= page_width * 0.75
+        if value.kind == "table" and value.matrix_bbox[2] - value.matrix_bbox[0] >= page_width * 0.75
     )
     if len(candidates) < 3:
         return objects
@@ -1722,30 +1495,23 @@ def _merge_stacked_wide_table_sections(
             current = [index]
             current_box = candidate_box
             continue
-        overlap = min(current_box[2], candidate_box[2]) - max(
-            current_box[0], candidate_box[0]
-        )
+        overlap = min(current_box[2], candidate_box[2]) - max(current_box[0], candidate_box[0])
         shorter_width = min(
             current_box[2] - current_box[0],
             candidate_box[2] - candidate_box[0],
         )
         vertical_gap = candidate_box[1] - current_box[3]
         combined_box = _union_boxes((current_box, candidate_box))
-        current_has_structural_grid = any(
-            "stable-fragmented-rule-grid" in objects[item].evidence
-            for item in current
-        )
-        candidate_has_structural_grid = (
-            "stable-fragmented-rule-grid" in objects[index].evidence
-        )
+        current_has_structural_grid = any("stable-fragmented-rule-grid" in objects[item].evidence for item in current)
+        candidate_has_structural_grid = "stable-fragmented-rule-grid" in objects[index].evidence
         if (
             overlap > 0
             and overlap * 4 >= shorter_width * 3
             and vertical_gap <= maximum_gap
             and not (
-                current_has_structural_grid and candidate_has_structural_grid
-                and combined_box[3] - combined_box[1]
-                > maximum_structural_cluster_height
+                current_has_structural_grid
+                and candidate_has_structural_grid
+                and combined_box[3] - combined_box[1] > maximum_structural_cluster_height
             )
         ):
             current.append(index)
@@ -1763,22 +1529,14 @@ def _merge_stacked_wide_table_sections(
     consumed: set[int] = set()
     replacements: dict[int, _ObjectDraft] = {}
     for cluster in clusters:
-        table_box = _union_boxes(
-            tuple(objects[index].matrix_bbox for index in cluster)
-        )
+        table_box = _union_boxes(tuple(objects[index].matrix_bbox for index in cluster))
         tail_bottom = min(page_bbox[3], table_box[3] + 96)
         selected = tuple(
             index
             for index, value in enumerate(objects)
             if index not in consumed
-            and table_box[1]
-            <= (value.draft.bbox[1] + value.draft.bbox[3]) / 2.0
-            < tail_bottom
-            and (
-                min(table_box[2], value.draft.bbox[2])
-                - max(table_box[0], value.draft.bbox[0])
-            )
-            * 2
+            and table_box[1] <= (value.draft.bbox[1] + value.draft.bbox[3]) / 2.0 < tail_bottom
+            and (min(table_box[2], value.draft.bbox[2]) - max(table_box[0], value.draft.bbox[0])) * 2
             >= min(
                 table_box[2] - table_box[0],
                 value.draft.bbox[2] - value.draft.bbox[0],
@@ -1788,20 +1546,12 @@ def _merge_stacked_wide_table_sections(
             continue
         first_index = min(selected)
         first = objects[min(cluster)]
-        member_ids = {
-            segment_id
-            for index in selected
-            for segment_id in objects[index].draft.segment_ids
-        }
-        member_bbox = _union_boxes(
-            tuple(segment_by_id[value].bbox for value in member_ids)
-        )
+        member_ids = {segment_id for index in selected for segment_id in objects[index].draft.segment_ids}
+        member_bbox = _union_boxes(tuple(segment_by_id[value].bbox for value in member_ids))
         replacements[first_index] = _ObjectDraft(
             kind="table",
             draft=_Draft(segment_ids=member_ids, bbox=member_bbox),
-            crop_bbox=_union_boxes(
-                tuple(objects[index].crop_bbox for index in selected)
-            ),
+            crop_bbox=_union_boxes(tuple(objects[index].crop_bbox for index in selected)),
             matrix_bbox=_union_boxes((table_box, member_bbox)),
             evidence=(
                 *first.evidence,
@@ -1814,11 +1564,7 @@ def _merge_stacked_wide_table_sections(
         consumed.update(index for index in selected if index != first_index)
     if not replacements:
         return objects
-    result = [
-        replacements.get(index, value)
-        for index, value in enumerate(objects)
-        if index not in consumed
-    ]
+    result = [replacements.get(index, value) for index, value in enumerate(objects) if index not in consumed]
     result.sort(key=lambda value: (value.draft.bbox[1], value.draft.bbox[0]))
     return result
 
@@ -1845,12 +1591,7 @@ def _merge_parallel_rule_table_objects(
     rule_rows = tuple(
         row
         for row in rows
-        if any(
-            cell.empty
-            and cell.code == 7
-            and cell.bbox[2] - cell.bbox[0] >= page_width * 0.90
-            for cell in row.cells
-        )
+        if any(cell.empty and cell.code == 7 and cell.bbox[2] - cell.bbox[0] >= page_width * 0.90 for cell in row.cells)
     )
     if len(rule_rows) < 3:
         return objects
@@ -1869,14 +1610,9 @@ def _merge_parallel_rule_table_objects(
     consumed: set[int] = set()
     merged: list[_ObjectDraft] = []
     for run in runs:
-        steps = tuple(
-            second.top - first.top for first, second in zip(run, run[1:])
-        )
+        steps = tuple(second.top - first.top for first, second in zip(run, run[1:]))
         cadence = float(median(steps))
-        if (
-            cadence < 8
-            or max(steps) - min(steps) > max(3.0, cadence * 0.20)
-        ):
+        if cadence < 8 or max(steps) - min(steps) > max(3.0, cadence * 0.20):
             continue
         region_top = int(run[0].top - cadence)
         region_bottom = int(run[-1].bottom + cadence)
@@ -1884,36 +1620,19 @@ def _merge_parallel_rule_table_objects(
             index
             for index, value in enumerate(objects)
             if index not in consumed
-            and (
-                value.kind == "flow"
-                or "single-visual-row-paragraph" in value.evidence
-            )
+            and (value.kind == "flow" or "single-visual-row-paragraph" in value.evidence)
             and value.matrix_basis is PartitionMatrixBasis.TOPOLOGY_SLICE
-            and region_top
-            <= (value.draft.bbox[1] + value.draft.bbox[3]) / 2.0
-            < region_bottom
+            and region_top <= (value.draft.bbox[1] + value.draft.bbox[3]) / 2.0 < region_bottom
         )
         if len(selected) < len(run) + 1:
             continue
-        member_ids = {
-            segment_id
-            for index in selected
-            for segment_id in objects[index].draft.segment_ids
-        }
+        member_ids = {segment_id for index in selected for segment_id in objects[index].draft.segment_ids}
         draft = _Draft(
             segment_ids=member_ids,
-            bbox=_union_boxes(
-                tuple(segment_by_id[value].bbox for value in member_ids)
-            ),
+            bbox=_union_boxes(tuple(segment_by_id[value].bbox for value in member_ids)),
         )
         visual_rows, _, _ = _visual_flow_rows(draft, segment_by_id)
-        if (
-            len(visual_rows) < len(run) + 1
-            or any(
-                row.bbox[2] - row.bbox[0] < page_width * 0.75
-                for row in visual_rows
-            )
-        ):
+        if len(visual_rows) < len(run) + 1 or any(row.bbox[2] - row.bbox[0] < page_width * 0.75 for row in visual_rows):
             continue
         consumed.update(selected)
         merged.append(
@@ -1933,9 +1652,7 @@ def _merge_parallel_rule_table_objects(
 
     if not merged:
         return objects
-    result = [
-        value for index, value in enumerate(objects) if index not in consumed
-    ]
+    result = [value for index, value in enumerate(objects) if index not in consumed]
     result.extend(merged)
     result.sort(key=lambda value: (value.draft.bbox[1], value.draft.bbox[0]))
     return result
@@ -1951,15 +1668,12 @@ def _merge_detached_marker_lanes(
     consumed: set[int] = set()
     replacements: dict[int, _ObjectDraft] = {}
     for marker_index, marker in enumerate(objects):
-        marker_segments = tuple(
-            segment_by_id[value] for value in marker.draft.segment_ids
-        )
+        marker_segments = tuple(segment_by_id[value] for value in marker.draft.segment_ids)
         if (
             marker_index in consumed
             or len(marker_segments) < 2
             or any(
-                segment.bbox[2] - segment.bbox[0] > 12
-                or segment.bbox[3] - segment.bbox[1] > 12
+                segment.bbox[2] - segment.bbox[0] > 12 or segment.bbox[3] - segment.bbox[1] > 12
                 for segment in marker_segments
             )
         ):
@@ -1974,9 +1688,9 @@ def _merge_detached_marker_lanes(
             ):
                 continue
             horizontal_gap = body.draft.bbox[0] - marker.draft.bbox[2]
-            vertical_overlap = min(
-                body.draft.bbox[3], marker.draft.bbox[3]
-            ) - max(body.draft.bbox[1], marker.draft.bbox[1])
+            vertical_overlap = min(body.draft.bbox[3], marker.draft.bbox[3]) - max(
+                body.draft.bbox[1], marker.draft.bbox[1]
+            )
             body_rows, _, body_height = _visual_flow_rows(
                 body.draft,
                 segment_by_id,
@@ -1986,11 +1700,7 @@ def _merge_detached_marker_lanes(
                 or vertical_overlap <= 0
                 or len(body_rows) < len(marker_segments)
                 or any(
-                    not any(
-                        max(segment.bbox[1], row.bbox[1])
-                        < min(segment.bbox[3], row.bbox[3])
-                        for row in body_rows
-                    )
+                    not any(max(segment.bbox[1], row.bbox[1]) < min(segment.bbox[3], row.bbox[3]) for row in body_rows)
                     for segment in marker_segments
                 )
             ):
@@ -2007,9 +1717,7 @@ def _merge_detached_marker_lanes(
             ),
         )
         member_ids = set(marker.draft.segment_ids | body.draft.segment_ids)
-        bbox = _union_boxes(
-            tuple(segment_by_id[value].bbox for value in member_ids)
-        )
+        bbox = _union_boxes(tuple(segment_by_id[value].bbox for value in member_ids))
         replacements[body_index] = replace(
             body,
             kind="list",
@@ -2065,22 +1773,13 @@ def _merge_explicit_horizontal_rule_table_objects(
         if len(selected) < 2:
             continue
 
-        segment_ids = {
-            segment_id
-            for index in selected
-            for segment_id in result[index].draft.segment_ids
-        }
-        payload_bbox = _union_boxes(
-            tuple(segment_by_id[value].bbox for value in segment_ids)
-        )
+        segment_ids = {segment_id for index in selected for segment_id in result[index].draft.segment_ids}
+        payload_bbox = _union_boxes(tuple(segment_by_id[value].bbox for value in segment_ids))
         draft = _Draft(segment_ids=segment_ids, bbox=payload_bbox)
         visual_rows, _, _ = _visual_flow_rows(draft, segment_by_id)
         if len(visual_rows) < len(region.rule_boxes):
             continue
-        if any(
-            row.bbox[2] - row.bbox[0] < page_width * 0.75
-            for row in visual_rows
-        ):
+        if any(row.bbox[2] - row.bbox[0] < page_width * 0.75 for row in visual_rows):
             continue
 
         table_bbox = _union_boxes((payload_bbox, region.bbox))
@@ -2123,12 +1822,7 @@ def _structural_rule_table_witness(
     vertical: list[tuple[int, int, int]] = []
     for rule in rules:
         rule_left, rule_top, rule_right, rule_bottom = rule.bbox
-        if (
-            rule_right <= left
-            or rule_left >= right
-            or rule_bottom <= top
-            or rule_top >= bottom
-        ):
+        if rule_right <= left or rule_left >= right or rule_bottom <= top or rule_top >= bottom:
             continue
         if rule.axis == "horizontal":
             overlap = min(right, rule_right) - max(left, rule_left)
@@ -2242,11 +1936,7 @@ def partition_recursive_objects(
                     segment_id
                     for segment_id in own
                     if interval_left
-                    <= (
-                        segment_by_id[segment_id].bbox[0]
-                        + segment_by_id[segment_id].bbox[2]
-                    )
-                    / 2.0
+                    <= (segment_by_id[segment_id].bbox[0] + segment_by_id[segment_id].bbox[2]) / 2.0
                     < interval_right
                 }
                 if members:
@@ -2260,11 +1950,7 @@ def partition_recursive_objects(
                         _TopologyChamber(
                             draft=_Draft(
                                 segment_ids=own,
-                                bbox=_union_boxes(
-                                    tuple(
-                                        segment_by_id[value].bbox for value in own
-                                    )
-                                ),
+                                bbox=_union_boxes(tuple(segment_by_id[value].bbox for value in own)),
                             ),
                             separator_boxes=separator_boxes,
                             parallel_grid=True,
@@ -2274,26 +1960,16 @@ def partition_recursive_objects(
                     _TopologyChamber(
                         draft=_Draft(
                             segment_ids=members,
-                            bbox=_union_boxes(
-                                tuple(segment_by_id[value].bbox for value in members)
-                            ),
+                            bbox=_union_boxes(tuple(segment_by_id[value].bbox for value in members)),
                         ),
                         separator_boxes=separator_boxes,
                     )
                     for members in frozen_groups
                 ]
-        return [
-            chamber
-            for child_id in node.child_ids
-            for chamber in find_topology_chambers(child_id)
-        ]
+        return [chamber for child_id in node.child_ids for chamber in find_topology_chambers(child_id)]
 
     topology_chambers = find_topology_chambers("geo-root")
-    chamber_segment_ids = {
-        segment_id
-        for chamber in topology_chambers
-        for segment_id in chamber.draft.segment_ids
-    }
+    chamber_segment_ids = {segment_id for chamber in topology_chambers for segment_id in chamber.draft.segment_ids}
 
     cycle_boxes = _mixed_axis_cycle_components(rows)
     # ``0 5 / 3 8`` (and its merged-cell variants) describes a finite 2-D
@@ -2311,11 +1987,7 @@ def partition_recursive_objects(
     for segment in segments:
         if segment.segment_id in chamber_segment_ids:
             continue
-        matches = tuple(
-            index
-            for index, bbox in enumerate(component_boxes)
-            if _center_inside(segment.bbox, bbox)
-        )
+        matches = tuple(index for index, bbox in enumerate(component_boxes) if _center_inside(segment.bbox, bbox))
         if not matches:
             continue
         # Nested/ragged component envelopes are resolved geometrically, not by
@@ -2339,14 +2011,10 @@ def partition_recursive_objects(
     ):
         if not members:
             continue
-        member_bbox = _union_boxes(
-            tuple(segment_by_id[value].bbox for value in members)
-        )
+        member_bbox = _union_boxes(tuple(segment_by_id[value].bbox for value in members))
         matrix_bbox = table_bbox
         basis = PartitionMatrixBasis.RULE_LATTICE
-        crop_bbox = _union_boxes(
-            (network_bbox_for_crop(matrix_bbox, networks), member_bbox)
-        )
+        crop_bbox = _union_boxes((network_bbox_for_crop(matrix_bbox, networks), member_bbox))
         evidence = (
             "finite-mixed-axis-cycle",
             "independent-structural-lattice",
@@ -2367,11 +2035,7 @@ def partition_recursive_objects(
             )
         )
 
-    table_segment_ids = {
-        segment_id
-        for candidate in table_drafts
-        for segment_id in candidate.draft.segment_ids
-    }
+    table_segment_ids = {segment_id for candidate in table_drafts for segment_id in candidate.draft.segment_ids}
 
     remaining = set(segment_by_id) - table_segment_ids - chamber_segment_ids
 
@@ -2384,17 +2048,13 @@ def partition_recursive_objects(
             return [
                 _Draft(
                     segment_ids=own,
-                    bbox=_union_boxes(
-                        tuple(segment_by_id[value].bbox for value in own)
-                    ),
+                    bbox=_union_boxes(tuple(segment_by_id[value].bbox for value in own)),
                 )
             ]
 
         child_drafts = [recurse(child_id) for child_id in node.child_ids]
         drafts = [draft for values in child_drafts for draft in values]
-        covered = {
-            segment_id for draft in drafts for segment_id in draft.segment_ids
-        }
+        covered = {segment_id for draft in drafts for segment_id in draft.segment_ids}
         for segment_id in sorted(own - covered):
             drafts.append(
                 _Draft(
@@ -2415,11 +2075,7 @@ def partition_recursive_objects(
         # into a hard object boundary.  The upper quartile still follows the
         # local text scale while ignoring those small witnesses.
         typical_height = _upper_quartile(heights) if heights else 4.0
-        child_owner = {
-            id(draft): child_index
-            for child_index, values in enumerate(child_drafts)
-            for draft in values
-        }
+        child_owner = {id(draft): child_index for child_index, values in enumerate(child_drafts) for draft in values}
         node_height = node.bbox[3] - node.bbox[1]
         short_row_scope = node_height <= max(
             48.0,
@@ -2429,10 +2085,7 @@ def partition_recursive_objects(
             node,
             rows,
             typical_height=typical_height,
-            active_segments=tuple(
-                segment_by_id[segment_id]
-                for segment_id in own
-            ),
+            active_segments=tuple(segment_by_id[segment_id] for segment_id in own),
         )
         pairs: list[tuple[int, int]] = []
         for first in range(len(drafts)):
@@ -2441,8 +2094,10 @@ def partition_recursive_objects(
                 second_child = child_owner.get(id(drafts[second]))
                 if first_child is not None and first_child == second_child:
                     continue
-                if node.axis == "rows" and not hard_row_separator and _row_link(
-                    drafts[first], drafts[second], typical_height
+                if (
+                    node.axis == "rows"
+                    and not hard_row_separator
+                    and _row_link(drafts[first], drafts[second], typical_height)
                 ):
                     pairs.append((first, second))
                 elif (
@@ -2464,10 +2119,7 @@ def partition_recursive_objects(
             draft,
             segment_by_id,
         )
-        contains_proven_lattice = any(
-            _center_inside(component_bbox, draft.bbox)
-            for component_bbox in component_boxes
-        )
+        contains_proven_lattice = any(_center_inside(component_bbox, draft.bbox) for component_bbox in component_boxes)
         marker_list = (
             _marker_list_span(
                 visual_rows,
@@ -2494,16 +2146,10 @@ def partition_recursive_objects(
             kind = "flow"
         evidence = (
             "spanning-finite-empty-corridor",
-            *(
-                ("single-visual-row-paragraph",)
-                if kind == "paragraph" and len(visual_rows) == 1
-                else ()
-            ),
+            *(("single-visual-row-paragraph",) if kind == "paragraph" and len(visual_rows) == 1 else ()),
             *(
                 ("single-segment-paragraph",)
-                if kind == "paragraph"
-                and not visual_rows
-                and len(draft.segment_ids) == 1
+                if kind == "paragraph" and not visual_rows and len(draft.segment_ids) == 1
                 else ()
             ),
             *(
@@ -2518,16 +2164,9 @@ def partition_recursive_objects(
             *(
                 ("repeated-marker-body-rows",)
                 if marker_list
-                else (
-                    ("repeated-indented-rows",)
-                    if geometry_list
-                    else ()
-                )
+                else (("repeated-indented-rows",) if geometry_list else ())
             ),
-            *(
-                f"empty-corridor={box[0]}:{box[1]}:{box[2]}:{box[3]}"
-                for box in chamber.separator_boxes
-            ),
+            *(f"empty-corridor={box[0]}:{box[1]}:{box[2]}:{box[3]}" for box in chamber.separator_boxes),
         )
         raw_objects.append(
             _ObjectDraft(
@@ -2555,9 +2194,7 @@ def partition_recursive_objects(
                     matrix_basis=PartitionMatrixBasis.TOPOLOGY_SLICE,
                 )
             )
-    raw_objects.sort(
-        key=lambda value: (value.draft.bbox[1], value.draft.bbox[0])
-    )
+    raw_objects.sort(key=lambda value: (value.draft.bbox[1], value.draft.bbox[0]))
     raw_objects = _merge_detached_marker_lanes(
         raw_objects,
         segment_by_id=segment_by_id,
@@ -2628,11 +2265,7 @@ def partition_recursive_objects(
         page_bbox=roots[0].bbox,
     )
 
-    owned = [
-        segment_id
-        for value in raw_objects
-        for segment_id in value.draft.segment_ids
-    ]
+    owned = [segment_id for value in raw_objects for segment_id in value.draft.segment_ids]
     if len(owned) != len(set(owned)) or set(owned) != set(segment_by_id):
         raise ValueError("recursive objects must form an exact segment partition")
     return tuple(

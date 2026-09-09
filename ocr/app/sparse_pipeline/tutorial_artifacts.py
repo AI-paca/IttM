@@ -98,9 +98,7 @@ class TutorialArtifactWriter:
         if destination.exists():
             raise FileExistsError(f"debug run already exists: {destination}")
 
-        temporary = Path(
-            tempfile.mkdtemp(prefix=f".{run_id}.partial-", dir=root)
-        )
+        temporary = Path(tempfile.mkdtemp(prefix=f".{run_id}.partial-", dir=root))
         try:
             self._write_control(temporary / "03-control", control)
 
@@ -218,13 +216,9 @@ class TutorialArtifactWriter:
         provenance_record = {
             "schema": "sparse-v20-debug-provenance-v1",
             "run_id": run_id,
-            "source_rgb_sha256": hashlib.sha256(
-                memoryview(np.ascontiguousarray(geometry.source_rgb))
-            ).hexdigest(),
+            "source_rgb_sha256": hashlib.sha256(memoryview(np.ascontiguousarray(geometry.source_rgb))).hexdigest(),
             "aligned_rgb_sha256": evidence.geometry.aligned_rgb_sha256,
-            "aligned_page_png_sha256": hashlib.sha256(
-                evidence.page.png_bytes
-            ).hexdigest(),
+            "aligned_page_png_sha256": hashlib.sha256(evidence.page.png_bytes).hexdigest(),
             "execution_order": list(PIPELINE_ORDER),
             "provided": supplied,
         }
@@ -294,10 +288,7 @@ class TutorialArtifactWriter:
             logical.close()
         (root / "sparse-matrix.tsv").write_text(
             "row\tcolumn\tsegment_id\n"
-            + "".join(
-                f"{cell.row}\t{cell.column}\t{cell.segment_id}\n"
-                for cell in matrix.cells
-            ),
+            + "".join(f"{cell.row}\t{cell.column}\t{cell.segment_id}\n" for cell in matrix.cells),
             encoding="utf-8",
         )
         cls._write_json(
@@ -323,11 +314,7 @@ class TutorialArtifactWriter:
         document: DocumentAssemblyResult,
     ) -> None:
         text = document.text if document.text is not None else document.candidate_text
-        markdown = (
-            document.markdown
-            if document.markdown is not None
-            else document.candidate_markdown
-        )
+        markdown = document.markdown if document.markdown is not None else document.candidate_markdown
         (root / "document.txt").write_text(
             text,
             encoding="utf-8",
@@ -359,13 +346,8 @@ class TutorialArtifactWriter:
     ) -> None:
         objects_root = root / "objects"
         objects_root.mkdir()
-        geometry_segments = {
-            item.segment_id: item
-            for item in evidence.geometry.segmentation.segments
-        }
-        matrix_cells: dict[str, list[list[int]]] = {
-            item: [] for item in document.source_segment_ids
-        }
+        geometry_segments = {item.segment_id: item for item in evidence.geometry.segmentation.segments}
+        matrix_cells: dict[str, list[list[int]]] = {item: [] for item in document.source_segment_ids}
         for cell in evidence.geometry.matrix.cells:
             matrix_cells[cell.segment_id].append([cell.row, cell.column])
         matrix_spans = {
@@ -377,35 +359,17 @@ class TutorialArtifactWriter:
             }
             for item in evidence.geometry.matrix.spans
         }
-        segment_fusion = {
-            item.segment_id: item for item in evidence.fusion.segments
-        }
-        segment_assembly = {
-            item.segment_id: item for item in document.segments
-        }
+        segment_fusion = {item.segment_id: item for item in evidence.fusion.segments}
+        segment_assembly = {item.segment_id: item for item in document.segments}
         document_objects = {item.object_id: item for item in document.objects}
         crop_by_block = {item.block_id: item for item in evidence.crops}
-        owner_by_segment = {
-            item.segment_id: item.object_id
-            for item in evidence.objects.segment_ownership
-        }
-        ownership_order = tuple(
-            item.segment_id
-            for item in evidence.geometry.segmentation.segments
-        )
-        ownership_sha256 = (
-            hashlib.sha256(
-                memoryview(np.ascontiguousarray(geometry.ownership))
-            ).hexdigest()
-        )
-        jobs_by_block: dict[str, list[object]] = {
-            item.block_id: [] for item in evidence.plan.blocks
-        }
+        owner_by_segment = {item.segment_id: item.object_id for item in evidence.objects.segment_ownership}
+        ownership_order = tuple(item.segment_id for item in evidence.geometry.segmentation.segments)
+        ownership_sha256 = hashlib.sha256(memoryview(np.ascontiguousarray(geometry.ownership))).hexdigest()
+        jobs_by_block: dict[str, list[object]] = {item.block_id: [] for item in evidence.plan.blocks}
         for job in evidence.queue.jobs:
             jobs_by_block.setdefault(job.block_id, []).append(job)
-        observations_by_segment: dict[str, list[object]] = {
-            item: [] for item in document.source_segment_ids
-        }
+        observations_by_segment: dict[str, list[object]] = {item: [] for item in document.source_segment_ids}
         for observation in evidence.fusion.observations:
             observations_by_segment[observation.segment_id].append(observation)
 
@@ -429,16 +393,8 @@ class TutorialArtifactWriter:
             segment_root.mkdir(parents=True)
             block_root.mkdir()
 
-            object_text = (
-                assembled.text
-                if assembled.text is not None
-                else assembled.candidate_text
-            )
-            object_markdown = (
-                assembled.markdown
-                if assembled.markdown is not None
-                else assembled.candidate_markdown
-            )
+            object_text = assembled.text if assembled.text is not None else assembled.candidate_text
+            object_markdown = assembled.markdown if assembled.markdown is not None else assembled.candidate_markdown
             (object_root / "object.txt").write_text(
                 object_text,
                 encoding="utf-8",
@@ -451,8 +407,7 @@ class TutorialArtifactWriter:
             object_blocks = tuple(
                 block
                 for block in evidence.plan.blocks
-                if object_id in block.object_ids
-                or bool(set(block.segment_ids) & set(source_object.segment_ids))
+                if object_id in block.object_ids or bool(set(block.segment_ids) & set(source_object.segment_ids))
             )
             cls._write_json(
                 object_root / "object.json",
@@ -490,29 +445,13 @@ class TutorialArtifactWriter:
                 segment = geometry_segments[segment_id]
                 fusion = segment_fusion[segment_id]
                 assembly = segment_assembly[segment_id]
-                raw_source = (
-                    root
-                    / "01-geometry"
-                    / "segment-crops"
-                    / "raw"
-                    / f"{segment_id}.png"
-                )
-                isolated_source = (
-                    root
-                    / "01-geometry"
-                    / "segment-crops"
-                    / "isolated"
-                    / f"{segment_id}.png"
-                )
+                raw_source = root / "01-geometry" / "segment-crops" / "raw" / f"{segment_id}.png"
+                isolated_source = root / "01-geometry" / "segment-crops" / "isolated" / f"{segment_id}.png"
                 raw_target = segment_root / f"{segment_id}.png"
                 isolated_target = segment_root / f"{segment_id}.isolated.png"
                 shutil.copyfile(raw_source, raw_target)
                 shutil.copyfile(isolated_source, isolated_target)
-                segment_text = (
-                    assembly.text
-                    if assembly.text is not None
-                    else assembly.candidate_text
-                )
+                segment_text = assembly.text if assembly.text is not None else assembly.candidate_text
                 (segment_root / f"{segment_id}.txt").write_text(
                     segment_text,
                     encoding="utf-8",
@@ -530,18 +469,12 @@ class TutorialArtifactWriter:
                         "sparse_span": matrix_spans[segment_id],
                         "raw_png": f"{segment_id}.png",
                         "isolated_png": f"{segment_id}.isolated.png",
-                        "raw_sha256": hashlib.sha256(
-                            raw_target.read_bytes()
-                        ).hexdigest(),
-                        "isolated_sha256": hashlib.sha256(
-                            isolated_target.read_bytes()
-                        ).hexdigest(),
+                        "raw_sha256": hashlib.sha256(raw_target.read_bytes()).hexdigest(),
+                        "isolated_sha256": hashlib.sha256(isolated_target.read_bytes()).hexdigest(),
                         "selected_text": fusion.selected_text,
                         "selected_observation_id": fusion.selected_observation_id,
                         "selected_transform": (
-                            fusion.selected_transform.value
-                            if fusion.selected_transform is not None
-                            else None
+                            fusion.selected_transform.value if fusion.selected_transform is not None else None
                         ),
                         "selected_lane_id": fusion.selected_lane_id,
                         "confidence": fusion.confidence,
@@ -560,9 +493,7 @@ class TutorialArtifactWriter:
                                 "lane_id": item.lane_id,
                                 "text": item.text,
                                 "confidence": float(item.confidence),
-                                "page_bboxes": [
-                                    list(box.as_tuple()) for box in item.page_bboxes
-                                ],
+                                "page_bboxes": [list(box.as_tuple()) for box in item.page_bboxes],
                             }
                             for item in observations_by_segment[segment_id]
                         ],
@@ -603,14 +534,9 @@ class TutorialArtifactWriter:
                 algebra = tuple(
                     item
                     for item in evidence.plan.adjacent_algebra
-                    if block.block_id
-                    in (item.first_block_id, item.second_block_id)
+                    if block.block_id in (item.first_block_id, item.second_block_id)
                 )
-                local_segments = tuple(
-                    item
-                    for item in block.segment_ids
-                    if item in source_object.segment_ids
-                )
+                local_segments = tuple(item for item in block.segment_ids if item in source_object.segment_ids)
                 cls._write_json(
                     target / "membership.json",
                     {
@@ -624,26 +550,20 @@ class TutorialArtifactWriter:
                         "segment_ids": list(block.segment_ids),
                         "object_local_segment_ids": list(local_segments),
                         "foreign_segment_ids": [
-                            item
-                            for item in block.segment_ids
-                            if item not in source_object.segment_ids
+                            item for item in block.segment_ids if item not in source_object.segment_ids
                         ],
                         "masked_segment_ids": list(crop.masked_segment_ids),
                         "isolation": "isolation.json",
                         "isolation_mask": isolation_mask_name,
                         "raw_sha256": hashlib.sha256(crop.raw.png_bytes).hexdigest(),
-                        "enhanced_sha256": hashlib.sha256(
-                            crop.gamma.png_bytes
-                        ).hexdigest(),
+                        "enhanced_sha256": hashlib.sha256(crop.gamma.png_bytes).hexdigest(),
                         "enhancement_recipe": crop.gamma.recipe,
                         "enhancement_backend": crop.gamma.backend.value,
                         "algebra": [
                             {
                                 "first_block_id": item.first_block_id,
                                 "second_block_id": item.second_block_id,
-                                "intersection_segment_ids": list(
-                                    item.intersection_segment_ids
-                                ),
+                                "intersection_segment_ids": list(item.intersection_segment_ids),
                                 "union_segment_ids": list(item.union_segment_ids),
                                 "xor_segment_ids": list(item.xor_segment_ids),
                             }
@@ -666,9 +586,7 @@ class TutorialArtifactWriter:
                             "input_sha256": job.input_sha256,
                             "context_sha256": job.context_sha256,
                             "text": output.text if output is not None else None,
-                            "geometry": (
-                                output.geometry.value if output is not None else None
-                            ),
+                            "geometry": (output.geometry.value if output is not None else None),
                             "words": (
                                 [
                                     {
@@ -694,9 +612,7 @@ class TutorialArtifactWriter:
                         )
                     )
                 cls._write_json(target / "ocr.json", {"jobs": job_records})
-                (target / "ocr.txt").write_text(
-                    "\n".join(job_text), encoding="utf-8"
-                )
+                (target / "ocr.txt").write_text("\n".join(job_text), encoding="utf-8")
                 debug_lines.extend(
                     (
                         f"### `{block.block_id}`",
@@ -718,14 +634,11 @@ class TutorialArtifactWriter:
                         (
                             "Isolation mask (white = removed before OCR):",
                             "",
-                            f"![{block.block_id} isolation mask]"
-                            f"(blocks/{block.block_id}/{isolation_mask_name})",
+                            f"![{block.block_id} isolation mask]" f"(blocks/{block.block_id}/{isolation_mask_name})",
                             "",
                         )
                     )
-            (object_root / "debag.md").write_text(
-                "\n".join(debug_lines) + "\n", encoding="utf-8"
-            )
+            (object_root / "debag.md").write_text("\n".join(debug_lines) + "\n", encoding="utf-8")
             index_lines.append(
                 f"| {source_object.reading_index} | `{object_id}` | "
                 f"{source_object.kind.value} | {len(source_object.segment_ids)} | "
@@ -742,9 +655,7 @@ class TutorialArtifactWriter:
                     "directory": object_id,
                 }
             )
-        (objects_root / "index.md").write_text(
-            "\n".join(index_lines) + "\n", encoding="utf-8"
-        )
+        (objects_root / "index.md").write_text("\n".join(index_lines) + "\n", encoding="utf-8")
         cls._write_json(
             objects_root / "manifest.json",
             {
@@ -778,13 +689,8 @@ class TutorialArtifactWriter:
                 "",
             ]
             (logs / log_name).write_text("\n".join(lines), encoding="utf-8")
-            table.append(
-                f"{step}\t{stage_number}\t{stage_name}\t{status}\t"
-                f"../{directory}/manifest.json"
-            )
-        (logs / "stages.tsv").write_text(
-            "\n".join(table) + "\n", encoding="utf-8"
-        )
+            table.append(f"{step}\t{stage_number}\t{stage_name}\t{status}\t" f"../{directory}/manifest.json")
+        (logs / "stages.tsv").write_text("\n".join(table) + "\n", encoding="utf-8")
 
     @classmethod
     def _validate(
@@ -810,9 +716,7 @@ class TutorialArtifactWriter:
             raise TypeError("evidence must be SparsePipelineEvidence")
         if not isinstance(document, DocumentAssemblyResult):
             raise TypeError("document must be a DocumentAssemblyResult")
-        if assembly_config is not None and not isinstance(
-            assembly_config, DocumentAssemblyConfig
-        ):
+        if assembly_config is not None and not isinstance(assembly_config, DocumentAssemblyConfig):
             raise TypeError("assembly_config must be a DocumentAssemblyConfig or None")
 
         cls._validate_control(control)
@@ -829,27 +733,19 @@ class TutorialArtifactWriter:
             queue=evidence.queue,
             fusion=evidence.fusion,
             ownership=geometry.ownership,
-            ownership_segment_ids=tuple(
-                segment.segment_id
-                for segment in geometry.result.segmentation.segments
-            ),
+            ownership_segment_ids=tuple(segment.segment_id for segment in geometry.result.segmentation.segments),
             object_config=evidence.object_config,
             planning_config=evidence.planning_config,
             crop_config=evidence.crop_config,
             fusion_config=evidence.fusion_config,
         )
         if document != expected_document:
-            raise ValueError(
-                "document result was not assembled from the supplied pipeline evidence"
-            )
+            raise ValueError("document result was not assembled from the supplied pipeline evidence")
 
         # A page candidate may have a stage-specific crop ID.  Alias only the
         # identifier; immutable source bytes remain exactly the aligned page.
         stage4_input = CropInput(evidence.stage4.crop_id, evidence.page.png_bytes)
-        if (
-            hashlib.sha256(stage4_input.png_bytes).hexdigest()
-            != evidence.stage4.source_sha256
-        ):
+        if hashlib.sha256(stage4_input.png_bytes).hexdigest() != evidence.stage4.source_sha256:
             raise ValueError("Stage 4 candidate source digest disagrees with the page")
         if CropEnhancementArtifactWriter._source_size(stage4_input) != (
             evidence.stage4.width,
@@ -858,20 +754,14 @@ class TutorialArtifactWriter:
             raise ValueError("Stage 4 candidate changed the aligned page geometry")
         for block, crop in zip(evidence.plan.blocks, evidence.crops):
             if crop.gamma.recipe != evidence.stage4.recipe:
-                raise ValueError(
-                    f"Stage 5 gamma recipe disagrees with Stage 4 for {block.block_id}"
-                )
+                raise ValueError(f"Stage 5 gamma recipe disagrees with Stage 4 for {block.block_id}")
             if crop.gamma.backend is not evidence.stage4.backend:
-                raise ValueError(
-                    f"Stage 5 gamma backend disagrees with Stage 4 for {block.block_id}"
-                )
+                raise ValueError(f"Stage 5 gamma backend disagrees with Stage 4 for {block.block_id}")
             if (crop.gamma.width, crop.gamma.height) != (
                 block.bbox.width,
                 block.bbox.height,
             ):
-                raise ValueError(
-                    f"Stage 5 gamma changed bbox geometry for {block.block_id}"
-                )
+                raise ValueError(f"Stage 5 gamma changed bbox geometry for {block.block_id}")
         return stage4_input
 
     @staticmethod
@@ -883,12 +773,7 @@ class TutorialArtifactWriter:
             or control.unresolved_node_ids
         ):
             raise ValueError("tutorial control must be a complete RunOutcome")
-        if (
-            not control.evidence
-            or not control.derivations
-            or not control.trace
-            or control.steps < 1
-        ):
+        if not control.evidence or not control.derivations or not control.trace or control.steps < 1:
             raise ValueError("tutorial control evidence must not be empty")
 
         stage_order: list[int] = []
@@ -923,9 +808,7 @@ class TutorialArtifactWriter:
     ) -> None:
         if geometry.result != evidence.geometry:
             raise ValueError("geometry bundle and sparse pipeline evidence disagree")
-        original_width, original_height = (
-            geometry.result.alignment.transform.original_size
-        )
+        original_width, original_height = geometry.result.alignment.transform.original_size
         aligned_width, aligned_height = geometry.result.segmentation.aligned_size
         expected_shapes = (
             ("source_rgb", geometry.source_rgb, (original_height, original_width, 3)),
@@ -947,23 +830,11 @@ class TutorialArtifactWriter:
             geometry.ownership,
             evidence.ownership,
         ):
-            raise ValueError(
-                "geometry bundle and sparse evidence ownership disagree"
-            )
-        expected_ownership_order = tuple(
-            segment.segment_id
-            for segment in geometry.result.segmentation.segments
-        )
-        if (
-            evidence.ownership_segment_ids is not None
-            and evidence.ownership_segment_ids != expected_ownership_order
-        ):
-            raise ValueError(
-                "geometry bundle and sparse evidence ownership order disagree"
-            )
-        aligned_sha256 = hashlib.sha256(
-            memoryview(np.ascontiguousarray(geometry.aligned_rgb))
-        ).hexdigest()
+            raise ValueError("geometry bundle and sparse evidence ownership disagree")
+        expected_ownership_order = tuple(segment.segment_id for segment in geometry.result.segmentation.segments)
+        if evidence.ownership_segment_ids is not None and evidence.ownership_segment_ids != expected_ownership_order:
+            raise ValueError("geometry bundle and sparse evidence ownership order disagree")
+        aligned_sha256 = hashlib.sha256(memoryview(np.ascontiguousarray(geometry.aligned_rgb))).hexdigest()
         if aligned_sha256 != geometry.result.aligned_rgb_sha256:
             raise ValueError("geometry aligned RGB digest disagrees with its result")
 
@@ -1003,10 +874,7 @@ class TutorialArtifactWriter:
         )
         helper._write_text(
             stage / "evidence.txt",
-            "".join(
-                f"{item.order_key!r}\t{item.atom_id}\t{item.payload}\n"
-                for item in control.evidence
-            ),
+            "".join(f"{item.order_key!r}\t{item.atom_id}\t{item.payload}\n" for item in control.evidence),
         )
         helper._write_text(
             stage / "trace.txt",
@@ -1082,8 +950,8 @@ class TutorialArtifactWriter:
                     "",
                 )
             ),
-                encoding="utf-8",
-            )
+            encoding="utf-8",
+        )
 
     @classmethod
     def _write_block_isolation_evidence(
@@ -1104,23 +972,15 @@ class TutorialArtifactWriter:
         if crop.isolation_mask_png is not None:
             isolation_mask_name = "isolation-mask.png"
             (target / isolation_mask_name).write_bytes(crop.isolation_mask_png)
-            isolation_mask_sha256 = hashlib.sha256(
-                crop.isolation_mask_png
-            ).hexdigest()
-        masked_owners = {
-            segment_id: owner_by_segment[segment_id]
-            for segment_id in crop.masked_segment_ids
-        }
+            isolation_mask_sha256 = hashlib.sha256(crop.isolation_mask_png).hexdigest()
+        masked_owners = {segment_id: owner_by_segment[segment_id] for segment_id in crop.masked_segment_ids}
         cls._write_json(
             target / "isolation.json",
             {
                 "applied": crop.isolation_mask_png is not None,
                 "mask_png": isolation_mask_name,
                 "mask_sha256": isolation_mask_sha256,
-                "mask_semantics": (
-                    "white pixels were removed from the OCR input; "
-                    "black pixels were preserved"
-                ),
+                "mask_semantics": ("white pixels were removed from the OCR input; " "black pixels were preserved"),
                 "masked_segment_ids": list(crop.masked_segment_ids),
                 "masked_segment_owners": masked_owners,
                 "view_object_id": object_id,
@@ -1135,9 +995,7 @@ class TutorialArtifactWriter:
                         "ownership and checked before artifact publication"
                     ),
                     "declared_members_preserved": True,
-                    "masked_segments_are_foreign_objects": all(
-                        owner != object_id for owner in masked_owners.values()
-                    ),
+                    "masked_segments_are_foreign_objects": all(owner != object_id for owner in masked_owners.values()),
                 },
             },
         )
@@ -1170,36 +1028,23 @@ class TutorialArtifactWriter:
                     "raw": raw_path.relative_to(stage).as_posix(),
                     "gamma": gamma_path.relative_to(stage).as_posix(),
                     "isolation_mask": (
-                        f"isolation-masks/{block.block_id}.png"
-                        if crop.isolation_mask_png is not None
-                        else None
+                        f"isolation-masks/{block.block_id}.png" if crop.isolation_mask_png is not None else None
                     ),
                     "masked_segment_ids": list(crop.masked_segment_ids),
                     "raw_sha256": hashlib.sha256(crop.raw.png_bytes).hexdigest(),
                     "gamma_sha256": crop.gamma.output_sha256,
                     "gamma_recipe": crop.gamma.recipe,
                     "gamma_backend": crop.gamma.backend.value,
-                    "gamma_recipe_matches_stage4": (
-                        crop.gamma.recipe == evidence.stage4.recipe
-                    ),
-                    "gamma_backend_matches_stage4": (
-                        crop.gamma.backend is evidence.stage4.backend
-                    ),
+                    "gamma_recipe_matches_stage4": (crop.gamma.recipe == evidence.stage4.recipe),
+                    "gamma_backend_matches_stage4": (crop.gamma.backend is evidence.stage4.backend),
                     "gamma_geometry_unchanged": (
-                        (crop.gamma.width, crop.gamma.height)
-                        == (block.bbox.width, block.bbox.height)
+                        (crop.gamma.width, crop.gamma.height) == (block.bbox.width, block.bbox.height)
                     ),
                 }
             )
-        recipe_matches = all(
-            item["gamma_recipe_matches_stage4"] is True for item in entries
-        )
-        backend_matches = all(
-            item["gamma_backend_matches_stage4"] is True for item in entries
-        )
-        geometry_unchanged = all(
-            item["gamma_geometry_unchanged"] is True for item in entries
-        )
+        recipe_matches = all(item["gamma_recipe_matches_stage4"] is True for item in entries)
+        backend_matches = all(item["gamma_backend_matches_stage4"] is True for item in entries)
+        geometry_unchanged = all(item["gamma_geometry_unchanged"] is True for item in entries)
         contact_sheets = write_paired_contact_sheets(
             stage,
             stem="blocks",
@@ -1303,9 +1148,7 @@ class TutorialArtifactWriter:
                 "invariants": {
                     "per_block_source_is_stage5_raw_crop": True,
                     "per_block_output_is_recomputed_from_source": True,
-                    "same_geometry": all(
-                        item["same_geometry"] is True for item in items
-                    ),
+                    "same_geometry": all(item["same_geometry"] is True for item in items),
                     "recipe_backend_match_global_calibration": True,
                     "full_page_output_not_used_as_ocr_input": True,
                 },
@@ -1319,8 +1162,7 @@ class TutorialArtifactWriter:
             "независимо из-за различающегося фона. Обе actual raw/gamma версии "
             "передаются Stage 2 как OCR candidates.",
             "",
-            "Full-page output — только global calibration / **NOT OCR INPUT**; "
-            "block gamma не вырезается из него.",
+            "Full-page output — только global calibration / **NOT OCR INPUT**; " "block gamma не вырезается из него.",
             "",
         ]
         for item in items:
@@ -1335,14 +1177,11 @@ class TutorialArtifactWriter:
                     "",
                     "| actual raw block | actual enhanced block |",
                     "|---|---|",
-                    f"| ![{block_id} raw]({item['source']}) | "
-                    f"![{block_id} gamma]({item['output']}) |",
+                    f"| ![{block_id} raw]({item['source']}) | " f"![{block_id} gamma]({item['output']}) |",
                     "",
                 )
             )
-        (stage / "production-block-gallery.md").write_text(
-            "\n".join(lines), encoding="utf-8"
-        )
+        (stage / "production-block-gallery.md").write_text("\n".join(lines), encoding="utf-8")
 
     @staticmethod
     def _write_membership_gallery(
@@ -1438,8 +1277,7 @@ class TutorialArtifactWriter:
                     "",
                     "| raw OCR input | gamma OCR input |",
                     "|---|---|",
-                    f"| ![{block_id} raw]({entry['raw']}) | "
-                    f"![{block_id} gamma]({entry['gamma']}) |",
+                    f"| ![{block_id} raw]({entry['raw']}) | " f"![{block_id} gamma]({entry['gamma']}) |",
                 )
             )
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -1474,10 +1312,7 @@ class TutorialArtifactWriter:
         finally:
             overlay.close()
 
-        segment_index = {
-            item.segment_id: index
-            for index, item in enumerate(evidence.geometry.segmentation.segments)
-        }
+        segment_index = {item.segment_id: index for index, item in enumerate(evidence.geometry.segmentation.segments)}
         pair_entries: list[dict[str, object]] = []
         pairs_root = stage / "adjacent-pairs"
         pairs_root.mkdir()
@@ -1560,10 +1395,7 @@ class TutorialArtifactWriter:
     ) -> np.ndarray:
         width, height = evidence.geometry.segmentation.aligned_size
         output = np.zeros((height, width), dtype=np.bool_)
-        segment_by_id = {
-            item.segment_id: item
-            for item in evidence.geometry.segmentation.segments
-        }
+        segment_by_id = {item.segment_id: item for item in evidence.geometry.segmentation.segments}
         for segment_id in segment_ids:
             box = segment_by_id[segment_id].bbox
             output[box.top : box.bottom, box.left : box.right] = True
@@ -1645,27 +1477,15 @@ class TutorialArtifactWriter:
         evidence: SparsePipelineEvidence,
         document: DocumentAssemblyResult,
     ) -> tuple[str, ...]:
-        geometry_status = (
-            "COMPLETE"
-            if evidence.geometry.status.value == "complete"
-            else "UNRESOLVED"
-        )
-        block_status = (
-            "COMPLETE"
-            if evidence.plan.status.value == "complete"
-            else "UNRESOLVED"
-        )
+        geometry_status = "COMPLETE" if evidence.geometry.status.value == "complete" else "UNRESOLVED"
+        block_status = "COMPLETE" if evidence.plan.status.value == "complete" else "UNRESOLVED"
         ocr_complete = (
             evidence.fusion.status is OcrFusionStatus.COMPLETE
             and evidence.queue.status is OcrQueueStatus.COMPLETE
             and not evidence.fusion.unassigned_word_observations
             and not evidence.fusion.replica_conflicts
         )
-        document_status = (
-            "COMPLETE"
-            if document.status is AssemblyStatus.COMPLETE
-            else "UNRESOLVED"
-        )
+        document_status = "COMPLETE" if document.status is AssemblyStatus.COMPLETE else "UNRESOLVED"
         return (
             "COMPLETE",
             geometry_status,
@@ -1749,10 +1569,7 @@ class TutorialArtifactWriter:
 
         pair_link = ""
         if evidence.plan.adjacent_algebra:
-            pair_link = (
-                "; [первая OR/XOR-пара]"
-                "(05-blocks/adjacent-pairs/pair-000000/manifest.json)"
-            )
+            pair_link = "; [первая OR/XOR-пара]" "(05-blocks/adjacent-pairs/pair-000000/manifest.json)"
         rows = (
             (3, "03-control", statuses[0], "trace.txt", "порядок и while-трасса"),
             (
@@ -1790,23 +1607,18 @@ class TutorialArtifactWriter:
         ]
         for step, (number, directory, status, artifact, description) in enumerate(rows, start=1):
             suffix = pair_link if number == 5 else ""
-            lines.append(
-                f"| {step} | {number} | {status} | "
-                f"[{description}]({directory}/{artifact}){suffix} |"
-            )
+            lines.append(f"| {step} | {number} | {status} | " f"[{description}]({directory}/{artifact}){suffix} |")
         lines.extend(
             (
                 "",
                 "## Быстрый ручной разбор",
                 "",
-                "- [точная разряженная матрица](sparse-matrix.tsv) и "
-                "[её логическая картинка](sparse-matrix.png);",
+                "- [точная разряженная матрица](sparse-matrix.tsv) и " "[её логическая картинка](sparse-matrix.png);",
                 "- [literal Stage 1 ownership](sparse-matrix-ownership.png);",
                 "- [объекты с собственными segments/ и blocks/](objects/index.md);",
                 "- [логи этапов](logs/stages.tsv);",
                 "- [commit, argv, config и input SHA](provenance.json);",
-                "- [итоговый document.md](document.md) и "
-                "[document.txt](document.txt).",
+                "- [итоговый document.md](document.md) и " "[document.txt](document.txt).",
                 "",
                 "## Как читать визуализации",
                 "",

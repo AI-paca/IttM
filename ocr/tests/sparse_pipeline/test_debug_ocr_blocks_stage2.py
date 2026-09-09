@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import csv
 import importlib.util
-import io
 import json
 import sys
 import threading
@@ -24,12 +23,7 @@ from app.sparse_pipeline.ocr_queue import (
 
 @pytest.fixture(scope="module")
 def runner() -> ModuleType:
-    path = (
-        Path(__file__).resolve().parents[3]
-        / "scripts"
-        / "debug"
-        / "debug_ocr_blocks.py"
-    )
+    path = Path(__file__).resolve().parents[3] / "scripts" / "debug" / "debug_ocr_blocks.py"
     name = "_stage2_debug_ocr_blocks_under_test"
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
@@ -295,9 +289,7 @@ def test_summary_json_tsv_and_markdown_are_complete_and_consistent(
     assert summary["status"] == "unresolved"
     assert summary["images"] == 2
     assert summary["accuracy_percent_mean"] == 90.0
-    assert summary["accuracy_percent_micro"] == pytest.approx(
-        100.0 * (1.0 - 2 / 14)
-    )
+    assert summary["accuracy_percent_micro"] == pytest.approx(100.0 * (1.0 - 2 / 14))
     assert summary["totals"]["lost_characters"] == 2
     assert summary["totals"]["reference_characters"] == 14
     with (tmp_path / "summary.tsv").open(encoding="utf-8", newline="") as stream:
@@ -363,11 +355,7 @@ def test_main_reuses_one_persistent_session_and_sorts_report_rows(
     assert runner.main() == 0
     assert len(sessions) == 1
     assert seen_session_ids == [id(sessions[0]), id(sessions[0])]
-    summary = json.loads(
-        (output_root / "persistent-run" / "summary.json").read_text(
-            encoding="utf-8"
-        )
-    )
+    summary = json.loads((output_root / "persistent-run" / "summary.json").read_text(encoding="utf-8"))
     assert [item["source"] for item in summary["items"]] == ["a.png", "b.png"]
 
 
@@ -423,11 +411,7 @@ def test_main_returns_failure_and_writes_the_failed_item(
     monkeypatch.setattr(runner, "_run_ocr", lambda *_args, **_kwargs: failed)
     monkeypatch.setattr(runner, "PersistentOcrSession", Session)
     assert runner.main() == 1
-    summary = json.loads(
-        (output_root / "failed-run" / "summary.json").read_text(
-            encoding="utf-8"
-        )
-    )
+    summary = json.loads((output_root / "failed-run" / "summary.json").read_text(encoding="utf-8"))
     assert summary["status"] == "failed"
     assert summary["failures"] == 1
     assert summary["items"][0]["error"] == "FixtureError: reported"

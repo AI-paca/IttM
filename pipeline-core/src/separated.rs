@@ -4631,6 +4631,38 @@ mod tests {
     }
 
     #[test]
+    fn valid_small_rasters_reach_the_block_boundary() {
+        for (width, height, rectangles) in [
+            (100_usize, 30_usize, vec![[10, 10, 90, 20]]),
+            (80, 40, vec![[8, 7, 55, 11], [12, 24, 70, 28]]),
+            (40, 40, vec![]),
+        ] {
+            let mut pixels = vec![255_u8; width * height];
+            for [left, top, right, bottom] in rectangles {
+                for y in top..bottom {
+                    pixels[y * width + left..y * width + right].fill(0);
+                }
+            }
+            let analysis = geometry::analyze_geometry(&pixels, width, height, width, 1)
+                .expect("valid raster geometry");
+            let topology = topology::build_physical_topology(&analysis)
+                .expect("valid raster topology");
+            let objects = objects::reconstruct_objects_with_topology(&analysis, &topology)
+                .expect("valid raster objects");
+            blocks::plan_blocks_with_topology(&analysis, &objects, &topology)
+                .expect("valid raster blocks");
+            verified_route_jobs(&pixels, width, height, width, 1)
+                .expect("valid raster compaction");
+            let handle = unsafe {
+                ittm_separated_begin(pixels.as_ptr(), pixels.len() as u32,
+                    width as u32, height as u32, width as u32, 1)
+            };
+            assert_ne!(handle, 0, "valid {width}x{height} raster session");
+            assert_eq!(ittm_separated_drop(handle), 0);
+        }
+    }
+
+    #[test]
     fn plans_the_same_explicit_stage_boundary_for_raster_lines() {
         let (pixels, width, height) = white_page_with_two_lines();
         let (jobs, rasters, _objects, _blocks, _topology, _matrices) =

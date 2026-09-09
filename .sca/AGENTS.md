@@ -38,7 +38,7 @@ edited or committed. The only tracked policy data is `accepted-risk.json`.
 | Nginx image            | `.sca/nginx-vuln.json`, `.sca/nginx.cdx.json`                  | Fixable image `MEDIUM`, `HIGH`, or `CRITICAL`           |
 | OCR runtime image      | `.sca/ocr-vuln.json`, `.sca/ocr.cdx.json`                      | Fixable image `MEDIUM`, `HIGH`, or `CRITICAL`           |
 | OCR CI image           | `.sca/ocr-ci-vuln.json`, `.sca/ocr-ci.cdx.json`                | Fixable image `MEDIUM`, `HIGH`, or `CRITICAL`           |
-| Rust SBOM coverage     | source/nginx/OCR CycloneDX reports                              | Missing expected Cargo root component                   |
+| Rust SBOM coverage     | source/nginx/OCR CycloneDX reports                             | Missing expected Cargo root component                   |
 | Unfixed image families | `.sca/accepted-risk-current.txt`, `-missing.txt`, `-stale.txt` | New or disappeared family relative to tracked policy    |
 
 The image definitions are:

@@ -57,19 +57,10 @@ def _segments(count: int) -> tuple[Segment, ...]:
 
 
 def _matrix(segments: tuple[Segment, ...]) -> SparseSegmentMatrix:
-    rows = tuple(
-        AxisInterval(index, index * 20, (index + 1) * 20)
-        for index in range(len(segments))
-    )
+    rows = tuple(AxisInterval(index, index * 20, (index + 1) * 20) for index in range(len(segments)))
     columns = (AxisInterval(0, 0, 120),)
-    cells = tuple(
-        SparseCell(index, 0, segment.segment_id)
-        for index, segment in enumerate(segments)
-    )
-    spans = tuple(
-        SegmentSpan(segment.segment_id, index, index + 1, 0, 1)
-        for index, segment in enumerate(segments)
-    )
+    cells = tuple(SparseCell(index, 0, segment.segment_id) for index, segment in enumerate(segments))
+    spans = tuple(SegmentSpan(segment.segment_id, index, index + 1, 0, 1) for index, segment in enumerate(segments))
     return SparseSegmentMatrix(rows, columns, cells, spans)
 
 
@@ -158,9 +149,7 @@ def test_unconfirmed_topology_marks_exactly_one_existing_whole_object() -> None:
     assert fallback[0].segment_ids == objects.objects[0].segment_ids
     assert fallback[0].core_segment_ids == fallback[0].segment_ids
     assert fallback[0].bbox == baseline.blocks[0].bbox
-    assert tuple(item.segment_ids for item in plan.blocks) == tuple(
-        item.segment_ids for item in baseline.blocks
-    )
+    assert tuple(item.segment_ids for item in plan.blocks) == tuple(item.segment_ids for item in baseline.blocks)
     assert plan.membership_units == baseline.membership_units
     assert len(plan.blocks) == len(baseline.blocks)
     assert "context-fallback=selected-whole-object" in plan.diagnostics
@@ -252,15 +241,10 @@ def test_multi_membership_whole_object_does_not_activate_fallback() -> None:
     )
 
     assert not any(item.context_fallback for item in plan.blocks)
-    assert tuple(item.segment_ids for item in plan.blocks) == tuple(
-        item.segment_ids for item in baseline.blocks
-    )
+    assert tuple(item.segment_ids for item in plan.blocks) == tuple(item.segment_ids for item in baseline.blocks)
     assert plan.membership_units == baseline.membership_units
     assert len(plan.blocks) * 2 == len(baseline.blocks) * 2
-    assert (
-        "context-fallback=blocked-no-reusable-whole-object-evidence"
-        in plan.diagnostics
-    )
+    assert "context-fallback=blocked-no-reusable-whole-object-evidence" in plan.diagnostics
 
 
 def test_runtime_keeps_one_best_agreed_fallback_output() -> None:
@@ -320,9 +304,7 @@ def test_runtime_keeps_one_best_agreed_fallback_output() -> None:
         (),
         OcrOutputGeometry.TEXT_ONLY,
     )
-    assert selected.diagnostics[-1] == (
-        "context-fallback-selected=job-gamma;candidates=2"
-    )
+    assert selected.diagnostics[-1] == ("context-fallback-selected=job-gamma;candidates=2")
     assert _context_fallback_selected(selected)
 
 
@@ -351,7 +333,5 @@ def test_runtime_does_not_activate_fallback_without_existing_output() -> None:
     selected = _select_context_fallback_queue(plan=plan, queue=queue)
 
     assert selected.jobs == queue.jobs
-    assert selected.diagnostics[-1] == (
-        "context-fallback-selected=none;candidates=0"
-    )
+    assert selected.diagnostics[-1] == ("context-fallback-selected=none;candidates=0")
     assert not _context_fallback_selected(selected)

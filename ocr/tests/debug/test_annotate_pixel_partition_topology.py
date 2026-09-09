@@ -7,18 +7,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-SCRIPT = (
-    Path(__file__).resolve().parents[3]
-    / "scripts"
-    / "debug"
-    / "annotate_pixel_partition_topology.py"
-)
+SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "debug" / "annotate_pixel_partition_topology.py"
 
 
 def _load_script():
-    spec = importlib.util.spec_from_file_location(
-        "_annotate_pixel_partition_topology_under_test", SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("_annotate_pixel_partition_topology_under_test", SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -226,11 +219,7 @@ def test_sidebar_visual_rows_survive_inside_table_y_extent() -> None:
     # table cells or word-level sidebar segments.
     assert codes[0][1:3] == (0, 5)
     for row, row_codes in zip(rows[1:], codes[1:]):
-        table_codes = tuple(
-            code
-            for slot, code in zip(row.slots, row_codes)
-            if 40 <= slot.start and slot.end <= 100
-        )
+        table_codes = tuple(code for slot, code in zip(row.slots, row_codes) if 40 <= slot.start and slot.end <= 100)
         assert table_codes == (3, 8)
 
 
@@ -358,15 +347,7 @@ def test_side_by_side_networks_share_one_planar_y_sweep() -> None:
     )
     middle = rows[1]
     middle_codes = codes[1]
-    left_codes = tuple(
-        code
-        for slot, code in zip(middle.slots, middle_codes)
-        if 10 <= slot.start and slot.end <= 50
-    )
-    right_codes = tuple(
-        code
-        for slot, code in zip(middle.slots, middle_codes)
-        if 70 <= slot.start and slot.end <= 110
-    )
+    left_codes = tuple(code for slot, code in zip(middle.slots, middle_codes) if 10 <= slot.start and slot.end <= 50)
+    right_codes = tuple(code for slot, code in zip(middle.slots, middle_codes) if 70 <= slot.start and slot.end <= 110)
     assert left_codes == (3, 8)
     assert right_codes == (0, 5)

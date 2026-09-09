@@ -81,10 +81,7 @@ function escapeXml(value: unknown): string {
     .replaceAll('"', "&quot;");
 }
 
-function overlayForPage(
-  page: PageArtifact,
-  rasterDataUrl: string,
-): string {
+function overlayForPage(page: PageArtifact, rasterDataUrl: string): string {
   const { oracle } = page;
   const colors = {
     paragraph: "#087f5b",
@@ -150,7 +147,11 @@ for (const page of pages) {
   const overlayPath = `${rasterPrefix}.overlay.svg`;
   const rasterDataUrl = `data:image/png;base64,${(await readFile(rasterPath)).toString("base64")}`;
   await writeFile(overlayPath, overlayForPage(page, rasterDataUrl));
-  overlayArtifacts.push({ page: page.page, raster: rasterPath, overlay: overlayPath });
+  overlayArtifacts.push({
+    page: page.page,
+    raster: rasterPath,
+    overlay: overlayPath,
+  });
 }
 
 const artifact = {

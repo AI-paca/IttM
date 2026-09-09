@@ -1,6 +1,5 @@
 from app.sparse_pipeline.recursive_object_partition import (
     HorizontalRuleTableRegion,
-    PartitionSegment,
     horizontal_rule_table_regions,
 )
 
@@ -34,7 +33,10 @@ def test_regular_full_width_rules_form_one_table_region() -> None:
 
 
 def test_irregular_rules_do_not_claim_a_table() -> None:
-    assert horizontal_rule_table_regions(
-        rules=((10, 100, 608, 102), (10, 120, 608, 122), (10, 190, 608, 192)),
-        page_bbox=(0, 0, 618, 459),
-    ) == ()
+    assert (
+        horizontal_rule_table_regions(
+            rules=((10, 100, 608, 102), (10, 120, 608, 122), (10, 190, 608, 192)),
+            page_bbox=(0, 0, 618, 459),
+        )
+        == ()
+    )

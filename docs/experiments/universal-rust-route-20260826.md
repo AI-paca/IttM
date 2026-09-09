@@ -18,10 +18,10 @@ raster conversion service.
 
 ## Confirmed failures before this experiment
 
-| Fixture | Last good input | First broken stage | Evidence |
-| --- | --- | --- | --- |
-| `doc_course_tasks_legacy.png` | one correctly detected table object | `separate-block` | one nearly full-table OCR crop was emitted instead of overlapping dyadic masks |
-| raster tables after compact masks | readable non-empty OCR blocks | `get-segment` | only plain block text crossed the ABI, so mask membership and word positions were unavailable and final text would duplicate |
+| Fixture                           | Last good input                     | First broken stage | Evidence                                                                                                                     |
+| --------------------------------- | ----------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `doc_course_tasks_legacy.png`     | one correctly detected table object | `separate-block`   | one nearly full-table OCR crop was emitted instead of overlapping dyadic masks                                               |
+| raster tables after compact masks | readable non-empty OCR blocks       | `get-segment`      | only plain block text crossed the ABI, so mask membership and word positions were unavailable and final text would duplicate |
 
 ## Implemented
 

@@ -43,22 +43,15 @@ def test_fragmented_rule_grid_promotes_multiline_flow_to_table() -> None:
 
 
 def test_parallel_text_rules_without_crossing_grid_remain_flow() -> None:
-    segments = (
-        PartitionSegment("paragraph", (5, 8, 95, 70), ("geo-root",)),
-    )
-    nodes = (
-        PartitionNode("geo-root", (0, 0, 100, 90), None, (), ("paragraph",)),
-    )
+    segments = (PartitionSegment("paragraph", (5, 8, 95, 70), ("geo-root",)),)
+    nodes = (PartitionNode("geo-root", (0, 0, 100, 90), None, (), ("paragraph",)),)
 
     result = partition_recursive_objects(
         segments=segments,
         nodes=nodes,
         rows=(),
         networks=(),
-        structural_rules=tuple(
-            StructuralRule("horizontal", (2, y, 98, y + 1))
-            for y in (5, 20, 35, 50)
-        ),
+        structural_rules=tuple(StructuralRule("horizontal", (2, y, 98, y + 1)) for y in (5, 20, 35, 50)),
     )
 
     assert len(result) == 1

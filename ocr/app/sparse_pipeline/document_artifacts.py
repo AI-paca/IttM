@@ -82,15 +82,11 @@ class DocumentArtifactWriter:
             fusion_config=fusion_config,
         )
         if result != expected:
-            raise ValueError(
-                "document result was not assembled from the supplied stage evidence"
-            )
+            raise ValueError("document result was not assembled from the supplied stage evidence")
 
         parent = root.parent
         parent.mkdir(parents=True, exist_ok=True)
-        temporary = Path(
-            tempfile.mkdtemp(prefix=f".{root.name}.partial-", dir=parent)
-        )
+        temporary = Path(tempfile.mkdtemp(prefix=f".{root.name}.partial-", dir=parent))
         try:
             self._write_stage(temporary / "07-document", result)
             rename_no_replace(temporary, root)
@@ -159,29 +155,17 @@ class DocumentArtifactWriter:
         for index, item in enumerate(result.objects):
             item_dir = object_text_dir / f"object-{index:08d}"
             item_dir.mkdir()
-            DocumentArtifactWriter._write_text(
-                item_dir / "candidate.txt", item.candidate_text
-            )
-            DocumentArtifactWriter._write_text(
-                item_dir / "candidate.md", item.candidate_markdown
-            )
+            DocumentArtifactWriter._write_text(item_dir / "candidate.txt", item.candidate_text)
+            DocumentArtifactWriter._write_text(item_dir / "candidate.md", item.candidate_markdown)
             if item.text is not None and item.markdown is not None:
-                DocumentArtifactWriter._write_text(
-                    item_dir / "certified.txt", item.text
-                )
-                DocumentArtifactWriter._write_text(
-                    item_dir / "certified.md", item.markdown
-                )
+                DocumentArtifactWriter._write_text(item_dir / "certified.txt", item.text)
+                DocumentArtifactWriter._write_text(item_dir / "certified.md", item.markdown)
         for index, item in enumerate(result.segments):
             item_dir = segment_text_dir / f"segment-{index:08d}"
             item_dir.mkdir()
-            DocumentArtifactWriter._write_text(
-                item_dir / "candidate.txt", item.candidate_text
-            )
+            DocumentArtifactWriter._write_text(item_dir / "candidate.txt", item.candidate_text)
             if item.text is not None:
-                DocumentArtifactWriter._write_text(
-                    item_dir / "certified.txt", item.text
-                )
+                DocumentArtifactWriter._write_text(item_dir / "certified.txt", item.text)
 
         diagnostics = "\n".join(result.diagnostics)
         DocumentArtifactWriter._write_text(
@@ -189,9 +173,7 @@ class DocumentArtifactWriter:
             diagnostics + ("\n" if diagnostics else ""),
         )
         payloads = tuple(
-            path
-            for path in sorted(stage_dir.rglob("*"))
-            if path.is_file() and path.name != "manifest.json"
+            path for path in sorted(stage_dir.rglob("*")) if path.is_file() and path.name != "manifest.json"
         )
         manifest = {
             "semantic_stage": 7,
@@ -219,14 +201,9 @@ class DocumentArtifactWriter:
         if isinstance(value, Enum):
             return cls._json_value(value.value)
         if is_dataclass(value) and not isinstance(value, type):
-            return {
-                field.name: cls._json_value(getattr(value, field.name))
-                for field in fields(value)
-            }
+            return {field.name: cls._json_value(getattr(value, field.name)) for field in fields(value)}
         if isinstance(value, Mapping):
-            return {
-                str(key): cls._json_value(item) for key, item in value.items()
-            }
+            return {str(key): cls._json_value(item) for key, item in value.items()}
         if isinstance(value, (tuple, list)):
             return [cls._json_value(item) for item in value]
         if value is None or isinstance(value, (str, int, float, bool)):
@@ -278,12 +255,7 @@ class DocumentArtifactWriter:
             )
             writer.writeheader()
             for value in values:
-                writer.writerow(
-                    {
-                        name: cls._tsv_value(getattr(value, name))
-                        for name in field_names
-                    }
-                )
+                writer.writerow({name: cls._tsv_value(getattr(value, name)) for name in field_names})
 
     @classmethod
     def _tsv_value(cls, value: object) -> str | int | float:

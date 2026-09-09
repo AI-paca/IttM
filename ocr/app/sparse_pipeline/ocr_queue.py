@@ -84,32 +84,23 @@ class OcrEngineOutput:
     def __post_init__(self) -> None:
         if type(self.text) is not str:
             raise ValueError("OCR engine text must be an observed string")
-        if type(self.words) is not tuple or any(
-            not isinstance(word, OcrWord) for word in self.words
-        ):
+        if type(self.words) is not tuple or any(not isinstance(word, OcrWord) for word in self.words):
             raise ValueError("OCR engine words must be an immutable OcrWord tuple")
         if not isinstance(self.geometry, OcrOutputGeometry):
             raise ValueError("OCR engine output geometry is invalid")
         if self.geometry is OcrOutputGeometry.TEXT_ONLY and self.words:
             raise ValueError("text-only OCR output cannot contain word boxes")
-        if self.geometry is OcrOutputGeometry.WORD_BOXES and (
-            bool(self.text.strip()) != bool(self.words)
-        ):
-            raise OcrInvalidOutputError(
-                "bbox OCR output text and observed words disagree"
-            )
-        if self.geometry is OcrOutputGeometry.WORD_BOXES and self.words and (
-            "".join(character for character in self.text if not character.isspace())
-            != "".join(
-                character
-                for word in self.words
-                for character in word.text
-                if not character.isspace()
+        if self.geometry is OcrOutputGeometry.WORD_BOXES and (bool(self.text.strip()) != bool(self.words)):
+            raise OcrInvalidOutputError("bbox OCR output text and observed words disagree")
+        if (
+            self.geometry is OcrOutputGeometry.WORD_BOXES
+            and self.words
+            and (
+                "".join(character for character in self.text if not character.isspace())
+                != "".join(character for word in self.words for character in word.text if not character.isspace())
             )
         ):
-            raise OcrInvalidOutputError(
-                "bbox OCR text is not exactly represented by its observed words"
-            )
+            raise OcrInvalidOutputError("bbox OCR text is not exactly represented by its observed words")
 
 
 class OcrWorker(Protocol):
@@ -216,9 +207,7 @@ class OcrJobResult:
                 raise ValueError(f"OCR job {name} must be lowercase SHA-256")
         if self.capability_id == "unspecified":
             object.__setattr__(self, "capability_id", self.lane_id)
-        if type(self.capability_id) is not str or not _SAFE_ID.fullmatch(
-            self.capability_id
-        ):
+        if type(self.capability_id) is not str or not _SAFE_ID.fullmatch(self.capability_id):
             raise ValueError("OCR job capability identifier is invalid")
         if self.status is OcrJobStatus.COMPLETE:
             if not isinstance(self.output, OcrEngineOutput):
@@ -232,10 +221,7 @@ class OcrJobResult:
             or type(self.error_type) is not str
             or not self.error_type
             or type(self.error_message) is not str
-            or (
-                self.failure_code is not None
-                and not isinstance(self.failure_code, OcrFailureCode)
-            )
+            or (self.failure_code is not None and not isinstance(self.failure_code, OcrFailureCode))
         ):
             raise ValueError("a failed OCR job requires a typed error and no output")
 
@@ -249,28 +235,20 @@ class OcrQueueResult:
     diagnostics: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if type(self.jobs) is not tuple or any(
-            not isinstance(job, OcrJobResult) for job in self.jobs
-        ):
+        if type(self.jobs) is not tuple or any(not isinstance(job, OcrJobResult) for job in self.jobs):
             raise ValueError("OCR queue jobs must be an immutable tuple")
         if not isinstance(self.status, OcrQueueStatus):
             raise ValueError("OCR queue status is invalid")
         if type(self.complete) is not int or type(self.failed) is not int:
             raise ValueError("OCR queue counters must be integers")
-        actual_complete = sum(
-            job.status is OcrJobStatus.COMPLETE for job in self.jobs
-        )
+        actual_complete = sum(job.status is OcrJobStatus.COMPLETE for job in self.jobs)
         actual_failed = len(self.jobs) - actual_complete
         if (self.complete, self.failed) != (actual_complete, actual_failed):
             raise ValueError("OCR queue counters disagree with jobs")
-        expected_status = (
-            OcrQueueStatus.COMPLETE if actual_failed == 0 else OcrQueueStatus.PARTIAL
-        )
+        expected_status = OcrQueueStatus.COMPLETE if actual_failed == 0 else OcrQueueStatus.PARTIAL
         if self.status is not expected_status:
             raise ValueError("OCR queue status disagrees with jobs")
-        if type(self.diagnostics) is not tuple or any(
-            type(item) is not str or not item for item in self.diagnostics
-        ):
+        if type(self.diagnostics) is not tuple or any(type(item) is not str or not item for item in self.diagnostics):
             raise ValueError("OCR queue diagnostics must be an immutable string tuple")
 
 
@@ -315,10 +293,7 @@ class ParallelOcrQueue:
             self.config.max_words,
             self.config.max_total_words // len(specs),
         )
-        by_lane = {
-            lane.lane_id: tuple(spec for spec in specs if spec.lane is lane)
-            for lane in lanes
-        }
+        by_lane = {lane.lane_id: tuple(spec for spec in specs if spec.lane is lane) for lane in lanes}
         unordered: list[OcrJobResult] = []
         diagnostics: list[str] = []
         worker_ownership: dict[int, tuple[object, str, int]] = {}
@@ -344,15 +319,10 @@ class ParallelOcrQueue:
                 try:
                     results, peak_pending = future.result()
                 except Exception as exc:  # defensive isolation around a whole lane
-                    results = tuple(
-                        self._failed(spec, exc, elapsed_seconds=0.0)
-                        for spec in by_lane[lane.lane_id]
-                    )
+                    results = tuple(self._failed(spec, exc, elapsed_seconds=0.0) for spec in by_lane[lane.lane_id])
                     peak_pending = 0
                 unordered.extend(results)
-                diagnostics.append(
-                    f"lane={lane.lane_id};workers={lane.max_workers};peak-pending={peak_pending}"
-                )
+                diagnostics.append(f"lane={lane.lane_id};workers={lane.max_workers};peak-pending={peak_pending}")
         order = {spec.job_id: spec.index for spec in specs}
         jobs = tuple(sorted(unordered, key=lambda job: order[job.job_id]))
         if tuple(job.job_id for job in jobs) != tuple(spec.job_id for spec in specs):
@@ -361,11 +331,7 @@ class ParallelOcrQueue:
         failed = len(jobs) - complete
         return OcrQueueResult(
             jobs=jobs,
-            status=(
-                OcrQueueStatus.COMPLETE
-                if failed == 0
-                else OcrQueueStatus.PARTIAL
-            ),
+            status=(OcrQueueStatus.COMPLETE if failed == 0 else OcrQueueStatus.PARTIAL),
             complete=complete,
             failed=failed,
             diagnostics=tuple(sorted(diagnostics)),
@@ -380,16 +346,12 @@ class ParallelOcrQueue:
     ) -> None:
         if not isinstance(plan, BlockPlan):
             raise OcrQueueInvariantError("plan must be a BlockPlan")
-        if type(crops) is not tuple or any(
-            not isinstance(crop, BlockCropPair) for crop in crops
-        ):
+        if type(crops) is not tuple or any(not isinstance(crop, BlockCropPair) for crop in crops):
             raise OcrQueueInvariantError("crops must be an immutable BlockCropPair tuple")
         if type(lanes) is not tuple or any(not isinstance(lane, OcrLane) for lane in lanes):
             raise OcrQueueInvariantError("lanes must be an immutable OcrLane tuple")
         if len(lanes) > self.config.max_lanes:
-            raise OcrQueueLimitError(
-                f"lane count exceeds configured limit {self.config.max_lanes}"
-            )
+            raise OcrQueueLimitError(f"lane count exceeds configured limit {self.config.max_lanes}")
         lane_ids = tuple(lane.lane_id for lane in lanes)
         if len(lane_ids) != len(set(lane_ids)):
             raise OcrQueueInvariantError("OCR lane identifiers must be unique")
@@ -398,20 +360,10 @@ class ParallelOcrQueue:
         if len(crops) != len(plan.blocks):
             raise OcrQueueInvariantError("block plan and crop count disagree")
         for block, crop in zip(plan.blocks, crops):
-            if (
-                crop.block_id != block.block_id
-                or crop.bbox != block.bbox
-                or crop.segment_ids != block.segment_ids
-            ):
-                raise OcrQueueInvariantError(
-                    "block plan and crop provenance disagree"
-                )
-        if any(
-            lane.max_workers > self.config.max_pending_per_lane for lane in lanes
-        ):
-            raise OcrQueueLimitError(
-                "lane workers exceed the configured pending-work bound"
-            )
+            if crop.block_id != block.block_id or crop.bbox != block.bbox or crop.segment_ids != block.segment_ids:
+                raise OcrQueueInvariantError("block plan and crop provenance disagree")
+        if any(lane.max_workers > self.config.max_pending_per_lane for lane in lanes):
+            raise OcrQueueLimitError("lane workers exceed the configured pending-work bound")
 
     def _build_specs(
         self,
@@ -454,9 +406,7 @@ class ParallelOcrQueue:
     ) -> None:
         job_count = 2 * len(plan.blocks) * len(lanes)
         if job_count > self.config.max_jobs:
-            raise OcrQueueLimitError(
-                f"job count exceeds configured limit {self.config.max_jobs}"
-            )
+            raise OcrQueueLimitError(f"job count exceeds configured limit {self.config.max_jobs}")
         oversized = next(
             (
                 (crop.block_id, transform)
@@ -470,16 +420,10 @@ class ParallelOcrQueue:
             None,
         )
         if oversized is not None:
-            raise OcrQueueLimitError(
-                f"{oversized[0]} {oversized[1].value} exceeds the input byte limit"
-            )
-        total_bytes = len(lanes) * sum(
-            len(crop.raw.png_bytes) + len(crop.gamma.png_bytes) for crop in crops
-        )
+            raise OcrQueueLimitError(f"{oversized[0]} {oversized[1].value} exceeds the input byte limit")
+        total_bytes = len(lanes) * sum(len(crop.raw.png_bytes) + len(crop.gamma.png_bytes) for crop in crops)
         if total_bytes > self.config.max_total_input_bytes:
-            raise OcrQueueLimitError(
-                "aggregate OCR job input bytes exceed the configured limit"
-            )
+            raise OcrQueueLimitError("aggregate OCR job input bytes exceed the configured limit")
 
     def _run_lane(
         self,
@@ -501,24 +445,18 @@ class ParallelOcrQueue:
                 worker = lane.worker_factory()
                 recognize = getattr(worker, "recognize", None)
                 if not callable(recognize):
-                    raise OcrInvalidOutputError(
-                        "worker_factory returned an object without recognize()"
-                    )
+                    raise OcrInvalidOutputError("worker_factory returned an object without recognize()")
                 with worker_ownership_lock:
                     previous = worker_ownership.get(id(worker))
                     if previous is not None and previous[0] is worker:
-                        raise OcrInvalidOutputError(
-                            "worker_factory reused one worker across deterministic shards"
-                        )
+                        raise OcrInvalidOutputError("worker_factory reused one worker across deterministic shards")
                     worker_ownership[id(worker)] = (
                         worker,
                         lane.lane_id,
                         shard_index,
                     )
             except Exception as exc:
-                return tuple(
-                    self._failed(spec, exc, elapsed_seconds=0.0) for spec in shard
-                )
+                return tuple(self._failed(spec, exc, elapsed_seconds=0.0) for spec in shard)
             results: list[OcrJobResult] = []
             for spec in shard:
                 started = time.perf_counter()
@@ -563,10 +501,7 @@ class ParallelOcrQueue:
             max_workers=len(shards),
             thread_name_prefix=f"ocr-{lane.lane_id}",
         ) as workers:
-            futures = tuple(
-                workers.submit(run_shard, index, shard)
-                for index, shard in enumerate(shards)
-            )
+            futures = tuple(workers.submit(run_shard, index, shard) for index, shard in enumerate(shards))
             for future in concurrent.futures.as_completed(futures):
                 results.extend(future.result())
         return tuple(results), len(shards)
@@ -580,40 +515,23 @@ class ParallelOcrQueue:
         word_quota: int,
     ) -> None:
         if not isinstance(output, OcrEngineOutput):
-            raise OcrInvalidOutputError(
-                "recognize() must return an OcrEngineOutput"
-            )
+            raise OcrInvalidOutputError("recognize() must return an OcrEngineOutput")
         if output.geometry is OcrOutputGeometry.WORD_BOXES and not output.text.strip() and not output.words:
             raise OcrRecognitionMissError("bbox OCR output is empty")
-        if output.geometry is OcrOutputGeometry.WORD_BOXES and (
-            bool(output.text.strip()) != bool(output.words)
-        ):
-            raise OcrInvalidOutputError(
-                "bbox OCR output text and attributable words disagree"
-            )
+        if output.geometry is OcrOutputGeometry.WORD_BOXES and (bool(output.text.strip()) != bool(output.words)):
+            raise OcrInvalidOutputError("bbox OCR output text and attributable words disagree")
         if output.geometry is OcrOutputGeometry.WORD_BOXES and (
             "".join(character for character in output.text if not character.isspace())
-            != "".join(
-                character
-                for word in output.words
-                for character in word.text
-                if not character.isspace()
-            )
+            != "".join(character for word in output.words for character in word.text if not character.isspace())
         ):
-            raise OcrInvalidOutputError(
-                "bbox OCR text is not exactly represented by its observed words"
-            )
+            raise OcrInvalidOutputError("bbox OCR text is not exactly represented by its observed words")
         if output.geometry is OcrOutputGeometry.TEXT_ONLY and not output.text.strip():
             raise OcrRecognitionMissError("text-only OCR output is empty")
         character_count = len(output.text) + sum(len(word.text) for word in output.words)
         if character_count > character_quota:
-            raise OcrInvalidOutputError(
-                "OCR output exceeds its deterministic character quota"
-            )
+            raise OcrInvalidOutputError("OCR output exceeds its deterministic character quota")
         if len(output.words) > word_quota:
-            raise OcrInvalidOutputError(
-                "OCR output exceeds its deterministic word quota"
-            )
+            raise OcrInvalidOutputError("OCR output exceeds its deterministic word quota")
         canvas = Box(0, 0, crop_size[0], crop_size[1])
         if any(word.bbox.intersection(canvas) != word.bbox for word in output.words):
             raise OcrInvalidOutputError("OCR returned a word outside its crop")
@@ -651,9 +569,7 @@ def _deterministic_lane_shards(
     lane: OcrLane,
     specs: tuple[_JobSpec, ...],
 ) -> tuple[tuple[_JobSpec, ...], ...]:
-    block_pairs = tuple(
-        specs[index : index + 2] for index in range(0, len(specs), 2)
-    )
+    block_pairs = tuple(specs[index : index + 2] for index in range(0, len(specs), 2))
     if any(
         len(pair) != 2
         or pair[0].block_id != pair[1].block_id
@@ -661,15 +577,12 @@ def _deterministic_lane_shards(
         or pair[1].transform is not OcrTransform.GAMMA
         for pair in block_pairs
     ):
-        raise OcrQueueInvariantError(
-            "each lane must receive atomic RAW/GAMMA block pairs"
-        )
+        raise OcrQueueInvariantError("each lane must receive atomic RAW/GAMMA block pairs")
     if not block_pairs:
         return ()
     shard_count = min(lane.max_workers, len(block_pairs))
     return tuple(
-        tuple(spec for pair in block_pairs[index::shard_count] for spec in pair)
-        for index in range(shard_count)
+        tuple(spec for pair in block_pairs[index::shard_count] for spec in pair) for index in range(shard_count)
     )
 
 
@@ -682,7 +595,8 @@ def input_sha256(job: OcrJobResult, crops: tuple[BlockCropPair, ...]) -> str:
         raise OcrQueueInvariantError("job references an unknown block crop")
     payload = (
         crop.raw.png_bytes
-        if job.transform in (
+        if job.transform
+        in (
             OcrTransform.RAW,
             OcrTransform.CONTEXTUAL_COMPOSITE,
         )

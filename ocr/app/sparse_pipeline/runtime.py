@@ -96,9 +96,7 @@ def _fallback_output_confidence(job: OcrJobResult) -> float:
     assert job.output is not None
     if not job.output.words:
         return 0.0
-    return sum(item.confidence for item in job.output.words) / len(
-        job.output.words
-    )
+    return sum(item.confidence for item in job.output.words) / len(job.output.words)
 
 
 def _select_context_fallback_queue(
@@ -108,9 +106,7 @@ def _select_context_fallback_queue(
 ) -> OcrQueueResult:
     """Keep exactly one observed whole-region output selected by agreement."""
 
-    fallback_blocks = tuple(
-        block for block in plan.blocks if block.context_fallback
-    )
+    fallback_blocks = tuple(block for block in plan.blocks if block.context_fallback)
     if not fallback_blocks:
         return queue
     if len(fallback_blocks) != 1:
@@ -124,27 +120,14 @@ def _select_context_fallback_queue(
         and job.output is not None
         and job.output.text.strip()
     )
-    tokens_by_job = {
-        job.job_id: _fallback_tokens(job.output.text)
-        for job in candidates
-        if job.output is not None
-    }
+    tokens_by_job = {job.job_id: _fallback_tokens(job.output.text) for job in candidates if job.output is not None}
     order = {job.job_id: index for index, job in enumerate(queue.jobs)}
 
     def score(job: OcrJobResult) -> tuple[float, float, int, int, int]:
         assert job.output is not None
         own = tokens_by_job[job.job_id]
-        others = tuple(
-            tokens
-            for job_id, tokens in tokens_by_job.items()
-            if job_id != job.job_id and tokens
-        )
-        retention = (
-            sum(len(own & other) / len(other) for other in others)
-            / len(others)
-            if others
-            else 1.0
-        )
+        others = tuple(tokens for job_id, tokens in tokens_by_job.items() if job_id != job.job_id and tokens)
+        retention = sum(len(own & other) / len(other) for other in others) / len(others) if others else 1.0
         return (
             retention,
             _fallback_output_confidence(job),
@@ -179,10 +162,7 @@ def _select_context_fallback_queue(
         queue,
         jobs=tuple(selected_jobs),
         diagnostics=queue.diagnostics
-        + (
-            "context-fallback-selected="
-            f"{selected_id or 'none'};candidates={len(candidates)}",
-        ),
+        + ("context-fallback-selected=" f"{selected_id or 'none'};candidates={len(candidates)}",),
     )
 
 
@@ -191,8 +171,7 @@ def _context_fallback_selected(queue: OcrQueueResult) -> bool:
 
     prefix = "context-fallback-selected="
     return any(
-        diagnostic.startswith(prefix)
-        and not diagnostic.startswith(f"{prefix}none;")
+        diagnostic.startswith(prefix) and not diagnostic.startswith(f"{prefix}none;")
         for diagnostic in queue.diagnostics
     )
 
@@ -208,18 +187,12 @@ class SparseRuntimeConfig:
 
     profile_name: str = SPARSE_RUNTIME_PROFILE
     geometry: GeometryConfig = field(default_factory=GeometryConfig)
-    objects: ObjectReconstructionConfig = field(
-        default_factory=ObjectReconstructionConfig
-    )
-    block_planning: BlockPlanningConfig = field(
-        default_factory=_standard_block_planning
-    )
+    objects: ObjectReconstructionConfig = field(default_factory=ObjectReconstructionConfig)
+    block_planning: BlockPlanningConfig = field(default_factory=_standard_block_planning)
     block_crops: BlockCropConfig = field(default_factory=BlockCropConfig)
     ocr_queue: OcrQueueConfig = field(default_factory=OcrQueueConfig)
     ocr_fusion: OcrFusionConfig = field(default_factory=_standard_ocr_fusion)
-    document_assembly: DocumentAssemblyConfig = field(
-        default_factory=DocumentAssemblyConfig
-    )
+    document_assembly: DocumentAssemblyConfig = field(default_factory=DocumentAssemblyConfig)
 
     def __post_init__(self) -> None:
         if (
@@ -245,21 +218,11 @@ class SparseRuntimeConfig:
             if not isinstance(value, value_type):
                 raise TypeError(f"{name} must be a {value_type.__name__}")
         spatial = self.block_planning.mode is BlockPlanningMode.SPATIAL_2D
-        membership = (
-            self.ocr_fusion.routing_mode is OcrRoutingMode.BLOCK_MEMBERSHIP
-        )
+        membership = self.ocr_fusion.routing_mode is OcrRoutingMode.BLOCK_MEMBERSHIP
         if spatial != membership:
-            raise ValueError(
-                "spatial block planning and membership OCR routing must be "
-                "enabled together"
-            )
-        if (
-            self.ocr_fusion.membership_assume_complete_observations
-            and not membership
-        ):
-            raise ValueError(
-                "complete membership observations require membership routing"
-            )
+            raise ValueError("spatial block planning and membership OCR routing must be " "enabled together")
+        if self.ocr_fusion.membership_assume_complete_observations and not membership:
+            raise ValueError("complete membership observations require membership routing")
 
 
 SPARSE_RUNTIME_PROFILES: dict[str, SparseRuntimeConfig] = {
@@ -276,9 +239,7 @@ def resolve_sparse_runtime_profile(
     profile = SPARSE_RUNTIME_PROFILES.get(name)
     if profile is None:
         known = ", ".join(sorted(SPARSE_RUNTIME_PROFILES))
-        raise ValueError(
-            f"Unknown sparse runtime profile '{name}'. Known profiles: {known}"
-        )
+        raise ValueError(f"Unknown sparse runtime profile '{name}'. Known profiles: {known}")
     return profile
 
 
@@ -293,9 +254,7 @@ class SparsePageResult:
     evidence: SparsePipelineEvidence
 
     def __post_init__(self) -> None:
-        if type(self.page_id) is not str or not _SAFE_PAGE_ID.fullmatch(
-            self.page_id
-        ):
+        if type(self.page_id) is not str or not _SAFE_PAGE_ID.fullmatch(self.page_id):
             raise ValueError("sparse page identifier is invalid")
         if self.completed_stages != PIPELINE_ORDER:
             raise ValueError("sparse page stages are incomplete or reordered")
@@ -304,10 +263,7 @@ class SparsePageResult:
         if self.control.status is not RunStatus.COMPLETE:
             raise ValueError("sparse page control did not complete")
         try:
-            control_order = tuple(
-                int(atom.payload.split(":", 1)[0])
-                for atom in self.control.evidence
-            )
+            control_order = tuple(int(atom.payload.split(":", 1)[0]) for atom in self.control.evidence)
         except (AttributeError, TypeError, ValueError) as exc:
             raise ValueError("sparse page control evidence is invalid") from exc
         if control_order != self.completed_stages:
@@ -319,12 +275,9 @@ class SparsePageResult:
         if self.evidence.page.crop_id != f"{self.page_id}-page":
             raise ValueError("sparse page identifier disagrees with its evidence")
         if (
-            self.document.source_segment_ids
-            != self.evidence.fusion.source_segment_ids
-            or self.document.source_object_ids
-            != tuple(item.object_id for item in self.evidence.objects.objects)
-            or self.document.source_block_ids
-            != tuple(item.block_id for item in self.evidence.plan.blocks)
+            self.document.source_segment_ids != self.evidence.fusion.source_segment_ids
+            or self.document.source_object_ids != tuple(item.object_id for item in self.evidence.objects.objects)
+            or self.document.source_block_ids != tuple(item.block_id for item in self.evidence.plan.blocks)
         ):
             raise ValueError("Stage 7 output disagrees with sparse evidence")
 
@@ -343,9 +296,7 @@ class SparsePipelineRuntime:
         lanes: tuple[OcrLane, ...],
         config: SparseRuntimeConfig | None = None,
     ) -> None:
-        if type(lanes) is not tuple or any(
-            not isinstance(lane, OcrLane) for lane in lanes
-        ):
+        if type(lanes) is not tuple or any(not isinstance(lane, OcrLane) for lane in lanes):
             raise TypeError("lanes must be an immutable OcrLane tuple")
         if not lanes:
             raise ValueError("sparse runtime requires at least one OCR lane")
@@ -354,13 +305,8 @@ class SparsePipelineRuntime:
         self.config = config or resolve_sparse_runtime_profile()
         if len(lanes) > self.config.ocr_queue.max_lanes:
             raise ValueError("sparse runtime OCR lane count exceeds the queue limit")
-        if any(
-            lane.max_workers > self.config.ocr_queue.max_pending_per_lane
-            for lane in lanes
-        ):
-            raise ValueError(
-                "sparse runtime lane workers exceed the per-lane queue limit"
-            )
+        if any(lane.max_workers > self.config.ocr_queue.max_pending_per_lane for lane in lanes):
+            raise ValueError("sparse runtime lane workers exceed the per-lane queue limit")
         self.lanes = lanes
         self._session = PersistentOcrSession(
             lanes,
@@ -415,19 +361,13 @@ class SparsePipelineRuntime:
         control = run_pipeline_control()
 
         # Stage 1: align, recursively segment, and build the sparse matrix.
-        geometry_bundle = GeometryAnalyzer(self.config.geometry).analyze_bundle(
-            image
-        )
+        geometry_bundle = GeometryAnalyzer(self.config.geometry).analyze_bundle(image)
         geometry = geometry_bundle.result
         transform = geometry.alignment.transform
         if transform.original_size != image.size:
-            raise RuntimeError(
-                "Stage 0/1 transform does not originate at the raw page canvas"
-            )
+            raise RuntimeError("Stage 0/1 transform does not originate at the raw page canvas")
         if transform.aligned_size != geometry.segmentation.aligned_size:
-            raise RuntimeError(
-                "Stage 0/1 transform does not terminate at the geometry canvas"
-            )
+            raise RuntimeError("Stage 0/1 transform does not terminate at the geometry canvas")
         if geometry.matrix.coordinate_mode is not SparseCoordinateMode.PIXEL_PARTITION:
             raise RuntimeError(
                 "production Stage 1 requires a physical pixel partition; "
@@ -459,17 +399,12 @@ class SparsePipelineRuntime:
             objects_result=objects,
             matrix=geometry.matrix,
         )
-        crops, aligned_rgb_sha256 = BlockCropper(
-            self.config.block_crops
-        ).crop_with_rgb_sha256(
+        crops, aligned_rgb_sha256 = BlockCropper(self.config.block_crops).crop_with_rgb_sha256(
             page,
             aligned_size=geometry.segmentation.aligned_size,
             plan=plan,
             ownership=geometry_bundle.ownership,
-            ownership_segment_ids=tuple(
-                segment.segment_id
-                for segment in geometry.segmentation.segments
-            ),
+            ownership_segment_ids=tuple(segment.segment_id for segment in geometry.segmentation.segments),
         )
         if aligned_rgb_sha256 != geometry.aligned_rgb_sha256:
             raise RuntimeError("Stage 1 and Stage 5 aligned RGB digests disagree")
@@ -502,10 +437,7 @@ class SparsePipelineRuntime:
             fusion=fusion,
             stage4=None,
             ownership=geometry_bundle.ownership,
-            ownership_segment_ids=tuple(
-                segment.segment_id
-                for segment in geometry.segmentation.segments
-            ),
+            ownership_segment_ids=tuple(segment.segment_id for segment in geometry.segmentation.segments),
             object_config=self.config.objects,
             planning_config=self.config.block_planning,
             crop_config=self.config.block_crops,
@@ -523,10 +455,7 @@ class SparsePipelineRuntime:
             queue=queue,
             fusion=fusion,
             ownership=geometry_bundle.ownership,
-            ownership_segment_ids=tuple(
-                segment.segment_id
-                for segment in geometry.segmentation.segments
-            ),
+            ownership_segment_ids=tuple(segment.segment_id for segment in geometry.segmentation.segments),
             object_config=self.config.objects,
             planning_config=self.config.block_planning,
             crop_config=self.config.block_crops,

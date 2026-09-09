@@ -11,12 +11,7 @@ import pytest
 
 @pytest.fixture(scope="module")
 def audit_module() -> ModuleType:
-    path = (
-        Path(__file__).resolve().parents[3]
-        / "scripts"
-        / "debug"
-        / "audit_saved_versions.py"
-    )
+    path = Path(__file__).resolve().parents[3] / "scripts" / "debug" / "audit_saved_versions.py"
     name = "_audit_saved_versions_under_test"
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
@@ -42,9 +37,7 @@ def _write_summary(
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
-        writer.writerow(
-            ("engine", "file", "http_status", "curl_exit", "wall_ms")
-        )
+        writer.writerow(("engine", "file", "http_status", "curl_exit", "wall_ms"))
         for name, http_status, curl_exit, wall_ms in rows:
             writer.writerow((engine, name, http_status, curl_exit, wall_ms))
 
@@ -116,9 +109,7 @@ def test_legacy_audit_scores_only_current_reference_and_reports_partial_cohort(
     run = next(
         row
         for row in bundle.runs
-        if row.version == "v1"
-        and row.suite == "image-fixtures"
-        and row.engine == "tesseract"
+        if row.version == "v1" and row.suite == "image-fixtures" and row.engine == "tesseract"
     )
 
     assert run.status == "partial_reference"
@@ -127,18 +118,14 @@ def test_legacy_audit_scores_only_current_reference_and_reports_partial_cohort(
     assert run.missing_current_references == 1
     assert run.micro_match_percent == "100.000000"
     assert run.macro_match_percent == "100.000000"
-    assert list(__import__("json").loads(run.reference_manifest_json)) == [
-        "kept.png"
-    ]
+    assert list(__import__("json").loads(run.reference_manifest_json)) == ["kept.png"]
     missing = next(row for row in bundle.files if row.file == "missing.png")
     assert missing.status == "n/a"
     assert missing.reason == "missing_current_reference"
     assert all(f"v{version}" in {row.version for row in bundle.runs} for version in range(1, 20))
 
 
-def test_v18_split_layout_and_v19_saved_rerun_share_only_exact_cohort(
-    audit_module: ModuleType, tmp_path: Path
-) -> None:
+def test_v18_split_layout_and_v19_saved_rerun_share_only_exact_cohort(audit_module: ModuleType, tmp_path: Path) -> None:
     legacy = tmp_path / "legacy"
     repo = tmp_path / "v18-repo"
     references = tmp_path / "reference"
@@ -168,12 +155,8 @@ def test_v18_split_layout_and_v19_saved_rerun_share_only_exact_cohort(
     assert spec19.saved_rerun_of == "v18-identical-published-csv"
 
     bundle = audit_module.audit_saved_versions(legacy, repo, references)
-    run18 = next(
-        row for row in bundle.runs if row.version == "v18" and row.engine == engine
-    )
-    run19 = next(
-        row for row in bundle.runs if row.version == "v19" and row.engine == engine
-    )
+    run18 = next(row for row in bundle.runs if row.version == "v18" and row.engine == engine)
+    run19 = next(row for row in bundle.runs if row.version == "v19" and row.engine == engine)
     assert run18.status == run19.status == "ok"
     assert run18.cohort_id == run19.cohort_id
     assert run19.saved_rerun_of == "v18-identical-published-csv"
@@ -204,14 +187,8 @@ def test_missing_output_and_failed_execution_are_fail_closed_not_averaged(
         ),
     )
 
-    bundle = audit_module.audit_saved_versions(
-        legacy, tmp_path / "v18", references
-    )
-    run = next(
-        row
-        for row in bundle.runs
-        if row.version == "v2" and row.engine == "tesseract"
-    )
+    bundle = audit_module.audit_saved_versions(legacy, tmp_path / "v18", references)
+    run = next(row for row in bundle.runs if row.version == "v2" and row.engine == "tesseract")
 
     assert run.status == "error"
     assert run.missing_outputs == 1
@@ -224,9 +201,7 @@ def test_missing_output_and_failed_execution_are_fail_closed_not_averaged(
     assert failed.match_percent == "n/a"
 
 
-def test_reports_emit_summary_detail_cohort_csv_and_v19_warning(
-    audit_module: ModuleType, tmp_path: Path
-) -> None:
+def test_reports_emit_summary_detail_cohort_csv_and_v19_warning(audit_module: ModuleType, tmp_path: Path) -> None:
     legacy = tmp_path / "legacy"
     references = tmp_path / "reference"
     references.mkdir()
@@ -239,9 +214,7 @@ def test_reports_emit_summary_detail_cohort_csv_and_v19_warning(
         names=("one.png",),
     )
     _write_actual(output, "tesseract", "one.png", "One\n")
-    bundle = audit_module.audit_saved_versions(
-        legacy, tmp_path / "v18", references
-    )
+    bundle = audit_module.audit_saved_versions(legacy, tmp_path / "v18", references)
     summary = tmp_path / "report.csv"
     details = tmp_path / "report-files.csv"
     cohorts = tmp_path / "report-cohorts.csv"

@@ -48,15 +48,11 @@ def test_known_text_sample_preserves_the_exact_drawn_mask(language: str) -> None
     assert sample.image.tobytes() == source_bytes
     assert analyzer.last_bundle is not None
     assert result.alignment.correction_degrees == pytest.approx(0.0, abs=1e-9)
-    np.testing.assert_array_equal(
-        analyzer.last_bundle.foreground_mask, sample.expected_ink_mask
-    )
+    np.testing.assert_array_equal(analyzer.last_bundle.foreground_mask, sample.expected_ink_mask)
     assert result.alignment.foreground_pixels == int(sample.expected_ink_mask.sum())
 
 
-def test_full_grid_contains_more_than_six_hundred_cases_and_every_requested_axis() -> (
-    None
-):
+def test_full_grid_contains_more_than_six_hundred_cases_and_every_requested_axis() -> None:
     try:
         specs = full_specs()
     except FileNotFoundError:
@@ -190,19 +186,10 @@ def test_geometry_artifacts_are_complete_atomic_and_never_overwritten(
     assert manifest["execution_step"] == 2
     assert manifest["foreground_pixels"] == int(sample.expected_ink_mask.sum())
     assert Image.open(stage_dir / "source.png").size == sample.image.size
-    assert "ownership_exact=true" in (stage_dir / "invariants.txt").read_text(
-        encoding="utf-8"
-    )
-    crop_manifest = json.loads(
-        (stage_dir / "segment-crops" / "manifest.json").read_text(
-            encoding="utf-8"
-        )
-    )
+    assert "ownership_exact=true" in (stage_dir / "invariants.txt").read_text(encoding="utf-8")
+    crop_manifest = json.loads((stage_dir / "segment-crops" / "manifest.json").read_text(encoding="utf-8"))
     assert crop_manifest["segments"] == len(bundle.result.segmentation.segments)
-    assert all(
-        item["ownership_pixels"] == item["ink_pixels"]
-        for item in crop_manifest["items"]
-    )
+    assert all(item["ownership_pixels"] == item["ink_pixels"] for item in crop_manifest["items"])
     with pytest.raises(FileExistsError):
         writer.write(tmp_path, run_id="sample", bundle=bundle)
     assert not tuple(tmp_path.glob(".sample.partial-*"))

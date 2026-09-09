@@ -4,11 +4,7 @@ from app.pipeline_flags import profile_flag_items
 
 
 def test_every_published_profile_flag_has_exactly_one_stage_owner():
-    published = {
-        flag.key
-        for profile in OCR_PIPELINE_PROFILES.values()
-        for flag in profile_flag_items(profile)
-    }
+    published = {flag.key for profile in OCR_PIPELINE_PROFILES.values() for flag in profile_flag_items(profile)}
     registry = input_flag_registry()
 
     assert set(registry) == published
@@ -51,11 +47,7 @@ def test_trusted_api_bypasses_tesseract_specific_flags():
 
 def test_only_structure_and_render_flags_may_process_plain_api_text():
     registry = input_flag_registry()
-    allowed = {
-        key
-        for key, registration in registry.items()
-        if registration.trusted_api == "plain_text_only"
-    }
+    allowed = {key for key, registration in registry.items() if registration.trusted_api == "plain_text_only"}
 
     assert allowed == {
         "contextual_markdown_grammar",

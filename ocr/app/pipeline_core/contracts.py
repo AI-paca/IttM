@@ -48,13 +48,7 @@ def recipe_for(capabilities: PipelineCapabilities) -> PipelineRecipe:
             "group_structures",
             "render_markdown",
         )
-        return PipelineRecipe(
-            stages=tuple(
-                stage
-                for index, stage in enumerate(ordered_stages)
-                if mask & (1 << index)
-            )
-        )
+        return PipelineRecipe(stages=tuple(stage for index, stage in enumerate(ordered_stages) if mask & (1 << index)))
 
     stages: list[str] = []
     if not capabilities.provides_layout:
@@ -187,8 +181,7 @@ class PageSegmentArtifact:
         return cls(
             markdown=markdown,
             counters=tuple(
-                (name, int(metadata.get(name, 0)))
-                for name in ("chunks", "cards_found", "tables_found", "table_cells")
+                (name, int(metadata.get(name, 0))) for name in ("chunks", "cards_found", "tables_found", "table_cells")
             ),
             flags=flags,
             structural_lint_pass=(True if "markdown_lint:pass" in flags else None),

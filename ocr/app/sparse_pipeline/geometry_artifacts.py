@@ -44,9 +44,7 @@ class GeometryArtifactWriter:
                 temporary_dir.rename(run_dir)
             except OSError as exc:
                 if run_dir.exists():
-                    raise FileExistsError(
-                        f"debug run already exists: {run_dir}"
-                    ) from exc
+                    raise FileExistsError(f"debug run already exists: {run_dir}") from exc
                 raise
             return run_dir
         except Exception:
@@ -55,13 +53,9 @@ class GeometryArtifactWriter:
 
     def _write_bundle(self, stage_dir: Path, bundle: GeometryBundle) -> None:
         result = bundle.result
-        aligned_sha256 = hashlib.sha256(
-            memoryview(np.ascontiguousarray(bundle.aligned_rgb))
-        ).hexdigest()
+        aligned_sha256 = hashlib.sha256(memoryview(np.ascontiguousarray(bundle.aligned_rgb))).hexdigest()
         if aligned_sha256 != result.aligned_rgb_sha256:
-            raise ValueError(
-                "geometry result was not derived from the supplied aligned RGB bundle"
-            )
+            raise ValueError("geometry result was not derived from the supplied aligned RGB bundle")
         segmentation = result.segmentation
         matrix = result.matrix
         manifest = {
@@ -96,9 +90,7 @@ class GeometryArtifactWriter:
         )
         if legacy_trace is not None:
             if not isinstance(excluded_foreground, np.ndarray):
-                raise ValueError(
-                    "v16 geometry trace requires excluded foreground evidence"
-                )
+                raise ValueError("v16 geometry trace requires excluded foreground evidence")
             manifest["legacy_projection"] = {
                 "version": legacy_trace.version,
                 "rows": legacy_trace.rows,
@@ -111,28 +103,18 @@ class GeometryArtifactWriter:
             manifest["foreground_scope"] = {
                 "definition": legacy_trace.foreground_definition,
                 "all_detected_pixels": legacy_trace.foreground_pixels,
-                "tracked_leaf_union_pixels": (
-                    legacy_trace.tracked_foreground_pixels
-                ),
-                "excluded_outside_leaf_union_pixels": (
-                    legacy_trace.excluded_foreground_pixels
-                ),
-                "excluded_mask_sha256": (
-                    legacy_trace.excluded_foreground_sha256
-                ),
+                "tracked_leaf_union_pixels": (legacy_trace.tracked_foreground_pixels),
+                "excluded_outside_leaf_union_pixels": (legacy_trace.excluded_foreground_pixels),
+                "excluded_mask_sha256": (legacy_trace.excluded_foreground_sha256),
             }
         self._write_json(stage_dir / "manifest.json", manifest)
         self._write_json(stage_dir / "alignment.json", asdict(result.alignment))
-        self._write_jsonl(
-            stage_dir / "nodes.jsonl", (asdict(node) for node in segmentation.nodes)
-        )
+        self._write_jsonl(stage_dir / "nodes.jsonl", (asdict(node) for node in segmentation.nodes))
         self._write_jsonl(
             stage_dir / "segments.jsonl",
             (asdict(segment) for segment in segmentation.segments),
         )
-        self._write_jsonl(
-            stage_dir / "rules.jsonl", (asdict(rule) for rule in segmentation.rules)
-        )
+        self._write_jsonl(stage_dir / "rules.jsonl", (asdict(rule) for rule in segmentation.rules))
         self._write_json(stage_dir / "matrix.json", self._matrix_json(matrix))
 
         self._save_rgb(stage_dir / "source.png", bundle.source_rgb)
@@ -168,12 +150,8 @@ class GeometryArtifactWriter:
                 )
                 + "\n",
             )
-        self._save_rgb(
-            stage_dir / "recursive-overlay.png", self._recursive_overlay(bundle)
-        )
-        self._save_rgb(
-            stage_dir / "segments-overlay.png", self._segments_overlay(bundle)
-        )
+        self._save_rgb(stage_dir / "recursive-overlay.png", self._recursive_overlay(bundle))
+        self._save_rgb(stage_dir / "segments-overlay.png", self._segments_overlay(bundle))
         self._save_rgb(stage_dir / "matrix-overlay.png", self._matrix_overlay(bundle))
         self._write_segment_crops(stage_dir, geometry=bundle)
 
@@ -269,10 +247,7 @@ class GeometryArtifactWriter:
     @staticmethod
     def _matrix_overlay(bundle: GeometryBundle) -> np.ndarray:
         image = Image.fromarray(np.array(bundle.aligned_rgb, copy=True), mode="RGB")
-        if (
-            bundle.result.matrix.coordinate_mode
-            is SparseCoordinateMode.LOGICAL_PROJECTION
-        ):
+        if bundle.result.matrix.coordinate_mode is SparseCoordinateMode.LOGICAL_PROJECTION:
             # Logical row/track ordinals have no pixel positions.  Drawing
             # them at y/x == ordinal fabricates a grid in the page corner.
             return np.asarray(image, dtype=np.uint8)
@@ -341,23 +316,16 @@ class GeometryArtifactWriter:
         )
         draw.text(
             (18, 72),
-            (
-                "blue M[row,col]=Snn: matrix payload;  "
-                "orange K=value: numeric code;  magenta: logical x_track"
-            ),
+            ("blue M[row,col]=Snn: matrix payload;  " "orange K=value: numeric code;  magenta: logical x_track"),
             fill=(20, 20, 20),
             font=small_font,
         )
 
         leaves_by_segment = {item.segment_id: item for item in trace.leaves}
-        occupied_by_segment = {
-            item.segment_id: (item.row, item.column) for item in matrix.cells
-        }
+        occupied_by_segment = {item.segment_id: (item.row, item.column) for item in matrix.cells}
         codes_by_segment: dict[str, list[tuple[int, int, int]]] = {}
         for item in matrix.structural_codes:
-            codes_by_segment.setdefault(item.segment_id, []).append(
-                (item.row, item.column, item.code)
-            )
+            codes_by_segment.setdefault(item.segment_id, []).append((item.row, item.column, item.code))
 
         if trace.leaves:
             track_top = min(item.source_bbox.top for item in trace.leaves)
@@ -385,9 +353,7 @@ class GeometryArtifactWriter:
                     canvas_size=canvas.size,
                 )
 
-        for segment_index, segment in enumerate(
-            bundle.result.segmentation.segments
-        ):
+        for segment_index, segment in enumerate(bundle.result.segmentation.segments):
             leaf = leaves_by_segment.get(segment.segment_id)
             if leaf is None:
                 continue
@@ -403,9 +369,7 @@ class GeometryArtifactWriter:
                 width=2,
             )
             occupied = occupied_by_segment.get(segment.segment_id)
-            coordinates = set(
-                codes_by_segment.get(segment.segment_id, ())
-            )
+            coordinates = set(codes_by_segment.get(segment.segment_id, ()))
             if occupied is not None:
                 coordinates.add((occupied[0], occupied[1], -1))
             coordinate_pairs = sorted({(row, column) for row, column, _ in coordinates})
@@ -423,20 +387,11 @@ class GeometryArtifactWriter:
                 if payload:
                     parts.append(f"M[{row},{column}]=S{segment_index:02d}")
                 parts.extend(f"K={value}" for value in values)
-                x_track = (
-                    trace.x_tracks[column]
-                    if 0 <= column < len(trace.x_tracks)
-                    else leaf.content_bbox.left
-                )
+                x_track = trace.x_tracks[column] if 0 <= column < len(trace.x_tracks) else leaf.content_bbox.left
                 _draw_label(
                     draw,
                     x=int(x_track) + 5,
-                    y=(
-                        header_height
-                        + box.top
-                        + 4
-                        + label_index * (_font_height(small_font) + 8)
-                    ),
+                    y=(header_height + box.top + 4 + label_index * (_font_height(small_font) + 8)),
                     text=" ".join(parts),
                     font=small_font,
                     foreground=(255, 255, 255) if payload else (25, 20, 10),
@@ -464,28 +419,21 @@ class GeometryArtifactWriter:
             f"mode={matrix.coordinate_mode.value}",
             f"shape={len(matrix.rows)}x{len(matrix.columns)} nonzero={len(matrix.cells)}",
         ]
-        values.extend(
-            f"({cell.row},{cell.column})\t{cell.segment_id}" for cell in matrix.cells
-        )
+        values.extend(f"({cell.row},{cell.column})\t{cell.segment_id}" for cell in matrix.cells)
         values.extend(
             f"span\t{span.segment_id}\t[{span.row_start}:{span.row_stop},{span.column_start}:{span.column_stop}]"
             for span in matrix.spans
         )
         values.extend(
-            f"code\t({item.row},{item.column})\t{item.segment_id}\t{item.code}"
-            for item in matrix.structural_codes
+            f"code\t({item.row},{item.column})\t{item.segment_id}\t{item.code}" for item in matrix.structural_codes
         )
         return "\n".join(values) + "\n"
 
     @staticmethod
     def _invariant_text(bundle: GeometryBundle) -> str:
         result = bundle.result
-        segment_pixels = sum(
-            segment.ink_pixels for segment in result.segmentation.segments
-        )
-        rule_pixels = sum(
-            rule.foreground_pixels for rule in result.segmentation.rules
-        )
+        segment_pixels = sum(segment.ink_pixels for segment in result.segmentation.segments)
+        rule_pixels = sum(rule.foreground_pixels for rule in result.segmentation.rules)
         return (
             "\n".join(
                 (
@@ -493,16 +441,12 @@ class GeometryArtifactWriter:
                     f"segment_pixels={segment_pixels}",
                     f"rule_pixels={rule_pixels}",
                     "ownership_exact="
-                    + str(
-                        segment_pixels + rule_pixels
-                        == result.alignment.foreground_pixels
-                    ).lower(),
+                    + str(segment_pixels + rule_pixels == result.alignment.foreground_pixels).lower(),
                     f"source_size={result.alignment.transform.original_size}",
                     f"aligned_size={result.alignment.transform.aligned_size}",
                     f"status={result.status.value}",
                     f"limit_leaves={result.limit_leaf_count}",
-                    "matrix_coordinate_mode="
-                    f"{result.matrix.coordinate_mode.value}",
+                    "matrix_coordinate_mode=" f"{result.matrix.coordinate_mode.value}",
                     "excluded_foreground_pixels="
                     f"{int(getattr(bundle, 'excluded_foreground_mask', np.zeros((), dtype=bool)).sum())}",
                 )
@@ -541,17 +485,14 @@ class GeometryArtifactWriter:
             f"excluded_foreground_sha256={trace.excluded_foreground_sha256}",
         ]
         lines.extend(
-            "group\t"
-            f"{group.index}\t{group.bbox.as_tuple()}\t"
-            + ",".join(group.segment_ids)
+            "group\t" f"{group.index}\t{group.bbox.as_tuple()}\t" + ",".join(group.segment_ids)
             for group in trace.groups
         )
         lines.extend(
             "leaf\t"
             f"{leaf.segment_id}\tbbox={leaf.source_bbox.as_tuple()}\t"
             f"content={leaf.content_bbox.as_tuple()}\tanchor={leaf.anchor}\t"
-            f"codes={leaf.codes}\tdecisions="
-            + ";".join(item.split for item in leaf.decisions)
+            f"codes={leaf.codes}\tdecisions=" + ";".join(item.split for item in leaf.decisions)
             for leaf in trace.leaves
         )
         cls._write_text(stage / "legacy-matrix.txt", "\n".join(lines) + "\n")
@@ -564,24 +505,14 @@ class GeometryArtifactWriter:
             {
                 "ownership_raster": "ownership.png",
                 "ownership_semantics": (
-                    "one deterministic segment owner per tracked foreground "
-                    "pixel; contextual bboxes may overlap"
+                    "one deterministic segment owner per tracked foreground " "pixel; contextual bboxes may overlap"
                 ),
-                "segment_ids": [
-                    item.segment_id
-                    for item in bundle.result.segmentation.segments
-                ],
+                "segment_ids": [item.segment_id for item in bundle.result.segmentation.segments],
                 "tracked_foreground_pixels": trace.tracked_foreground_pixels,
                 "excluded_foreground_mask": "excluded-foreground.png",
-                "excluded_foreground_isolated": (
-                    "excluded-foreground-isolated.png"
-                ),
-                "excluded_foreground_pixels": (
-                    trace.excluded_foreground_pixels
-                ),
-                "excluded_foreground_sha256": (
-                    trace.excluded_foreground_sha256
-                ),
+                "excluded_foreground_isolated": ("excluded-foreground-isolated.png"),
+                "excluded_foreground_pixels": (trace.excluded_foreground_pixels),
+                "excluded_foreground_sha256": (trace.excluded_foreground_sha256),
                 "projection_sha256": trace.projection_sha256,
             },
         )
@@ -606,10 +537,7 @@ class GeometryArtifactWriter:
             raw_root.mkdir()
             isolated_root.mkdir()
 
-        matrix_cells: dict[str, list[list[int]]] = {
-            item.segment_id: []
-            for item in segments
-        }
+        matrix_cells: dict[str, list[list[int]]] = {item.segment_id: [] for item in segments}
         for cell in geometry.result.matrix.cells:
             matrix_cells[cell.segment_id].append([cell.row, cell.column])
         matrix_spans = {
@@ -629,9 +557,7 @@ class GeometryArtifactWriter:
         try:
             for index, segment in enumerate(segments):
                 if not _SAFE_RUN_ID.fullmatch(segment.segment_id):
-                    raise ValueError(
-                        "segment_id contains unsafe artifact characters"
-                    )
+                    raise ValueError("segment_id contains unsafe artifact characters")
                 box = segment.bbox
                 raw = np.array(
                     geometry.aligned_rgb[
@@ -651,10 +577,7 @@ class GeometryArtifactWriter:
                 exact_mask = (ownership == index) & foreground
                 ownership_pixels = int(np.count_nonzero(exact_mask))
                 if ownership_pixels != segment.ink_pixels:
-                    raise ValueError(
-                        "isolated crop ownership disagrees with "
-                        f"{segment.segment_id}"
-                    )
+                    raise ValueError("isolated crop ownership disagrees with " f"{segment.segment_id}")
                 isolated = np.full(raw.shape, 255, dtype=np.uint8)
                 isolated[exact_mask] = raw[exact_mask]
 
@@ -667,9 +590,7 @@ class GeometryArtifactWriter:
                     archive.writestr(isolated_name, isolated_bytes)
                     raw_value: str | None = None
                     isolated_value: str | None = None
-                    archive_contact_items.append(
-                        (segment.segment_id, raw_name, isolated_name)
-                    )
+                    archive_contact_items.append((segment.segment_id, raw_name, isolated_name))
                     raw_sha256 = hashlib.sha256(raw_bytes).hexdigest()
                     isolated_sha256 = hashlib.sha256(isolated_bytes).hexdigest()
                 else:
@@ -679,34 +600,28 @@ class GeometryArtifactWriter:
                     cls._save_rgb(isolated_path, isolated)
                     raw_value = raw_name
                     isolated_value = isolated_name
-                    file_contact_items.append(
-                        (segment.segment_id, raw_path, isolated_path)
-                    )
+                    file_contact_items.append((segment.segment_id, raw_path, isolated_path))
                     raw_sha256 = hashlib.sha256(raw_path.read_bytes()).hexdigest()
-                    isolated_sha256 = hashlib.sha256(
-                        isolated_path.read_bytes()
-                    ).hexdigest()
+                    isolated_sha256 = hashlib.sha256(isolated_path.read_bytes()).hexdigest()
                 entries.append(
                     {
-                    "segment_id": segment.segment_id,
-                    "bbox": list(box.as_tuple()),
-                    "width": box.width,
-                    "height": box.height,
-                    "kind": segment.kind.value,
-                    "ink_pixels": segment.ink_pixels,
-                    "ownership_pixels": ownership_pixels,
-                    "row_index": segment.row_index,
-                    "order_key": list(segment.order_key),
-                    "parent_path": list(segment.parent_path),
-                    "component_ids": list(segment.component_ids),
-                    "sparse_cells": matrix_cells[segment.segment_id],
-                    "sparse_span": matrix_spans[segment.segment_id],
+                        "segment_id": segment.segment_id,
+                        "bbox": list(box.as_tuple()),
+                        "width": box.width,
+                        "height": box.height,
+                        "kind": segment.kind.value,
+                        "ink_pixels": segment.ink_pixels,
+                        "ownership_pixels": ownership_pixels,
+                        "row_index": segment.row_index,
+                        "order_key": list(segment.order_key),
+                        "parent_path": list(segment.parent_path),
+                        "component_ids": list(segment.component_ids),
+                        "sparse_cells": matrix_cells[segment.segment_id],
+                        "sparse_span": matrix_spans[segment.segment_id],
                         "raw": raw_value,
                         "isolated": isolated_value,
                         "raw_archive_member": raw_name if compact else None,
-                        "isolated_archive_member": (
-                            isolated_name if compact else None
-                        ),
+                        "isolated_archive_member": (isolated_name if compact else None),
                         "raw_sha256": raw_sha256,
                         "isolated_sha256": isolated_sha256,
                     }
@@ -739,14 +654,8 @@ class GeometryArtifactWriter:
                 "storage": "archive" if compact else "files",
                 "archive": archive_path.name if compact else None,
                 "definition": {
-                    "raw": (
-                        "unaltered aligned-page pixels inside the segment "
-                        "half-open bbox"
-                    ),
-                    "isolated": (
-                        "white canvas with only foreground pixels exactly "
-                        "owned by segment_id"
-                    ),
+                    "raw": ("unaltered aligned-page pixels inside the segment " "half-open bbox"),
+                    "isolated": ("white canvas with only foreground pixels exactly " "owned by segment_id"),
                 },
                 "segments": len(entries),
                 "contact_sheets": contact_sheets,
@@ -805,8 +714,7 @@ class GeometryArtifactWriter:
                     "",
                     "| raw bbox crop | isolated ownership crop |",
                     "|---|---|",
-                    f"| ![{segment_id} raw]({entry['raw']}) | "
-                    f"![{segment_id} isolated]({entry['isolated']}) |",
+                    f"| ![{segment_id} raw]({entry['raw']}) | " f"![{segment_id} isolated]({entry['isolated']}) |",
                 )
             )
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -838,10 +746,7 @@ class GeometryArtifactWriter:
 
     @staticmethod
     def _write_jsonl(path: Path, values: object) -> None:
-        lines = [
-            json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-            for value in values
-        ]
+        lines = [json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) for value in values]
         path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
     @staticmethod

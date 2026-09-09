@@ -90,9 +90,7 @@ class _Fixture:
             plan=self.plan,
         )
         if self.crops != expected_crops:
-            raise AssertionError(
-                "test fixture crops must be derived from its aligned RGB page"
-            )
+            raise AssertionError("test fixture crops must be derived from its aligned RGB page")
         object.__setattr__(
             self,
             "geometry",
@@ -147,15 +145,9 @@ def _matrix(
     horizontal_rule_rows: tuple[int, ...] = (),
     vertical_rule_columns: tuple[int, ...] = (),
 ) -> SparseSegmentMatrix:
-    rows = tuple(
-        AxisInterval(index, start, stop)
-        for index, (start, stop) in enumerate(zip(row_edges, row_edges[1:]))
-    )
+    rows = tuple(AxisInterval(index, start, stop) for index, (start, stop) in enumerate(zip(row_edges, row_edges[1:])))
     columns = tuple(
-        AxisInterval(index, start, stop)
-        for index, (start, stop) in enumerate(
-            zip(column_edges, column_edges[1:])
-        )
+        AxisInterval(index, start, stop) for index, (start, stop) in enumerate(zip(column_edges, column_edges[1:]))
     )
     cells = tuple(
         sorted(
@@ -195,12 +187,8 @@ def _geometry(
     rules: tuple[Rule, ...] = (),
 ) -> GeometryResult:
     width, height = aligned_size
-    foreground_pixels = sum(item.ink_pixels for item in segments) + sum(
-        item.foreground_pixels for item in rules
-    )
-    content_boxes = tuple(item.bbox for item in segments) + tuple(
-        item.bbox for item in rules
-    )
+    foreground_pixels = sum(item.ink_pixels for item in segments) + sum(item.foreground_pixels for item in rules)
+    content_boxes = tuple(item.bbox for item in segments) + tuple(item.bbox for item in rules)
     return GeometryResult(
         alignment=AlignmentTrace(
             transform=AffineTransform.identity(aligned_size),
@@ -436,9 +424,7 @@ def _ownership_for_geometry(
 ) -> tuple[np.ndarray, tuple[str, ...]]:
     width, height = geometry.segmentation.aligned_size
     ownership = np.full((height, width), -1, dtype=np.int32)
-    segment_ids = tuple(
-        segment.segment_id for segment in geometry.segmentation.segments
-    )
+    segment_ids = tuple(segment.segment_id for segment in geometry.segmentation.segments)
     for label, segment in enumerate(geometry.segmentation.segments):
         box = segment.bbox
         ownership[box.top : box.bottom, box.left : box.right] = label
@@ -463,11 +449,7 @@ def _queue_lanes(
         crop = crop_by_id[block.block_id]
         context_sha256 = hashlib.sha256(crop.raw.png_bytes).hexdigest()
         for transform in (OcrTransform.RAW, OcrTransform.GAMMA):
-            payload = (
-                crop.raw.png_bytes
-                if transform is OcrTransform.RAW
-                else crop.gamma.png_bytes
-            )
+            payload = crop.raw.png_bytes if transform is OcrTransform.RAW else crop.gamma.png_bytes
             for lane_id, output_factory in output_factories.items():
                 jobs.append(
                     OcrJobResult(
@@ -508,16 +490,18 @@ def _fail_scheduled_lane(
     lane_id: str,
 ) -> OcrQueueResult:
     jobs = tuple(
-        replace(
-            item,
-            status=OcrJobStatus.FAILED,
-            output=None,
-            error_type="RuntimeError",
-            error_message="scheduled capability failed",
-            failure_code=OcrFailureCode.ENGINE_ERROR,
+        (
+            replace(
+                item,
+                status=OcrJobStatus.FAILED,
+                output=None,
+                error_type="RuntimeError",
+                error_message="scheduled capability failed",
+                failure_code=OcrFailureCode.ENGINE_ERROR,
+            )
+            if item.lane_id == lane_id
+            else item
         )
-        if item.lane_id == lane_id
-        else item
         for item in queue.jobs
     )
     complete = sum(item.status is OcrJobStatus.COMPLETE for item in jobs)
@@ -550,9 +534,7 @@ def _word_boxes(
     *,
     confidence: float = 0.99,
 ) -> _OutputFactory:
-    segment_by_id = {
-        item.segment_id: item for item in geometry.segmentation.segments
-    }
+    segment_by_id = {item.segment_id: item for item in geometry.segmentation.segments}
 
     def output(block: object, transform: OcrTransform) -> OcrEngineOutput:
         del transform
@@ -783,9 +765,7 @@ def test_full_spatial_assembly_preserves_multiple_membership_groups() -> None:
         rules=geometry.segmentation.rules,
         matrix=geometry.matrix,
     )
-    assert tuple(item.segment_ids for item in objects.objects) == (
-        ("g-00", "g-01", "g-10", "g-11"),
-    )
+    assert tuple(item.segment_ids for item in objects.objects) == (("g-00", "g-01", "g-10", "g-11"),)
     planning_config = BlockPlanningConfig(
         mode=BlockPlanningMode.SPATIAL_2D,
         padding=0,
@@ -853,9 +833,7 @@ def test_full_spatial_assembly_preserves_multiple_membership_groups() -> None:
         ("g-10", "g-11"),
     )
     assert all(item.text is not None for item in result.structural_units)
-    assert {
-        item.segment_ids for item in result.evidence_slices
-    } == {("g-00", "g-01"), ("g-10", "g-11")}
+    assert {item.segment_ids for item in result.evidence_slices} == {("g-00", "g-01"), ("g-10", "g-11")}
 
 
 def test_spatial_group_covering_whole_paragraph_is_one_structural_unit() -> None:
@@ -876,9 +854,7 @@ def test_spatial_group_covering_whole_paragraph_is_one_structural_unit() -> None
         objects_result=objects,
         matrix=geometry.matrix,
     )
-    assert tuple(item.segment_ids for item in plan.membership_units) == (
-        ("p-0", "p-1"),
-    )
+    assert tuple(item.segment_ids for item in plan.membership_units) == (("p-0", "p-1"),)
     page, crops = _crops(geometry, plan)
     _, aligned_rgb_sha256 = BlockCropper().crop_with_rgb_sha256(
         page,
@@ -922,14 +898,9 @@ def test_spatial_group_covering_whole_paragraph_is_one_structural_unit() -> None
     assert result.status is AssemblyStatus.COMPLETE
     assert result.text is not None
     assert compact_ocr_text(result.candidate_text) == "FIRSTSECOND"
-    assert tuple(item.segment_ids for item in result.structural_units) == (
-        ("p-0", "p-1"),
-    )
+    assert tuple(item.segment_ids for item in result.structural_units) == (("p-0", "p-1"),)
     assert result.structural_units[0].text == result.objects[0].text
-    assert (
-        "segment-group-grammar-unsplittable"
-        not in result.objects[0].reasons
-    )
+    assert "segment-group-grammar-unsplittable" not in result.objects[0].reasons
 
 
 def test_one_object_accepts_stable_raw_gamma_text_only_evidence() -> None:
@@ -942,9 +913,7 @@ def test_one_object_accepts_stable_raw_gamma_text_only_evidence() -> None:
     assert fixture.objects.objects[0].kind is ObjectKind.PARAGRAPH
     assert fixture.fusion.status is OcrFusionStatus.UNRESOLVED
     assert fixture.fusion.observations == ()
-    assert all(
-        item.selected_text is None for item in fixture.fusion.segments
-    )
+    assert all(item.selected_text is None for item in fixture.fusion.segments)
 
     result = _assemble(fixture)
 
@@ -999,10 +968,7 @@ def test_failed_scheduled_capability_blocks_otherwise_stable_object_text() -> No
     assert result.candidate_text == "GOOD"
     assert result.objects[0].text is None
     reasons = result.objects[0].reasons + result.diagnostics
-    assert any(
-        "queue" in item.lower() and "partial" in item.lower()
-        for item in reasons
-    )
+    assert any("queue" in item.lower() and "partial" in item.lower() for item in reasons)
 
 
 def test_independent_text_and_bbox_capabilities_can_corroborate() -> None:
@@ -1087,9 +1053,7 @@ def test_agreeing_unresolved_segments_allow_stable_object_text() -> None:
             ),
         },
     )
-    assert tuple(
-        item.selected_text for item in fixture.fusion.segments
-    ) == ("RIGHT", "TEXT")
+    assert tuple(item.selected_text for item in fixture.fusion.segments) == ("RIGHT", "TEXT")
     assert all(item.unresolved for item in fixture.fusion.segments)
 
     result = _assemble(fixture)
@@ -1247,10 +1211,7 @@ def test_text_only_block_covering_two_objects_never_guesses_a_split() -> None:
     assert result.text is None
     assert result.candidate_text == "first object second object"
     assert all(item.text is None for item in result.objects)
-    assert not any(
-        item.attribution_level is AttributionLevel.OBJECT
-        for item in result.evidence_slices
-    )
+    assert not any(item.attribution_level is AttributionLevel.OBJECT for item in result.evidence_slices)
 
 
 def test_unattributable_fallback_markdown_equals_candidate_text() -> None:
@@ -1331,23 +1292,14 @@ def test_segment_evidence_assembles_each_structural_kind_without_loss(
     assert result.text is not None
     assert result.candidate_text == result.text
     _assert_exact_codepoints_in_order(result.text, tuple(texts.values()))
-    assert all(
-        item.attribution_level is AttributionLevel.SEGMENT
-        for item in result.segments
-    )
-    expected_unit_ids = tuple(
-        f"unit-{index:08d}" for index in range(unit_count)
-    )
+    assert all(item.attribution_level is AttributionLevel.SEGMENT for item in result.segments)
+    expected_unit_ids = tuple(f"unit-{index:08d}" for index in range(unit_count))
     assert len(result.structural_units) == unit_count
     assert all(item.kind is kind for item in result.structural_units)
     assert tuple(item.unit_id for item in result.structural_units) == expected_unit_ids
     assert result.objects[0].structural_unit_ids == expected_unit_ids
-    unit_payload = "".join(
-        item.candidate_text for item in result.structural_units
-    )
-    assert compact_ocr_text(unit_payload) == compact_ocr_text(
-        result.objects[0].candidate_text
-    )
+    unit_payload = "".join(item.candidate_text for item in result.structural_units)
+    assert compact_ocr_text(unit_payload) == compact_ocr_text(result.objects[0].candidate_text)
 
 
 def test_spanning_table_segment_is_emitted_once_not_once_per_sparse_cell() -> None:
@@ -1609,9 +1561,7 @@ def test_repeated_anchor_alignment_ambiguity_stays_unresolved() -> None:
     assert result.text is None
     assert compact_ocr_text(result.candidate_text) == "same"
     assert result.objects[1].text is None
-    assert all(
-        item.block_id == "block-000000" for item in result.evidence_slices
-    )
+    assert all(item.block_id == "block-000000" for item in result.evidence_slices)
 
 
 def test_unique_overlap_or_xor_recovers_a_segment_group_without_guessing() -> None:
@@ -1631,11 +1581,7 @@ def test_unique_overlap_or_xor_recovers_a_segment_group_without_guessing() -> No
     assert result.objects[0].attribution_level is AttributionLevel.OBJECT
     assert result.objects[1].text == "SECOND"
     assert result.objects[1].attribution_level is AttributionLevel.SEGMENT_GROUP
-    recovered = tuple(
-        item
-        for item in result.evidence_slices
-        if item.object_id == "object-000001"
-    )
+    recovered = tuple(item for item in result.evidence_slices if item.object_id == "object-000001")
     assert recovered
     assert all(
         item.block_id == "block-000001"
@@ -1801,10 +1747,7 @@ def test_overlap_anchor_with_text_on_both_sides_is_not_subtracted() -> None:
     assert result.structural_units[0].text is None
     assert result.structural_units[0].status is AssemblyStatus.UNRESOLVED
     assert result.objects[1].text is None
-    assert all(
-        item.attribution_level is not AttributionLevel.SEGMENT_GROUP
-        for item in result.evidence_slices
-    )
+    assert all(item.attribution_level is not AttributionLevel.SEGMENT_GROUP for item in result.evidence_slices)
 
 
 def test_overlap_source_without_exact_anchor_is_not_subtracted() -> None:
@@ -1825,10 +1768,7 @@ def test_overlap_source_without_exact_anchor_is_not_subtracted() -> None:
     assert result.structural_units[0].text is None
     assert result.structural_units[0].status is AssemblyStatus.UNRESOLVED
     assert result.objects[1].text is None
-    assert all(
-        item.attribution_level is not AttributionLevel.SEGMENT_GROUP
-        for item in result.evidence_slices
-    )
+    assert all(item.attribution_level is not AttributionLevel.SEGMENT_GROUP for item in result.evidence_slices)
 
 
 def test_overlap_residual_on_wrong_reading_side_is_not_recovered() -> None:
@@ -1843,10 +1783,7 @@ def test_overlap_residual_on_wrong_reading_side_is_not_recovered() -> None:
     assert result.status is AssemblyStatus.UNRESOLVED
     assert result.text is None
     assert result.objects[1].text is None
-    assert all(
-        item.attribution_level is not AttributionLevel.SEGMENT_GROUP
-        for item in result.evidence_slices
-    )
+    assert all(item.attribution_level is not AttributionLevel.SEGMENT_GROUP for item in result.evidence_slices)
 
 
 @pytest.mark.parametrize(
@@ -1866,10 +1803,7 @@ def test_token_internal_overlap_anchor_is_not_subtracted(
     assert result.status is AssemblyStatus.UNRESOLVED
     assert result.text is None
     assert result.objects[1].text is None
-    assert all(
-        item.attribution_level is not AttributionLevel.SEGMENT_GROUP
-        for item in result.evidence_slices
-    )
+    assert all(item.attribution_level is not AttributionLevel.SEGMENT_GROUP for item in result.evidence_slices)
 
 
 def test_overlap_residual_that_is_only_part_of_an_object_is_not_certified() -> None:
@@ -1943,10 +1877,7 @@ def test_overlap_residual_that_is_only_part_of_an_object_is_not_certified() -> N
     assert result.text is None
     assert result.objects[1].text is None
     assert result.objects[1].attribution_level is AttributionLevel.SEGMENT
-    assert all(
-        item.attribution_level is not AttributionLevel.SEGMENT_GROUP
-        for item in result.evidence_slices
-    )
+    assert all(item.attribution_level is not AttributionLevel.SEGMENT_GROUP for item in result.evidence_slices)
 
 
 def test_limits_are_checked_before_alignment_or_output_construction() -> None:
@@ -1971,11 +1902,7 @@ def test_public_assembly_api_has_no_reference_or_expected_text_channel() -> None
     signature = inspect.signature(DocumentAssembler.assemble)
     forbidden = ("reference", "expected", "ground_truth", "truth", "answer")
 
-    assert not any(
-        token in name.lower()
-        for name in signature.parameters
-        for token in forbidden
-    )
+    assert not any(token in name.lower() for name in signature.parameters for token in forbidden)
 
 
 def test_interleaved_segment_owners_preserve_object_reading_order() -> None:
@@ -2033,9 +1960,9 @@ def test_every_non_whitespace_output_codepoint_has_exact_evidence_provenance() -
     covered = [False] * len(certified)
     for evidence in result.evidence_slices:
         assert evidence.output_start < evidence.output_stop
-        assert compact_ocr_text(
-            result.text[evidence.output_start : evidence.output_stop]
-        ) == compact_ocr_text(evidence.text)
+        assert compact_ocr_text(result.text[evidence.output_start : evidence.output_stop]) == compact_ocr_text(
+            evidence.text
+        )
         for index in range(evidence.output_start, evidence.output_stop):
             if not result.text[index].isspace():
                 covered[len(compact_ocr_text(result.text[:index]))] = True

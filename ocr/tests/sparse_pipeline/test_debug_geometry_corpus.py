@@ -10,18 +10,11 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
-SCRIPT = (
-    Path(__file__).resolve().parents[3]
-    / "scripts"
-    / "debug"
-    / "debug_geometry_corpus.py"
-)
+SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "debug" / "debug_geometry_corpus.py"
 
 
 def _load_script():
-    spec = importlib.util.spec_from_file_location(
-        "_debug_geometry_corpus_under_test", SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("_debug_geometry_corpus_under_test", SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -246,18 +239,14 @@ def test_generated_pdf_stack_is_expanded_only_after_exact_reconstruction(
         )
 
 
-def test_main_reports_all_statuses_and_returns_nonzero_on_failure(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_main_reports_all_statuses_and_returns_nonzero_on_failure(tmp_path: Path, monkeypatch) -> None:
     module = _load_script()
     input_root = tmp_path / "input"
     output_root = tmp_path / "output"
     input_root.mkdir()
     for name in ("complete.png", "degraded.png", "failed.png"):
         (input_root / name).write_bytes(b"discovery-only")
-    (input_root / f"complete{module.LINE_OWNER_SUFFIX}").write_bytes(
-        b"not-an-input-image"
-    )
+    (input_root / f"complete{module.LINE_OWNER_SUFFIX}").write_bytes(b"not-an-input-image")
 
     monkeypatch.setattr(
         module,
@@ -322,9 +311,7 @@ def test_main_reports_all_statuses_and_returns_nonzero_on_failure(
         assert field in markdown
 
 
-def test_main_can_fail_the_interstage_gate_on_degraded_only(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_main_can_fail_the_interstage_gate_on_degraded_only(tmp_path: Path, monkeypatch) -> None:
     module = _load_script()
     input_root = tmp_path / "input"
     output_root = tmp_path / "output"
@@ -359,8 +346,6 @@ def test_main_can_fail_the_interstage_gate_on_degraded_only(
     )
 
     assert module.main() == 2
-    summary = json.loads(
-        (output_root / "strict-degraded" / "summary.json").read_text(encoding="utf-8")
-    )
+    summary = json.loads((output_root / "strict-degraded" / "summary.json").read_text(encoding="utf-8"))
     assert summary["status"] == "degraded"
     assert summary["fail_on_degraded"] is True

@@ -47,21 +47,15 @@ class OcrArtifactWriter:
             raise ValueError("run_id contains unsafe characters")
         if not isinstance(plan, BlockPlan):
             raise ValueError("plan must be a BlockPlan")
-        if type(segments) is not tuple or any(
-            not isinstance(item, Segment) for item in segments
-        ):
+        if type(segments) is not tuple or any(not isinstance(item, Segment) for item in segments):
             raise ValueError("segments must be an immutable Segment tuple")
-        if type(crops) is not tuple or any(
-            not isinstance(item, BlockCropPair) for item in crops
-        ):
+        if type(crops) is not tuple or any(not isinstance(item, BlockCropPair) for item in crops):
             raise ValueError("crops must be an immutable BlockCropPair tuple")
         if not isinstance(queue, OcrQueueResult):
             raise ValueError("queue must be an OcrQueueResult")
         if not isinstance(fusion, OcrFusionResult):
             raise ValueError("fusion must be an OcrFusionResult")
-        if tuple(item.block_id for item in crops) != tuple(
-            item.block_id for item in plan.blocks
-        ):
+        if tuple(item.block_id for item in crops) != tuple(item.block_id for item in plan.blocks):
             raise ValueError("OCR crop order disagrees with the block plan")
         if fusion.source_segment_ids != plan.source_segment_ids:
             raise ValueError("OCR fusion and block plan segment order disagree")
@@ -81,10 +75,7 @@ class OcrArtifactWriter:
             queue=queue,
         )
         if fusion != expected_fusion:
-            raise ValueError(
-                "OCR fusion evidence was not derived from the supplied "
-                "segments, queue and crop bytes"
-            )
+            raise ValueError("OCR fusion evidence was not derived from the supplied " "segments, queue and crop bytes")
 
         root.mkdir(parents=True, exist_ok=True)
         destination = root / run_id
@@ -199,25 +190,18 @@ class OcrArtifactWriter:
                 {
                     "first_block_id": item.first_block_id,
                     "second_block_id": item.second_block_id,
-                    "intersection_segment_ids": list(
-                        item.intersection_segment_ids
-                    ),
+                    "intersection_segment_ids": list(item.intersection_segment_ids),
                     "union_segment_ids": list(item.union_segment_ids),
                     "xor_segment_ids": list(item.xor_segment_ids),
-                    "first_only_segment_ids": list(
-                        item.first_only_segment_ids
-                    ),
-                    "second_only_segment_ids": list(
-                        item.second_only_segment_ids
-                    ),
+                    "first_only_segment_ids": list(item.first_only_segment_ids),
+                    "second_only_segment_ids": list(item.second_only_segment_ids),
                 }
                 for item in plan.adjacent_algebra
             ],
         }
         _write_jsonl(stage / "inputs" / "segments.jsonl", segment_entries)
         (stage / "inputs" / "plan.json").write_text(
-            json.dumps(plan_entry, ensure_ascii=False, sort_keys=True, indent=2)
-            + "\n",
+            json.dumps(plan_entry, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
             encoding="utf-8",
         )
         if matrix is not None and plan.mode is BlockPlanningMode.SPATIAL_2D:
@@ -249,12 +233,8 @@ class OcrArtifactWriter:
                     "segment_ids": list(crop.segment_ids),
                     "raw": raw_path.relative_to(stage).as_posix(),
                     "gamma": gamma_path.relative_to(stage).as_posix(),
-                    "raw_sha256": hashlib.sha256(
-                        crop.raw.png_bytes
-                    ).hexdigest(),
-                    "gamma_sha256": hashlib.sha256(
-                        crop.gamma.png_bytes
-                    ).hexdigest(),
+                    "raw_sha256": hashlib.sha256(crop.raw.png_bytes).hexdigest(),
+                    "gamma_sha256": hashlib.sha256(crop.gamma.png_bytes).hexdigest(),
                 }
             )
 
@@ -291,11 +271,7 @@ class OcrArtifactWriter:
                     "words": words,
                     "input_sha256": job.input_sha256,
                     "context_sha256": job.context_sha256,
-                    "failure_code": (
-                        job.failure_code.value
-                        if job.failure_code is not None
-                        else None
-                    ),
+                    "failure_code": (job.failure_code.value if job.failure_code is not None else None),
                     "error_type": job.error_type,
                     "error_message": job.error_message,
                     "elapsed_seconds": float(job.elapsed_seconds),
@@ -316,17 +292,13 @@ class OcrArtifactWriter:
                     "selected_text": path.relative_to(stage).as_posix(),
                     "selected_observation_id": segment.selected_observation_id,
                     "selected_transform": (
-                        segment.selected_transform.value
-                        if segment.selected_transform is not None
-                        else None
+                        segment.selected_transform.value if segment.selected_transform is not None else None
                     ),
                     "selected_lane_id": segment.selected_lane_id,
                     "confidence": segment.confidence,
                     "stability": segment.stability,
                     "observation_count": segment.observation_count,
-                    "independent_context_count": (
-                        segment.independent_context_count
-                    ),
+                    "independent_context_count": (segment.independent_context_count),
                     "uncertainty_reasons": list(segment.uncertainty_reasons),
                     "script_scores": [list(item) for item in segment.script_scores],
                     "unresolved": segment.unresolved,
@@ -347,9 +319,7 @@ class OcrArtifactWriter:
                     "text_path": path.relative_to(stage).as_posix(),
                     "attribution_status": observation.attribution_status.value,
                     "attribution_reason": observation.attribution_reason,
-                    "source_replica_conflict": (
-                        observation.source_replica_conflict
-                    ),
+                    "source_replica_conflict": (observation.source_replica_conflict),
                 }
             )
 
@@ -382,9 +352,7 @@ class OcrArtifactWriter:
                     "selected_text": path.relative_to(stage).as_posix(),
                     "selected_observation_id": group.selected_observation_id,
                     "selected_transform": (
-                        group.selected_transform.value
-                        if group.selected_transform is not None
-                        else None
+                        group.selected_transform.value if group.selected_transform is not None else None
                     ),
                     "selected_lane_id": group.selected_lane_id,
                     "confidence": group.confidence,
@@ -438,27 +406,15 @@ class OcrArtifactWriter:
                 "intersection_segment_ids": list(item.intersection_segment_ids),
                 "union_segment_ids": list(item.union_segment_ids),
                 "xor_segment_ids": list(item.xor_segment_ids),
-                "confirmed_intersection_segment_ids": list(
-                    item.confirmed_intersection_segment_ids
-                ),
+                "confirmed_intersection_segment_ids": list(item.confirmed_intersection_segment_ids),
                 "cross_transform_confirmed_intersection_segment_ids": list(
                     item.cross_transform_confirmed_intersection_segment_ids
                 ),
-                "near_confirmed_intersection_segment_ids": list(
-                    item.near_confirmed_intersection_segment_ids
-                ),
-                "deferred_intersection_segment_ids": list(
-                    item.deferred_intersection_segment_ids
-                ),
-                "conflicting_intersection_segment_ids": list(
-                    item.conflicting_intersection_segment_ids
-                ),
-                "missing_intersection_segment_ids": list(
-                    item.missing_intersection_segment_ids
-                ),
-                "observed_union_segment_ids": list(
-                    item.observed_union_segment_ids
-                ),
+                "near_confirmed_intersection_segment_ids": list(item.near_confirmed_intersection_segment_ids),
+                "deferred_intersection_segment_ids": list(item.deferred_intersection_segment_ids),
+                "conflicting_intersection_segment_ids": list(item.conflicting_intersection_segment_ids),
+                "missing_intersection_segment_ids": list(item.missing_intersection_segment_ids),
+                "observed_union_segment_ids": list(item.observed_union_segment_ids),
                 "observed_xor_segment_ids": list(item.observed_xor_segment_ids),
             }
             for item in fusion.overlaps
@@ -494,30 +450,14 @@ class OcrArtifactWriter:
 
         failed_jobs = sum(job.status is OcrJobStatus.FAILED for job in queue.jobs)
         unresolved_segments = sum(item.unresolved for item in fusion.segments)
-        overlap_exact_confirmed = sum(
-            len(item.confirmed_intersection_segment_ids)
-            for item in fusion.overlaps
-        )
+        overlap_exact_confirmed = sum(len(item.confirmed_intersection_segment_ids) for item in fusion.overlaps)
         overlap_cross_transform_confirmed = sum(
-            len(item.cross_transform_confirmed_intersection_segment_ids)
-            for item in fusion.overlaps
+            len(item.cross_transform_confirmed_intersection_segment_ids) for item in fusion.overlaps
         )
-        overlap_near_confirmed = sum(
-            len(item.near_confirmed_intersection_segment_ids)
-            for item in fusion.overlaps
-        )
-        overlap_deferred = sum(
-            len(item.deferred_intersection_segment_ids)
-            for item in fusion.overlaps
-        )
-        overlap_conflicts = sum(
-            len(item.conflicting_intersection_segment_ids)
-            for item in fusion.overlaps
-        )
-        overlap_missing = sum(
-            len(item.missing_intersection_segment_ids)
-            for item in fusion.overlaps
-        )
+        overlap_near_confirmed = sum(len(item.near_confirmed_intersection_segment_ids) for item in fusion.overlaps)
+        overlap_deferred = sum(len(item.deferred_intersection_segment_ids) for item in fusion.overlaps)
+        overlap_conflicts = sum(len(item.conflicting_intersection_segment_ids) for item in fusion.overlaps)
+        overlap_missing = sum(len(item.missing_intersection_segment_ids) for item in fusion.overlaps)
         manifest = {
             "semantic_stage": 2,
             "execution_step": 6,
@@ -532,17 +472,13 @@ class OcrArtifactWriter:
             "segment_observations": len(fusion.observations),
             "segment_group_observations": len(fusion.group_observations),
             "segment_groups": len(fusion.segment_groups),
-            "block_text_observations": len(
-                fusion.block_text_observations
-            ),
+            "block_text_observations": len(fusion.block_text_observations),
             "unassigned_words": len(fusion.unassigned_word_observations),
             "replica_conflicts": len(fusion.replica_conflicts),
             "unresolved_segments": unresolved_segments,
             "overlap_pairs": len(fusion.overlaps),
             "overlap_exact_confirmed": overlap_exact_confirmed,
-            "overlap_cross_transform_confirmed": (
-                overlap_cross_transform_confirmed
-            ),
+            "overlap_cross_transform_confirmed": (overlap_cross_transform_confirmed),
             "overlap_near_confirmed": overlap_near_confirmed,
             "overlap_deferred": overlap_deferred,
             "overlap_conflicts": overlap_conflicts,
@@ -563,8 +499,7 @@ class OcrArtifactWriter:
             },
         }
         (stage / "manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2)
-            + "\n",
+            json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
             encoding="utf-8",
         )
         (stage / "diagnostics.txt").write_text(
@@ -577,13 +512,11 @@ class OcrArtifactWriter:
                     f"failed_jobs={failed_jobs}",
                     f"unresolved_segments={unresolved_segments}",
                     f"segment_groups={len(fusion.segment_groups)}",
-                    "unresolved_segment_groups="
-                    f"{sum(item.unresolved for item in fusion.segment_groups)}",
+                    "unresolved_segment_groups=" f"{sum(item.unresolved for item in fusion.segment_groups)}",
                     f"unassigned_words={len(fusion.unassigned_word_observations)}",
                     f"replica_conflicts={len(fusion.replica_conflicts)}",
                     f"overlap_exact_confirmed={overlap_exact_confirmed}",
-                    "overlap_cross_transform_confirmed="
-                    f"{overlap_cross_transform_confirmed}",
+                    "overlap_cross_transform_confirmed=" f"{overlap_cross_transform_confirmed}",
                     f"overlap_near_confirmed={overlap_near_confirmed}",
                     f"overlap_deferred={overlap_deferred}",
                     f"overlap_conflicts={overlap_conflicts}",
@@ -599,10 +532,7 @@ class OcrArtifactWriter:
 def _write_jsonl(path: Path, values: list[dict[str, object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        "".join(
-            json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n"
-            for value in values
-        ),
+        "".join(json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n" for value in values),
         encoding="utf-8",
     )
 

@@ -39,9 +39,7 @@ class PersistentOcrSession:
         lanes: tuple[OcrLane, ...],
         config: OcrQueueConfig | None = None,
     ) -> None:
-        if type(lanes) is not tuple or any(
-            not isinstance(lane, OcrLane) for lane in lanes
-        ):
+        if type(lanes) is not tuple or any(not isinstance(lane, OcrLane) for lane in lanes):
             raise TypeError("lanes must be an immutable OcrLane tuple")
         if not lanes:
             raise ValueError("a persistent OCR session requires at least one lane")
@@ -53,11 +51,7 @@ class PersistentOcrSession:
         if len(lanes) > self._queue.config.max_lanes:
             raise ValueError("persistent OCR lane count exceeds the queue limit")
         self._states = {
-            lane.lane_id: tuple(
-                _PersistentShard(lane, index)
-                for index in range(lane.max_workers)
-            )
-            for lane in lanes
+            lane.lane_id: tuple(_PersistentShard(lane, index) for index in range(lane.max_workers)) for lane in lanes
         }
         self._worker_ownership: dict[int, tuple[object, str, int]] = {}
         self._worker_ownership_lock = threading.Lock()
@@ -115,12 +109,7 @@ class PersistentOcrSession:
                 self.config.max_words,
                 self.config.max_total_words // len(specs),
             )
-            by_lane = {
-                lane.lane_id: tuple(
-                    spec for spec in specs if spec.lane is lane
-                )
-                for lane in self.lanes
-            }
+            by_lane = {lane.lane_id: tuple(spec for spec in specs if spec.lane is lane) for lane in self.lanes}
             futures: dict[
                 concurrent.futures.Future[tuple[OcrJobResult, ...]],
                 tuple[OcrLane, int, tuple[_JobSpec, ...]],
@@ -155,28 +144,16 @@ class PersistentOcrSession:
                         )
                         for spec in shard
                     )
-                diagnostics.append(
-                    f"lane={lane.lane_id};persistent-shard={shard_index}"
-                )
+                diagnostics.append(f"lane={lane.lane_id};persistent-shard={shard_index}")
             order = {spec.job_id: spec.index for spec in specs}
             jobs = tuple(sorted(unordered, key=lambda job: order[job.job_id]))
-            if tuple(job.job_id for job in jobs) != tuple(
-                spec.job_id for spec in specs
-            ):
-                raise OcrQueueInvariantError(
-                    "persistent OCR execution lost or duplicated a job"
-                )
-            complete = sum(
-                job.status is OcrJobStatus.COMPLETE for job in jobs
-            )
+            if tuple(job.job_id for job in jobs) != tuple(spec.job_id for spec in specs):
+                raise OcrQueueInvariantError("persistent OCR execution lost or duplicated a job")
+            complete = sum(job.status is OcrJobStatus.COMPLETE for job in jobs)
             failed = len(jobs) - complete
             return OcrQueueResult(
                 jobs=jobs,
-                status=(
-                    OcrQueueStatus.COMPLETE
-                    if failed == 0
-                    else OcrQueueStatus.PARTIAL
-                ),
+                status=(OcrQueueStatus.COMPLETE if failed == 0 else OcrQueueStatus.PARTIAL),
                 complete=complete,
                 failed=failed,
                 diagnostics=tuple(sorted(diagnostics)),
@@ -229,9 +206,7 @@ class PersistentOcrSession:
                 )
                 if bool(getattr(exc, "worker_poisoned", False)):
                     self._close_worker(state)
-                if state.worker is None and not bool(
-                    getattr(exc, "retryable", False)
-                ):
+                if state.worker is None and not bool(getattr(exc, "retryable", False)):
                     results.extend(
                         self._queue._failed(
                             remaining,
@@ -253,9 +228,7 @@ class PersistentOcrSession:
         with self._worker_ownership_lock:
             previous = self._worker_ownership.get(id(worker))
             if previous is not None and previous[0] is worker:
-                raise ValueError(
-                    "worker_factory reused one worker across persistent shards"
-                )
+                raise ValueError("worker_factory reused one worker across persistent shards")
             self._worker_ownership[id(worker)] = (
                 worker,
                 state.lane.lane_id,
@@ -281,9 +254,7 @@ class PersistentOcrSession:
                 return
             self._closed = True
             futures = tuple(
-                state.executor.submit(self._close_worker, state)
-                for states in self._states.values()
-                for state in states
+                state.executor.submit(self._close_worker, state) for states in self._states.values() for state in states
             )
             for future in futures:
                 try:

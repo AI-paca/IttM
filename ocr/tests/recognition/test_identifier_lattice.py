@@ -80,8 +80,7 @@ def test_relational_rule_replaces_only_observed_same_row_segments():
         row: next(
             word["text"]
             for word in fused
-            if word["bbox"][1] < (row * 40 + 20) < word["bbox"][3]
-            and word["bbox"][0] < 220
+            if word["bbox"][1] < (row * 40 + 20) < word["bbox"][3] and word["bbox"][0] < 220
         )
         for row in range(6)
     }

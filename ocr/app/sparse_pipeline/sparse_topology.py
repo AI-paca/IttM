@@ -98,9 +98,7 @@ def compose_sparse_code(
     if type(empty) is not bool:
         raise TypeError("empty must be a boolean")
     return (
-        (MERGE_UP_CODE if merge_up else 0)
-        + (MERGE_LEFT_CODE if merge_left else 0)
-        + (EMPTY_SLOT_CODE if empty else 0)
+        (MERGE_UP_CODE if merge_up else 0) + (MERGE_LEFT_CODE if merge_left else 0) + (EMPTY_SLOT_CODE if empty else 0)
     )
 
 
@@ -138,23 +136,13 @@ def encode_ragged_topology(
             if slot is None:
                 encoded.append(None)
                 continue
-            above = (
-                rows[row_index - 1][column]
-                if row_index > 0 and column < len(rows[row_index - 1])
-                else None
-            )
+            above = rows[row_index - 1][column] if row_index > 0 and column < len(rows[row_index - 1]) else None
             left = row[column - 1] if column > 0 else None
             is_empty = isinstance(slot, EmptySlot)
             merge_up = above is not None and (
-                (is_empty and isinstance(above, EmptySlot))
-                or (not is_empty and slot == above)
+                (is_empty and isinstance(above, EmptySlot)) or (not is_empty and slot == above)
             )
-            merge_left = (
-                not is_empty
-                and left is not None
-                and not isinstance(left, EmptySlot)
-                and slot == left
-            )
+            merge_left = not is_empty and left is not None and not isinstance(left, EmptySlot) and slot == left
             encoded.append(
                 compose_sparse_code(
                     merge_up=merge_up,
@@ -204,20 +192,13 @@ def encode_spatial_topology(
                 max(slot.start, above.start) < min(slot.end, above.end)
                 and (
                     (is_empty and isinstance(above.value, EmptySlot))
-                    or (
-                        not is_empty
-                        and not isinstance(above.value, EmptySlot)
-                        and slot.value == above.value
-                    )
+                    or (not is_empty and not isinstance(above.value, EmptySlot) and slot.value == above.value)
                 )
                 for above in previous_row
             )
             left = row[column - 1] if column > 0 else None
             merge_left = (
-                not is_empty
-                and left is not None
-                and not isinstance(left.value, EmptySlot)
-                and slot.value == left.value
+                not is_empty and left is not None and not isinstance(left.value, EmptySlot) and slot.value == left.value
             )
             encoded.append(
                 compose_sparse_code(
@@ -248,9 +229,7 @@ def encode_observed_topology(
     ``null`` tail convention.
     """
 
-    if type(rows) is not tuple or any(
-        not isinstance(row, ObservedTopologyRow) for row in rows
-    ):
+    if type(rows) is not tuple or any(not isinstance(row, ObservedTopologyRow) for row in rows):
         raise TypeError("rows must be an immutable tuple of observed rows")
     previous_payload: frozenset[int] = frozenset()
     previous_empty: frozenset[int] = frozenset()
@@ -270,25 +249,13 @@ def encode_observed_topology(
         if not merge_left_set <= payload_set:
             raise ValueError("merge-left coordinates must contain payload")
         materialized = payload_set | empty_set
-        if materialized and materialized != frozenset(
-            range(max(materialized) + 1)
-        ):
-            raise ValueError(
-                "leading and internal coordinates must be payload or empty"
-            )
+        if materialized and materialized != frozenset(range(max(materialized) + 1)):
+            raise ValueError("leading and internal coordinates must be payload or empty")
         for column in sorted(materialized):
             is_empty = column in empty_set
             code = compose_sparse_code(
-                merge_up=(
-                    column in previous_empty
-                    if is_empty
-                    else column in previous_payload
-                ),
-                merge_left=(
-                    not is_empty
-                    and column in merge_left_set
-                    and column - 1 in payload_set
-                ),
+                merge_up=(column in previous_empty if is_empty else column in previous_payload),
+                merge_left=(not is_empty and column in merge_left_set and column - 1 in payload_set),
                 empty=is_empty,
             )
             result.append(
@@ -305,9 +272,7 @@ def encode_observed_topology(
 
 
 def _canonical_columns(values: tuple[int, ...], *, name: str) -> tuple[int, ...]:
-    if type(values) is not tuple or any(
-        type(value) is not int or value < 0 for value in values
-    ):
+    if type(values) is not tuple or any(type(value) is not int or value < 0 for value in values):
         raise TypeError(f"{name} columns must be a tuple of non-negative integers")
     if values != tuple(sorted(set(values))):
         raise ValueError(f"{name} columns must be unique and sorted")

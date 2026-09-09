@@ -51,9 +51,7 @@ class _EvidenceBudget:
 
     def consume(self, count: int) -> None:
         if self.checks + count > self.maximum:
-            raise SparsePipelineEvidenceInvariantError(
-                "sparse evidence revalidation exceeds the recorded work limit"
-            )
+            raise SparsePipelineEvidenceInvariantError("sparse evidence revalidation exceeds the recorded work limit")
         self.checks += count
 
 
@@ -65,20 +63,13 @@ def _validate_segment_handoff(
 ) -> None:
     """Join recursive geometry to canonical document order without forgery."""
 
-    if (
-        len(stage1_ids) != len(set(stage1_ids))
-        or set(stage6_ids) != set(stage1_ids)
-    ):
-        raise SparsePipelineEvidenceInvariantError(
-            "stage 1/6 segment identifiers disagree"
-        )
+    if len(stage1_ids) != len(set(stage1_ids)) or set(stage6_ids) != set(stage1_ids):
+        raise SparsePipelineEvidenceInvariantError("stage 1/6 segment identifiers disagree")
     # Stage 6 establishes canonical document reading order.  Recursive Stage
     # 1 order is a tree traversal and may legitimately differ once a ruled
     # table contains merged cells.  Downstream stages must preserve Stage 6.
     if stage5_ids != stage6_ids or stage2_ids != stage6_ids:
-        raise SparsePipelineEvidenceInvariantError(
-            "stage 6/5/2 canonical segment order disagrees"
-        )
+        raise SparsePipelineEvidenceInvariantError("stage 6/5/2 canonical segment order disagrees")
 
 
 @dataclass(frozen=True)
@@ -122,13 +113,8 @@ class SparsePipelineEvidence:
         segments = self.geometry.segmentation.segments
         segment_ids = tuple(item.segment_id for item in segments)
         aligned_size = self.geometry.segmentation.aligned_size
-        if (
-            self.objects.aligned_size != aligned_size
-            or self.plan.aligned_size != aligned_size
-        ):
-            raise SparsePipelineEvidenceInvariantError(
-                "stage 1/6/5 aligned canvas sizes disagree"
-            )
+        if self.objects.aligned_size != aligned_size or self.plan.aligned_size != aligned_size:
+            raise SparsePipelineEvidenceInvariantError("stage 1/6/5 aligned canvas sizes disagree")
         _validate_segment_handoff(
             segment_ids,
             self.objects.source_segment_ids,
@@ -144,9 +130,7 @@ class SparsePipelineEvidence:
             stage4_config=stage4_config,
         )
         owner_by_segment = self._validate_objects(segments=segments)
-        evidence_budget = _EvidenceBudget(
-            planning_config.max_evidence_revalidation_checks
-        )
+        evidence_budget = _EvidenceBudget(planning_config.max_evidence_revalidation_checks)
         self._validate_plan(
             segments=segments,
             owner_by_segment=owner_by_segment,
@@ -154,13 +138,8 @@ class SparsePipelineEvidence:
             matrix=self.geometry.matrix,
             budget=evidence_budget,
         )
-        if (
-            self.plan.mode is BlockPlanningMode.SPATIAL_2D
-            and self.ownership is None
-        ):
-            raise SparsePipelineEvidenceInvariantError(
-                "spatial evidence requires the Stage 1 ownership raster"
-            )
+        if self.plan.mode is BlockPlanningMode.SPATIAL_2D and self.ownership is None:
+            raise SparsePipelineEvidenceInvariantError("spatial evidence requires the Stage 1 ownership raster")
         try:
             BlockCropper._validate_exact_spatial_membership(
                 aligned_size=aligned_size,
@@ -214,31 +193,15 @@ class SparsePipelineEvidence:
         )
         for name, value, expected in values:
             if not isinstance(value, expected):
-                raise SparsePipelineEvidenceInvariantError(
-                    f"{name} must be a {expected.__name__}"
-                )
-        if type(self.crops) is not tuple or any(
-            not isinstance(item, BlockCropPair) for item in self.crops
-        ):
-            raise SparsePipelineEvidenceInvariantError(
-                "crops must be an immutable BlockCropPair tuple"
-            )
+                raise SparsePipelineEvidenceInvariantError(f"{name} must be a {expected.__name__}")
+        if type(self.crops) is not tuple or any(not isinstance(item, BlockCropPair) for item in self.crops):
+            raise SparsePipelineEvidenceInvariantError("crops must be an immutable BlockCropPair tuple")
         if (self.ownership is None) != (self.ownership_segment_ids is None):
-            raise SparsePipelineEvidenceInvariantError(
-                "ownership raster and segment order must be supplied together"
-            )
-        if self.ownership is not None and not isinstance(
-            self.ownership, np.ndarray
-        ):
-            raise SparsePipelineEvidenceInvariantError(
-                "ownership must be a NumPy array or None"
-            )
-        if self.ownership_segment_ids is not None and type(
-            self.ownership_segment_ids
-        ) is not tuple:
-            raise SparsePipelineEvidenceInvariantError(
-                "ownership segment order must be an immutable tuple or None"
-            )
+            raise SparsePipelineEvidenceInvariantError("ownership raster and segment order must be supplied together")
+        if self.ownership is not None and not isinstance(self.ownership, np.ndarray):
+            raise SparsePipelineEvidenceInvariantError("ownership must be a NumPy array or None")
+        if self.ownership_segment_ids is not None and type(self.ownership_segment_ids) is not tuple:
+            raise SparsePipelineEvidenceInvariantError("ownership segment order must be an immutable tuple or None")
         optional_values = (
             ("stage4", self.stage4, EnhancedCrop),
             ("object_config", self.object_config, ObjectReconstructionConfig),
@@ -249,9 +212,7 @@ class SparsePipelineEvidence:
         )
         for name, value, expected in optional_values:
             if value is not None and not isinstance(value, expected):
-                raise SparsePipelineEvidenceInvariantError(
-                    f"{name} must be a {expected.__name__} or None"
-                )
+                raise SparsePipelineEvidenceInvariantError(f"{name} must be a {expected.__name__} or None")
 
     def _validate_limits(
         self,
@@ -264,59 +225,37 @@ class SparsePipelineEvidence:
     ) -> None:
         segment_count = len(self.geometry.segmentation.segments)
         if segment_count > object_config.max_segments:
-            raise SparsePipelineEvidenceInvariantError(
-                "segment count exceeds the recorded object configuration"
-            )
+            raise SparsePipelineEvidenceInvariantError("segment count exceeds the recorded object configuration")
         if segment_count > planning_config.max_segments:
-            raise SparsePipelineEvidenceInvariantError(
-                "segment count exceeds the recorded planning configuration"
-            )
+            raise SparsePipelineEvidenceInvariantError("segment count exceeds the recorded planning configuration")
         if len(self.objects.objects) > planning_config.max_objects:
-            raise SparsePipelineEvidenceInvariantError(
-                "object count exceeds the recorded planning configuration"
-            )
+            raise SparsePipelineEvidenceInvariantError("object count exceeds the recorded planning configuration")
         if len(self.plan.blocks) > min(
             planning_config.max_blocks,
             crop_config.max_blocks,
         ):
-            raise SparsePipelineEvidenceInvariantError(
-                "block count exceeds a recorded stage configuration"
-            )
-        if (
-            len(self.fusion.observations)
-            + len(self.fusion.group_observations)
-            > fusion_config.max_observations
-        ):
-            raise SparsePipelineEvidenceInvariantError(
-                "observation count exceeds the recorded fusion configuration"
-            )
+            raise SparsePipelineEvidenceInvariantError("block count exceeds a recorded stage configuration")
+        if len(self.fusion.observations) + len(self.fusion.group_observations) > fusion_config.max_observations:
+            raise SparsePipelineEvidenceInvariantError("observation count exceeds the recorded fusion configuration")
         if len(self.page.png_bytes) > crop_config.max_page_bytes:
-            raise SparsePipelineEvidenceInvariantError(
-                "page bytes exceed the recorded crop configuration"
-            )
+            raise SparsePipelineEvidenceInvariantError("page bytes exceed the recorded crop configuration")
         width, height = self.geometry.segmentation.aligned_size
         if (
             width > crop_config.max_dimension
             or height > crop_config.max_dimension
             or width * height > crop_config.max_page_pixels
         ):
-            raise SparsePipelineEvidenceInvariantError(
-                "page dimensions exceed the recorded crop configuration"
-            )
+            raise SparsePipelineEvidenceInvariantError("page dimensions exceed the recorded crop configuration")
         if self.stage4 is not None and (
             len(self.page.png_bytes) > stage4_config.max_input_bytes
             or width > stage4_config.max_dimension
             or height > stage4_config.max_dimension
             or width * height > stage4_config.max_input_pixels
         ):
-            raise SparsePipelineEvidenceInvariantError(
-                "stage 4 input exceeds its recorded configuration"
-            )
+            raise SparsePipelineEvidenceInvariantError("stage 4 input exceeds its recorded configuration")
 
     def _validate_objects(self, *, segments: tuple[object, ...]) -> dict[str, str]:
-        segment_by_id = {
-            getattr(item, "segment_id"): item for item in segments
-        }
+        segment_by_id = {getattr(item, "segment_id"): item for item in segments}
         owner_by_segment: dict[str, str] = {}
         for item in self.objects.objects:
             try:
@@ -331,22 +270,13 @@ class SparsePipelineEvidence:
                 )
             for segment_id in item.segment_ids:
                 if segment_id in owner_by_segment:
-                    raise SparsePipelineEvidenceInvariantError(
-                        "stage 6 assigns one segment to multiple objects"
-                    )
+                    raise SparsePipelineEvidenceInvariantError("stage 6 assigns one segment to multiple objects")
                 owner_by_segment[segment_id] = item.object_id
         if set(owner_by_segment) != set(self.objects.source_segment_ids):
-            raise SparsePipelineEvidenceInvariantError(
-                "stage 6 ownership is not the exact stage 1 segment partition"
-            )
-        ownership_records = {
-            item.segment_id: item.object_id
-            for item in self.objects.segment_ownership
-        }
+            raise SparsePipelineEvidenceInvariantError("stage 6 ownership is not the exact stage 1 segment partition")
+        ownership_records = {item.segment_id: item.object_id for item in self.objects.segment_ownership}
         if ownership_records != owner_by_segment:
-            raise SparsePipelineEvidenceInvariantError(
-                "stage 6 ownership records disagree with its objects"
-            )
+            raise SparsePipelineEvidenceInvariantError("stage 6 ownership records disagree with its objects")
         return owner_by_segment
 
     def _validate_plan(
@@ -358,90 +288,52 @@ class SparsePipelineEvidence:
         matrix: SparseSegmentMatrix,
         budget: _EvidenceBudget | None = None,
     ) -> None:
-        budget = budget or _EvidenceBudget(
-            planning_config.max_evidence_revalidation_checks
-        )
-        segment_by_id = {
-            getattr(item, "segment_id"): item for item in segments
-        }
+        budget = budget or _EvidenceBudget(planning_config.max_evidence_revalidation_checks)
+        segment_by_id = {getattr(item, "segment_id"): item for item in segments}
         if self.plan.mode is not planning_config.mode:
-            raise SparsePipelineEvidenceInvariantError(
-                "stage 5 plan mode disagrees with its recorded configuration"
-            )
-        if self.plan.mode is BlockPlanningMode.SPATIAL_2D and (
-            self.plan.matrix_sha256 != sparse_matrix_sha256(matrix)
-        ):
-            raise SparsePipelineEvidenceInvariantError(
-                "stage 5 matrix provenance disagrees with Stage 1"
-            )
+            raise SparsePipelineEvidenceInvariantError("stage 5 plan mode disagrees with its recorded configuration")
+        if self.plan.mode is BlockPlanningMode.SPATIAL_2D and (self.plan.matrix_sha256 != sparse_matrix_sha256(matrix)):
+            raise SparsePipelineEvidenceInvariantError("stage 5 matrix provenance disagrees with Stage 1")
         width, height = self.plan.aligned_size
         memberships = {segment_id: 0 for segment_id in segment_by_id}
         budget.consume(len(segments) + len(self.plan.blocks))
         scope_owner: dict[str, str] = {}
         owner_scope: dict[str, str] = {}
         for block in self.plan.blocks:
-            budget.consume(
-                len(block.segment_ids)
-                + len(block.core_segment_ids)
-                + len(block.object_ids)
-            )
+            budget.consume(len(block.segment_ids) + len(block.core_segment_ids) + len(block.object_ids))
             if (
                 (
                     planning_config.mode is BlockPlanningMode.FULL_WIDTH
-                    and len(block.core_segment_ids)
-                    > planning_config.max_core_segments
+                    and len(block.core_segment_ids) > planning_config.max_core_segments
                 )
                 or (
                     planning_config.mode is BlockPlanningMode.SPATIAL_2D
-                    and len(block.core_segment_ids)
-                    > planning_config.max_block_segments
+                    and len(block.core_segment_ids) > planning_config.max_block_segments
                 )
                 or len(block.segment_ids) > planning_config.max_block_segments
             ):
-                raise SparsePipelineEvidenceInvariantError(
-                    f"stage 5 block {block.block_id} exceeds segment limits"
-                )
+                raise SparsePipelineEvidenceInvariantError(f"stage 5 block {block.block_id} exceeds segment limits")
             for segment_id in block.segment_ids:
                 memberships[segment_id] += 1
             expected_owners = tuple(
-                dict.fromkeys(
-                    owner_by_segment[segment_id]
-                    for segment_id in block.core_segment_ids
-                )
+                dict.fromkeys(owner_by_segment[segment_id] for segment_id in block.core_segment_ids)
             )
             if block.object_ids != expected_owners:
                 raise SparsePipelineEvidenceInvariantError(
                     f"stage 5 block {block.block_id} object identifiers disagree"
                 )
             if planning_config.mode is BlockPlanningMode.SPATIAL_2D:
-                block_owners = {
-                    owner_by_segment[segment_id]
-                    for segment_id in block.segment_ids
-                }
+                block_owners = {owner_by_segment[segment_id] for segment_id in block.segment_ids}
                 if block.scope_id is None or len(block_owners) != 1:
-                    raise SparsePipelineEvidenceInvariantError(
-                        "every spatial block must belong to one Stage 6 object"
-                    )
+                    raise SparsePipelineEvidenceInvariantError("every spatial block must belong to one Stage 6 object")
                 owner = next(iter(block_owners))
                 if scope_owner.setdefault(block.scope_id, owner) != owner:
-                    raise SparsePipelineEvidenceInvariantError(
-                        "one spatial scope crosses Stage 6 objects"
-                    )
+                    raise SparsePipelineEvidenceInvariantError("one spatial scope crosses Stage 6 objects")
                 if owner_scope.setdefault(owner, block.scope_id) != block.scope_id:
-                    raise SparsePipelineEvidenceInvariantError(
-                        "one Stage 6 object has multiple spatial scopes"
-                    )
-                if any(
-                    owner_by_segment[segment_id] != owner
-                    for segment_id in block.segment_ids
-                ):
-                    raise SparsePipelineEvidenceInvariantError(
-                        "one spatial block crosses Stage 6 objects"
-                    )
-            member_bbox = Box.union(
-                segment_by_id[segment_id].bbox
-                for segment_id in block.segment_ids
-            )
+                    raise SparsePipelineEvidenceInvariantError("one Stage 6 object has multiple spatial scopes")
+                if any(owner_by_segment[segment_id] != owner for segment_id in block.segment_ids):
+                    raise SparsePipelineEvidenceInvariantError("one spatial block crosses Stage 6 objects")
+            member_bbox = Box.union(segment_by_id[segment_id].bbox for segment_id in block.segment_ids)
             if planning_config.mode is BlockPlanningMode.FULL_WIDTH:
                 expected_bbox = Box(
                     0,
@@ -475,8 +367,7 @@ class SparsePipelineEvidence:
                     )
                 except BlockPlanningInvariantError as exc:
                     raise SparsePipelineEvidenceInvariantError(
-                        f"stage 5 block {block.block_id} spatial padding "
-                        "disagrees with stage 1"
+                        f"stage 5 block {block.block_id} spatial padding " "disagrees with stage 1"
                     ) from exc
             if block.bbox != expected_bbox:
                 raise SparsePipelineEvidenceInvariantError(
@@ -484,49 +375,24 @@ class SparsePipelineEvidence:
                 )
             if block.bbox.area > planning_config.max_block_pixels:
                 raise SparsePipelineEvidenceInvariantError(
-                    f"stage 5 block {block.block_id} pixel footprint exceeds "
-                    "the recorded limit"
+                    f"stage 5 block {block.block_id} pixel footprint exceeds " "the recorded limit"
                 )
-        if (
-            max(memberships.values(), default=0)
-            > planning_config.max_segment_memberships
-        ):
-            raise SparsePipelineEvidenceInvariantError(
-                "stage 5 segment memberships exceed the recorded limit"
-            )
-        if (
-            sum(len(block.segment_ids) for block in self.plan.blocks)
-            > planning_config.max_total_block_memberships
-        ):
-            raise SparsePipelineEvidenceInvariantError(
-                "stage 5 aggregate memberships exceed the recorded limit"
-            )
-        if any(
-            not block.core_segment_ids and len(block.segment_ids) == 1
-            for block in self.plan.blocks
-        ):
-            raise SparsePipelineEvidenceInvariantError(
-                "stage 5 singleton signature probes are forbidden"
-            )
+        if max(memberships.values(), default=0) > planning_config.max_segment_memberships:
+            raise SparsePipelineEvidenceInvariantError("stage 5 segment memberships exceed the recorded limit")
+        if sum(len(block.segment_ids) for block in self.plan.blocks) > planning_config.max_total_block_memberships:
+            raise SparsePipelineEvidenceInvariantError("stage 5 aggregate memberships exceed the recorded limit")
+        if any(not block.core_segment_ids and len(block.segment_ids) == 1 for block in self.plan.blocks):
+            raise SparsePipelineEvidenceInvariantError("stage 5 singleton signature probes are forbidden")
         if len(self.plan.adjacent_algebra) > planning_config.max_overlap_pairs:
-            raise SparsePipelineEvidenceInvariantError(
-                "stage 5 overlap pairs exceed the recorded limit"
-            )
-        pair_memberships = sum(
-            len(item.union_segment_ids)
-            for item in self.plan.adjacent_algebra
-        )
+            raise SparsePipelineEvidenceInvariantError("stage 5 overlap pairs exceed the recorded limit")
+        pair_memberships = sum(len(item.union_segment_ids) for item in self.plan.adjacent_algebra)
         if pair_memberships > planning_config.max_pair_memberships:
-            raise SparsePipelineEvidenceInvariantError(
-                    "stage 5 block pair memberships exceed the recorded limit"
-                )
+            raise SparsePipelineEvidenceInvariantError("stage 5 block pair memberships exceed the recorded limit")
         for unit in self.plan.membership_units:
             budget.consume(len(unit.segment_ids) + len(unit.block_ids))
             owners = {owner_by_segment[value] for value in unit.segment_ids}
             if len(owners) != 1:
-                raise SparsePipelineEvidenceInvariantError(
-                    "one membership unit crosses Stage 6 objects"
-                )
+                raise SparsePipelineEvidenceInvariantError("one membership unit crosses Stage 6 objects")
 
     def _validate_crops(
         self,
@@ -536,25 +402,15 @@ class SparsePipelineEvidence:
         budget: _EvidenceBudget,
         owner_by_segment: dict[str, str],
     ) -> dict[str, BlockCropPair]:
-        if tuple(item.block_id for item in self.crops) != tuple(
-            item.block_id for item in self.plan.blocks
-        ):
-            raise SparsePipelineEvidenceInvariantError(
-                "stage 4 crops do not follow the exact stage 5 block order"
-            )
+        if tuple(item.block_id for item in self.crops) != tuple(item.block_id for item in self.plan.blocks):
+            raise SparsePipelineEvidenceInvariantError("stage 4 crops do not follow the exact stage 5 block order")
         crop_by_block: dict[str, BlockCropPair] = {}
         for block, crop in zip(self.plan.blocks, self.crops):
             budget.consume(1)
-            if (
-                crop.bbox != block.bbox
-                or crop.segment_ids != block.segment_ids
-            ):
-                raise SparsePipelineEvidenceInvariantError(
-                    f"stage 4 crop {crop.block_id} disagrees with stage 5"
-                )
+            if crop.bbox != block.bbox or crop.segment_ids != block.segment_ids:
+                raise SparsePipelineEvidenceInvariantError(f"stage 4 crop {crop.block_id} disagrees with stage 5")
             if any(
-                segment_id not in owner_by_segment
-                or segment_id in block.segment_ids
+                segment_id not in owner_by_segment or segment_id in block.segment_ids
                 for segment_id in crop.masked_segment_ids
             ):
                 raise SparsePipelineEvidenceInvariantError(
@@ -574,16 +430,12 @@ class SparsePipelineEvidence:
             expected = page_rgb.crop(block.bbox.as_tuple())
             if crop.isolation_mask_png is not None:
                 try:
-                    with Image.open(
-                        io.BytesIO(crop.isolation_mask_png)
-                    ) as mask:
+                    with Image.open(io.BytesIO(crop.isolation_mask_png)) as mask:
                         mask.load()
                         expected.paste((255, 255, 255), mask=mask)
                 except (OSError, UnidentifiedImageError, SyntaxError) as exc:
                     expected.close()
-                    raise SparsePipelineEvidenceInvariantError(
-                        f"isolation mask {crop.block_id} is invalid"
-                    ) from exc
+                    raise SparsePipelineEvidenceInvariantError(f"isolation mask {crop.block_id} is invalid") from exc
             actual = self._decode_rgb(
                 crop.raw.png_bytes,
                 expected_size=(block.bbox.width, block.bbox.height),
@@ -610,17 +462,14 @@ class SparsePipelineEvidence:
         for job in self.queue.jobs:
             budget.consume(1)
             if job.job_id in jobs_by_id:
-                raise SparsePipelineEvidenceInvariantError(
-                    "stage 2 queue job identifiers must be unique"
-                )
+                raise SparsePipelineEvidenceInvariantError("stage 2 queue job identifiers must be unique")
             crop = crop_by_block.get(job.block_id)
             if crop is None:
-                raise SparsePipelineEvidenceInvariantError(
-                    f"stage 2 job {job.job_id} references an unknown block"
-                )
+                raise SparsePipelineEvidenceInvariantError(f"stage 2 job {job.job_id} references an unknown block")
             payload = (
                 crop.raw.png_bytes
-                if job.transform in (
+                if job.transform
+                in (
                     OcrTransform.RAW,
                     OcrTransform.CONTEXTUAL_COMPOSITE,
                 )
@@ -656,9 +505,7 @@ class SparsePipelineEvidence:
             budget.consume(1)
             job = jobs_by_id.get(item.job_id)
             if job is None:
-                raise SparsePipelineEvidenceInvariantError(
-                    "stage 2 fusion references an unknown queue job"
-                )
+                raise SparsePipelineEvidenceInvariantError("stage 2 fusion references an unknown queue job")
             actual = (
                 item.block_id,
                 item.transform,
@@ -682,9 +529,7 @@ class SparsePipelineEvidence:
             observation_id = getattr(item, "observation_id", None)
             if observation_id is not None:
                 if observation_id in observation_by_id:
-                    raise SparsePipelineEvidenceInvariantError(
-                        "stage 2 observation identifiers must be unique"
-                    )
+                    raise SparsePipelineEvidenceInvariantError("stage 2 observation identifiers must be unique")
                 observation_by_id[observation_id] = item
 
         unit_by_id = {item.unit_id: item for item in self.plan.membership_units}
@@ -692,11 +537,7 @@ class SparsePipelineEvidence:
         for item in self.fusion.group_observations:
             budget.consume(1)
             unit = unit_by_id.get(item.unit_id)
-            if (
-                unit is None
-                or item.segment_ids != unit.segment_ids
-                or item.block_id not in unit.block_ids
-            ):
+            if unit is None or item.segment_ids != unit.segment_ids or item.block_id not in unit.block_ids:
                 raise SparsePipelineEvidenceInvariantError(
                     "stage 2 group observation disagrees with Stage 5 membership"
                 )
@@ -705,14 +546,8 @@ class SparsePipelineEvidence:
             budget.consume(1)
             unit = unit_by_id.get(item.unit_id)
             observed = group_observations_by_unit.get(item.unit_id, ())
-            if (
-                unit is None
-                or item.segment_ids != unit.segment_ids
-                or item.observation_count != len(observed)
-            ):
-                raise SparsePipelineEvidenceInvariantError(
-                    "stage 2 group fusion disagrees with Stage 5 membership"
-                )
+            if unit is None or item.segment_ids != unit.segment_ids or item.observation_count != len(observed):
+                raise SparsePipelineEvidenceInvariantError("stage 2 group fusion disagrees with Stage 5 membership")
 
         observations_by_segment: dict[str, list[object]] = {
             segment_id: [] for segment_id in self.fusion.source_segment_ids
@@ -722,15 +557,11 @@ class SparsePipelineEvidence:
             try:
                 observations_by_segment[item.segment_id].append(item)
             except KeyError as exc:
-                raise SparsePipelineEvidenceInvariantError(
-                    "stage 2 observation references an unknown segment"
-                ) from exc
+                raise SparsePipelineEvidenceInvariantError("stage 2 observation references an unknown segment") from exc
         for item in self.fusion.segments:
             budget.consume(1)
             if item.observation_count != len(observations_by_segment[item.segment_id]):
-                raise SparsePipelineEvidenceInvariantError(
-                    f"stage 2 fusion count for {item.segment_id} disagrees"
-                )
+                raise SparsePipelineEvidenceInvariantError(f"stage 2 fusion count for {item.segment_id} disagrees")
             if item.selected_observation_id is None:
                 continue
             selected = observation_by_id.get(item.selected_observation_id)
@@ -740,14 +571,10 @@ class SparsePipelineEvidence:
                 or selected.transform is not item.selected_transform
                 or selected.lane_id != item.selected_lane_id
             ):
-                raise SparsePipelineEvidenceInvariantError(
-                    f"stage 2 selection for {item.segment_id} is forged"
-                )
+                raise SparsePipelineEvidenceInvariantError(f"stage 2 selection for {item.segment_id} is forged")
 
         if len(self.fusion.overlaps) != len(self.plan.adjacent_algebra):
-            raise SparsePipelineEvidenceInvariantError(
-                "stage 2 overlap count disagrees with stage 5"
-            )
+            raise SparsePipelineEvidenceInvariantError("stage 2 overlap count disagrees with stage 5")
         for algebra, overlap in zip(
             self.plan.adjacent_algebra,
             self.fusion.overlaps,
@@ -766,9 +593,7 @@ class SparsePipelineEvidence:
                 algebra.union_segment_ids,
                 algebra.xor_segment_ids,
             ):
-                raise SparsePipelineEvidenceInvariantError(
-                    "stage 2 overlap algebra disagrees with stage 5"
-                )
+                raise SparsePipelineEvidenceInvariantError("stage 2 overlap algebra disagrees with stage 5")
 
         for conflict in self.fusion.replica_conflicts:
             budget.consume(1 + len(conflict.job_ids))
@@ -800,26 +625,13 @@ class SparsePipelineEvidence:
             return
         aligned_size = self.geometry.segmentation.aligned_size
         if (self.stage4.width, self.stage4.height) != aligned_size:
-            raise SparsePipelineEvidenceInvariantError(
-                "optional stage 4 candidate size disagrees with stage 1"
-            )
-        if self.stage4.source_sha256 != hashlib.sha256(
-            self.page.png_bytes
-        ).hexdigest():
-            raise SparsePipelineEvidenceInvariantError(
-                "optional stage 4 candidate was not derived from the page"
-            )
+            raise SparsePipelineEvidenceInvariantError("optional stage 4 candidate size disagrees with stage 1")
+        if self.stage4.source_sha256 != hashlib.sha256(self.page.png_bytes).hexdigest():
+            raise SparsePipelineEvidenceInvariantError("optional stage 4 candidate was not derived from the page")
         if self.stage4.dpi != stage4_config.dpi:
-            raise SparsePipelineEvidenceInvariantError(
-                "optional stage 4 candidate DPI disagrees with its config"
-            )
-        if (
-            stage4_config.backend is not EnhancementBackend.AUTO
-            and self.stage4.backend is not stage4_config.backend
-        ):
-            raise SparsePipelineEvidenceInvariantError(
-                "optional stage 4 candidate backend disagrees with its config"
-            )
+            raise SparsePipelineEvidenceInvariantError("optional stage 4 candidate DPI disagrees with its config")
+        if stage4_config.backend is not EnhancementBackend.AUTO and self.stage4.backend is not stage4_config.backend:
+            raise SparsePipelineEvidenceInvariantError("optional stage 4 candidate backend disagrees with its config")
 
     @staticmethod
     def _decode_rgb(
@@ -832,29 +644,19 @@ class SparsePipelineEvidence:
             raise SparsePipelineEvidenceInvariantError(f"{label} is not a PNG")
         try:
             with Image.open(io.BytesIO(payload)) as opened:
-                if (
-                    opened.format != "PNG"
-                    or opened.size != expected_size
-                    or getattr(opened, "n_frames", 1) != 1
-                ):
-                    raise SparsePipelineEvidenceInvariantError(
-                        f"{label} metadata disagrees with its stage"
-                    )
+                if opened.format != "PNG" or opened.size != expected_size or getattr(opened, "n_frames", 1) != 1:
+                    raise SparsePipelineEvidenceInvariantError(f"{label} metadata disagrees with its stage")
                 raw_exif = opened.info.get("exif")
                 if raw_exif is None:
                     orientation = 1
                 elif type(raw_exif) is not bytes:
-                    raise SparsePipelineEvidenceInvariantError(
-                        f"{label} contains invalid EXIF metadata"
-                    )
+                    raise SparsePipelineEvidenceInvariantError(f"{label} contains invalid EXIF metadata")
                 else:
                     metadata = Image.Exif()
                     metadata.load(raw_exif)
                     orientation = metadata.get(274, 1)
                 if orientation not in (None, 1):
-                    raise SparsePipelineEvidenceInvariantError(
-                        f"{label} contains unresolved orientation"
-                    )
+                    raise SparsePipelineEvidenceInvariantError(f"{label} contains unresolved orientation")
                 opened.load()
                 if opened.mode in {"RGBA", "LA"} or "transparency" in opened.info:
                     rgba = opened.convert("RGBA")
@@ -869,17 +671,13 @@ class SparsePipelineEvidence:
         except SparsePipelineEvidenceInvariantError:
             raise
         except (OSError, UnidentifiedImageError, SyntaxError, ValueError) as exc:
-            raise SparsePipelineEvidenceInvariantError(
-                f"{label} contains invalid PNG data"
-            ) from exc
+            raise SparsePipelineEvidenceInvariantError(f"{label} contains invalid PNG data") from exc
 
     @staticmethod
     def _rgb_sha256(image: Image.Image) -> str:
         digest = hashlib.sha256()
         for top in range(0, image.height, 512):
-            stripe = image.crop(
-                (0, top, image.width, min(image.height, top + 512))
-            )
+            stripe = image.crop((0, top, image.width, min(image.height, top + 512)))
             try:
                 digest.update(stripe.tobytes())
             finally:

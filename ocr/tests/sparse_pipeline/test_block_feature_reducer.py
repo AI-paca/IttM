@@ -38,9 +38,7 @@ def _reduce(
     *,
     window_kinds: tuple[str | None, ...] | None = None,
 ) -> tuple[int, ...]:
-    source_ids = tuple(
-        dict.fromkeys(segment_id for block in members for segment_id in block)
-    )
+    source_ids = tuple(dict.fromkeys(segment_id for block in members for segment_id in block))
     selected, _statistics = _planner()._sparse_identifying_candidate_indexes(
         members=members,
         scope_ids=("scope-000000",) * len(members),
@@ -55,13 +53,8 @@ def _signatures(
     members: tuple[tuple[str, ...], ...],
     selected: tuple[int, ...],
 ) -> tuple[tuple[int, ...], ...]:
-    source_ids = tuple(
-        dict.fromkeys(segment_id for block in members for segment_id in block)
-    )
-    return tuple(
-        tuple(index for index in selected if segment_id in members[index])
-        for segment_id in source_ids
-    )
+    source_ids = tuple(dict.fromkeys(segment_id for block in members for segment_id in block))
+    return tuple(tuple(index for index in selected if segment_id in members[index]) for segment_id in source_ids)
 
 
 def test_feature_reducer_preserves_unique_nonzero_signatures() -> None:
@@ -104,9 +97,7 @@ def test_feature_reducer_preserves_marked_header_block() -> None:
     selected = _reduce(members, window_kinds=kinds)
 
     assert 2 in selected
-    assert len(_signatures(members, selected)) == len(
-        set(_signatures(members, selected))
-    )
+    assert len(_signatures(members, selected)) == len(set(_signatures(members, selected)))
 
 
 def test_b201_shaped_feature_matrix_reduces_to_sixty_blocks() -> None:
@@ -117,20 +108,12 @@ def test_b201_shaped_feature_matrix_reduces_to_sixty_blocks() -> None:
     triples = list(combinations(range(feature_count), 3))
     Random(0).shuffle(triples)
     codes.extend(triples[: segment_count - len(codes)])
-    source_ids = tuple(
-        f"segment-{index:06d}" for index in range(segment_count)
-    )
+    source_ids = tuple(f"segment-{index:06d}" for index in range(segment_count))
     base_members = tuple(
-        tuple(
-            segment_id
-            for segment_id, code in zip(source_ids, codes)
-            if feature_index in code
-        )
+        tuple(segment_id for segment_id, code in zip(source_ids, codes) if feature_index in code)
         for feature_index in range(feature_count)
     )
-    members = base_members + tuple(
-        base_members[index % feature_count] for index in range(94)
-    )
+    members = base_members + tuple(base_members[index % feature_count] for index in range(94))
 
     assert len(members) == 154
     assert max(map(len, members)) <= 256
@@ -147,13 +130,8 @@ def test_b201_shaped_feature_matrix_reduces_to_sixty_blocks() -> None:
 def test_ambiguous_b201_shape_is_repaired_without_segment_loss() -> None:
     segment_count = 2_901
     original_block_count = 154
-    source_ids = tuple(
-        f"segment-{index:06d}" for index in range(segment_count)
-    )
-    ambiguous_members = tuple(
-        source_ids[offset::original_block_count]
-        for offset in range(original_block_count)
-    )
+    source_ids = tuple(f"segment-{index:06d}" for index in range(segment_count))
+    ambiguous_members = tuple(source_ids[offset::original_block_count] for offset in range(original_block_count))
     planner = _planner()
 
     assert not planner._signature_family_is_identifying(
@@ -174,11 +152,7 @@ def test_ambiguous_b201_shape_is_repaired_without_segment_loss() -> None:
     assert (repaired, origins) == (repeated, repeated_origins)
     assert len(repaired) <= 60
     assert all(2 <= len(block_members) <= 256 for block_members in repaired)
-    assert {
-        segment_id
-        for block_members in repaired
-        for segment_id in block_members
-    } == set(source_ids)
+    assert {segment_id for block_members in repaired for segment_id in block_members} == set(source_ids)
     assert planner._signature_family_is_identifying(
         members=repaired,
         source_ids=source_ids,
@@ -201,9 +175,7 @@ def test_ambiguous_b201_shape_is_repaired_without_segment_loss() -> None:
 
 
 def test_b201_locality_family_exports_two_island_layout_contract() -> None:
-    source_ids = tuple(
-        f"segment-{index:06d}" for index in range(2_949)
-    )
+    source_ids = tuple(f"segment-{index:06d}" for index in range(2_949))
     planner = _planner()
     regions = planner._locality_preserving_regions(source_ids)
     family = planner._locality_preserving_signature_candidate_family(source_ids)
@@ -222,9 +194,7 @@ def test_b201_locality_family_exports_two_island_layout_contract() -> None:
     assert len(regions) == 12
     assert family[:12] == regions
     assert len(family) == 60
-    assert family == planner._locality_preserving_signature_candidate_family(
-        source_ids
-    )
+    assert family == planner._locality_preserving_signature_candidate_family(source_ids)
     assert all(2 <= len(block_members) <= 256 for block_members in family)
     assert planner._signature_family_is_identifying(
         members=family,
@@ -240,16 +210,10 @@ def test_b201_locality_family_exports_two_island_layout_contract() -> None:
         assert len(islands) == (1 if index < len(regions) else 2)
         assert tuple(item.segment_id for item in placements) == block_members
         assert {
-            item.segment_id for island in islands for item in placements
-            if item.island_id == island.island_id
+            item.segment_id for island in islands for item in placements if item.island_id == island.island_id
         } == set(block_members)
         assert all(max(island.matrix_segment_shape) <= 16 for island in islands)
-        assert len(
-            {
-                (item.island_id, item.matrix_row, item.matrix_column)
-                for item in placements
-            }
-        ) == len(placements)
+        assert len({(item.island_id, item.matrix_row, item.matrix_column) for item in placements}) == len(placements)
 
 
 @pytest.mark.parametrize(
@@ -266,9 +230,7 @@ def test_locality_family_uses_derived_resource_bound(
     segment_count: int,
     expected_blocks: int,
 ) -> None:
-    source_ids = tuple(
-        f"segment-{index:06d}" for index in range(segment_count)
-    )
+    source_ids = tuple(f"segment-{index:06d}" for index in range(segment_count))
     planner = _planner()
     regions = planner._locality_preserving_regions(source_ids)
     region_codes = planner._locality_region_codes(regions)
@@ -369,10 +331,7 @@ def test_oversized_compact_tiles_fail_without_mutating_signatures() -> None:
         with pytest.raises(BlockPlanningLimitError, match="compact tile"):
             planner._validated_matrix_block_pixel_footprint(
                 bbox=huge_by_segment[block_members[0]],
-                member_bboxes=tuple(
-                    huge_by_segment[segment_id]
-                    for segment_id in block_members
-                ),
+                member_bboxes=tuple(huge_by_segment[segment_id] for segment_id in block_members),
                 window_kind="polar-signature",
             )
 
@@ -559,6 +518,4 @@ def test_structural_table_source_stays_in_plan_but_not_ocr_membership() -> None:
 
     assert structural_id in plan.source_segment_ids
     assert structural_id not in plan.ocr_eligible_segment_ids
-    assert all(
-        structural_id not in item.segment_ids for item in plan.membership_units
-    )
+    assert all(structural_id not in item.segment_ids for item in plan.membership_units)

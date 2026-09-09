@@ -529,7 +529,8 @@ export class BrowserPipelineCore {
       ({ paragraph: 0, table: 1, small_table: 2 })[kind];
     const kindName = (kind: number): StructuralObjectKind => {
       const value = (["paragraph", "table", "small_table"] as const)[kind];
-      if (!value) throw new Error(`Rust assembler returned object kind ${kind}`);
+      if (!value)
+        throw new Error(`Rust assembler returned object kind ${kind}`);
       return value;
     };
     const encoder = new TextEncoder();
@@ -551,7 +552,9 @@ export class BrowserPipelineCore {
             layout.logical_column_count,
           );
           if (status !== 0) {
-            throw new Error(`Rust topology layout handoff failed with status ${status}`);
+            throw new Error(
+              `Rust topology layout handoff failed with status ${status}`,
+            );
           }
         } finally {
           if (objectPointer)
@@ -581,7 +584,9 @@ export class BrowserPipelineCore {
             text.byteLength,
           );
           if (status !== 0) {
-            throw new Error(`Rust topology segment handoff failed with status ${status}`);
+            throw new Error(
+              `Rust topology segment handoff failed with status ${status}`,
+            );
           }
         } finally {
           if (segmentPointer)
@@ -609,7 +614,9 @@ export class BrowserPipelineCore {
             index,
           );
           if (value < 0)
-            throw new Error(`Rust topology object field failed with status ${value}`);
+            throw new Error(
+              `Rust topology object field failed with status ${value}`,
+            );
           return value;
         };
         const objectId = readAssemblerText(
@@ -625,10 +632,7 @@ export class BrowserPipelineCore {
         );
         const objectMarkdown = readAssemblerText(
           assembler,
-          assembler.ittm_assembler_object_markdown_length(
-            handle,
-            objectIndex,
-          ),
+          assembler.ittm_assembler_object_markdown_length(handle, objectIndex),
           (pointer, capacity) =>
             assembler.ittm_assembler_object_markdown_copy(
               handle,
@@ -648,7 +652,9 @@ export class BrowserPipelineCore {
               index,
             );
             if (value < 0)
-              throw new Error(`Rust topology cell field failed with status ${value}`);
+              throw new Error(
+                `Rust topology cell field failed with status ${value}`,
+              );
             return value;
           };
           const segmentIds = Array.from(
@@ -719,17 +725,20 @@ export class BrowserPipelineCore {
     if (dropStatus !== 0) {
       throw new Error(`Unknown Rust topology assembler handle: ${handle}`);
     }
-    if (!result) throw new Error("Rust topology assembler returned no artifact");
+    if (!result)
+      throw new Error("Rust topology assembler returned no artifact");
     return result;
   }
 
-  buildNativePdfParts(
-    items: readonly PdfTextGeometryItem[],
-  ): { objects: NativeTextObject[]; segments: NativeExtractedSegment[] } | null {
+  buildNativePdfParts(items: readonly PdfTextGeometryItem[]): {
+    objects: NativeTextObject[];
+    segments: NativeExtractedSegment[];
+  } | null {
     const nativePdf = nativePdfExports(this.exports);
     const encoder = new TextEncoder();
     const handle = nativePdf.ittm_pdf_native_begin();
-    if (!handle) throw new Error("Rust native PDF route rejected a new session");
+    if (!handle)
+      throw new Error("Rust native PDF route rejected a new session");
     let result:
       | { objects: NativeTextObject[]; segments: NativeExtractedSegment[] }
       | null
@@ -740,9 +749,12 @@ export class BrowserPipelineCore {
         const text = encoder.encode(item.str ?? "");
         const textPointer = copyIntoWasm(nativePdf, text);
         const transform = Array.from({ length: 6 }, (_unused, index) =>
-          Number(item.transform?.[index] ?? (index === 0 || index === 3 ? 1 : 0)),
+          Number(
+            item.transform?.[index] ?? (index === 0 || index === 3 ? 1 : 0),
+          ),
         );
-        const hasHeight = typeof item.height === "number" && Number.isFinite(item.height);
+        const hasHeight =
+          typeof item.height === "number" && Number.isFinite(item.height);
         try {
           const status = nativePdf.ittm_pdf_native_add_item(
             handle,
@@ -759,7 +771,9 @@ export class BrowserPipelineCore {
             transform[5],
           );
           if (status !== 0) {
-            throw new Error(`Rust native PDF item handoff failed with status ${status}`);
+            throw new Error(
+              `Rust native PDF item handoff failed with status ${status}`,
+            );
           }
         } finally {
           if (textPointer) nativePdf.ittm_dealloc(textPointer, text.byteLength);
@@ -767,7 +781,9 @@ export class BrowserPipelineCore {
       }
       const buildStatus = nativePdf.ittm_pdf_native_build(handle);
       if (buildStatus !== 0) {
-        throw new Error(`Rust native PDF build failed with status ${buildStatus}`);
+        throw new Error(
+          `Rust native PDF build failed with status ${buildStatus}`,
+        );
       }
       const length = nativePdf.ittm_pdf_native_render_length(handle);
       const rendered = readNativePdfText(
@@ -782,7 +798,10 @@ export class BrowserPipelineCore {
       } | null;
       if (parts === null) {
         result = null;
-      } else if (!Array.isArray(parts.objects) || !Array.isArray(parts.segments)) {
+      } else if (
+        !Array.isArray(parts.objects) ||
+        !Array.isArray(parts.segments)
+      ) {
         throw new Error("Rust native PDF route returned an invalid artifact");
       } else {
         result = { objects: parts.objects, segments: parts.segments };
@@ -795,7 +814,8 @@ export class BrowserPipelineCore {
     if (dropStatus !== 0) {
       throw new Error(`Unknown Rust native PDF handle: ${handle}`);
     }
-    if (result === undefined) throw new Error("Rust native PDF route returned no artifact");
+    if (result === undefined)
+      throw new Error("Rust native PDF route returned no artifact");
     return result;
   }
 
@@ -1006,11 +1026,14 @@ function readAssemblerText(
 ): string {
   if (!length) return "";
   const pointer = exports.ittm_alloc(length) >>> 0;
-  if (!pointer) throw new Error("Pipeline core could not allocate assembler output");
+  if (!pointer)
+    throw new Error("Pipeline core could not allocate assembler output");
   try {
     const copied = copy(pointer, length);
     if (copied !== length) {
-      throw new Error(`Rust topology assembler copied ${copied} bytes; expected ${length}`);
+      throw new Error(
+        `Rust topology assembler copied ${copied} bytes; expected ${length}`,
+      );
     }
     return new TextDecoder().decode(
       new Uint8Array(exports.memory.buffer, pointer, length),
@@ -1027,11 +1050,14 @@ function readNativePdfText(
 ): string {
   if (!length) throw new Error("Rust native PDF route returned no artifact");
   const pointer = exports.ittm_alloc(length) >>> 0;
-  if (!pointer) throw new Error("Pipeline core could not allocate native PDF output");
+  if (!pointer)
+    throw new Error("Pipeline core could not allocate native PDF output");
   try {
     const copied = copy(pointer, length);
     if (copied !== length) {
-      throw new Error(`Rust native PDF route copied ${copied} bytes; expected ${length}`);
+      throw new Error(
+        `Rust native PDF route copied ${copied} bytes; expected ${length}`,
+      );
     }
     return new TextDecoder().decode(
       new Uint8Array(exports.memory.buffer, pointer, length),
@@ -1075,20 +1101,28 @@ export class BrowserSeparatedSession {
             fieldIndex,
           );
           if (value < 0) {
-            throw new Error(`Invalid separated object field: ${index}:${fieldIndex}`);
+            throw new Error(
+              `Invalid separated object field: ${index}:${fieldIndex}`,
+            );
           }
           return value;
         };
         const segmentCount = field(5);
-        const segmentIndexes = Array.from({ length: segmentCount }, (_value, segment) => {
-          const value = this.exports.ittm_separated_object_segment(
-            this.handle,
-            index,
-            segment,
-          );
-          if (value < 0) throw new Error(`Invalid separated object segment: ${index}:${segment}`);
-          return value;
-        });
+        const segmentIndexes = Array.from(
+          { length: segmentCount },
+          (_value, segment) => {
+            const value = this.exports.ittm_separated_object_segment(
+              this.handle,
+              index,
+              segment,
+            );
+            if (value < 0)
+              throw new Error(
+                `Invalid separated object segment: ${index}:${segment}`,
+              );
+            return value;
+          },
+        );
         return {
           index,
           bbox: [field(0), field(1), field(2), field(3)] as const,
@@ -1116,20 +1150,28 @@ export class BrowserSeparatedSession {
             fieldIndex,
           );
           if (value < 0) {
-            throw new Error(`Invalid separated block field: ${index}:${fieldIndex}`);
+            throw new Error(
+              `Invalid separated block field: ${index}:${fieldIndex}`,
+            );
           }
           return value;
         };
         const segmentCount = field(5);
-        const segmentIndexes = Array.from({ length: segmentCount }, (_value, segment) => {
-          const value = this.exports.ittm_separated_block_segment(
-            this.handle,
-            index,
-            segment,
-          );
-          if (value < 0) throw new Error(`Invalid separated block segment: ${index}:${segment}`);
-          return value;
-        });
+        const segmentIndexes = Array.from(
+          { length: segmentCount },
+          (_value, segment) => {
+            const value = this.exports.ittm_separated_block_segment(
+              this.handle,
+              index,
+              segment,
+            );
+            if (value < 0)
+              throw new Error(
+                `Invalid separated block segment: ${index}:${segment}`,
+              );
+            return value;
+          },
+        );
         return {
           index,
           bbox: [field(0), field(1), field(2), field(3)] as const,
@@ -1152,7 +1194,9 @@ export class BrowserSeparatedSession {
         fieldIndex,
       );
       if (value <= 0) {
-        throw new Error(`Invalid separated block raster field: ${index}:${fieldIndex}`);
+        throw new Error(
+          `Invalid separated block raster field: ${index}:${fieldIndex}`,
+        );
       }
       return value;
     };
@@ -1168,10 +1212,13 @@ export class BrowserSeparatedSession {
       index,
     );
     if (length !== stride * height) {
-      throw new Error("Separated block raster length disagrees with its dimensions");
+      throw new Error(
+        "Separated block raster length disagrees with its dimensions",
+      );
     }
     const pointer = this.exports.ittm_alloc(length) >>> 0;
-    if (!pointer) throw new Error("Pipeline core could not allocate block raster buffer");
+    if (!pointer)
+      throw new Error("Pipeline core could not allocate block raster buffer");
     try {
       const copied = this.exports.ittm_separated_block_raster_copy(
         this.handle,
@@ -1180,10 +1227,16 @@ export class BrowserSeparatedSession {
         length,
       );
       if (copied !== length) {
-        throw new Error(`Separated block raster copied ${copied} bytes; expected ${length}`);
+        throw new Error(
+          `Separated block raster copied ${copied} bytes; expected ${length}`,
+        );
       }
       return {
-        pixels: new Uint8Array(this.exports.memory.buffer, pointer, length).slice(),
+        pixels: new Uint8Array(
+          this.exports.memory.buffer,
+          pointer,
+          length,
+        ).slice(),
         width,
         height,
         stride,
@@ -1272,10 +1325,13 @@ export class BrowserSeparatedSession {
       index,
     );
     if (length !== stride * height) {
-      throw new Error("Separated OCR raster length disagrees with its dimensions");
+      throw new Error(
+        "Separated OCR raster length disagrees with its dimensions",
+      );
     }
     const pointer = this.exports.ittm_alloc(length) >>> 0;
-    if (!pointer) throw new Error("Pipeline core could not allocate raster buffer");
+    if (!pointer)
+      throw new Error("Pipeline core could not allocate raster buffer");
     try {
       const copied = this.exports.ittm_separated_job_raster_copy(
         this.handle,
@@ -1349,7 +1405,9 @@ export class BrowserSeparatedSession {
         ),
       );
       if (status !== 0) {
-        throw new Error(`Separated OCR word handoff failed with status ${status}`);
+        throw new Error(
+          `Separated OCR word handoff failed with status ${status}`,
+        );
       }
     } finally {
       if (pointer) this.exports.ittm_dealloc(pointer, encoded.byteLength);

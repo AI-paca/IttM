@@ -77,7 +77,9 @@ function assertHandoff(handoff: SegmentTopologyHandoff): void {
   const layouts = new Map<string, SegmentObjectLayout>();
   for (const layout of handoff.object_layouts ?? []) {
     if (!layout.object_id || layouts.has(layout.object_id)) {
-      throw new Error(`Invalid or duplicate object layout: ${layout.object_id}`);
+      throw new Error(
+        `Invalid or duplicate object layout: ${layout.object_id}`,
+      );
     }
     if (
       !Number.isInteger(layout.logical_row_count) ||
@@ -122,8 +124,7 @@ function assertHandoff(handoff: SegmentTopologyHandoff): void {
       layout &&
       (layout.object_kind !== topology.object_kind ||
         topology.row + topology.row_span > layout.logical_row_count ||
-        topology.column + topology.column_span >
-          layout.logical_column_count)
+        topology.column + topology.column_span > layout.logical_column_count)
     ) {
       throw new Error(
         `Segment ${segment.segment_id} exceeds its logical object layout`,
@@ -150,22 +151,21 @@ function markdownForObject(
   logicalRowCount?: number,
   logicalColumnCount?: number,
 ): string {
-  const inferredRowCount = Math.max(
-    0,
-    ...cells.map((cell) => cell.row + cell.row_span - 1),
-  ) + (cells.length ? 1 : 0);
-  const inferredColumnCount = Math.max(
-    0,
-    ...cells.map((cell) => cell.column + cell.column_span - 1),
-  ) + (cells.length ? 1 : 0);
+  const inferredRowCount =
+    Math.max(0, ...cells.map((cell) => cell.row + cell.row_span - 1)) +
+    (cells.length ? 1 : 0);
+  const inferredColumnCount =
+    Math.max(0, ...cells.map((cell) => cell.column + cell.column_span - 1)) +
+    (cells.length ? 1 : 0);
   const rowCount = logicalRowCount ?? inferredRowCount;
   const columnCount = logicalColumnCount ?? inferredColumnCount;
   const cellsByCoordinate = new Map(
     cells.map((cell) => [`${cell.row}:${cell.column}`, cell]),
   );
   const rows = Array.from({ length: rowCount }, (_, row) =>
-    Array.from({ length: columnCount }, (_, column) =>
-      cellsByCoordinate.get(`${row}:${column}`)?.text ?? "",
+    Array.from(
+      { length: columnCount },
+      (_, column) => cellsByCoordinate.get(`${row}:${column}`)?.text ?? "",
     ),
   );
   if (kind === "table" || kind === "small_table") {
@@ -284,18 +284,13 @@ function materializeObjectCells(
       const rowLimit = conflict.row - cell.row;
       const columnLimit = conflict.column - cell.column;
       if (rowLimit <= 0 && columnLimit <= 0) {
-        throw new Error(
-          `Object anchor overlap at ${cell.row}:${cell.column}`,
-        );
+        throw new Error(`Object anchor overlap at ${cell.row}:${cell.column}`);
       }
       if (rowLimit <= 0) {
         cell.column_span = Math.max(1, columnLimit);
       } else if (columnLimit <= 0) {
         cell.row_span = Math.max(1, rowLimit);
-      } else if (
-        rowLimit * cell.column_span >=
-        cell.row_span * columnLimit
-      ) {
+      } else if (rowLimit * cell.column_span >= cell.row_span * columnLimit) {
         cell.row_span = rowLimit;
       } else {
         cell.column_span = columnLimit;
@@ -387,37 +382,37 @@ export function assembleSegmentTopologyHandoff(
 
   const materializedObjects = [...grouped.entries()].map(
     ([objectId, segments]) => {
-    segments.sort(
-      (left, right) =>
-        left.topology.row - right.topology.row ||
-        left.topology.column - right.topology.column ||
-        left.segment_id.localeCompare(right.segment_id),
-    );
-    const layout = layouts.get(objectId);
-    const kind = layout?.object_kind ?? segments[0].topology.object_kind;
-    if (segments.some((segment) => segment.topology.object_kind !== kind)) {
-      throw new Error(`Object ${objectId} mixes structural kinds`);
-    }
-    const cells = materializeObjectCells(kind, segments);
-    const logicalRowCount =
-      layout?.logical_row_count ??
-      Math.max(0, ...cells.map((cell) => cell.row + cell.row_span));
-    const logicalColumnCount =
-      layout?.logical_column_count ??
-      Math.max(0, ...cells.map((cell) => cell.column + cell.column_span));
-    return {
-      object_id: objectId,
-      kind,
-      logical_row_count: logicalRowCount,
-      logical_column_count: logicalColumnCount,
-      cells,
-      markdown: markdownForObject(
+      segments.sort(
+        (left, right) =>
+          left.topology.row - right.topology.row ||
+          left.topology.column - right.topology.column ||
+          left.segment_id.localeCompare(right.segment_id),
+      );
+      const layout = layouts.get(objectId);
+      const kind = layout?.object_kind ?? segments[0].topology.object_kind;
+      if (segments.some((segment) => segment.topology.object_kind !== kind)) {
+        throw new Error(`Object ${objectId} mixes structural kinds`);
+      }
+      const cells = materializeObjectCells(kind, segments);
+      const logicalRowCount =
+        layout?.logical_row_count ??
+        Math.max(0, ...cells.map((cell) => cell.row + cell.row_span));
+      const logicalColumnCount =
+        layout?.logical_column_count ??
+        Math.max(0, ...cells.map((cell) => cell.column + cell.column_span));
+      return {
+        object_id: objectId,
         kind,
+        logical_row_count: logicalRowCount,
+        logical_column_count: logicalColumnCount,
         cells,
-        logicalRowCount,
-        logicalColumnCount,
-      ),
-    };
+        markdown: markdownForObject(
+          kind,
+          cells,
+          logicalRowCount,
+          logicalColumnCount,
+        ),
+      };
     },
   );
   const objects =

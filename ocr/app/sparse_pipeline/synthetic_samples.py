@@ -143,8 +143,7 @@ def known_lines(language: str, layout: str) -> tuple[str, ...]:
     if layout == "combined":
         return tuple(
             itertools.chain.from_iterable(
-                LANGUAGE_LINES[language][item_layout]
-                for item_layout in ("paragraph", "list", "table")
+                LANGUAGE_LINES[language][item_layout] for item_layout in ("paragraph", "list", "table")
             )
         )
     return LANGUAGE_LINES[language][layout]
@@ -155,9 +154,7 @@ def render_sample(spec: SyntheticSpec) -> SyntheticSample:
     font = ImageFont.truetype(spec.font_path, spec.font_size)
     probe = Image.new("RGB", (1, 1), spec.background_rgb)
     probe_draw = ImageDraw.Draw(probe)
-    measurements = tuple(
-        probe_draw.textbbox((0, 0), line, font=font, anchor="lt") for line in lines
-    )
+    measurements = tuple(probe_draw.textbbox((0, 0), line, font=font, anchor="lt") for line in lines)
     line_height = max(1, max(box[3] - box[1] for box in measurements))
     minimum_text_left = min(box[0] for box in measurements)
     maximum_text_right = max(box[2] for box in measurements)
@@ -166,9 +163,7 @@ def render_sample(spec: SyntheticSpec) -> SyntheticSample:
     border_pixels = round(spec.border_pt * spec.dpi / 72)
     padding = margin_pixels + border_pixels
     width = max(1, text_width + 2 * padding)
-    height = max(
-        1, len(lines) * line_height + (len(lines) - 1) * spec.line_spacing + 2 * padding
-    )
+    height = max(1, len(lines) * line_height + (len(lines) - 1) * spec.line_spacing + 2 * padding)
     image = Image.new("RGB", (width, height), spec.background_rgb)
     draw = ImageDraw.Draw(image)
     text_mask_image = Image.new("L", (width, height), 0)
@@ -187,9 +182,7 @@ def render_sample(spec: SyntheticSpec) -> SyntheticSample:
         draw.text(origin, line, font=font, fill=spec.foreground_rgb, anchor="lt")
         text_mask_draw.text(origin, line, font=font, fill=255, anchor="lt")
         line_mask_image = Image.new("L", (width, height), 0)
-        ImageDraw.Draw(line_mask_image).text(
-            origin, line, font=font, fill=255, anchor="lt"
-        )
+        ImageDraw.Draw(line_mask_image).text(origin, line, font=font, fill=255, anchor="lt")
         line_masks.append(np.asarray(line_mask_image, dtype=np.uint8) > 0)
         y += line_height + spec.line_spacing
     text_mask = np.asarray(text_mask_image, dtype=np.uint8) > 0
@@ -233,9 +226,7 @@ def smoke_specs() -> tuple[SyntheticSpec, ...]:
     ):
         fonts = available_fonts(language)
         font_path = fonts[(spacing + margin + font_size + len(layout)) % len(fonts)]
-        background, foreground = COLOR_SCHEMES[
-            (spacing + margin + font_size) % len(COLOR_SCHEMES)
-        ]
+        background, foreground = COLOR_SCHEMES[(spacing + margin + font_size) % len(COLOR_SCHEMES)]
         parts = (
             language,
             layout,
@@ -287,9 +278,7 @@ def tiny_specs() -> tuple[SyntheticSpec, ...]:
             for font_size in range(6, 10):
                 for spacing in range(11):
                     for layout in ("paragraph", "list", "table", "combined"):
-                        background, foreground = COLOR_SCHEMES[
-                            index % len(COLOR_SCHEMES)
-                        ]
+                        background, foreground = COLOR_SCHEMES[index % len(COLOR_SCHEMES)]
                         values.append(
                             SyntheticSpec(
                                 case_id=f"tiny-{index:04d}",
@@ -396,9 +385,7 @@ def write_samples(root: Path, specs: tuple[SyntheticSpec, ...]) -> Path:
             line_owner_path = staging / f"{stem}{LINE_OWNER_SUFFIX}"
             sample.image.save(image_path, format="PNG", dpi=(spec.dpi, spec.dpi))
             text_path.write_text(sample.expected_text + "\n", encoding="utf-8")
-            Image.fromarray(
-                sample.expected_ink_mask.astype(np.uint8) * 255, mode="L"
-            ).save(
+            Image.fromarray(sample.expected_ink_mask.astype(np.uint8) * 255, mode="L").save(
                 mask_path,
                 format="PNG",
             )

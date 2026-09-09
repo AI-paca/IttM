@@ -108,10 +108,7 @@ class AffineTransform:
         for matrix in (self.forward, self.inverse):
             if len(matrix) != 9 or not all(math.isfinite(value) for value in matrix):
                 raise ValueError("transform matrices must contain nine finite values")
-            if any(
-                abs(matrix[index] - expected) > 1e-12
-                for index, expected in ((6, 0.0), (7, 0.0), (8, 1.0))
-            ):
+            if any(abs(matrix[index] - expected) > 1e-12 for index, expected in ((6, 0.0), (7, 0.0), (8, 1.0))):
                 raise ValueError("an affine transform must have last row (0, 0, 1)")
         identity = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
         for first, second in (
@@ -119,17 +116,11 @@ class AffineTransform:
             (self.inverse, self.forward),
         ):
             product = tuple(
-                sum(
-                    first[row * 3 + inner] * second[inner * 3 + column]
-                    for inner in range(3)
-                )
+                sum(first[row * 3 + inner] * second[inner * 3 + column] for inner in range(3))
                 for row in range(3)
                 for column in range(3)
             )
-            if any(
-                abs(value - expected) > 1e-9
-                for value, expected in zip(product, identity)
-            ):
+            if any(abs(value - expected) > 1e-9 for value, expected in zip(product, identity)):
                 raise ValueError("forward and inverse matrices are not exact inverses")
 
     @classmethod
@@ -181,9 +172,7 @@ class AlignmentTrace:
     def __post_init__(self) -> None:
         if not math.isfinite(self.correction_degrees):
             raise ValueError("correction angle must be finite")
-        if len(self.background_rgb) != 3 or any(
-            not 0 <= value <= 255 for value in self.background_rgb
-        ):
+        if len(self.background_rgb) != 3 or any(not 0 <= value <= 255 for value in self.background_rgb):
             raise ValueError("background_rgb must contain three bytes")
         if self.foreground_pixels < 0:
             raise ValueError("foreground pixel count must be non-negative")
@@ -279,18 +268,12 @@ class RecursiveNode:
         if len(self.child_ids) != len(set(self.child_ids)):
             raise ValueError("recursive child identifiers must be unique")
         if self.child_ids and (self.axis is None or self.stop_reason is not None):
-            raise ValueError(
-                "an internal recursive node needs an axis and no stop reason"
-            )
+            raise ValueError("an internal recursive node needs an axis and no stop reason")
         if not self.child_ids and (self.axis is not None or self.stop_reason is None):
             raise ValueError("a recursive leaf needs a stop reason and no split axis")
-        split_evidence_count = int(bool(self.separator_boxes)) + int(
-            self.split_coordinate is not None
-        )
+        split_evidence_count = int(bool(self.separator_boxes)) + int(self.split_coordinate is not None)
         if self.child_ids and split_evidence_count != 1:
-            raise ValueError(
-                "an internal node needs one gap or component-boundary split trace"
-            )
+            raise ValueError("an internal node needs one gap or component-boundary split trace")
         if not self.child_ids and split_evidence_count:
             raise ValueError("a recursive leaf cannot retain split evidence")
         if self.split_coordinate is not None and self.split_coordinate < 1:
@@ -312,9 +295,7 @@ class SegmentationResult:
     diagnostics: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if len(self.aligned_size) != 2 or any(
-            type(value) is not int or value < 1 for value in self.aligned_size
-        ):
+        if len(self.aligned_size) != 2 or any(type(value) is not int or value < 1 for value in self.aligned_size):
             raise ValueError("aligned_size must contain two positive integers")
         segment_ids = tuple(segment.segment_id for segment in self.segments)
         rule_ids = tuple(rule.rule_id for rule in self.rules)
@@ -353,13 +334,9 @@ class SegmentationResult:
                     raise ValueError("recursive separator lies outside its node")
             if node.split_coordinate is not None:
                 if node.axis is SplitAxis.ROWS:
-                    valid_coordinate = (
-                        node.bbox.top < node.split_coordinate < node.bbox.bottom
-                    )
+                    valid_coordinate = node.bbox.top < node.split_coordinate < node.bbox.bottom
                 else:
-                    valid_coordinate = (
-                        node.bbox.left < node.split_coordinate < node.bbox.right
-                    )
+                    valid_coordinate = node.bbox.left < node.split_coordinate < node.bbox.right
                 if not valid_coordinate:
                     raise ValueError("recursive split coordinate lies outside its node")
 
@@ -371,15 +348,11 @@ class SegmentationResult:
                 if child.parent_id != parent.node_id:
                     raise ValueError("recursive child and parent references disagree")
                 if child.depth != parent.depth + 1:
-                    raise ValueError(
-                        "recursive child depth is not parent depth plus one"
-                    )
+                    raise ValueError("recursive child depth is not parent depth plus one")
                 if child.bbox.intersection(parent.bbox) != child.bbox:
                     raise ValueError("recursive child lies outside its parent")
         if incoming[self.root_node_id] != 0 or any(
-            count != 1
-            for node_id, count in incoming.items()
-            if node_id != self.root_node_id
+            count != 1 for node_id, count in incoming.items() if node_id != self.root_node_id
         ):
             raise ValueError("recursive nodes must form a single-parent tree")
 
@@ -398,10 +371,7 @@ class SegmentationResult:
                 continue
             visiting.add(node_id)
             stack.append((node_id, True))
-            stack.extend(
-                (child_id, False)
-                for child_id in reversed(nodes_by_id[node_id].child_ids)
-            )
+            stack.extend((child_id, False) for child_id in reversed(nodes_by_id[node_id].child_ids))
         if visited != known_nodes:
             raise ValueError("recursive tree contains unreachable nodes")
 
@@ -412,9 +382,7 @@ class SegmentationResult:
                 raise ValueError("segment parent path must start at the recursive root")
             if any(node_id not in known_nodes for node_id in segment.parent_path):
                 raise ValueError("segment parent path references an unknown node")
-            for parent_id, child_id in zip(
-                segment.parent_path, segment.parent_path[1:]
-            ):
+            for parent_id, child_id in zip(segment.parent_path, segment.parent_path[1:]):
                 if child_id not in nodes_by_id[parent_id].child_ids:
                     raise ValueError("segment parent path is not a recursive path")
             leaf = nodes_by_id[segment.parent_path[-1]]
@@ -431,18 +399,10 @@ class SegmentationResult:
             rule.foreground_pixels for rule in self.rules
         )
         if owned_pixels != self.foreground_pixels:
-            raise ValueError(
-                "segments and rules must exactly own every foreground pixel"
-            )
-        component_ids = tuple(
-            component_id
-            for segment in self.segments
-            for component_id in segment.component_ids
-        )
+            raise ValueError("segments and rules must exactly own every foreground pixel")
+        component_ids = tuple(component_id for segment in self.segments for component_id in segment.component_ids)
         if len(component_ids) != len(set(component_ids)):
-            raise ValueError(
-                "a foreground component cannot have multiple segment owners"
-            )
+            raise ValueError("a foreground component cannot have multiple segment owners")
 
 
 @dataclass(frozen=True)
@@ -540,10 +500,7 @@ class SparseSegmentMatrix:
         known_segments = set(span_ids)
         if any(cell.segment_id not in known_segments for cell in self.cells):
             raise ValueError("sparse cell references a segment without a span")
-        if any(
-            cell.row >= len(self.rows) or cell.column >= len(self.columns)
-            for cell in self.cells
-        ):
+        if any(cell.row >= len(self.rows) or cell.column >= len(self.columns) for cell in self.cells):
             raise ValueError("sparse cell lies outside the declared axes")
         if (
             tuple(
@@ -556,9 +513,7 @@ class SparseSegmentMatrix:
         ):
             raise ValueError("sparse cells must use canonical row-major order")
         for span in self.spans:
-            owned = tuple(
-                cell for cell in self.cells if cell.segment_id == span.segment_id
-            )
+            owned = tuple(cell for cell in self.cells if cell.segment_id == span.segment_id)
             if not owned:
                 raise ValueError("every segment span must contain a sparse cell")
             actual = (
@@ -579,69 +534,45 @@ class SparseSegmentMatrix:
             raise ValueError("horizontal rule rows must be unique and sorted")
         if self.vertical_rule_columns != tuple(sorted(set(self.vertical_rule_columns))):
             raise ValueError("vertical rule columns must be unique and sorted")
-        if any(
-            index >= len(self.rows) or index < 0 for index in self.horizontal_rule_rows
-        ):
+        if any(index >= len(self.rows) or index < 0 for index in self.horizontal_rule_rows):
             raise ValueError("horizontal rule row lies outside the matrix")
-        if any(
-            index >= len(self.columns) or index < 0
-            for index in self.vertical_rule_columns
-        ):
+        if any(index >= len(self.columns) or index < 0 for index in self.vertical_rule_columns):
             raise ValueError("vertical rule column lies outside the matrix")
         if not isinstance(self.coordinate_mode, SparseCoordinateMode):
             raise ValueError("sparse coordinate mode is invalid")
         structural_entries = tuple(
-            (item.row, item.column, item.segment_id, item.code)
-            for item in self.structural_codes
+            (item.row, item.column, item.segment_id, item.code) for item in self.structural_codes
         )
         if len(structural_entries) != len(set(structural_entries)):
             raise ValueError("sparse structural codes must be unique")
         if tuple(sorted(structural_entries)) != structural_entries:
             raise ValueError("sparse structural codes must use canonical order")
         if any(
-            item.row >= len(self.rows)
-            or item.column >= len(self.columns)
-            or item.segment_id not in known_segments
+            item.row >= len(self.rows) or item.column >= len(self.columns) or item.segment_id not in known_segments
             for item in self.structural_codes
         ):
             raise ValueError("sparse structural code lies outside its projection")
         if self.projection_sha256 is not None and (
             type(self.projection_sha256) is not str
             or len(self.projection_sha256) != 64
-            or any(
-                character not in "0123456789abcdef"
-                for character in self.projection_sha256
-            )
+            or any(character not in "0123456789abcdef" for character in self.projection_sha256)
         ):
-            raise ValueError(
-                "sparse projection SHA-256 must be lowercase hexadecimal"
-            )
+            raise ValueError("sparse projection SHA-256 must be lowercase hexadecimal")
         if self.coordinate_mode is SparseCoordinateMode.LOGICAL_PROJECTION:
             if self.projection_sha256 is None:
-                raise ValueError(
-                    "logical sparse projection requires immutable provenance"
-                )
+                raise ValueError("logical sparse projection requires immutable provenance")
             if self.horizontal_rule_rows or self.vertical_rule_columns:
-                raise ValueError(
-                    "logical projection cannot claim physical rule bands"
-                )
+                raise ValueError("logical projection cannot claim physical rule bands")
         elif self.structural_codes or self.projection_sha256 is not None:
-            raise ValueError(
-                "legacy projection evidence requires logical coordinate mode"
-            )
+            raise ValueError("legacy projection evidence requires logical coordinate mode")
 
     @staticmethod
     def _validate_axis(name: str, intervals: tuple[AxisInterval, ...]) -> None:
-        if tuple(interval.index for interval in intervals) != tuple(
-            range(len(intervals))
-        ):
+        if tuple(interval.index for interval in intervals) != tuple(range(len(intervals))):
             raise ValueError(f"sparse {name} indexes must be contiguous")
         if intervals and intervals[0].start != 0:
             raise ValueError(f"sparse {name} axis must start at zero")
-        if any(
-            previous.end != current.start
-            for previous, current in zip(intervals, intervals[1:])
-        ):
+        if any(previous.end != current.start for previous, current in zip(intervals, intervals[1:])):
             raise ValueError(f"sparse {name} intervals must exactly cover their axis")
 
     def segment_ids(self) -> frozenset[str]:
@@ -651,9 +582,7 @@ class SparseSegmentMatrix:
         values: dict[tuple[int, int], list[str]] = {}
         for cell in self.cells:
             values.setdefault((cell.row, cell.column), []).append(cell.segment_id)
-        return {
-            coordinate: tuple(segment_ids) for coordinate, segment_ids in values.items()
-        }
+        return {coordinate: tuple(segment_ids) for coordinate, segment_ids in values.items()}
 
 
 @dataclass(frozen=True)
@@ -669,36 +598,21 @@ class GeometryResult:
         if (
             type(self.aligned_rgb_sha256) is not str
             or len(self.aligned_rgb_sha256) != 64
-            or any(
-                character not in "0123456789abcdef"
-                for character in self.aligned_rgb_sha256
-            )
+            or any(character not in "0123456789abcdef" for character in self.aligned_rgb_sha256)
         ):
-            raise ValueError(
-                "aligned RGB SHA-256 must be 64 lowercase hexadecimal characters"
-            )
+            raise ValueError("aligned RGB SHA-256 must be 64 lowercase hexadecimal characters")
         if self.alignment.transform.aligned_size != self.segmentation.aligned_size:
             raise ValueError("alignment and segmentation canvas sizes differ")
         if self.alignment.foreground_pixels != self.segmentation.foreground_pixels:
             raise ValueError("alignment and segmentation foreground counts differ")
-        expected_segment_ids = frozenset(
-            segment.segment_id for segment in self.segmentation.segments
-        )
+        expected_segment_ids = frozenset(segment.segment_id for segment in self.segmentation.segments)
         if self.matrix.segment_ids() != expected_segment_ids:
-            raise ValueError(
-                "sparse matrix does not contain every segment exactly once"
-            )
-        limit_leaf_count = sum(
-            node.stop_reason is StopReason.LIMIT for node in self.segmentation.nodes
-        )
-        expected_status = (
-            GeometryStatus.DEGRADED if limit_leaf_count else GeometryStatus.COMPLETE
-        )
+            raise ValueError("sparse matrix does not contain every segment exactly once")
+        limit_leaf_count = sum(node.stop_reason is StopReason.LIMIT for node in self.segmentation.nodes)
+        expected_status = GeometryStatus.DEGRADED if limit_leaf_count else GeometryStatus.COMPLETE
         if self.status is not expected_status:
             raise ValueError("geometry status does not match recursion limit leaves")
 
     @property
     def limit_leaf_count(self) -> int:
-        return sum(
-            node.stop_reason is StopReason.LIMIT for node in self.segmentation.nodes
-        )
+        return sum(node.stop_reason is StopReason.LIMIT for node in self.segmentation.nodes)

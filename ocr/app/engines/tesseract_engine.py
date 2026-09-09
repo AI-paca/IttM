@@ -574,11 +574,7 @@ class TesseractEngine(OcrEngine):
             lang="+".join(requested),
         )
         words = self._words_from_data(data, min_conf)
-        if (
-            words
-            or psm in self.edge_word_fallback_psms
-            or not self._edge_ink_touches_all_sides(image)
-        ):
+        if words or psm in self.edge_word_fallback_psms or not self._edge_ink_touches_all_sides(image):
             return words
 
         bordered = self._add_ocr_border(image)
@@ -639,17 +635,12 @@ class TesseractEngine(OcrEngine):
         try:
             import pytesseract
 
-            scaled = image.resize(
-                (max(1, image.width * 4), max(1, image.height * 4))
-            )
+            scaled = image.resize((max(1, image.width * 4), max(1, image.height * 4)))
             try:
                 data = pytesseract.image_to_data(
                     scaled,
                     lang="eng",
-                    config=(
-                        "--oem 1 --psm 8 "
-                        "-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-                    ),
+                    config=("--oem 1 --psm 8 " "-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"),
                     output_type=pytesseract.Output.DICT,
                 )
             finally:
@@ -664,11 +655,7 @@ class TesseractEngine(OcrEngine):
             )
             if str(text).strip()
         ]
-        candidates = [
-            (text, confidence)
-            for text, confidence in candidates
-            if confidence >= 0
-        ]
+        candidates = [(text, confidence) for text, confidence in candidates if confidence >= 0]
         return max(candidates, key=lambda item: item[1], default=("", 0.0))
 
     def recognize_cjk_phrase(
@@ -682,9 +669,7 @@ class TesseractEngine(OcrEngine):
         try:
             import pytesseract
 
-            scaled = image.resize(
-                (max(1, image.width * 4), max(1, image.height * 4))
-            )
+            scaled = image.resize((max(1, image.width * 4), max(1, image.height * 4)))
             try:
                 data = pytesseract.image_to_data(
                     scaled,
@@ -707,8 +692,7 @@ class TesseractEngine(OcrEngine):
         candidates = [
             (text, confidence)
             for text, confidence in candidates
-            if confidence >= 0
-            and script_counts(text).get("cjk", 0) == len(text)
+            if confidence >= 0 and script_counts(text).get("cjk", 0) == len(text)
         ]
         if not candidates:
             return "", 0.0

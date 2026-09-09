@@ -32,7 +32,6 @@ from app.sparse_pipeline.crop_enhancement import (
     GammaDarkCropEnhancer,
 )
 from app.sparse_pipeline.ocr_adapter_contracts import (
-    OcrFailureCode,
     OcrOutputGeometry,
     OcrResource,
 )
@@ -50,19 +49,13 @@ from app.sparse_pipeline.ocr_queue import (
 
 def _cache_json_value(value: object) -> object:
     if dataclasses.is_dataclass(value):
-        return {
-            field.name: _cache_json_value(getattr(value, field.name))
-            for field in dataclasses.fields(value)
-        }
+        return {field.name: _cache_json_value(getattr(value, field.name)) for field in dataclasses.fields(value)}
     if isinstance(value, enum.Enum):
         return value.value
     if isinstance(value, Path):
         return str(value.resolve())
     if isinstance(value, Mapping):
-        return {
-            str(key): _cache_json_value(item)
-            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
-        }
+        return {str(key): _cache_json_value(item) for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))}
     if isinstance(value, (tuple, list)):
         return [_cache_json_value(item) for item in value]
     if isinstance(value, (set, frozenset)):
@@ -208,9 +201,7 @@ class SourcePlacementArtifact:
                 self.source_bbox.width,
                 self.source_bbox.height,
             ):
-                raise ValueError(
-                    "source placement artifact disagrees with source bbox"
-                )
+                raise ValueError("source placement artifact disagrees with source bbox")
 
 
 @dataclass(frozen=True)
@@ -297,13 +288,7 @@ def _membership_component_by_block_id(plan: BlockPlan) -> dict[str, str]:
             parent[first_root] = second_root
 
     for unit in plan.membership_units:
-        members = tuple(
-            dict.fromkeys(
-                block_id
-                for block_id in unit.block_ids
-                if block_id in parent
-            )
-        )
+        members = tuple(dict.fromkeys(block_id for block_id in unit.block_ids if block_id in parent))
         for block_id in members[1:]:
             union(members[0], block_id)
     return {block_id: find(block_id) for block_id in block_ids}
@@ -316,9 +301,7 @@ def _component_membership_slots(
     unit_ids_by_component: dict[str, list[str]] = {}
     for unit in plan.membership_units:
         component_ids = {
-            component_by_block_id[block_id]
-            for block_id in unit.block_ids
-            if block_id in component_by_block_id
+            component_by_block_id[block_id] for block_id in unit.block_ids if block_id in component_by_block_id
         }
         if len(component_ids) > 1:
             raise ValueError("membership unit spans disconnected block components")
@@ -415,9 +398,7 @@ class LanguageSplayState:
         self.observations: list[tuple[str, int]] = []
         self.locked_profile_id: str | None = None
         self.lock_is_provisional = False
-        self.engine_order_nodes: dict[
-            str, list[EngineOrderSplayNode]
-        ] = {}
+        self.engine_order_nodes: dict[str, list[EngineOrderSplayNode]] = {}
         self.fallback_loss_streaks: dict[str, int] = {}
         self._sequence = 0
         self._capture_attempt_inputs = False
@@ -474,9 +455,7 @@ class LanguageSplayState:
         existing = {node.languages for node in nodes}
         for languages in orders:
             if languages not in existing:
-                nodes.append(
-                    EngineOrderSplayNode(languages, len(nodes))
-                )
+                nodes.append(EngineOrderSplayNode(languages, len(nodes)))
                 existing.add(languages)
 
     def copy_language_strategy_from(
@@ -484,12 +463,9 @@ class LanguageSplayState:
         source: LanguageSplayState,
     ) -> None:
         self.engine_order_nodes = {
-            profile_id: [replace(node) for node in nodes]
-            for profile_id, nodes in source.engine_order_nodes.items()
+            profile_id: [replace(node) for node in nodes] for profile_id, nodes in source.engine_order_nodes.items()
         }
-        self.fallback_loss_streaks = dict(
-            source.fallback_loss_streaks
-        )
+        self.fallback_loss_streaks = dict(source.fallback_loss_streaks)
 
     def ordered_engine_orders(
         self,
@@ -500,11 +476,7 @@ class LanguageSplayState:
     ) -> tuple[tuple[str, ...], ...]:
         self.ensure_engine_orders(profile_id, orders)
         nodes = self.engine_order_nodes[profile_id]
-        active = tuple(
-            node.languages
-            for node in nodes
-            if node.loss_streak < maximum_losses
-        )
+        active = tuple(node.languages for node in nodes if node.loss_streak < maximum_losses)
         return active or (nodes[0].languages,)
 
     def observe_engine_order(
@@ -544,9 +516,7 @@ class LanguageSplayState:
         maximum_losses: int,
     ) -> None:
         nodes = self.engine_order_nodes.get(profile_id, [])
-        eligible = tuple(
-            node for node in nodes if node.attempts >= minimum_samples
-        )
+        eligible = tuple(node for node in nodes if node.attempts >= minimum_samples)
         if len(eligible) < 2:
             return
         winner = max(
@@ -575,10 +545,7 @@ class LanguageSplayState:
         maximum_losses: int,
     ) -> tuple[str, ...]:
         return tuple(
-            profile_id
-            for profile_id in profile_ids
-            if self.fallback_loss_streaks.get(profile_id, 0)
-            < maximum_losses
+            profile_id for profile_id in profile_ids if self.fallback_loss_streaks.get(profile_id, 0) < maximum_losses
         )
 
     def observe_fallback_profiles(
@@ -593,9 +560,7 @@ class LanguageSplayState:
             if winner_profile_id == profile_id:
                 self.fallback_loss_streaks[profile_id] = 0
             elif winner_profile_id == primary_profile_id:
-                self.fallback_loss_streaks[profile_id] = (
-                    self.fallback_loss_streaks.get(profile_id, 0) + 1
-                )
+                self.fallback_loss_streaks[profile_id] = self.fallback_loss_streaks.get(profile_id, 0) + 1
 
     def reset_language_guards(self) -> None:
         for nodes in self.engine_order_nodes.values():
@@ -608,9 +573,7 @@ class LanguageSplayState:
 
     def observe(self, profile_id: str, grammar_percent: int) -> None:
         self.observations.append((profile_id, grammar_percent))
-        node = next(
-            node for node in self.nodes if node.profile_id == profile_id
-        )
+        node = next(node for node in self.nodes if node.profile_id == profile_id)
         node.attempts += 1
         node.quality_sum += grammar_percent / 100.0
         node.last_grammar_percent = grammar_percent
@@ -668,9 +631,7 @@ class LanguageSplayState:
     ) -> None:
         for attempt in attempts:
             self._sequence += 1
-            self.attempts.append(
-                replace(attempt, sequence=self._sequence)
-            )
+            self.attempts.append(replace(attempt, sequence=self._sequence))
 
     def write_csv(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -689,9 +650,7 @@ class LanguageSplayState:
                 if artifact_path.exists():
                     existing = artifact_path.read_bytes()
                     if hashlib.sha256(existing).hexdigest() != digest:
-                        raise ValueError(
-                            "stored OCR attempt artifact digest is invalid"
-                        )
+                        raise ValueError("stored OCR attempt artifact digest is invalid")
                 else:
                     artifact_path.write_bytes(payload)
                 written.append(digest)
@@ -720,16 +679,12 @@ class LanguageSplayState:
                         rank,
                         node.profile_id,
                         "+".join(node.languages),
-                        "yes"
-                        if node.profile_id == self.locked_profile_id
-                        else "no",
+                        "yes" if node.profile_id == self.locked_profile_id else "no",
                         (
-                            "provisional"
-                            if self.lock_is_provisional
-                            else "confirmed"
-                        )
-                        if node.profile_id == self.locked_profile_id
-                        else "",
+                            ("provisional" if self.lock_is_provisional else "confirmed")
+                            if node.profile_id == self.locked_profile_id
+                            else ""
+                        ),
                         f"{node.weight / total_weight:.6f}",
                         node.attempts,
                         node.exact_grammar,
@@ -769,10 +724,8 @@ class LanguageSplayState:
                         attempt.transform.value,
                         attempt.input_sha256,
                         (
-                            f"{artifact_directory.name}/"
-                            f"{attempt.input_sha256}.png"
-                            if attempt.input_sha256
-                            in self._attempt_input_payloads
+                            f"{artifact_directory.name}/" f"{attempt.input_sha256}.png"
+                            if attempt.input_sha256 in self._attempt_input_payloads
                             else ""
                         ),
                         attempt.status,
@@ -840,9 +793,7 @@ def _content_ink_mask(
     values = (
         inside_values
         if sample_density >= 0.45
-        else surrounding_values
-        if surrounding_values.size >= 16
-        else inside_values
+        else surrounding_values if surrounding_values.size >= 16 else inside_values
     )
     if not values.size:
         return np.zeros(unit_mask.shape, dtype=bool), True
@@ -858,12 +809,8 @@ def _content_ink_mask(
     height, width = unit_mask.shape
     minimum_horizontal_rule = max(32, math.ceil(width * 0.65))
     minimum_vertical_rule = max(32, math.ceil(height * 0.65))
-    horizontal_rules = (
-        np.count_nonzero(ink, axis=1) >= minimum_horizontal_rule
-    )
-    vertical_rules = (
-        np.count_nonzero(ink, axis=0) >= minimum_vertical_rule
-    )
+    horizontal_rules = np.count_nonzero(ink, axis=1) >= minimum_horizontal_rule
+    vertical_rules = np.count_nonzero(ink, axis=0) >= minimum_vertical_rule
     if np.any(horizontal_rules):
         ink[horizontal_rules, :] = False
     if np.any(vertical_rules):
@@ -903,9 +850,7 @@ def _compact_internal_whitespace(
                 continue
             left_context = maximum_gap // 2
             right_context = maximum_gap - left_context
-            keep[
-                int(first) + 1 + left_context : int(second) - right_context
-            ] = False
+            keep[int(first) + 1 + left_context : int(second) - right_context] = False
         return np.flatnonzero(keep)
 
     height, width = ink_mask.shape
@@ -924,18 +869,10 @@ def _pack_tiles(
     int,
     tuple[int, int],
 ]:
-    if any(
-        tile.canonical_bbox is not None
-        or tile.canonical_png_bytes is not None
-        for tile in tiles
-    ):
-        raise ValueError(
-            "canonical locality tiles cannot be passed to generic packing"
-        )
+    if any(tile.canonical_bbox is not None or tile.canonical_png_bytes is not None for tile in tiles):
+        raise ValueError("canonical locality tiles cannot be passed to generic packing")
     gap = 8
-    total_tile_pixels = sum(
-        tile.pixels.shape[0] * tile.pixels.shape[1] for tile in tiles
-    )
+    total_tile_pixels = sum(tile.pixels.shape[0] * tile.pixels.shape[1] for tile in tiles)
     target_width = max(
         max(tile.pixels.shape[1] for tile in tiles),
         math.ceil(math.sqrt(total_tile_pixels)),
@@ -945,36 +882,23 @@ def _pack_tiles(
     current_width = 0
     for tile in tiles:
         tile_width = tile.pixels.shape[1]
-        projected_width = (
-            current_width + gap + tile_width
-            if current_row
-            else tile_width
-        )
+        projected_width = current_width + gap + tile_width if current_row else tile_width
         if current_row and projected_width > target_width:
             mutable_rows.append(current_row)
             current_row = []
             current_width = 0
         current_row.append(tile)
-        current_width = (
-            current_width + gap + tile_width
-            if len(current_row) > 1
-            else tile_width
-        )
+        current_width = current_width + gap + tile_width if len(current_row) > 1 else tile_width
     if current_row:
         mutable_rows.append(current_row)
     rows = tuple(tuple(row) for row in mutable_rows)
-    row_heights = tuple(
-        max(tile.pixels.shape[0] for tile in row) for row in rows
-    )
+    row_heights = tuple(max(tile.pixels.shape[0] for tile in row) for row in rows)
     row_tops = []
     top = 0
     for height in row_heights:
         row_tops.append(top)
         top += height + gap
-    row_widths = tuple(
-        sum(tile.pixels.shape[1] for tile in row) + gap * (len(row) - 1)
-        for row in rows
-    )
+    row_widths = tuple(sum(tile.pixels.shape[1] for tile in row) + gap * (len(row) - 1) for row in rows)
     atlas_width = max(row_widths)
     atlas_height = sum(row_heights) + gap * (len(rows) - 1)
     source_placements_list: list[tuple[_Tile, int, int]] = []
@@ -1014,22 +938,14 @@ def _pack_tiles(
         run_height = previous - run_start + 1
         if run_height >= 2:
             text_line_heights.append(run_height)
-    median_text_height = (
-        sorted(text_line_heights)[len(text_line_heights) // 2]
-        if text_line_heights
-        else 24
-    )
+    median_text_height = sorted(text_line_heights)[len(text_line_heights) // 2] if text_line_heights else 24
     requested_scale = min(
         4,
         max(1, math.ceil(24 / max(1, median_text_height))),
     )
     pixel_limited_scale = max(
         1,
-        math.floor(
-            math.sqrt(
-                16_000_000 / max(1, atlas_width * atlas_height)
-            )
-        ),
+        math.floor(math.sqrt(16_000_000 / max(1, atlas_width * atlas_height))),
     )
     scale = min(requested_scale, pixel_limited_scale)
     if scale > 1:
@@ -1104,9 +1020,7 @@ def _slot_for_locality_tile(
     try:
         return slots[tile.unit_id]
     except KeyError as error:
-        raise ValueError(
-            "local tile is outside its locality-family contract"
-        ) from error
+        raise ValueError("local tile is outside its locality-family contract") from error
 
 
 def _bounded_locality_family_slots(
@@ -1122,31 +1036,17 @@ def _bounded_locality_family_slots(
         raise ValueError("locality-family contract requires occupied tiles")
     if len(tiles) > 256:
         raise BlockPlanningLimitError(
-            "locality-family block exceeds 256 occupied tiles; "
-            "split it dyadically before rendering"
+            "locality-family block exceeds 256 occupied tiles; " "split it dyadically before rendering"
         )
-    metadata_by_segment = {
-        placement.segment_id: placement for placement in block.local_placements
-    }
-    tiles_by_island: dict[str, list[tuple[int, _Tile]]] = {
-        island.island_id: [] for island in block.local_islands
-    }
+    metadata_by_segment = {placement.segment_id: placement for placement in block.local_placements}
+    tiles_by_island: dict[str, list[tuple[int, _Tile]]] = {island.island_id: [] for island in block.local_islands}
     for tile in tiles:
-        metadata = tuple(
-            metadata_by_segment.get(segment_id)
-            for segment_id in tile.segment_ids
-        )
+        metadata = tuple(metadata_by_segment.get(segment_id) for segment_id in tile.segment_ids)
         if not metadata or any(item is None for item in metadata):
             raise ValueError("local tile lacks planner placement metadata")
-        positions = {
-            (item.island_id, item.polar_order)
-            for item in metadata
-            if item is not None
-        }
+        positions = {(item.island_id, item.polar_order) for item in metadata if item is not None}
         if len(positions) != 1:
-            raise ValueError(
-                "one local tile cannot span multiple planner positions"
-            )
+            raise ValueError("one local tile cannot span multiple planner positions")
         island_id, polar_order = next(iter(positions))
         if island_id not in tiles_by_island:
             raise ValueError("local tile references an unknown visual island")
@@ -1156,9 +1056,7 @@ def _bounded_locality_family_slots(
     columns = min(16, max(1, math.ceil(math.sqrt(maximum_island_tiles))))
     rows = math.ceil(maximum_island_tiles / columns)
     if rows > 16:
-        raise BlockPlanningLimitError(
-            "locality-family occupied slots exceed the 16x16 contract"
-        )
+        raise BlockPlanningLimitError("locality-family occupied slots exceed the 16x16 contract")
 
     slots: dict[str | _LocalitySlotKey, int] = {}
     for island in block.local_islands:
@@ -1188,9 +1086,7 @@ def _derive_local_region_layouts(
     membership_slot_by_id: dict[str | _LocalitySlotKey, int] | None = None,
     slot_shape: tuple[int, int] | None = None,
 ) -> dict[str, _LocalRegionLayout]:
-    metadata_by_segment = {
-        placement.segment_id: placement for placement in block.local_placements
-    }
+    metadata_by_segment = {placement.segment_id: placement for placement in block.local_placements}
     tiles_by_region: dict[str, list[tuple[_Tile, int, int]]] = {
         island.local_region_id: [] for island in block.local_islands
     }
@@ -1208,30 +1104,30 @@ def _derive_local_region_layouts(
                 raise ValueError("canonical membership slot shape is invalid")
             slot = _slot_for_locality_tile(membership_slot_by_id, tile)
             matrix_row, matrix_column = divmod(slot, slot_shape[0])
-        tiles_by_region[metadata.local_region_id].append(
-            (tile, matrix_row, matrix_column)
-        )
+        tiles_by_region[metadata.local_region_id].append((tile, matrix_row, matrix_column))
 
     layouts: dict[str, _LocalRegionLayout] = {}
     for island in block.local_islands:
         occupied = tiles_by_region[island.local_region_id]
-        rows = max(
-            (matrix_row for _tile, matrix_row, _matrix_column in occupied),
-            default=0,
-        ) + 1
-        columns = max(
-            (matrix_column for _tile, _matrix_row, matrix_column in occupied),
-            default=0,
-        ) + 1
+        rows = (
+            max(
+                (matrix_row for _tile, matrix_row, _matrix_column in occupied),
+                default=0,
+            )
+            + 1
+        )
+        columns = (
+            max(
+                (matrix_column for _tile, _matrix_row, matrix_column in occupied),
+                default=0,
+            )
+            + 1
+        )
         column_widths = [0] * columns
         row_heights = [0] * rows
         for tile, matrix_row, matrix_column in occupied:
-            column_widths[matrix_column] = max(
-                column_widths[matrix_column], tile.pixels.shape[1]
-            )
-            row_heights[matrix_row] = max(
-                row_heights[matrix_row], tile.pixels.shape[0]
-            )
+            column_widths[matrix_column] = max(column_widths[matrix_column], tile.pixels.shape[1])
+            row_heights[matrix_row] = max(row_heights[matrix_row], tile.pixels.shape[0])
         layouts[island.local_region_id] = _LocalRegionLayout(
             matrix_segment_shape=(rows, columns),
             column_widths=tuple(column_widths),
@@ -1255,20 +1151,13 @@ def _render_canonical_locality_raster(
         raise ValueError("local tile packing requires at least one real tile")
     if maximum_pixels <= 0:
         raise ValueError("local tile pixel limit must be positive")
-    metadata_by_segment = {
-        placement.segment_id: placement for placement in block.local_placements
-    }
+    metadata_by_segment = {placement.segment_id: placement for placement in block.local_placements}
     tiles_by_island: dict[
         str,
         list[tuple[int, int, int, int, int, _Tile]],
-    ] = {
-        island.island_id: [] for island in block.local_islands
-    }
+    ] = {island.island_id: [] for island in block.local_islands}
     for tile in tiles:
-        metadata = tuple(
-            metadata_by_segment.get(segment_id)
-            for segment_id in tile.segment_ids
-        )
+        metadata = tuple(metadata_by_segment.get(segment_id) for segment_id in tile.segment_ids)
         if not metadata or any(item is None for item in metadata):
             raise ValueError("local tile lacks planner placement metadata")
         positions = {
@@ -1284,9 +1173,7 @@ def _render_canonical_locality_raster(
             if item is not None
         }
         if len(positions) != 1:
-            raise ValueError(
-                "one local tile cannot span multiple planner positions"
-            )
+            raise ValueError("one local tile cannot span multiple planner positions")
         (
             island_id,
             table_row,
@@ -1294,9 +1181,7 @@ def _render_canonical_locality_raster(
             matrix_row,
             matrix_column,
             polar_order,
-        ) = next(
-            iter(positions)
-        )
+        ) = next(iter(positions))
         if membership_slot_by_id is not None:
             if slot_shape is None or slot_shape[0] < 1 or slot_shape[1] < 1:
                 raise ValueError("canonical membership slot shape is invalid")
@@ -1316,9 +1201,7 @@ def _render_canonical_locality_raster(
         )
 
     gap = 8
-    median_tile_height = sorted(tile.pixels.shape[0] for tile in tiles)[
-        len(tiles) // 2
-    ]
+    median_tile_height = sorted(tile.pixels.shape[0] for tile in tiles)[len(tiles) // 2]
     island_separator = max(gap * 2, median_tile_height)
     derived_layouts = _derive_local_region_layouts(
         tiles,
@@ -1326,18 +1209,19 @@ def _render_canonical_locality_raster(
         membership_slot_by_id=membership_slot_by_id,
         slot_shape=slot_shape,
     )
-    effective_layouts = derived_layouts if region_layouts is None else {
-        **derived_layouts,
-        **region_layouts,
-    }
-    island_layouts: list[
-        tuple[tuple[tuple[_Tile, int, int], ...], int, int]
-    ] = []
+    effective_layouts = (
+        derived_layouts
+        if region_layouts is None
+        else {
+            **derived_layouts,
+            **region_layouts,
+        }
+    )
+    island_layouts: list[tuple[tuple[tuple[_Tile, int, int], ...], int, int]] = []
     for island in block.local_islands:
         layout = effective_layouts[island.local_region_id]
         if any(
-            matrix_row >= layout.matrix_segment_shape[0]
-            or matrix_column >= layout.matrix_segment_shape[1]
+            matrix_row >= layout.matrix_segment_shape[0] or matrix_column >= layout.matrix_segment_shape[1]
             for (
                 _table_row,
                 _table_column,
@@ -1347,9 +1231,7 @@ def _render_canonical_locality_raster(
                 _tile,
             ) in tiles_by_island[island.island_id]
         ):
-            raise ValueError(
-                "local region layout does not cover an occupied position"
-            )
+            raise ValueError("local region layout does not cover an occupied position")
         column_lefts: list[int] = []
         left = 0
         for column_width in layout.column_widths:
@@ -1384,38 +1266,26 @@ def _render_canonical_locality_raster(
             placements.append(
                 (
                     tile,
-                    column_lefts[matrix_column]
-                    + (layout.column_widths[matrix_column] - tile_width) // 2,
-                    row_tops[matrix_row]
-                    + (layout.row_heights[matrix_row] - tile_height) // 2,
+                    column_lefts[matrix_column] + (layout.column_widths[matrix_column] - tile_width) // 2,
+                    row_tops[matrix_row] + (layout.row_heights[matrix_row] - tile_height) // 2,
                 )
             )
         if placements:
-            island_layouts.append(
-                (tuple(placements), island_width, island_height)
-            )
+            island_layouts.append((tuple(placements), island_width, island_height))
     if not island_layouts:
         raise ValueError("local tile packing has no occupied visual island")
 
     atlas_width = max(layout[1] for layout in island_layouts)
-    atlas_height = sum(layout[2] for layout in island_layouts) + (
-        island_separator * (len(island_layouts) - 1)
-    )
+    atlas_height = sum(layout[2] for layout in island_layouts) + (island_separator * (len(island_layouts) - 1))
     source_placements: list[tuple[_Tile, int, int]] = []
     island_top = 0
     for island_placements, island_width, island_height in island_layouts:
         island_left = (atlas_width - island_width) // 2
-        source_placements.extend(
-            (tile, left + island_left, top + island_top)
-            for tile, left, top in island_placements
-        )
+        source_placements.extend((tile, left + island_left, top + island_top) for tile, left, top in island_placements)
         island_top += island_height + island_separator
     base_pixels = atlas_width * atlas_height
     if base_pixels > maximum_pixels:
-        raise BlockPlanningLimitError(
-            "local compact layout exceeds configured pixel limit "
-            f"{maximum_pixels}"
-        )
+        raise BlockPlanningLimitError("local compact layout exceeds configured pixel limit " f"{maximum_pixels}")
 
     atlas = np.full((atlas_height, atlas_width, 3), 255, dtype=np.uint8)
     for tile, left, tile_top in source_placements:
@@ -1438,22 +1308,14 @@ def _render_canonical_locality_raster(
             previous = row
         if previous - run_start + 1 >= 2:
             text_line_heights.append(previous - run_start + 1)
-    median_text_height = (
-        sorted(text_line_heights)[len(text_line_heights) // 2]
-        if text_line_heights
-        else 24
-    )
+    median_text_height = sorted(text_line_heights)[len(text_line_heights) // 2] if text_line_heights else 24
     requested_scale = min(
         4,
         max(1, math.ceil(24 / max(1, median_text_height))),
     )
-    pixel_limited_scale = math.floor(
-        math.sqrt(maximum_pixels / max(1, base_pixels))
-    )
+    pixel_limited_scale = math.floor(math.sqrt(maximum_pixels / max(1, base_pixels)))
     if pixel_limited_scale < 1:
-        raise BlockPlanningLimitError(
-            "local compact layout cannot fit without shrinking tiles"
-        )
+        raise BlockPlanningLimitError("local compact layout cannot fit without shrinking tiles")
     scale = min(requested_scale, pixel_limited_scale)
     if scale > 1:
         atlas_image = Image.fromarray(atlas, mode="RGB")
@@ -1529,27 +1391,19 @@ def _crop_canonical_locality_subset(
 
     if not tiles or any(tile.canonical_bbox is None for tile in tiles):
         raise ValueError("canonical locality subset requires canonical boxes")
-    source_payloads = {
-        tile.canonical_png_bytes for tile in tiles
-    }
+    source_payloads = {tile.canonical_png_bytes for tile in tiles}
     if None in source_payloads or len(source_payloads) != 1:
-        raise ValueError(
-            "canonical locality subset requires one immutable source raster"
-        )
+        raise ValueError("canonical locality subset requires one immutable source raster")
     source_payload = next(iter(source_payloads))
     assert source_payload is not None
-    bounds = Box.union(
-        tile.canonical_bbox for tile in tiles if tile.canonical_bbox is not None
-    )
+    bounds = Box.union(tile.canonical_bbox for tile in tiles if tile.canonical_bbox is not None)
     placements = []
     for tile in tiles:
         canonical_bbox = tile.canonical_bbox
         assert canonical_bbox is not None
         expected_size = (canonical_bbox.height, canonical_bbox.width)
         if tile.pixels.shape[:2] != expected_size:
-            raise ValueError(
-                "canonical locality tile geometry disagrees with placement"
-            )
+            raise ValueError("canonical locality tile geometry disagrees with placement")
         left = canonical_bbox.left - bounds.left
         top = canonical_bbox.top - bounds.top
         placements.append(
@@ -1567,12 +1421,7 @@ def _crop_canonical_locality_subset(
         )
     with Image.open(io.BytesIO(source_payload)) as opened:
         opened.load()
-        if (
-            bounds.left < 0
-            or bounds.top < 0
-            or bounds.right > opened.width
-            or bounds.bottom > opened.height
-        ):
+        if bounds.left < 0 or bounds.top < 0 or bounds.right > opened.width or bounds.bottom > opened.height:
             raise ValueError("canonical subset exceeds source raster")
         subset = opened.convert("RGB").crop(bounds.as_tuple())
     try:
@@ -1593,9 +1442,7 @@ def _source_placement_artifacts(
     block: RecognitionBlock,
     page: np.ndarray,
 ) -> tuple[SourcePlacementArtifact, ...]:
-    metadata_by_segment = {
-        placement.segment_id: placement for placement in block.local_placements
-    }
+    metadata_by_segment = {placement.segment_id: placement for placement in block.local_placements}
     spatial_positions: dict[str, tuple[str, int, int, int]] = {}
     if not metadata_by_segment:
         widths = sorted(tile.source_bbox.width for tile in tiles)
@@ -1617,16 +1464,8 @@ def _source_placement_artifacts(
                 ),
             )
             for tile in ordered:
-                start = (
-                    tile.source_bbox.top
-                    if vertical
-                    else tile.source_bbox.left
-                )
-                stop = (
-                    tile.source_bbox.bottom
-                    if vertical
-                    else tile.source_bbox.right
-                )
+                start = tile.source_bbox.top if vertical else tile.source_bbox.left
+                stop = tile.source_bbox.bottom if vertical else tile.source_bbox.right
                 best_index = None
                 best_overlap = 0
                 for index, (band_start, band_stop) in enumerate(bands):
@@ -1653,11 +1492,7 @@ def _source_placement_artifacts(
             return result
 
         row_by_id = band_indexes(tiles, vertical=True)
-        column_members = tuple(
-            tile
-            for tile in tiles
-            if tile.source_bbox.width <= max(1, median_width * 3)
-        )
+        column_members = tuple(tile for tile in tiles if tile.source_bbox.width <= max(1, median_width * 3))
         column_by_id = band_indexes(column_members, vertical=False)
         reading_order = {
             tile.unit_id: index
@@ -1684,10 +1519,7 @@ def _source_placement_artifacts(
     artifacts = []
     page_height, page_width = page.shape[:2]
     for tile in tiles:
-        metadata = tuple(
-            metadata_by_segment.get(segment_id)
-            for segment_id in tile.segment_ids
-        )
+        metadata = tuple(metadata_by_segment.get(segment_id) for segment_id in tile.segment_ids)
         positions = (
             {
                 (
@@ -1702,14 +1534,10 @@ def _source_placement_artifacts(
             if metadata_by_segment
             else {spatial_positions[tile.unit_id]}
         )
-        if metadata_by_segment and (
-            not metadata or any(item is None for item in metadata)
-        ):
+        if metadata_by_segment and (not metadata or any(item is None for item in metadata)):
             raise ValueError("source placement lacks planner metadata")
         if len(positions) != 1:
-            raise ValueError(
-                "source placement spans multiple polar positions"
-            )
+            raise ValueError("source placement spans multiple polar positions")
         bbox = tile.source_bbox
         if (
             bbox.left < 0
@@ -1725,9 +1553,7 @@ def _source_placement_artifacts(
             bbox.left : bbox.right,
         ].copy()
         payload = _png_bytes(source_pixels)
-        island_id, matrix_row, matrix_column, polar_order = next(
-            iter(positions)
-        )
+        island_id, matrix_row, matrix_column, polar_order = next(iter(positions))
         artifacts.append(
             SourcePlacementArtifact(
                 unit_id=tile.unit_id,
@@ -1761,20 +1587,11 @@ def build_deferred_compact_crops(
         if opened.format != "PNG" or opened.size != aligned_size:
             raise ValueError("deferred crop source disagrees with aligned geometry")
         page = np.asarray(opened.convert("RGB")).copy()
-    label_by_segment = {
-        segment_id: label
-        for label, segment_id in enumerate(ownership_segment_ids or ())
-    }
-    span_by_segment = {
-        span.segment_id: span for span in segment_spans
-    }
+    label_by_segment = {segment_id: label for label, segment_id in enumerate(ownership_segment_ids or ())}
+    span_by_segment = {span.segment_id: span for span in segment_spans}
     outputs: list[BlockCropPair] = []
     compacted: list[BlockCompaction] = []
-    unit_by_segment = {
-        segment_id: unit
-        for unit in plan.membership_units
-        for segment_id in unit.segment_ids
-    }
+    unit_by_segment = {segment_id: unit for unit in plan.membership_units for segment_id in unit.segment_ids}
     tile_cache: dict[tuple[str, ...], _Tile | None] = {}
     for block in plan.blocks:
         local_layout = block.matrix_window_kind in {
@@ -1782,23 +1599,14 @@ def build_deferred_compact_crops(
             "polar-local-signature",
         }
         if local_layout and (ownership is None or segment_bboxes is None):
-            raise ValueError(
-                "polar-local compaction requires ownership and segment bboxes"
-            )
+            raise ValueError("polar-local compaction requires ownership and segment bboxes")
         bbox = block.bbox
         crop_bbox = bbox
         pixels = page[bbox.top : bbox.bottom, bbox.left : bbox.right].copy()
-        region_ownership = (
-            ownership[bbox.top : bbox.bottom, bbox.left : bbox.right]
-            if ownership is not None
-            else None
-        )
+        region_ownership = ownership[bbox.top : bbox.bottom, bbox.left : bbox.right] if ownership is not None else None
         selected_labels = {
-            label_by_segment[segment_id]
-            for segment_id in block.segment_ids
-            if segment_id in label_by_segment
+            label_by_segment[segment_id] for segment_id in block.segment_ids if segment_id in label_by_segment
         }
-        masked_segment_ids: tuple[str, ...] = ()
         if region_ownership is not None:
             foreign_labels = set(
                 int(value)
@@ -1807,11 +1615,6 @@ def build_deferred_compact_crops(
             )
             if foreign_labels:
                 pixels[np.isin(region_ownership, tuple(foreign_labels))] = 255
-                masked_segment_ids = tuple(
-                    segment_id
-                    for segment_id, label in label_by_segment.items()
-                    if label in foreign_labels
-                )
 
         tiles: list[_Tile] = []
         omitted: list[str] = []
@@ -1825,25 +1628,24 @@ def build_deferred_compact_crops(
                 key = (
                     (0, 0, 0, 0, segment_id)
                     if local_layout
-                    else
-                    (
-                        span.row_start,
-                        span.row_stop,
-                        span.column_start,
-                        span.column_stop,
-                        "",
+                    else (
+                        (
+                            span.row_start,
+                            span.row_stop,
+                            span.column_start,
+                            span.column_stop,
+                            "",
+                        )
+                        if span is not None
+                        else (0, 0, 0, 0, segment_id)
                     )
-                    if span is not None
-                    else (0, 0, 0, 0, segment_id)
                 )
                 grouped_segment_ids.setdefault(key, []).append(segment_id)
             for group_ids_list in grouped_segment_ids.values():
                 group_ids = tuple(group_ids_list)
                 unit = unit_by_segment.get(group_ids[0])
                 labels = tuple(
-                    label_by_segment[segment_id]
-                    for segment_id in group_ids
-                    if segment_id in label_by_segment
+                    label_by_segment[segment_id] for segment_id in group_ids if segment_id in label_by_segment
                 )
                 if unit is None or not labels:
                     if unit is not None:
@@ -1856,13 +1658,8 @@ def build_deferred_compact_crops(
                     else:
                         tiles.append(cached)
                     continue
-                if segment_bboxes is not None and all(
-                    segment_id in segment_bboxes for segment_id in group_ids
-                ):
-                    member_bbox = Box.union(
-                        segment_bboxes[segment_id]
-                        for segment_id in group_ids
-                    )
+                if segment_bboxes is not None and all(segment_id in segment_bboxes for segment_id in group_ids):
+                    member_bbox = Box.union(segment_bboxes[segment_id] for segment_id in group_ids)
                     analysis_bbox = Box(
                         max(0, member_bbox.left - 4),
                         max(0, member_bbox.top - 4),
@@ -1889,12 +1686,8 @@ def build_deferred_compact_crops(
                         continue
                     local_left = max(0, int(columns.min()) - 2)
                     local_top = max(0, int(rows.min()) - 2)
-                    local_right = min(
-                        unit_pixels.shape[1], int(columns.max()) + 3
-                    )
-                    local_bottom = min(
-                        unit_pixels.shape[0], int(rows.max()) + 3
-                    )
+                    local_right = min(unit_pixels.shape[1], int(columns.max()) + 3)
+                    local_bottom = min(unit_pixels.shape[0], int(rows.max()) + 3)
                     source_bbox = Box(
                         analysis_bbox.left + local_left,
                         analysis_bbox.top + local_top,
@@ -2019,9 +1812,7 @@ def build_deferred_compact_crops(
         if tiles:
             source_placements: tuple[SourcePlacementArtifact, ...] = ()
             if local_layout:
-                membership_slot_by_id, slot_shape = (
-                    _bounded_locality_family_slots(tuple(tiles), block)
-                )
+                membership_slot_by_id, slot_shape = _bounded_locality_family_slots(tuple(tiles), block)
                 rendered = _render_canonical_locality_raster(
                     tuple(tiles),
                     block,
@@ -2034,9 +1825,7 @@ def build_deferred_compact_crops(
                 packed_size = rendered.size
                 raster_kind = CompactionRasterKind.CANONICAL_LOCALITY
             else:
-                payload, placements, packed_pixels, packed_size = _pack_tiles(
-                    tuple(tiles)
-                )
+                payload, placements, packed_pixels, packed_size = _pack_tiles(tuple(tiles))
                 raster_kind = CompactionRasterKind.SPATIAL_PACKED
             source_placements = _source_placement_artifacts(
                 tuple(tiles),
@@ -2044,9 +1833,7 @@ def build_deferred_compact_crops(
                 page,
             )
             crop_bbox = Box(0, 0, packed_size[0], packed_size[1])
-            occupied_before = sum(
-                tile.pixels.shape[0] * tile.pixels.shape[1] for tile in tiles
-            )
+            occupied_before = sum(tile.pixels.shape[0] * tile.pixels.shape[1] for tile in tiles)
             compacted.append(
                 BlockCompaction(
                     block_id=block.block_id,
@@ -2069,8 +1856,7 @@ def build_deferred_compact_crops(
             block_units = tuple(
                 unit
                 for unit in plan.membership_units
-                if block.block_id in unit.block_ids
-                and set(unit.segment_ids).issubset(block.segment_ids)
+                if block.block_id in unit.block_ids and set(unit.segment_ids).issubset(block.segment_ids)
             )
             if len(block_units) == 1:
                 unit = block_units[0]
@@ -2121,11 +1907,7 @@ def build_deferred_compact_crops(
 
 
 _TOKEN = re.compile(r"[\w]+", re.UNICODE)
-_VOWELS = frozenset(
-    "aeiouyAEIOUY"
-    "аеёиоуыэюяАЕЁИОУЫЭЮЯ"
-    "αεηιουωΑΕΗΙΟΥΩ"
-)
+_VOWELS = frozenset("aeiouyAEIOUY" "аеёиоуыэюяАЕЁИОУЫЭЮЯ" "αεηιουωΑΕΗΙΟΥΩ")
 _QUOTE_ADJACENT_PIPE = re.compile(r"[\"'“”‘’]\|(?=\s)")
 _NUMERIC_SEPARATOR = re.compile(r"\d\s*[/:-]\s*\d")
 
@@ -2183,13 +1965,9 @@ def _text_selection_evidence(text: str) -> tuple[int, int, int]:
     if dominant_script is not None:
         for token in _TOKEN.findall(text):
             letters = tuple(character for character in token if character.isalpha())
-            token_scripts = {
-                _character_script(character) for character in letters
-            } - {"neutral"}
+            token_scripts = {_character_script(character) for character in letters} - {"neutral"}
             minority_scripts = token_scripts - {dominant_script}
-            if minority_scripts and (
-                len(letters) <= 3 or len(token_scripts) > 1
-            ):
+            if minority_scripts and (len(letters) <= 3 or len(token_scripts) > 1):
                 minority_confusables += 1
 
     malformed_punctuation = len(_QUOTE_ADJACENT_PIPE.findall(text))
@@ -2205,32 +1983,18 @@ def assess_grammar(
     if not text:
         return GrammarAssessment(0, False, ("empty",))
     confidences = tuple(word.confidence for word in output.words)
-    mean_confidence = (
-        sum(confidences) / len(confidences) if confidences else 0.0
-    )
+    mean_confidence = sum(confidences) / len(confidences) if confidences else 0.0
     minimum_confidence = min(confidences) if confidences else 0.0
     letters = tuple(character for character in text if character.isalpha())
     allowed = _allowed_scripts(languages)
-    matching_letters = sum(
-        _character_script(character) in allowed for character in letters
-    )
+    matching_letters = sum(_character_script(character) in allowed for character in letters)
     script_fit = matching_letters / len(letters) if letters else 1.0
-    controls = sum(
-        unicodedata.category(character).startswith("C")
-        and not character.isspace()
-        for character in text
-    )
+    controls = sum(unicodedata.category(character).startswith("C") and not character.isspace() for character in text)
     visible = tuple(character for character in text if not character.isspace())
-    symbols = sum(
-        not character.isalnum()
-        and character not in ".,:;!?%+-=*/()[]{}<>_|#@"
-        for character in visible
-    )
+    symbols = sum(not character.isalnum() and character not in ".,:;!?%+-=*/()[]{}<>_|#@" for character in visible)
     symbol_ratio = symbols / len(visible) if visible else 1.0
     tokens = tuple(_TOKEN.findall(text))
-    lexical = tuple(
-        token for token in tokens if any(char.isalpha() for char in token)
-    )
+    lexical = tuple(token for token in tokens if any(char.isalpha() for char in token))
     implausible = 0
     for token in lexical:
         letters_in_token = tuple(char for char in token if char.isalpha())
@@ -2245,29 +2009,17 @@ def assess_grammar(
         if lexical
         else (1.0 if any(character.isdigit() for character in text) else 0.0)
     )
-    semantic_shape = bool(letters) or len(tokens) > 1 or any(
-        character in "%=+-*/" for character in text
-    )
-    cyrillic_letters = sum(
-        1 for character in text if "\u0400" <= character <= "\u04ff"
-    )
-    latin_letters = sum(
-        1 for character in text if "a" <= character.lower() <= "z"
-    )
+    semantic_shape = bool(letters) or len(tokens) > 1 or any(character in "%=+-*/" for character in text)
+    cyrillic_letters = sum(1 for character in text if "\u0400" <= character <= "\u04ff")
+    latin_letters = sum(1 for character in text if "a" <= character.lower() <= "z")
     allowed_latin_tokens = {"CI", "PR", "README", "SCA", "SBOM"}
     suspicious_latin_tokens = {
         token
         for token in re.findall(r"[A-Za-z]+", text)
         if token.upper() not in allowed_latin_tokens
-        and (
-            len(token) <= 2
-            or (not token.islower() and not token.isupper())
-        )
+        and (len(token) <= 2 or (not token.islower() and not token.isupper()))
     }
-    suspicious_script_mix = (
-        cyrillic_letters > latin_letters * 2
-        and bool(suspicious_latin_tokens)
-    )
+    suspicious_script_mix = cyrillic_letters > latin_letters * 2 and bool(suspicious_latin_tokens)
     (
         minority_confusables,
         malformed_punctuation,
@@ -2276,10 +2028,7 @@ def assess_grammar(
     singletons = sum(len(token) == 1 and token.isalpha() for token in lexical)
     singleton_ratio = singletons / len(lexical) if lexical else 0.0
     score = (
-        mean_confidence * 0.48
-        + script_fit * 0.28
-        + lexical_fit * 0.18
-        + (1.0 - min(1.0, symbol_ratio * 3.0)) * 0.06
+        mean_confidence * 0.48 + script_fit * 0.28 + lexical_fit * 0.18 + (1.0 - min(1.0, symbol_ratio * 3.0)) * 0.06
     )
     score -= min(0.35, singleton_ratio * 0.25)
     score -= min(0.50, controls * 0.20)
@@ -2479,9 +2228,7 @@ class AdaptivePersistentOcrSession:
         if len(lanes) != 1:
             raise ValueError("adaptive OCR requires exactly one base lane")
         self._profiles = self._profiles_from_lane(lanes[0])
-        self._engine_variants = self._engine_variants_from_profiles(
-            self._profiles
-        )
+        self._engine_variants = self._engine_variants_from_profiles(self._profiles)
         self._max_workers = lanes[0].max_workers
         self.state = state or LanguageSplayState(self._profiles)
         self.state.ensure_profiles(self._profiles)
@@ -2494,9 +2241,7 @@ class AdaptivePersistentOcrSession:
         if self.log_path is not None:
             self.state.enable_attempt_input_artifacts()
         self._workers: dict[tuple[str, tuple[str, ...]], object] = {}
-        self._worker_errors: dict[
-            tuple[str, tuple[str, ...]], Exception
-        ] = {}
+        self._worker_errors: dict[tuple[str, tuple[str, ...]], Exception] = {}
         self._content_cache = content_cache or AdaptiveOcrContentCache()
         self._unit_candidate_cache: dict[
             tuple[
@@ -2534,9 +2279,7 @@ class AdaptivePersistentOcrSession:
             if config is None:
                 config = getattr(prototype, "_config", None)
             if config is None or not hasattr(config, "languages"):
-                raise TypeError(
-                    "adaptive OCR worker must expose a dataclass language config"
-                )
+                raise TypeError("adaptive OCR worker must expose a dataclass language config")
             adapter_type = type(prototype)
             hinted = tuple(getattr(config, "languages"))
         finally:
@@ -2553,9 +2296,7 @@ class AdaptivePersistentOcrSession:
             ("equ",),
         ]
         for language in hinted:
-            candidate = tuple(
-                item for item in str(language).split("+") if item
-            )
+            candidate = tuple(item for item in str(language).split("+") if item)
             if candidate and candidate not in ordered_languages:
                 ordered_languages.append(candidate)
 
@@ -2576,10 +2317,7 @@ class AdaptivePersistentOcrSession:
                     languages=languages,
                     resource=lane.resource,
                     worker_factory=factory,
-                    adapter_id=(
-                        f"{adapter_type.__module__}."
-                        f"{adapter_type.__qualname__}"
-                    ),
+                    adapter_id=(f"{adapter_type.__module__}." f"{adapter_type.__qualname__}"),
                     config_sha256=_cache_fingerprint(profile_config),
                     psm=str(getattr(profile_config, "psm", "")),
                 )
@@ -2593,15 +2331,11 @@ class AdaptivePersistentOcrSession:
         variants: dict[str, tuple[LanguageProfile, ...]] = {}
         for profile in profiles:
             profile_variants = [profile]
-            if profile.profile_id == "rus-eng" and set(
-                profile.languages
-            ) == {"rus", "eng"}:
+            if profile.profile_id == "rus-eng" and set(profile.languages) == {"rus", "eng"}:
                 reversed_languages = tuple(reversed(profile.languages))
 
                 def reversed_factory(
-                    base_factory: Callable[[], object] = (
-                        profile.worker_factory
-                    ),
+                    base_factory: Callable[[], object] = (profile.worker_factory),
                     languages: tuple[str, ...] = reversed_languages,
                 ) -> object:
                     prototype = base_factory()
@@ -2610,9 +2344,7 @@ class AdaptivePersistentOcrSession:
                         if config is None:
                             config = getattr(prototype, "_config", None)
                         if config is None or not hasattr(config, "languages"):
-                            raise TypeError(
-                                "adaptive OCR worker must expose languages"
-                            )
+                            raise TypeError("adaptive OCR worker must expose languages")
                         adapter_type = type(prototype)
                         variant_config = replace(
                             config,
@@ -2636,7 +2368,7 @@ class AdaptivePersistentOcrSession:
                                 reversed_languages,
                             )
                         ),
-                    )
+                    ),
                 )
             variants[profile.profile_id] = tuple(profile_variants)
         return variants
@@ -2671,11 +2403,7 @@ class AdaptivePersistentOcrSession:
 
     @staticmethod
     def _mean_confidence(output: OcrEngineOutput) -> float:
-        return (
-            sum(word.confidence for word in output.words) / len(output.words)
-            if output.words
-            else 0.0
-        )
+        return sum(word.confidence for word in output.words) / len(output.words) if output.words else 0.0
 
     def _candidate_score(
         self,
@@ -2688,9 +2416,7 @@ class AdaptivePersistentOcrSession:
             numeric_separators,
         ) = _text_selection_evidence(candidate.output.text)
         profile_rank = next(
-            index
-            for index, profile in enumerate(self._profiles)
-            if profile.profile_id == candidate.profile.profile_id
+            index for index, profile in enumerate(self._profiles) if profile.profile_id == candidate.profile.profile_id
         )
         selection_percent = (
             candidate.assessment.percent
@@ -2736,21 +2462,12 @@ class AdaptivePersistentOcrSession:
                 [],
             ).append(candidate)
         for profile_id, profile_candidates in by_profile.items():
-            orders = tuple(
-                dict.fromkeys(
-                    candidate.profile.languages
-                    for candidate in profile_candidates
-                )
-            )
+            orders = tuple(dict.fromkeys(candidate.profile.languages for candidate in profile_candidates))
             if len(self._engine_variants.get(profile_id, ())) <= 1:
                 continue
             best_by_order = {
                 languages: max(
-                    (
-                        candidate
-                        for candidate in profile_candidates
-                        if candidate.profile.languages == languages
-                    ),
+                    (candidate for candidate in profile_candidates if candidate.profile.languages == languages),
                     key=self._candidate_score,
                 )
                 for languages in orders
@@ -2778,9 +2495,7 @@ class AdaptivePersistentOcrSession:
 
     @staticmethod
     def _terminal_exact(candidate: _Candidate) -> bool:
-        alphanumeric = sum(
-            character.isalnum() for character in candidate.output.text
-        )
+        alphanumeric = sum(character.isalnum() for character in candidate.output.text)
         return candidate.assessment.exact and alphanumeric >= 3
 
     def _attempt(
@@ -2797,9 +2512,7 @@ class AdaptivePersistentOcrSession:
         input_sha256 = hashlib.sha256(payload).hexdigest()
         try:
             if transform is OcrTransform.GAMMA:
-                enhanced = self._enhancer.enhance_many(
-                    (CropInput(f"{block_id}-gamma-attempt", raw_png),)
-                )[0]
+                enhanced = self._enhancer.enhance_many((CropInput(f"{block_id}-gamma-attempt", raw_png),))[0]
                 payload = enhanced.png_bytes
             else:
                 payload = raw_png
@@ -2820,11 +2533,7 @@ class AdaptivePersistentOcrSession:
                     profile_id=profile.profile_id,
                     transform=transform.value,
                     psm=profile.psm,
-                    enhancer_id=(
-                        self._enhancer_id
-                        if transform is OcrTransform.GAMMA
-                        else "none"
-                    ),
+                    enhancer_id=(self._enhancer_id if transform is OcrTransform.GAMMA else "none"),
                 ),
                 recognize_payload,
             )
@@ -2887,34 +2596,27 @@ class AdaptivePersistentOcrSession:
         run_primary: bool = True,
         ordered_mixed_profile: bool = False,
     ) -> _RecognitionDecision:
-        profiles_by_id = {
-            profile.profile_id: profile for profile in self._profiles
-        }
+        profiles_by_id = {profile.profile_id: profile for profile in self._profiles}
         best: _Candidate | None = None
         profile_candidates: list[_Candidate] = []
         primary_profile_id = (
             primary_profile_id
             if primary_profile_id in profiles_by_id
-            else self.state.locked_profile_id
-            if self.state.locked_profile_id in profiles_by_id
-            else self._DEFAULT_PROFILE_ID
+            else (
+                self.state.locked_profile_id
+                if self.state.locked_profile_id in profiles_by_id
+                else self._DEFAULT_PROFILE_ID
+            )
         )
         if primary_profile_id not in profiles_by_id:
             primary_profile_id = self._profiles[0].profile_id
-        allowed_fallback_ids = (
-            None
-            if fallback_profile_ids is None
-            else frozenset(fallback_profile_ids)
-        )
+        allowed_fallback_ids = None if fallback_profile_ids is None else frozenset(fallback_profile_ids)
         profile_ids = ((primary_profile_id,) if run_primary else ()) + tuple(
             profile_id
             for profile_id in self.state.ordered_profile_ids()
             if profile_id != primary_profile_id
             and profile_id in profiles_by_id
-            and (
-                allowed_fallback_ids is None
-                or profile_id in allowed_fallback_ids
-            )
+            and (allowed_fallback_ids is None or profile_id in allowed_fallback_ids)
         )
         primary_grammar_percent = 0
         primary_raw_candidate: _Candidate | None = None
@@ -2932,11 +2634,7 @@ class AdaptivePersistentOcrSession:
             profile_transforms = (
                 transforms
                 if is_primary_profile
-                else tuple(
-                    transform
-                    for transform in transforms
-                    if transform is OcrTransform.RAW
-                )
+                else tuple(transform for transform in transforms if transform is OcrTransform.RAW)
             )
             all_variants = (
                 self._engine_variants.get(profile_id, (profile,))
@@ -2949,10 +2647,7 @@ class AdaptivePersistentOcrSession:
                 maximum_losses=self._LANGUAGE_STRATEGY_MAXIMUM_LOSSES,
             )
             active_variants = tuple(
-                variant
-                for languages in active_orders
-                for variant in all_variants
-                if variant.languages == languages
+                variant for languages in active_orders for variant in all_variants if variant.languages == languages
             )
             attempted_variants: list[LanguageProfile] = []
             if len(all_variants) > 1 and OcrTransform.RAW in profile_transforms:
@@ -2967,15 +2662,11 @@ class AdaptivePersistentOcrSession:
                     attempted_variants.append(variant)
                     if candidate is not None:
                         profile_candidates.append(candidate)
-                        if (
-                            profile_best is None
-                            or self._candidate_score(candidate)
-                            > self._candidate_score(profile_best)
+                        if profile_best is None or self._candidate_score(candidate) > self._candidate_score(
+                            profile_best
                         ):
                             profile_best = candidate
-                        if candidate.assessment.percent >= (
-                            self._LOCK_GRAMMAR_PERCENT
-                        ):
+                        if candidate.assessment.percent >= (self._LOCK_GRAMMAR_PERCENT):
                             break
                 if (
                     profile_best is not None
@@ -2996,9 +2687,7 @@ class AdaptivePersistentOcrSession:
                         )
                         if candidate is not None:
                             profile_candidates.append(candidate)
-                            if self._candidate_score(
-                                candidate
-                            ) > self._candidate_score(profile_best):
+                            if self._candidate_score(candidate) > self._candidate_score(profile_best):
                                 profile_best = candidate
                 if is_primary_profile:
                     primary_raw_candidate = profile_best
@@ -3007,32 +2696,20 @@ class AdaptivePersistentOcrSession:
                     and (
                         not ordered_mixed_profile
                         or unit_id != "full-block"
-                        or not self._candidate_is_supported_homogeneous(
-                            profile_best
-                        )
+                        or not self._candidate_is_supported_homogeneous(profile_best)
                     )
-                    and (
-                        profile_best is None
-                        or profile_best.assessment.percent
-                        < self._LOCK_GRAMMAR_PERCENT
-                    )
+                    and (profile_best is None or profile_best.assessment.percent < self._LOCK_GRAMMAR_PERCENT)
                 ):
                     gamma_candidate = self._attempt(
                         block_id=block_id,
                         unit_id=unit_id,
-                        profile=(
-                            profile_best.profile
-                            if profile_best is not None
-                            else active_variants[0]
-                        ),
+                        profile=(profile_best.profile if profile_best is not None else active_variants[0]),
                         transform=OcrTransform.GAMMA,
                         raw_png=raw_png,
                     )
                     if gamma_candidate is not None:
                         profile_candidates.append(gamma_candidate)
-                        if self._candidate_score(
-                            gamma_candidate
-                        ) > self._candidate_score(profile_best):
+                        if self._candidate_score(gamma_candidate) > self._candidate_score(profile_best):
                             profile_best = gamma_candidate
             else:
                 for transform in profile_transforms:
@@ -3043,40 +2720,21 @@ class AdaptivePersistentOcrSession:
                         transform=transform,
                         raw_png=raw_png,
                     )
-                    if (
-                        is_primary_profile
-                        and transform is OcrTransform.RAW
-                        and candidate is not None
-                    ):
+                    if is_primary_profile and transform is OcrTransform.RAW and candidate is not None:
                         primary_raw_candidate = candidate
                     if candidate is not None and (
-                        profile_best is None
-                        or self._candidate_score(candidate)
-                        > self._candidate_score(profile_best)
+                        profile_best is None or self._candidate_score(candidate) > self._candidate_score(profile_best)
                     ):
                         profile_best = candidate
-                    if (
-                        candidate is not None
-                        and (
-                            self._terminal_exact(candidate)
-                            or (
-                                transform is OcrTransform.RAW
-                                and candidate.assessment.percent
-                                >= self._LOCK_GRAMMAR_PERCENT
-                            )
+                    if candidate is not None and (
+                        self._terminal_exact(candidate)
+                        or (
+                            transform is OcrTransform.RAW and candidate.assessment.percent >= self._LOCK_GRAMMAR_PERCENT
                         )
                     ):
                         break
-            observed_percent = (
-                profile_best.assessment.percent
-                if profile_best is not None
-                else 0
-            )
-            if (
-                profile_best is not None
-                and profile_best.assessment.exact
-                and not self._terminal_exact(profile_best)
-            ):
+            observed_percent = profile_best.assessment.percent if profile_best is not None else 0
+            if profile_best is not None and profile_best.assessment.exact and not self._terminal_exact(profile_best):
                 observed_percent = min(observed_percent, 99)
             self.state.observe(
                 profile.profile_id,
@@ -3088,15 +2746,11 @@ class AdaptivePersistentOcrSession:
                 primary_grammar_percent = observed_percent
                 primary_profile_candidate = profile_best
             if profile_best is not None and (
-                best is None
-                or self._candidate_score(profile_best)
-                > self._candidate_score(best)
+                best is None or self._candidate_score(profile_best) > self._candidate_score(best)
             ):
                 best = profile_best
             profile_reached_lock = (
-                profile_best is not None
-                and profile_best.assessment.percent
-                >= self._LOCK_GRAMMAR_PERCENT
+                profile_best is not None and profile_best.assessment.percent >= self._LOCK_GRAMMAR_PERCENT
             )
             if profile_reached_lock:
                 all_profiles_below_lock = False
@@ -3112,42 +2766,27 @@ class AdaptivePersistentOcrSession:
             ):
                 general_fallback_ids = self.state.active_fallback_profile_ids(
                     ("rus", "eng"),
-                    maximum_losses=(
-                        self._LANGUAGE_STRATEGY_MAXIMUM_LOSSES
-                    ),
+                    maximum_losses=(self._LANGUAGE_STRATEGY_MAXIMUM_LOSSES),
                 )
                 profile_ids = (primary_profile_id,) + tuple(
-                    profile_id
-                    for profile_id in general_fallback_ids
-                    if profile_id in profiles_by_id
+                    profile_id for profile_id in general_fallback_ids if profile_id in profiles_by_id
                 )
             if is_primary_profile and mixed_fallback_only:
-                mixed_fallback_ids = (
-                    self._mixed_fallback_profile_ids(profile_best)
-                    if profile_best is not None
-                    else ()
-                )
+                mixed_fallback_ids = self._mixed_fallback_profile_ids(profile_best) if profile_best is not None else ()
                 if allowed_fallback_ids is not None:
                     mixed_fallback_ids = tuple(
-                        profile_id
-                        for profile_id in mixed_fallback_ids
-                        if profile_id in allowed_fallback_ids
+                        profile_id for profile_id in mixed_fallback_ids if profile_id in allowed_fallback_ids
                     )
                     if not mixed_fallback_ids:
                         mixed_fallback_ids = tuple(
                             profile_id
                             for profile_id in self.state.ordered_profile_ids()
-                            if profile_id in allowed_fallback_ids
-                            and profile_id != primary_profile_id
+                            if profile_id in allowed_fallback_ids and profile_id != primary_profile_id
                         )
                 if not mixed_fallback_ids:
                     break
                 profile_ids = (primary_profile_id,) + mixed_fallback_ids
-            if (
-                not is_primary_profile
-                and profile_reached_lock
-                and not sweep_after_low_primary
-            ):
+            if not is_primary_profile and profile_reached_lock and not sweep_after_low_primary:
                 break
             profile_index += 1
         # A confirmed, healthy document-language candidate is the stable
@@ -3209,19 +2848,14 @@ class AdaptivePersistentOcrSession:
         return tuple(
             profile.profile_id
             for profile in self._profiles
-            if profile.profile_id in desired
-            and profile.profile_id != primary.profile.profile_id
+            if profile.profile_id in desired and profile.profile_id != primary.profile.profile_id
         )
 
     @staticmethod
     def _has_math_evidence(text: str) -> bool:
-        return any(
-            symbol in text for symbol in ("∑", "√", "∫", "≠", "≤", "≥")
-        ) or bool(
+        return any(symbol in text for symbol in ("∑", "√", "∫", "≠", "≤", "≥")) or bool(
             re.search(
-                r"(?<!\w)(?:[A-Za-z]\w*|\d+(?:[.,]\d+)?)"
-                r"\s*=\s*"
-                r"(?:[A-Za-z]\w*|\d+(?:[.,]\d+)?)(?!\w)",
+                r"(?<!\w)(?:[A-Za-z]\w*|\d+(?:[.,]\d+)?)" r"\s*=\s*" r"(?:[A-Za-z]\w*|\d+(?:[.,]\d+)?)(?!\w)",
                 text,
             )
         )
@@ -3262,18 +2896,13 @@ class AdaptivePersistentOcrSession:
                 attempt.languages,
             )
             if kind == "cjk":
-                alphanumeric_count = sum(
-                    character.isalnum() for character in attempt.text
-                )
+                alphanumeric_count = sum(character.isalnum() for character in attempt.text)
                 cjk_count = sum(
-                    _character_script(character) in cjk_scripts
-                    for character in attempt.text
-                    if character.isalnum()
+                    _character_script(character) in cjk_scripts for character in attempt.text if character.isalnum()
                 )
                 cjk_density = cjk_count / max(1, alphanumeric_count)
                 if (
-                    attempt.mean_confidence
-                    >= self._SPECIALIZED_MIN_MEAN_CONFIDENCE
+                    attempt.mean_confidence >= self._SPECIALIZED_MIN_MEAN_CONFIDENCE
                     and cjk_density >= self._SPECIALIZED_MIN_SCRIPT_DENSITY
                 ):
                     desired_kinds.add("cjk")
@@ -3306,21 +2935,11 @@ class AdaptivePersistentOcrSession:
         script_kind: str,
     ) -> bool:
         if script_kind == "cjk":
-            return any(
-                _character_script(character)
-                in {"cjk", "hiragana", "katakana"}
-                for character in text
-            )
+            return any(_character_script(character) in {"cjk", "hiragana", "katakana"} for character in text)
         if script_kind == "greek":
-            return any(
-                _character_script(character) == "greek"
-                for character in text
-            )
+            return any(_character_script(character) == "greek" for character in text)
         if script_kind == "math":
-            return cls._has_math_evidence(text) or any(
-                character in "=+-−×÷*/^∑√∫≠≤≥"
-                for character in text
-            )
+            return cls._has_math_evidence(text) or any(character in "=+-−×÷*/^∑√∫≠≤≥" for character in text)
         return False
 
     def _candidate_has_local_native_evidence(
@@ -3332,23 +2951,11 @@ class AdaptivePersistentOcrSession:
     ) -> bool:
         if candidate is None or not candidate.output.text.strip():
             return False
-        alphanumeric = tuple(
-            character
-            for character in candidate.output.text
-            if character.isalnum()
-        )
-        native_count = sum(
-            self._word_matches_native_script(character, script_kind)
-            for character in alphanumeric
-        )
-        minimum_density = (
-            self._LOCAL_NATIVE_MIN_SCRIPT_DENSITY
-            if leaf
-            else self._SPECIALIZED_MIN_SCRIPT_DENSITY
-        )
+        alphanumeric = tuple(character for character in candidate.output.text if character.isalnum())
+        native_count = sum(self._word_matches_native_script(character, script_kind) for character in alphanumeric)
+        minimum_density = self._LOCAL_NATIVE_MIN_SCRIPT_DENSITY if leaf else self._SPECIALIZED_MIN_SCRIPT_DENSITY
         return (
-            self._mean_confidence(candidate.output)
-            >= self._SPECIALIZED_MIN_MEAN_CONFIDENCE
+            self._mean_confidence(candidate.output) >= self._SPECIALIZED_MIN_MEAN_CONFIDENCE
             and native_count >= self._LOCAL_NATIVE_MIN_CHARACTERS
             and native_count / max(1, len(alphanumeric)) >= minimum_density
         )
@@ -3367,16 +2974,8 @@ class AdaptivePersistentOcrSession:
             return ""
         if script_kind == "math":
             return stripped
-        native_scripts = (
-            {"cjk", "hiragana", "katakana"}
-            if script_kind == "cjk"
-            else {"greek"}
-        )
-        if any(
-            character.isalpha()
-            and _character_script(character) not in native_scripts
-            for character in stripped
-        ):
+        native_scripts = {"cjk", "hiragana", "katakana"} if script_kind == "cjk" else {"greek"}
+        if any(character.isalpha() and _character_script(character) not in native_scripts for character in stripped):
             return ""
         return stripped
 
@@ -3424,10 +3023,7 @@ class AdaptivePersistentOcrSession:
         profile_candidates: tuple[_Candidate, ...],
         fallback_profile_ids: tuple[str, ...],
     ) -> tuple[_NativeScriptRun, ...]:
-        candidate_by_profile_id = {
-            candidate.profile.profile_id: candidate
-            for candidate in profile_candidates
-        }
+        candidate_by_profile_id = {candidate.profile.profile_id: candidate for candidate in profile_candidates}
         native_runs = []
         captured_kinds: set[str] = set()
         for profile_id in fallback_profile_ids:
@@ -3457,13 +3053,8 @@ class AdaptivePersistentOcrSession:
     ) -> tuple[str, ...]:
         if compaction is None or not compaction.source_placements:
             return ()
-        source_unit_ids = {
-            artifact.unit_id for artifact in compaction.source_placements
-        }
-        candidate_by_profile_id = {
-            candidate.profile.profile_id: candidate
-            for candidate in profile_candidates
-        }
+        source_unit_ids = {artifact.unit_id for artifact in compaction.source_placements}
+        candidate_by_profile_id = {candidate.profile.profile_id: candidate for candidate in profile_candidates}
         matched_unit_ids: set[str] = set()
         for profile_id in fallback_profile_ids:
             candidate = candidate_by_profile_id.get(profile_id)
@@ -3495,19 +3086,13 @@ class AdaptivePersistentOcrSession:
                 area, _inverse_index, unit_id = max(overlaps)
                 if area > 0:
                     matched_unit_ids.add(unit_id)
-        return tuple(
-            placement.unit_id
-            for placement in compaction.placements
-            if placement.unit_id in matched_unit_ids
-        )
+        return tuple(placement.unit_id for placement in compaction.placements if placement.unit_id in matched_unit_ids)
 
     def _fallback_evidence_kinds(
         self,
         fallback_profile_ids: tuple[str, ...],
     ) -> frozenset[str]:
-        profile_by_id = {
-            profile.profile_id: profile for profile in self._profiles
-        }
+        profile_by_id = {profile.profile_id: profile for profile in self._profiles}
         return frozenset(
             script_kind
             for profile_id in fallback_profile_ids
@@ -3525,17 +3110,13 @@ class AdaptivePersistentOcrSession:
         self,
         fallback_profile_ids: tuple[str, ...],
     ) -> frozenset[str]:
-        return self._fallback_evidence_kinds(
-            fallback_profile_ids
-        ) & self._NATIVE_SCRIPT_EVIDENCE_KINDS
+        return self._fallback_evidence_kinds(fallback_profile_ids) & self._NATIVE_SCRIPT_EVIDENCE_KINDS
 
     def _fallback_feature_kinds(
         self,
         fallback_profile_ids: tuple[str, ...],
     ) -> frozenset[str]:
-        return self._fallback_evidence_kinds(
-            fallback_profile_ids
-        ) & self._FEATURE_EVIDENCE_KINDS
+        return self._fallback_evidence_kinds(fallback_profile_ids) & self._FEATURE_EVIDENCE_KINDS
 
     def _should_recurse_full_block(
         self,
@@ -3544,10 +3125,7 @@ class AdaptivePersistentOcrSession:
         allow_membership_calibration: bool,
     ) -> bool:
         if not self._uses_specialized_context_recursion(full_block):
-            return (
-                allow_membership_calibration
-                and full_block.all_profiles_below_lock
-            )
+            return allow_membership_calibration and full_block.all_profiles_below_lock
         return self._candidate_requires_context_recursion(
             full_block.candidate,
             full_block.fallback_profile_ids,
@@ -3570,10 +3148,7 @@ class AdaptivePersistentOcrSession:
         *,
         missing_native_script: bool | None = None,
     ) -> bool:
-        if (
-            candidate is not None
-            and candidate.assessment.percent >= self._LOCK_GRAMMAR_PERCENT
-        ):
+        if candidate is not None and candidate.assessment.percent >= self._LOCK_GRAMMAR_PERCENT:
             return False
         if candidate is None or not candidate.output.text.strip():
             return True
@@ -3581,9 +3156,7 @@ class AdaptivePersistentOcrSession:
             return True
 
         observed = self._observed_scripts(candidate.output.text)
-        evidenced_kinds = self._fallback_script_kinds(
-            fallback_profile_ids
-        )
+        evidenced_kinds = self._fallback_script_kinds(fallback_profile_ids)
         supported_scripts = set(_allowed_scripts(candidate.profile.languages))
         if "cjk" in evidenced_kinds:
             supported_scripts.update(("cjk", "hiragana", "katakana"))
@@ -3618,9 +3191,7 @@ class AdaptivePersistentOcrSession:
         candidate: _Candidate | None,
         fallback_profile_ids: tuple[str, ...],
     ) -> bool:
-        evidenced_kinds = self._fallback_script_kinds(
-            fallback_profile_ids
-        )
+        evidenced_kinds = self._fallback_script_kinds(fallback_profile_ids)
         if not evidenced_kinds:
             return False
         if candidate is None or not candidate.output.text.strip():
@@ -3639,10 +3210,7 @@ class AdaptivePersistentOcrSession:
     ) -> bool:
         if candidate is None or not candidate.output.text.strip():
             return False
-        return bool(
-            self._observed_scripts(candidate.output.text)
-            - _allowed_scripts(candidate.profile.languages)
-        )
+        return bool(self._observed_scripts(candidate.output.text) - _allowed_scripts(candidate.profile.languages))
 
     def _local_split_strategy_key(
         self,
@@ -3663,9 +3231,7 @@ class AdaptivePersistentOcrSession:
             return None
         return (
             self.state.locked_profile_id,
-            tuple(sorted(self._fallback_evidence_kinds(
-                full_block.fallback_profile_ids
-            ))),
+            tuple(sorted(self._fallback_evidence_kinds(full_block.fallback_profile_ids))),
         )
 
     def _recursive_calibration_succeeded(
@@ -3694,12 +3260,10 @@ class AdaptivePersistentOcrSession:
         bbox = placement.crop_bbox
         return max(
             0,
-            min(word.bbox.right, bbox.right)
-            - max(word.bbox.left, bbox.left),
+            min(word.bbox.right, bbox.right) - max(word.bbox.left, bbox.left),
         ) * max(
             0,
-            min(word.bbox.bottom, bbox.bottom)
-            - max(word.bbox.top, bbox.top),
+            min(word.bbox.bottom, bbox.bottom) - max(word.bbox.top, bbox.top),
         )
 
     def _patch_missing_native_units(
@@ -3711,9 +3275,7 @@ class AdaptivePersistentOcrSession:
     ) -> _Candidate | None:
         if full is None or recursive is None or not placements:
             return None
-        evidenced_scripts = self._fallback_script_kinds(
-            fallback_profile_ids
-        )
+        evidenced_scripts = self._fallback_script_kinds(fallback_profile_ids)
         missing_scripts = tuple(
             script_kind
             for script_kind in evidenced_scripts
@@ -3728,11 +3290,7 @@ class AdaptivePersistentOcrSession:
         replacements: dict[str, list[OcrWord]] = {}
         for word in recursive.output.words:
             native_kind = next(
-                (
-                    script_kind
-                    for script_kind in missing_scripts
-                    if self._native_word_text(word.text, script_kind)
-                ),
+                (script_kind for script_kind in missing_scripts if self._native_word_text(word.text, script_kind)),
                 None,
             )
             if native_kind is None:
@@ -3752,25 +3310,14 @@ class AdaptivePersistentOcrSession:
         replacements = {
             unit_id: words
             for unit_id, words in replacements.items()
-            if sum(
-                len(
-                    "".join(
-                        character
-                        for character in word.text
-                        if character.isalnum()
-                    )
-                )
-                for word in words
-            )
+            if sum(len("".join(character for character in word.text if character.isalnum())) for word in words)
             >= self._LOCAL_NATIVE_MIN_CHARACTERS
         }
         if not replacements:
             return None
 
         placement_by_id = {
-            placement.unit_id: placement
-            for placement in placements
-            if placement.unit_id in replacements
+            placement.unit_id: placement for placement in placements if placement.unit_id in replacements
         }
 
         def target_unit_id(word: OcrWord) -> str | None:
@@ -3790,11 +3337,7 @@ class AdaptivePersistentOcrSession:
 
         full_targets = tuple(target_unit_id(word) for word in full.output.words)
         matched_units = {unit_id for unit_id in full_targets if unit_id}
-        replacements = {
-            unit_id: words
-            for unit_id, words in replacements.items()
-            if unit_id in matched_units
-        }
+        replacements = {unit_id: words for unit_id, words in replacements.items() if unit_id in matched_units}
         if not replacements:
             return None
 
@@ -3807,10 +3350,7 @@ class AdaptivePersistentOcrSession:
             if unit_id in emitted_units:
                 continue
             emitted_units.add(unit_id)
-            deduplicated = {
-                (native.text, native.bbox.as_tuple()): native
-                for native in replacements[unit_id]
-            }
+            deduplicated = {(native.text, native.bbox.as_tuple()): native for native in replacements[unit_id]}
             words.extend(deduplicated.values())
         if not emitted_units:
             return None
@@ -3837,20 +3377,14 @@ class AdaptivePersistentOcrSession:
             if current_kind is None or not current_words:
                 return
             separator = "" if current_kind == "cjk" else " "
-            weights = tuple(
-                max(1, len(text.replace(" ", "")))
-                for text in current_texts
-            )
+            weights = tuple(max(1, len(text.replace(" ", ""))) for text in current_texts)
             runs.append(
                 _RecursiveNativeRun(
                     script_kind=current_kind,
                     start_index=start_index,
                     stop_index=stop_index,
                     text=separator.join(current_texts),
-                    confidence=sum(
-                        word.confidence * weight
-                        for word, weight in zip(current_words, weights)
-                    )
+                    confidence=sum(word.confidence * weight for word, weight in zip(current_words, weights))
                     / max(1, sum(weights)),
                     bbox=Box.union(word.bbox for word in current_words),
                 )
@@ -3891,10 +3425,7 @@ class AdaptivePersistentOcrSession:
         recursive: _RecursiveNativeRun,
         specialized: _NativeScriptRun,
     ) -> float | None:
-        if (
-            recursive.script_kind != specialized.script_kind
-            or specialized.confidence + 1e-9 < recursive.confidence
-        ):
+        if recursive.script_kind != specialized.script_kind or specialized.confidence + 1e-9 < recursive.confidence:
             return None
         recursive_text = "".join(recursive.text.casefold().split())
         specialized_text = "".join(specialized.text.casefold().split())
@@ -3968,17 +3499,11 @@ class AdaptivePersistentOcrSession:
         recursive_runs = self._recursive_native_runs(recursive_output.words)
         replacements: dict[int, tuple[int, OcrWord]] = {}
         for script_kind in ("cjk", "greek", "math"):
-            recursive_subset = tuple(
-                run for run in recursive_runs if run.script_kind == script_kind
-            )
-            specialized_subset = tuple(
-                run for run in specialized_runs if run.script_kind == script_kind
-            )
-            for recursive_index, specialized_index in (
-                self._monotonic_native_run_alignment(
-                    recursive_subset,
-                    specialized_subset,
-                )
+            recursive_subset = tuple(run for run in recursive_runs if run.script_kind == script_kind)
+            specialized_subset = tuple(run for run in specialized_runs if run.script_kind == script_kind)
+            for recursive_index, specialized_index in self._monotonic_native_run_alignment(
+                recursive_subset,
+                specialized_subset,
             ):
                 recursive_run = recursive_subset[recursive_index]
                 specialized_run = specialized_subset[specialized_index]
@@ -4042,9 +3567,6 @@ class AdaptivePersistentOcrSession:
         child._enhancer = GammaDarkCropEnhancer()
         child._enhancer_id = self._enhancer_id
         child._closed = False
-        baseline_attempts = {
-            node.profile_id: node.attempts for node in nodes
-        }
         try:
             decision = child._recognize_image(
                 block_id=block_id,
@@ -4057,32 +3579,13 @@ class AdaptivePersistentOcrSession:
                 run_primary=run_primary,
                 ordered_mixed_profile=ordered_mixed_profile,
             )
-            attempted_profiles = tuple(
-                dict.fromkeys(
-                    attempt.profile_id for attempt in child.state.attempts
-                )
-            )
-            node_by_id = {
-                node.profile_id: node for node in child.state.nodes
-            }
-            observations = tuple(
-                (
-                    profile_id,
-                    node_by_id[profile_id].last_grammar_percent,
-                )
-                for profile_id in attempted_profiles
-                if node_by_id[profile_id].attempts
-                > baseline_attempts.get(profile_id, 0)
-            )
             return _IsolatedRecognition(
                 candidate=decision.candidate,
                 profile_candidates=decision.profile_candidates,
                 attempts=tuple(child.state.attempts),
                 observations=tuple(child.state.observations),
                 elapsed_seconds=time.perf_counter() - started,
-                all_profiles_below_lock=(
-                    decision.all_profiles_below_lock
-                ),
+                all_profiles_below_lock=(decision.all_profiles_below_lock),
                 primary_raw_candidate=decision.primary_raw_candidate,
             )
         finally:
@@ -4164,49 +3667,34 @@ class AdaptivePersistentOcrSession:
             block_id=plan.blocks[0].block_id,
             unit_id="full-block",
             raw_png=crops[0].raw.png_bytes,
-            primary_profile_id=(
-                self._DEFAULT_PROFILE_ID
-                if initialize_document_lock
-                else self.state.locked_profile_id
-            ),
+            primary_profile_id=(self._DEFAULT_PROFILE_ID if initialize_document_lock else self.state.locked_profile_id),
             sweep_after_low_primary=initialize_document_lock,
             transforms=(OcrTransform.RAW, OcrTransform.GAMMA),
             mixed_fallback_only=not initialize_document_lock,
             fallback_profile_ids=(
                 (self._DEFAULT_PROFILE_ID,)
-                if not initialize_document_lock
-                and plan.blocks[0].matrix_window_kind != "dyadic-mask"
+                if not initialize_document_lock and plan.blocks[0].matrix_window_kind != "dyadic-mask"
                 else None
             ),
-            ordered_mixed_profile=(
-                plan.blocks[0].matrix_window_kind in local_kinds
-            ),
+            ordered_mixed_profile=(plan.blocks[0].matrix_window_kind in local_kinds),
         )
         first_attempts = tuple(self.state.attempts[first_attempt_start:])
         if initialize_document_lock:
             self.state.locked_profile_id = (
-                first.candidate.profile.profile_id
-                if first.candidate is not None
-                else self._DEFAULT_PROFILE_ID
+                first.candidate.profile.profile_id if first.candidate is not None else self._DEFAULT_PROFILE_ID
             )
-            self.state.lock_is_provisional = (
-                first.primary_grammar_percent
-                < self._LOCK_GRAMMAR_PERCENT
-            )
+            self.state.lock_is_provisional = first.primary_grammar_percent < self._LOCK_GRAMMAR_PERCENT
+
         def materialize(
             index: int,
             decision: _RecognitionDecision | _IsolatedRecognition,
             attempts: tuple[LanguageAttempt, ...],
             elapsed_seconds: float,
         ) -> _FullBlockRecognition:
-            fallback_profile_ids = self._specialized_fallback_profile_ids(
-                attempts
-            )
+            fallback_profile_ids = self._specialized_fallback_profile_ids(attempts)
             candidate = decision.candidate
             primary_raw = decision.primary_raw_candidate
-            compaction = (compaction_by_id or {}).get(
-                plan.blocks[index].block_id
-            )
+            compaction = (compaction_by_id or {}).get(plan.blocks[index].block_id)
             if (
                 plan.blocks[index].matrix_window_kind in local_kinds
                 and primary_raw is not None
@@ -4219,8 +3707,7 @@ class AdaptivePersistentOcrSession:
                     # Local membership fusion needs a RAW control.  Gamma is
                     # selected only when it improves grammar, not for a tiny
                     # confidence-only tie over the same recognized text.
-                    or candidate.assessment.percent
-                    <= primary_raw.assessment.percent
+                    or candidate.assessment.percent <= primary_raw.assessment.percent
                 )
             ):
                 candidate = primary_raw
@@ -4248,9 +3735,7 @@ class AdaptivePersistentOcrSession:
             time.perf_counter() - first_started,
         )
         results: dict[int, _FullBlockRecognition] = {0: first_full}
-        profile_by_id = {
-            profile.profile_id: profile for profile in self._profiles
-        }
+        profile_by_id = {profile.profile_id: profile for profile in self._profiles}
         specialized_probe_profile_ids = tuple(
             profile_id
             for profile_id in self.state.ordered_profile_ids()
@@ -4270,9 +3755,7 @@ class AdaptivePersistentOcrSession:
             if not indexes:
                 return {}
             nodes = tuple(replace(node) for node in self.state.nodes)
-            with concurrent.futures.ThreadPoolExecutor(
-                max_workers=self._max_workers
-            ) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self._max_workers) as executor:
                 futures = tuple(
                     (
                         index,
@@ -4293,21 +3776,15 @@ class AdaptivePersistentOcrSession:
                                         )
                                     )
                                 )
-                                if plan.blocks[index].matrix_window_kind
-                                == "dyadic-mask"
+                                if plan.blocks[index].matrix_window_kind == "dyadic-mask"
                                 else (self._DEFAULT_PROFILE_ID,)
                             ),
-                            ordered_mixed_profile=(
-                                plan.blocks[index].matrix_window_kind
-                                in local_kinds
-                            ),
+                            ordered_mixed_profile=(plan.blocks[index].matrix_window_kind in local_kinds),
                         ),
                     )
                     for index in indexes
                 )
-                isolated = tuple(
-                    (index, future.result()) for index, future in futures
-                )
+                isolated = tuple((index, future.result()) for index, future in futures)
             by_index = {}
             for index, item in isolated:
                 self.state.merge_attempts(item.attempts)
@@ -4328,19 +3805,11 @@ class AdaptivePersistentOcrSession:
             return by_index
 
         local_indexes = tuple(
-            index
-            for index, block in enumerate(plan.blocks)
-            if block.matrix_window_kind in local_kinds
+            index for index, block in enumerate(plan.blocks) if block.matrix_window_kind in local_kinds
         )
-        calibration_indexes = local_indexes[
-            : self._SPLIT_CALIBRATION_SAMPLES
-        ]
-        calibration_frontier = (
-            max(calibration_indexes) if calibration_indexes else 0
-        )
-        first_phase_indexes = tuple(
-            range(1, min(len(plan.blocks), calibration_frontier + 1))
-        )
+        calibration_indexes = local_indexes[: self._SPLIT_CALIBRATION_SAMPLES]
+        calibration_frontier = max(calibration_indexes) if calibration_indexes else 0
+        first_phase_indexes = tuple(range(1, min(len(plan.blocks), calibration_frontier + 1)))
         first_phase = run_phase(first_phase_indexes, fast_local=False)
         self.state.finalize_engine_order_calibration(
             self._DEFAULT_PROFILE_ID,
@@ -4384,23 +3853,16 @@ class AdaptivePersistentOcrSession:
         fast_local = (
             len(calibration_indexes) >= self._SPLIT_CALIBRATION_SAMPLES
             and not native_script_evidence
-            and calibration_successes
-            < self._SPLIT_CALIBRATION_MIN_SUCCESSES
+            and calibration_successes < self._SPLIT_CALIBRATION_MIN_SUCCESSES
         )
-        remaining_indexes = tuple(
-            range(calibration_frontier + 1, len(plan.blocks))
-        )
+        remaining_indexes = tuple(range(calibration_frontier + 1, len(plan.blocks)))
         run_phase(remaining_indexes, fast_local=fast_local)
         return tuple(results[index] for index in range(len(plan.blocks)))
 
     @staticmethod
     def _intersection_area(left: Box, right: Box) -> int:
-        width = max(
-            0, min(left.right, right.right) - max(left.left, right.left)
-        )
-        height = max(
-            0, min(left.bottom, right.bottom) - max(left.top, right.top)
-        )
+        width = max(0, min(left.right, right.right) - max(left.left, right.left))
+        height = max(0, min(left.bottom, right.bottom) - max(left.top, right.top))
         return width * height
 
     @staticmethod
@@ -4413,18 +3875,10 @@ class AdaptivePersistentOcrSession:
         source = placement.source_bbox
         scale_x = source.width / max(1, crop.width)
         scale_y = source.height / max(1, crop.height)
-        left = source.left - block_bbox.left + round(
-            (word.bbox.left - crop.left) * scale_x
-        )
-        top = source.top - block_bbox.top + round(
-            (word.bbox.top - crop.top) * scale_y
-        )
-        right = source.left - block_bbox.left + round(
-            (word.bbox.right - crop.left) * scale_x
-        )
-        bottom = source.top - block_bbox.top + round(
-            (word.bbox.bottom - crop.top) * scale_y
-        )
+        left = source.left - block_bbox.left + round((word.bbox.left - crop.left) * scale_x)
+        top = source.top - block_bbox.top + round((word.bbox.top - crop.top) * scale_y)
+        right = source.left - block_bbox.left + round((word.bbox.right - crop.left) * scale_x)
+        bottom = source.top - block_bbox.top + round((word.bbox.bottom - crop.top) * scale_y)
         left = max(0, min(block_bbox.width - 1, left))
         top = max(0, min(block_bbox.height - 1, top))
         right = max(left + 1, min(block_bbox.width, right))
@@ -4441,27 +3895,19 @@ class AdaptivePersistentOcrSession:
         crops: tuple[BlockCropPair, ...],
         compactions: tuple[BlockCompaction, ...],
     ) -> dict[str, tuple[dict[str, int], tuple[int, int]]]:
-        compaction_by_id = {
-            compaction.block_id: compaction for compaction in compactions
-        }
+        compaction_by_id = {compaction.block_id: compaction for compaction in compactions}
         crop_by_id = {crop.block_id: crop for crop in crops}
         canonical_block_ids = tuple(
             block.block_id
             for block in plan.blocks
             if (
-                (compaction := compaction_by_id.get(block.block_id))
-                is not None
-                and getattr(compaction, "raster_kind", None)
-                is CompactionRasterKind.CANONICAL_LOCALITY
+                (compaction := compaction_by_id.get(block.block_id)) is not None
+                and getattr(compaction, "raster_kind", None) is CompactionRasterKind.CANONICAL_LOCALITY
             )
         )
         if not canonical_block_ids:
             return {}
-        missing_crop_ids = tuple(
-            block_id
-            for block_id in canonical_block_ids
-            if block_id not in crop_by_id
-        )
+        missing_crop_ids = tuple(block_id for block_id in canonical_block_ids if block_id not in crop_by_id)
         if missing_crop_ids:
             raise ValueError("canonical locality block has no bound crop")
         component_by_block_id = _membership_component_by_block_id(plan)
@@ -4491,12 +3937,8 @@ class AdaptivePersistentOcrSession:
                     )
                 )
             )
-            slot_by_id = {
-                unit_id: slot for slot, unit_id in enumerate(unit_ids)
-            }
-            component_crops = tuple(
-                crop_by_id[block_id] for block_id in component_block_ids
-            )
+            slot_by_id = {unit_id: slot for slot, unit_id in enumerate(unit_ids)}
+            component_crops = tuple(crop_by_id[block_id] for block_id in component_block_ids)
             contract = (
                 slot_by_id,
                 (
@@ -4518,42 +3960,28 @@ class AdaptivePersistentOcrSession:
     ) -> OcrEngineOutput:
         if compaction is None or not compaction.placements or not output.words:
             return output
-        if (
-            getattr(compaction, "raster_kind", None)
-            is CompactionRasterKind.CANONICAL_LOCALITY
-        ):
+        if getattr(compaction, "raster_kind", None) is CompactionRasterKind.CANONICAL_LOCALITY:
             slot_width, slot_height = canonical_slot_size
-            if (
-                slot_width <= 0
-                or slot_height <= 0
-                or len(membership_slot_by_id) > slot_width * slot_height
-            ):
-                raise ValueError(
-                    "canonical locality membership slots exceed bound crop"
-                )
+            if slot_width <= 0 or slot_height <= 0 or len(membership_slot_by_id) > slot_width * slot_height:
+                raise ValueError("canonical locality membership slots exceed bound crop")
             grouped: dict[str, list[tuple[int, OcrWord]]] = {}
             for order, word in enumerate(output.words):
                 placement = max(
                     compaction.placements,
                     key=lambda item: (
                         self._intersection_area(word.bbox, item.crop_bbox),
-                        -abs(
-                            (word.bbox.left + word.bbox.right)
-                            - (
-                                item.crop_bbox.left
-                                + item.crop_bbox.right
-                            )
-                        ),
+                        -abs((word.bbox.left + word.bbox.right) - (item.crop_bbox.left + item.crop_bbox.right)),
                     ),
                 )
-                if self._intersection_area(
-                    word.bbox,
-                    placement.crop_bbox,
-                ) <= 0:
+                if (
+                    self._intersection_area(
+                        word.bbox,
+                        placement.crop_bbox,
+                    )
+                    <= 0
+                ):
                     continue
-                grouped.setdefault(placement.unit_id, []).append(
-                    (order, word)
-                )
+                grouped.setdefault(placement.unit_id, []).append((order, word))
             mapped_with_order = []
             for placement in compaction.placements:
                 words = grouped.get(placement.unit_id)
@@ -4561,17 +3989,12 @@ class AdaptivePersistentOcrSession:
                     continue
                 slot = membership_slot_by_id.get(placement.unit_id)
                 if slot is None:
-                    raise ValueError(
-                        "canonical locality placement is outside membership plan"
-                    )
+                    raise ValueError("canonical locality placement is outside membership plan")
                 left = slot % slot_width
                 top = slot // slot_width
                 text = " ".join(word.text for _, word in words)
                 weights = [max(1, len(word.text)) for _, word in words]
-                confidence = sum(
-                    word.confidence * weight
-                    for (_, word), weight in zip(words, weights)
-                ) / sum(weights)
+                confidence = sum(word.confidence * weight for (_, word), weight in zip(words, weights)) / sum(weights)
                 mapped_with_order.append(
                     (
                         words[0][0],
@@ -4582,9 +4005,7 @@ class AdaptivePersistentOcrSession:
                         ),
                     )
                 )
-            mapped = tuple(
-                word for _, word in sorted(mapped_with_order)
-            )
+            mapped = tuple(word for _, word in sorted(mapped_with_order))
             return OcrEngineOutput(
                 text=" ".join(word.text for word in mapped),
                 words=mapped,
@@ -4596,10 +4017,7 @@ class AdaptivePersistentOcrSession:
                 compaction.placements,
                 key=lambda item: (
                     self._intersection_area(word.bbox, item.crop_bbox),
-                    -abs(
-                        (word.bbox.left + word.bbox.right)
-                        - (item.crop_bbox.left + item.crop_bbox.right)
-                    ),
+                    -abs((word.bbox.left + word.bbox.right) - (item.crop_bbox.left + item.crop_bbox.right)),
                 ),
             )
             mapped.append(self._map_word(word, placement, block_bbox))
@@ -4617,24 +4035,17 @@ class AdaptivePersistentOcrSession:
         first_order: int,
         tiles: tuple[_Tile, ...],
     ) -> _ContextGroup:
-        canonical_flags = tuple(
-            tile.canonical_bbox is not None for tile in tiles
-        )
+        canonical_flags = tuple(tile.canonical_bbox is not None for tile in tiles)
         if any(canonical_flags):
             if not all(canonical_flags):
-                raise ValueError(
-                    "context group cannot mix canonical and spatial tiles"
-                )
+                raise ValueError("context group cannot mix canonical and spatial tiles")
             rendered = _crop_canonical_locality_subset(tiles)
             payload = rendered.png_bytes
             placements = rendered.placements
         else:
             payload, placements, _, _ = _pack_tiles(tiles)
         return _ContextGroup(
-            group_id=(
-                f"{block_id}:context-depth-{depth:02d}:"
-                f"order-{first_order:08d}:units-{len(tiles):03d}"
-            ),
+            group_id=(f"{block_id}:context-depth-{depth:02d}:" f"order-{first_order:08d}:units-{len(tiles):03d}"),
             depth=depth,
             first_order=first_order,
             tiles=tiles,
@@ -4677,14 +4088,12 @@ class AdaptivePersistentOcrSession:
         same_column = tuple(
             item
             for item in source_placements
-            if item.island_id == anchor.island_id
-            and item.matrix_column == anchor.matrix_column
+            if item.island_id == anchor.island_id and item.matrix_column == anchor.matrix_column
         )
         same_row = tuple(
             item
             for item in source_placements
-            if item.island_id == anchor.island_id
-            and item.matrix_row == anchor.matrix_row
+            if item.island_id == anchor.island_id and item.matrix_row == anchor.matrix_row
         )
         candidates = same_column if len(same_column) >= 2 else same_row
         ranked = sorted(
@@ -4738,13 +4147,9 @@ class AdaptivePersistentOcrSession:
             )
             backgrounds.append(np.median(border, axis=0))
             decoded.append((artifact, pixels))
-        median_height = float(
-            np.median([pixels.shape[0] for _, pixels in decoded])
-        )
+        median_height = float(np.median([pixels.shape[0] for _, pixels in decoded]))
         gutter = max(4, min(32, int(round(median_height * 0.25))))
-        background = np.rint(
-            np.median(np.asarray(backgrounds), axis=0)
-        ).astype(np.uint8)
+        background = np.rint(np.median(np.asarray(backgrounds), axis=0)).astype(np.uint8)
         width = sum(pixels.shape[1] for _, pixels in decoded)
         width += gutter * (len(decoded) + 1)
         height = max(pixels.shape[0] for _, pixels in decoded) + 2 * gutter
@@ -4783,10 +4188,7 @@ class AdaptivePersistentOcrSession:
             left += tile_width + gutter
         payload = _png_bytes(canvas)
         return _ContextGroup(
-            group_id=(
-                f"{block_id}:source-placement-line:anchor-{anchor_id}:"
-                f"units-{len(tiles):03d}"
-            ),
+            group_id=(f"{block_id}:source-placement-line:anchor-{anchor_id}:" f"units-{len(tiles):03d}"),
             depth=leaf_group.depth,
             first_order=leaf_group.first_order,
             tiles=tuple(tiles),
@@ -4804,23 +4206,13 @@ class AdaptivePersistentOcrSession:
     ) -> bool:
         if candidate is None or not group.emit_unit_ids:
             return False
-        targets = tuple(
-            placement
-            for placement in group.placements
-            if placement.unit_id in group.emit_unit_ids
-        )
+        targets = tuple(placement for placement in group.placements if placement.unit_id in group.emit_unit_ids)
         if not targets:
             return False
         return any(
             word.confidence >= self._SPECIALIZED_MIN_MEAN_CONFIDENCE
-            and any(
-                self._native_word_text(word.text, script_kind)
-                for script_kind in script_kinds
-            )
-            and any(
-                self._intersection_area(word.bbox, placement.crop_bbox) > 0
-                for placement in targets
-            )
+            and any(self._native_word_text(word.text, script_kind) for script_kind in script_kinds)
+            and any(self._intersection_area(word.bbox, placement.crop_bbox) > 0 for placement in targets)
             for word in candidate.output.words
         )
 
@@ -4860,9 +4252,7 @@ class AdaptivePersistentOcrSession:
                     ):
                         self.state.attempts[index] = replace(
                             self.state.attempts[index],
-                            transform=(
-                                OcrTransform.SOURCE_PLACEMENT_FALLBACK
-                            ),
+                            transform=(OcrTransform.SOURCE_PLACEMENT_FALLBACK),
                         )
                     candidate = decision.candidate
                     if candidate is None:
@@ -4878,9 +4268,7 @@ class AdaptivePersistentOcrSession:
                 )
                 if candidate is None:
                     continue
-                if best is None or self._candidate_score(
-                    candidate
-                ) > self._candidate_score(best):
+                if best is None or self._candidate_score(candidate) > self._candidate_score(best):
                     best = candidate
                 if require_native_coverage:
                     if self._source_line_covers_anchor(
@@ -4890,12 +4278,8 @@ class AdaptivePersistentOcrSession:
                     ):
                         return candidate
                     continue
-                if (
-                    candidate.assessment.percent >= self._LOCK_GRAMMAR_PERCENT
-                    or (
-                        candidate.output.text.strip()
-                        and self._mean_confidence(candidate.output) >= 0.85
-                    )
+                if candidate.assessment.percent >= self._LOCK_GRAMMAR_PERCENT or (
+                    candidate.output.text.strip() and self._mean_confidence(candidate.output) >= 0.85
                 ):
                     return candidate
         return None if require_native_coverage else best
@@ -4905,11 +4289,7 @@ class AdaptivePersistentOcrSession:
         fallback_profile_ids: tuple[str, ...],
     ) -> tuple[str, ...]:
         allowed = frozenset(fallback_profile_ids)
-        return tuple(
-            profile_id
-            for profile_id in self.state.ordered_profile_ids()
-            if profile_id in allowed
-        )
+        return tuple(profile_id for profile_id in self.state.ordered_profile_ids() if profile_id in allowed)
 
     def _cached_context_group(
         self,
@@ -4934,11 +4314,7 @@ class AdaptivePersistentOcrSession:
             return None
         return max(
             cached,
-            key=lambda item: (
-                self._candidate_score(item.candidate)
-                if item.candidate is not None
-                else (-1, -1.0, -1)
-            ),
+            key=lambda item: (self._candidate_score(item.candidate) if item.candidate is not None else (-1, -1.0, -1)),
         )
 
     def _store_context_group(
@@ -4947,9 +4323,7 @@ class AdaptivePersistentOcrSession:
         fallback_policy: tuple[str, ...],
         candidate: _Candidate | None,
     ) -> None:
-        transform = (
-            candidate.transform if candidate is not None else OcrTransform.RAW
-        )
+        transform = candidate.transform if candidate is not None else OcrTransform.RAW
         self._group_candidate_cache[
             (
                 tuple(tile.unit_id for tile in group.tiles),
@@ -5049,11 +4423,7 @@ class AdaptivePersistentOcrSession:
         ordered = tuple(
             dict.fromkeys(
                 tuple(unit.unit_id for unit in plan.membership_units)
-                + tuple(
-                    placement.unit_id
-                    for compaction in compactions
-                    for placement in compaction.placements
-                )
+                + tuple(placement.unit_id for compaction in compactions for placement in compaction.placements)
             )
         )
         return (
@@ -5076,10 +4446,7 @@ class AdaptivePersistentOcrSession:
         if not artifacts:
             return ()
         associations = []
-        if (
-            compaction.raster_kind
-            is CompactionRasterKind.CANONICAL_LOCALITY
-        ):
+        if compaction.raster_kind is CompactionRasterKind.CANONICAL_LOCALITY:
             slot_by_unit, slot_width = self._topology_slot_by_unit(
                 plan,
                 compactions,
@@ -5144,14 +4511,10 @@ class AdaptivePersistentOcrSession:
         queue: OcrQueueResult,
     ) -> tuple[TopologyScriptEvidence, ...]:
         jobs = {
-            job.block_id: job
-            for job in queue.jobs
-            if job.status is OcrJobStatus.COMPLETE and job.output is not None
+            job.block_id: job for job in queue.jobs if job.status is OcrJobStatus.COMPLETE and job.output is not None
         }
         compaction_by_id = {item.block_id: item for item in compactions}
-        matrix_sha256 = plan.matrix_sha256 or _cache_fingerprint(
-            (plan.aligned_size, plan.source_segment_ids)
-        )
+        matrix_sha256 = plan.matrix_sha256 or _cache_fingerprint((plan.aligned_size, plan.source_segment_ids))
         evidence: dict[
             tuple[str, str, str, tuple[int, ...], int, int],
             TopologyScriptEvidence,
@@ -5227,26 +4590,17 @@ class AdaptivePersistentOcrSession:
     ) -> tuple[tuple[str, str, tuple[str, ...]], ...]:
         jobs = {job.block_id: job for job in queue.jobs}
         compaction_by_id = {item.block_id: item for item in compactions}
-        matrix_sha256 = plan.matrix_sha256 or _cache_fingerprint(
-            (plan.aligned_size, plan.source_segment_ids)
-        )
+        matrix_sha256 = plan.matrix_sha256 or _cache_fingerprint((plan.aligned_size, plan.source_segment_ids))
         all_artifacts = tuple(
             {
-                artifact.unit_id: artifact
-                for compaction in compactions
-                for artifact in compaction.source_placements
+                artifact.unit_id: artifact for compaction in compactions for artifact in compaction.source_placements
             }.values()
         )
         routed = []
         for block in plan.blocks:
             compaction = compaction_by_id.get(block.block_id)
             job = jobs.get(block.block_id)
-            if (
-                compaction is None
-                or job is None
-                or job.status is not OcrJobStatus.COMPLETE
-                or job.output is None
-            ):
+            if compaction is None or job is None or job.status is not OcrJobStatus.COMPLETE or job.output is None:
                 continue
             associated = self._topology_job_words(
                 plan=plan,
@@ -5266,11 +4620,7 @@ class AdaptivePersistentOcrSession:
                     artifact.source_bbox,
                     plan.aligned_size[0],
                 )
-                same_island = tuple(
-                    item
-                    for item in all_artifacts
-                    if item.island_id == artifact.island_id
-                )
+                same_island = tuple(item for item in all_artifacts if item.island_id == artifact.island_id)
                 covered_columns = {
                     item.matrix_column
                     for item in same_island
@@ -5285,9 +4635,7 @@ class AdaptivePersistentOcrSession:
                     <= (item.source_bbox.top + item.source_bbox.bottom) // 2
                     < artifact.source_bbox.bottom
                 }
-                spans_topology = (
-                    len(covered_columns) > 1 or len(covered_rows) > 1
-                )
+                spans_topology = len(covered_columns) > 1 or len(covered_rows) > 1
                 relevant = tuple(
                     item
                     for item in evidence
@@ -5297,14 +4645,12 @@ class AdaptivePersistentOcrSession:
                             and item.island_id == artifact.island_id
                             and (
                                 spans_topology
-                                or min(right_ppm, item.source_right_ppm)
-                                > max(left_ppm, item.source_left_ppm)
+                                or min(right_ppm, item.source_right_ppm) > max(left_ppm, item.source_left_ppm)
                             )
                         )
                         or (
                             item.matrix_sha256 != matrix_sha256
-                            and min(right_ppm, item.source_right_ppm)
-                            > max(left_ppm, item.source_left_ppm)
+                            and min(right_ppm, item.source_right_ppm) > max(left_ppm, item.source_left_ppm)
                         )
                     )
                 )
@@ -5326,29 +4672,24 @@ class AdaptivePersistentOcrSession:
                     >= self._LOCAL_NATIVE_MIN_CHARACTERS
                 }
                 missing = tuple(
-                    sorted(
-                        {
-                            item.script_kind
-                            for item in relevant
-                            if item.script_kind not in covered_scripts
-                        }
-                    )
+                    sorted({item.script_kind for item in relevant if item.script_kind not in covered_scripts})
                 )
                 if not missing:
                     continue
                 strictly_covers_interval = any(
                     left_ppm <= item.source_left_ppm
                     and right_ppm >= item.source_right_ppm
-                    and (right_ppm - left_ppm)
-                    > (item.source_right_ppm - item.source_left_ppm) * 5 // 4
+                    and (right_ppm - left_ppm) > (item.source_right_ppm - item.source_left_ppm) * 5 // 4
                     for item in relevant
                 )
                 if not spans_topology and not strictly_covers_interval:
                     continue
                 routed.append(
-                    (block.block_id, artifact.unit_id, missing or tuple(
-                        sorted({item.script_kind for item in relevant})
-                    ))
+                    (
+                        block.block_id,
+                        artifact.unit_id,
+                        missing or tuple(sorted({item.script_kind for item in relevant})),
+                    )
                 )
         return tuple(routed)
 
@@ -5431,9 +4772,7 @@ class AdaptivePersistentOcrSession:
                     continue
                 matched = []
                 for index, (base_word, _kind, _candidate) in enumerate(base):
-                    if index in removed or not any(
-                        character.isalnum() for character in base_word.text
-                    ):
+                    if index in removed or not any(character.isalnum() for character in base_word.text):
                         continue
                     for native_word in run:
                         horizontal = max(
@@ -5456,9 +4795,7 @@ class AdaptivePersistentOcrSession:
                     continue
                 first = min(matched)
                 removed.update(matched)
-                replacements[first] = tuple(
-                    (word, script_kind, candidate) for word in run
-                )
+                replacements[first] = tuple((word, script_kind, candidate) for word in run)
         if not replacements:
             return None
         fused = []
@@ -5503,7 +4840,6 @@ class AdaptivePersistentOcrSession:
             )
         blocks = {item.block_id: item for item in plan.blocks}
         compaction_by_id = {item.block_id: item for item in compactions}
-        crop_by_id = {item.block_id: item for item in crops}
         jobs = list(queue.jobs)
         provenance = []
         changed_jobs = []
@@ -5551,11 +4887,7 @@ class AdaptivePersistentOcrSession:
                         if self._specialized_profile_kind(
                             profile_id,
                             next(
-                                (
-                                    profile.languages
-                                    for profile in self._profiles
-                                    if profile.profile_id == profile_id
-                                ),
+                                (profile.languages for profile in self._profiles if profile.profile_id == profile_id),
                                 (),
                             ),
                         )
@@ -5574,8 +4906,7 @@ class AdaptivePersistentOcrSession:
                 if not native_candidates:
                     continue
                 route_elapsed = combined.elapsed_seconds + sum(
-                    candidate.elapsed_seconds
-                    for _script_kind, candidate in native_candidates
+                    candidate.elapsed_seconds for _script_kind, candidate in native_candidates
                 )
                 anchor_bbox = group.placements[0].crop_bbox
                 fused = self._fuse_topology_source_words(
@@ -5593,9 +4924,7 @@ class AdaptivePersistentOcrSession:
                     job=current_job,
                 )
                 replaced_indexes = {
-                    index
-                    for index, _word, associated, _source_box in associations
-                    if associated.unit_id == unit_id
+                    index for index, _word, associated, _source_box in associations if associated.unit_id == unit_id
                 }
                 if not replaced_indexes:
                     continue
@@ -5607,10 +4936,7 @@ class AdaptivePersistentOcrSession:
                         anchor_bbox,
                         artifact.source_bbox,
                     )
-                    if (
-                        compaction.raster_kind
-                        is CompactionRasterKind.CANONICAL_LOCALITY
-                    ):
+                    if compaction.raster_kind is CompactionRasterKind.CANONICAL_LOCALITY:
                         original_word = current_job.output.words[first_replaced]
                         output_box = original_word.bbox
                     else:
@@ -5676,9 +5002,7 @@ class AdaptivePersistentOcrSession:
             "hits": cache_after.hits - cache_before.hits,
             "misses": cache_after.misses - cache_before.misses,
             "exact_duplicate_calls_avoided": cache_after.hits - cache_before.hits,
-            "ocr_work_seconds": (
-                cache_after.ocr_work_seconds - cache_before.ocr_work_seconds
-            ),
+            "ocr_work_seconds": (cache_after.ocr_work_seconds - cache_before.ocr_work_seconds),
         }
         diagnostics = list(queue.diagnostics)
         for item in provenance:
@@ -5702,7 +5026,6 @@ class AdaptivePersistentOcrSession:
             cache_metrics=cache_metrics,
         )
 
-
     def _recognize_context_groups(
         self,
         *,
@@ -5717,9 +5040,7 @@ class AdaptivePersistentOcrSession:
         if not groups:
             return ()
         nodes = tuple(replace(node) for node in self.state.nodes)
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=self._max_workers
-        ) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self._max_workers) as executor:
             futures = tuple(
                 executor.submit(
                     self._recognize_isolated,
@@ -5746,41 +5067,26 @@ class AdaptivePersistentOcrSession:
         forced_children: set[str] = set()
         for group, primary in zip(groups, isolated):
             output_group = group
-            group_has_routed_native_unit = (
-                not routed_native_unit_ids
-                or any(
-                    tile.unit_id in routed_native_unit_ids
-                    for tile in group.tiles
-                )
+            group_has_routed_native_unit = not routed_native_unit_ids or any(
+                tile.unit_id in routed_native_unit_ids for tile in group.tiles
             )
-            forced_native_search = (
-                group.group_id in forced_native_search_group_ids
-                and group_has_routed_native_unit
-            )
+            forced_native_search = group.group_id in forced_native_search_group_ids and group_has_routed_native_unit
             local_native_evidence = False
-            fallback_policy = self._ordered_context_fallback_policy(
-                fallback_profile_ids
-            )
+            fallback_policy = self._ordered_context_fallback_policy(fallback_profile_ids)
             cached = self._cached_context_group(group, fallback_policy)
             missing_native_script: bool | None = None
             if cached is not None:
                 candidate = cached.candidate
             else:
                 candidate = primary.candidate
-                primary_missing_native_script = (
-                    self._missing_evidenced_native_script(
-                        candidate,
-                        fallback_profile_ids,
-                    )
+                primary_missing_native_script = self._missing_evidenced_native_script(
+                    candidate,
+                    fallback_profile_ids,
                 )
-                if (
-                    fallback_policy
-                    and (
-                        candidate is None
-                        or candidate.assessment.percent
-                        < self._LOCK_GRAMMAR_PERCENT
-                        or forced_native_search
-                    )
+                if fallback_policy and (
+                    candidate is None
+                    or candidate.assessment.percent < self._LOCK_GRAMMAR_PERCENT
+                    or forced_native_search
                 ):
                     fallback = self._recognize_image(
                         block_id=block_id,
@@ -5792,9 +5098,7 @@ class AdaptivePersistentOcrSession:
                         fallback_profile_ids=fallback_policy,
                         run_primary=False,
                     ).candidate
-                    evidenced_script_kinds = self._fallback_script_kinds(
-                        fallback_profile_ids
-                    )
+                    evidenced_script_kinds = self._fallback_script_kinds(fallback_profile_ids)
                     locally_evidenced_scripts = tuple(
                         script_kind
                         for script_kind in evidenced_script_kinds
@@ -5804,9 +5108,7 @@ class AdaptivePersistentOcrSession:
                             leaf=len(group.tiles) == 1,
                         )
                     )
-                    local_native_evidence = bool(
-                        locally_evidenced_scripts
-                    )
+                    local_native_evidence = bool(locally_evidenced_scripts)
                     native_patch = (
                         self._patch_missing_native_units(
                             candidate,
@@ -5819,21 +5121,13 @@ class AdaptivePersistentOcrSession:
                     )
                     if native_patch is not None:
                         candidate = native_patch
-                    local_missing_native_script = (
-                        primary_missing_native_script
-                        and (
-                            bool(locally_evidenced_scripts)
-                            or forced_native_search
-                        )
+                    local_missing_native_script = primary_missing_native_script and (
+                        bool(locally_evidenced_scripts) or forced_native_search
                     )
                     if native_patch is not None:
                         missing_native_script = False
                     elif local_missing_native_script:
-                        if (
-                            fallback is not None
-                            and len(group.tiles) == 1
-                            and bool(locally_evidenced_scripts)
-                        ):
+                        if fallback is not None and len(group.tiles) == 1 and bool(locally_evidenced_scripts):
                             candidate = fallback
                             missing_native_script = False
                         elif len(group.tiles) == 1:
@@ -5857,11 +5151,7 @@ class AdaptivePersistentOcrSession:
                             missing_native_script = True
                     elif fallback is not None and (
                         not primary_missing_native_script
-                        and (
-                        candidate is None
-                        or self._candidate_score(fallback)
-                        > self._candidate_score(candidate)
-                        )
+                        and (candidate is None or self._candidate_score(fallback) > self._candidate_score(candidate))
                     ):
                         candidate = fallback
 
@@ -5908,10 +5198,7 @@ class AdaptivePersistentOcrSession:
                         if (
                             local_native_evidence
                             or not routed_native_unit_ids
-                            or any(
-                                tile.unit_id in routed_native_unit_ids
-                                for tile in child.tiles
-                            )
+                            or any(tile.unit_id in routed_native_unit_ids for tile in child.tiles)
                         ):
                             forced_children.add(child.group_id)
                 continue
@@ -5925,9 +5212,7 @@ class AdaptivePersistentOcrSession:
                     block_bbox=block_bbox,
                     groups=tuple(children),
                     fallback_profile_ids=fallback_profile_ids,
-                    forced_native_search_group_ids=frozenset(
-                        forced_children
-                    ),
+                    forced_native_search_group_ids=frozenset(forced_children),
                     routed_native_unit_ids=routed_native_unit_ids,
                     source_placements=source_placements,
                 )
@@ -5997,10 +5282,7 @@ class AdaptivePersistentOcrSession:
                         cached.crop_size[1],
                     ),
                 )
-                mapped = tuple(
-                    self._map_word(word, local_placement, block_bbox)
-                    for word in candidate.output.words
-                )
+                mapped = tuple(self._map_word(word, local_placement, block_bbox) for word in candidate.output.words)
                 candidates.append((placement, candidate, mapped))
         finally:
             image.close()
@@ -6013,23 +5295,12 @@ class AdaptivePersistentOcrSession:
                 item[0].source_bbox.left,
             ),
         )
-        words = tuple(
-            word
-            for _, _, mapped in ordered_candidates
-            for word in mapped
-        )
+        words = tuple(word for _, _, mapped in ordered_candidates for word in mapped)
         if not words:
             return None
-        total_characters = sum(
-            max(1, len(candidate.output.text))
-            for _, candidate, _ in candidates
-        )
+        total_characters = sum(max(1, len(candidate.output.text)) for _, candidate, _ in candidates)
         grammar_percent = round(
-            sum(
-                candidate.assessment.percent
-                * max(1, len(candidate.output.text))
-                for _, candidate, _ in candidates
-            )
+            sum(candidate.assessment.percent * max(1, len(candidate.output.text)) for _, candidate, _ in candidates)
             / total_characters
         )
         representative = max(
@@ -6054,10 +5325,7 @@ class AdaptivePersistentOcrSession:
                 ("recursive-membership-units",),
             ),
             input_sha256=hashlib.sha256(crop.raw.png_bytes).hexdigest(),
-            elapsed_seconds=sum(
-                candidate.elapsed_seconds
-                for _, candidate, _ in candidates
-            ),
+            elapsed_seconds=sum(candidate.elapsed_seconds for _, candidate, _ in candidates),
         )
 
     def _recursive_candidate(
@@ -6144,19 +5412,12 @@ class AdaptivePersistentOcrSession:
             forced_native_search_group_ids=frozenset(
                 group.group_id
                 for group in initial_groups
-                if not native_script_unit_ids
-                or any(
-                    tile.unit_id in native_script_unit_ids
-                    for tile in group.tiles
-                )
+                if not native_script_unit_ids or any(tile.unit_id in native_script_unit_ids for tile in group.tiles)
             ),
             routed_native_unit_ids=native_script_unit_ids,
             source_placements=compaction.source_placements,
         )
-        original_placements = {
-            placement.unit_id: placement
-            for placement in compaction.placements
-        }
+        original_placements = {placement.unit_id: placement for placement in compaction.placements}
         candidates = []
         for group, candidate in recognized:
             mapped = self._map_context_output(
@@ -6171,20 +5432,10 @@ class AdaptivePersistentOcrSession:
         if not candidates:
             return None
 
-        words = tuple(
-            word
-            for _, _, output in candidates
-            for word in output.words
-        )
-        total_characters = sum(
-            max(1, len(output.text))
-            for _, _, output in candidates
-        )
+        words = tuple(word for _, _, output in candidates for word in output.words)
+        total_characters = sum(max(1, len(output.text)) for _, _, output in candidates)
         grammar_percent = round(
-            sum(
-                candidate.assessment.percent * max(1, len(output.text))
-                for _, candidate, output in candidates
-            )
+            sum(candidate.assessment.percent * max(1, len(output.text)) for _, candidate, output in candidates)
             / total_characters
         )
         representative = max(
@@ -6209,18 +5460,12 @@ class AdaptivePersistentOcrSession:
                 ("recursive-context-groups",),
             ),
             input_sha256=hashlib.sha256(crop.raw.png_bytes).hexdigest(),
-            elapsed_seconds=sum(
-                candidate.elapsed_seconds
-                for _, candidate, _ in candidates
-            ),
+            elapsed_seconds=sum(candidate.elapsed_seconds for _, candidate, _ in candidates),
         )
+
     @staticmethod
     def _observed_scripts(text: str) -> frozenset[str]:
-        return frozenset(
-            script
-            for character in text
-            if (script := _character_script(character)) != "neutral"
-        )
+        return frozenset(script for character in text if (script := _character_script(character)) != "neutral")
 
     def _recognize_recursive_blocks(
         self,
@@ -6232,18 +5477,14 @@ class AdaptivePersistentOcrSession:
         allow_membership_calibration: bool,
     ) -> dict[int, _Candidate | None]:
         pending = []
-        for index, (block, crop, full_block) in enumerate(
-            zip(plan.blocks, crops, recognized)
-        ):
+        for index, (block, crop, full_block) in enumerate(zip(plan.blocks, crops, recognized)):
             compaction = compaction_by_id.get(block.block_id)
             if (
                 compaction is None
                 or not 1 < len(compaction.placements) <= 16 * 16
                 or not self._should_recurse_full_block(
                     full_block,
-                    allow_membership_calibration=(
-                        allow_membership_calibration and index == 0
-                    ),
+                    allow_membership_calibration=(allow_membership_calibration and index == 0),
                 )
             ):
                 continue
@@ -6259,9 +5500,7 @@ class AdaptivePersistentOcrSession:
             if not entries:
                 return
             nodes = tuple(replace(node) for node in self.state.nodes)
-            with concurrent.futures.ThreadPoolExecutor(
-                max_workers=self._max_workers
-            ) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self._max_workers) as executor:
                 futures = tuple(
                     (
                         int(index),
@@ -6271,29 +5510,17 @@ class AdaptivePersistentOcrSession:
                             block_bbox=block.bbox,
                             crop=crop,
                             compaction=compaction,
-                            fallback_profile_ids=(
-                                full_block.fallback_profile_ids
-                            ),
-                            native_script_unit_ids=frozenset(
-                                full_block.native_script_unit_ids
-                            ),
+                            fallback_profile_ids=(full_block.fallback_profile_ids),
+                            native_script_unit_ids=frozenset(full_block.native_script_unit_ids),
                             nodes=nodes,
                             locked_profile_id=self.state.locked_profile_id,
-                            lock_is_provisional=(
-                                self.state.lock_is_provisional
-                            ),
-                            contextual=(
-                                self._uses_specialized_context_recursion(
-                                    full_block
-                                )
-                            ),
+                            lock_is_provisional=(self.state.lock_is_provisional),
+                            contextual=(self._uses_specialized_context_recursion(full_block)),
                         ),
                     )
                     for index, block, crop, compaction, full_block in entries
                 )
-                isolated = tuple(
-                    (index, future.result()) for index, future in futures
-                )
+                isolated = tuple((index, future.result()) for index, future in futures)
 
             # Futures may finish in any order; state and diagnostics preserve
             # the original block order.
@@ -6321,23 +5548,15 @@ class AdaptivePersistentOcrSession:
             if len(samples) < self._SPLIT_CALIBRATION_SAMPLES:
                 samples.append(entry)
 
-        calibration_entries = tuple(
-            entry
-            for samples in calibration_by_key.values()
-            for entry in samples
-        )
+        calibration_entries = tuple(entry for samples in calibration_by_key.values() for entry in samples)
         if not calibration_entries:
             recognize_batch(tuple(pending))
             return results
 
         # Process a contiguous prefix so attempt/splay order remains identical
         # to the source block order even when evidence keys are interleaved.
-        calibration_frontier = max(
-            int(entry[0]) for entry in calibration_entries
-        )
-        first_batch = tuple(
-            entry for entry in pending if int(entry[0]) <= calibration_frontier
-        )
+        calibration_frontier = max(int(entry[0]) for entry in calibration_entries)
+        first_batch = tuple(entry for entry in pending if int(entry[0]) <= calibration_frontier)
         recognize_batch(first_batch)
 
         ineffective_keys = set()
@@ -6357,8 +5576,7 @@ class AdaptivePersistentOcrSession:
         remaining = tuple(
             entry
             for entry in pending
-            if int(entry[0]) > calibration_frontier
-            and key_by_index.get(int(entry[0])) not in ineffective_keys
+            if int(entry[0]) > calibration_frontier and key_by_index.get(int(entry[0])) not in ineffective_keys
         )
         recognize_batch(remaining)
         return results
@@ -6370,9 +5588,7 @@ class AdaptivePersistentOcrSession:
         crops: tuple[BlockCropPair, ...],
         compactions: tuple[BlockCompaction, ...],
     ) -> None:
-        compaction_by_id = {
-            compaction.block_id: compaction for compaction in compactions
-        }
+        compaction_by_id = {compaction.block_id: compaction for compaction in compactions}
         for block, crop in zip(plan.blocks, crops):
             if block.matrix_window_kind not in {
                 "polar-local-full",
@@ -6381,21 +5597,12 @@ class AdaptivePersistentOcrSession:
                 continue
             compaction = compaction_by_id.get(block.block_id)
             if compaction is None:
-                raise ValueError(
-                    "canonical locality block has no compaction contract"
-                )
-            if (
-                getattr(compaction, "raster_kind", None)
-                is not CompactionRasterKind.CANONICAL_LOCALITY
-            ):
-                raise ValueError(
-                    "locality block was not produced by canonical renderer"
-                )
+                raise ValueError("canonical locality block has no compaction contract")
+            if getattr(compaction, "raster_kind", None) is not CompactionRasterKind.CANONICAL_LOCALITY:
+                raise ValueError("locality block was not produced by canonical renderer")
             actual_sha256 = hashlib.sha256(crop.raw.png_bytes).hexdigest()
             if getattr(compaction, "raw_sha256", "") != actual_sha256:
-                raise ValueError(
-                    "canonical locality raster digest disagrees with crop"
-                )
+                raise ValueError("canonical locality raster digest disagrees with crop")
             for placement in compaction.placements:
                 if (
                     placement.crop_bbox.left < 0
@@ -6403,9 +5610,7 @@ class AdaptivePersistentOcrSession:
                     or placement.crop_bbox.right > crop.bbox.width
                     or placement.crop_bbox.bottom > crop.bbox.height
                 ):
-                    raise ValueError(
-                        "canonical locality placement exceeds raster bounds"
-                    )
+                    raise ValueError("canonical locality placement exceeds raster bounds")
 
     def run_with_compaction(
         self,
@@ -6460,9 +5665,7 @@ class AdaptivePersistentOcrSession:
                 and 1 < len(compaction.placements) <= 16 * 16
                 and self._should_recurse_full_block(
                     full_block,
-                    allow_membership_calibration=(
-                        allow_membership_calibration and index == 0
-                    ),
+                    allow_membership_calibration=(allow_membership_calibration and index == 0),
                 )
             )
             if should_recurse:
@@ -6470,16 +5673,9 @@ class AdaptivePersistentOcrSession:
                 recursive = recursive_by_index.get(index)
                 if recursive is not None:
                     if not self._uses_specialized_context_recursion(full_block):
-                        if (
-                            candidate is None
-                            or recursive.assessment.percent
-                            >= candidate.assessment.percent
-                        ):
+                        if candidate is None or recursive.assessment.percent >= candidate.assessment.percent:
                             candidate = recursive
-                            diagnostics.append(
-                                f"block={block.block_id};"
-                                "recursive=membership-units"
-                            )
+                            diagnostics.append(f"block={block.block_id};" "recursive=membership-units")
                         recursive = None
                 if recursive is not None:
                     native_patch = self._patch_missing_native_units(
@@ -6490,10 +5686,7 @@ class AdaptivePersistentOcrSession:
                     )
                     if native_patch is not None:
                         candidate = native_patch
-                        diagnostics.append(
-                            f"block={block.block_id};"
-                            "recursive=native-unit-patch"
-                        )
+                        diagnostics.append(f"block={block.block_id};" "recursive=native-unit-patch")
                     else:
                         if full_block.native_script_runs:
                             recursive = replace(
@@ -6503,12 +5696,9 @@ class AdaptivePersistentOcrSession:
                                     full_block.native_script_runs,
                                 ),
                             )
-                    if (
-                        native_patch is None
-                        and not self._contextual_composite_is_acceptable(
-                            recursive,
-                            full_block.fallback_profile_ids,
-                        )
+                    if native_patch is None and not self._contextual_composite_is_acceptable(
+                        recursive,
+                        full_block.fallback_profile_ids,
                     ):
                         diagnostics.append(
                             f"block={block.block_id};"
@@ -6522,18 +5712,10 @@ class AdaptivePersistentOcrSession:
                         full_block,
                     ):
                         candidate = recursive
-                        diagnostics.append(
-                            f"block={block.block_id};"
-                            "recursive=contextual-composite"
-                        )
+                        diagnostics.append(f"block={block.block_id};" "recursive=contextual-composite")
             if candidate is None:
-                input_sha256 = hashlib.sha256(
-                    crop.raw.png_bytes
-                ).hexdigest()
-                diagnostics.append(
-                    f"block={block.block_id};outcome=unresolved;"
-                    "reason=profile-exhausted"
-                )
+                input_sha256 = hashlib.sha256(crop.raw.png_bytes).hexdigest()
+                diagnostics.append(f"block={block.block_id};outcome=unresolved;" "reason=profile-exhausted")
                 jobs.append(
                     OcrJobResult(
                         job_id=f"ocr-job-{index:08d}",
@@ -6549,11 +5731,7 @@ class AdaptivePersistentOcrSession:
                         ),
                         error_type=None,
                         error_message=None,
-                        elapsed_seconds=(
-                            recognition_seconds
-                            + time.perf_counter()
-                            - recursive_started
-                        ),
+                        elapsed_seconds=(recognition_seconds + time.perf_counter() - recursive_started),
                         input_sha256=input_sha256,
                         context_sha256=input_sha256,
                         failure_code=None,
@@ -6563,23 +5741,17 @@ class AdaptivePersistentOcrSession:
                 continue
             canonical_locality = (
                 compaction is not None
-                and getattr(compaction, "raster_kind", None)
-                is CompactionRasterKind.CANONICAL_LOCALITY
+                and getattr(compaction, "raster_kind", None) is CompactionRasterKind.CANONICAL_LOCALITY
             )
             if canonical_locality:
-                diagnostics.append(
-                    f"block={block.block_id};"
-                    "geometry=canonical-membership-slots-v1"
-                )
+                diagnostics.append(f"block={block.block_id};" "geometry=canonical-membership-slots-v1")
                 try:
                     (
                         membership_slot_by_id,
                         canonical_slot_size,
                     ) = canonical_contract_by_block_id[block.block_id]
                 except KeyError as error:
-                    raise ValueError(
-                        "canonical locality block has no membership contract"
-                    ) from error
+                    raise ValueError("canonical locality block has no membership contract") from error
             else:
                 membership_slot_by_id = {}
                 canonical_slot_size = (0, 0)
@@ -6591,9 +5763,7 @@ class AdaptivePersistentOcrSession:
                     membership_slot_by_id,
                     canonical_slot_size,
                 )
-                if canonical_locality
-                or candidate.transform
-                is not OcrTransform.CONTEXTUAL_COMPOSITE
+                if canonical_locality or candidate.transform is not OcrTransform.CONTEXTUAL_COMPOSITE
                 else candidate.output
             )
             jobs.append(
@@ -6607,15 +5777,9 @@ class AdaptivePersistentOcrSession:
                     output=mapped_output,
                     error_type=None,
                     error_message=None,
-                    elapsed_seconds=(
-                        recognition_seconds
-                        + time.perf_counter()
-                        - recursive_started
-                    ),
+                    elapsed_seconds=(recognition_seconds + time.perf_counter() - recursive_started),
                     input_sha256=candidate.input_sha256,
-                    context_sha256=hashlib.sha256(
-                        crop.raw.png_bytes
-                    ).hexdigest(),
+                    context_sha256=hashlib.sha256(crop.raw.png_bytes).hexdigest(),
                     failure_code=None,
                     capability_id=candidate.profile.profile_id,
                 )
@@ -6629,13 +5793,10 @@ class AdaptivePersistentOcrSession:
         cache_after = self._content_cache.snapshot()
         diagnostics.extend(
             (
-                f"content-cache.requests="
-                f"{cache_after.requests - cache_before.requests}",
+                f"content-cache.requests=" f"{cache_after.requests - cache_before.requests}",
                 f"content-cache.hits={cache_after.hits - cache_before.hits}",
-                f"content-cache.misses="
-                f"{cache_after.misses - cache_before.misses}",
-                f"content-cache.exact-duplicate-calls-avoided="
-                f"{cache_after.hits - cache_before.hits}",
+                f"content-cache.misses=" f"{cache_after.misses - cache_before.misses}",
+                f"content-cache.exact-duplicate-calls-avoided=" f"{cache_after.hits - cache_before.hits}",
                 f"content-cache.ocr-work-seconds="
                 f"{cache_after.ocr_work_seconds - cache_before.ocr_work_seconds:.6f}",
             )
@@ -6646,11 +5807,7 @@ class AdaptivePersistentOcrSession:
         failed = len(jobs) - complete
         return OcrQueueResult(
             jobs=tuple(jobs),
-            status=(
-                OcrQueueStatus.COMPLETE
-                if failed == 0
-                else OcrQueueStatus.PARTIAL
-            ),
+            status=(OcrQueueStatus.COMPLETE if failed == 0 else OcrQueueStatus.PARTIAL),
             complete=complete,
             failed=failed,
             diagnostics=tuple(diagnostics),

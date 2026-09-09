@@ -736,7 +736,4 @@ def apply_lexical_correction(text: str, mode: str) -> str:
         return text
 
     prefer_euro = "€" in text
-    return "\n".join(
-        _correct_ui_ocr_line(line, prefer_euro=prefer_euro)
-        for line in text.splitlines()
-    )
+    return "\n".join(_correct_ui_ocr_line(line, prefer_euro=prefer_euro) for line in text.splitlines())

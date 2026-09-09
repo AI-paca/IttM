@@ -99,8 +99,7 @@ class NativePipelineCore:
         missing_exports = [name for name in required_exports if not hasattr(library, name)]
         if missing_exports:
             raise RuntimeError(
-                f"Pipeline core ABI {version} is incomplete at {resolved}: "
-                + ", ".join(missing_exports)
+                f"Pipeline core ABI {version} is incomplete at {resolved}: " + ", ".join(missing_exports)
             )
         library.ittm_pipeline_abi_version.restype = ctypes.c_uint32
         library.ittm_pipeline_route_id.restype = ctypes.c_uint32
@@ -235,8 +234,12 @@ class NativePipelineCore:
         )
         library.ittm_separated_import_block.restype = ctypes.c_int32
         library.ittm_separated_import_block_geometry.argtypes = (
-            ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32,
-            ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_void_p,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
+            ctypes.c_uint32,
         )
         library.ittm_separated_import_block_geometry.restype = ctypes.c_int32
         library.ittm_separated_import_segments_begin.argtypes = ()
@@ -582,9 +585,7 @@ class NativePipelineCore:
                     )
                 )
                 if status != 0:
-                    raise ValueError(
-                        f"Topology layout handoff failed with status {status}"
-                    )
+                    raise ValueError(f"Topology layout handoff failed with status {status}")
             for (
                 segment_id,
                 object_id,
@@ -600,9 +601,7 @@ class NativePipelineCore:
                 encoded_text = text.encode("utf-8")
                 segment_buffer = ctypes.create_string_buffer(encoded_segment_id)
                 object_buffer = ctypes.create_string_buffer(encoded_object_id)
-                text_buffer = (
-                    ctypes.create_string_buffer(encoded_text) if encoded_text else None
-                )
+                text_buffer = ctypes.create_string_buffer(encoded_text) if encoded_text else None
                 status = int(
                     self._library.ittm_assembler_add_segment(
                         handle,
@@ -620,20 +619,14 @@ class NativePipelineCore:
                     )
                 )
                 if status != 0:
-                    raise ValueError(
-                        f"Topology segment handoff failed with status {status}"
-                    )
+                    raise ValueError(f"Topology segment handoff failed with status {status}")
             length = int(self._library.ittm_assembler_render_length(handle))
             if length == 0:
                 return ""
             output = ctypes.create_string_buffer(length)
-            copied = int(
-                self._library.ittm_assembler_render_copy(handle, output, length)
-            )
+            copied = int(self._library.ittm_assembler_render_copy(handle, output, length))
             if copied != length:
-                raise RuntimeError(
-                    f"Topology assembler copied {copied} bytes; expected {length}"
-                )
+                raise RuntimeError(f"Topology assembler copied {copied} bytes; expected {length}")
             return bytes(output.raw[:length]).decode("utf-8")
         finally:
             if int(self._library.ittm_assembler_drop(handle)) != 0:
@@ -663,31 +656,21 @@ class NativePipelineCore:
                     )
                 )
                 if status != 0:
-                    raise RuntimeError(
-                        f"Rust native PDF item handoff failed with status {status}"
-                    )
+                    raise RuntimeError(f"Rust native PDF item handoff failed with status {status}")
             build_status = int(self._library.ittm_pdf_native_build(handle))
             if build_status != 0:
-                raise RuntimeError(
-                    f"Rust native PDF build failed with status {build_status}"
-                )
+                raise RuntimeError(f"Rust native PDF build failed with status {build_status}")
             length = int(self._library.ittm_pdf_native_render_length(handle))
             if length <= 0:
                 raise RuntimeError("Rust native PDF route returned no artifact")
             output = ctypes.create_string_buffer(length)
-            copied = int(
-                self._library.ittm_pdf_native_render_copy(handle, output, length)
-            )
+            copied = int(self._library.ittm_pdf_native_render_copy(handle, output, length))
             if copied != length:
-                raise RuntimeError(
-                    f"Rust native PDF route copied {copied} bytes; expected {length}"
-                )
+                raise RuntimeError(f"Rust native PDF route copied {copied} bytes; expected {length}")
             artifact = json.loads(bytes(output.raw[:length]).decode("utf-8"))
             if artifact is None:
                 return None
-            if not isinstance(artifact.get("objects"), list) or not isinstance(
-                artifact.get("segments"), list
-            ):
+            if not isinstance(artifact.get("objects"), list) or not isinstance(artifact.get("segments"), list):
                 raise RuntimeError("Rust native PDF route returned an invalid artifact")
             return artifact
         finally:
@@ -769,11 +752,7 @@ class NativePipelineCore:
         source_indexes: tuple[int, ...],
         text: str,
     ) -> None:
-        sources = (
-            (ctypes.c_uint32 * len(source_indexes))(*source_indexes)
-            if source_indexes
-            else None
-        )
+        sources = (ctypes.c_uint32 * len(source_indexes))(*source_indexes) if source_indexes else None
         encoded = text.encode("utf-8")
         text_buffer = ctypes.create_string_buffer(encoded) if encoded else None
         result = int(
@@ -792,19 +771,28 @@ class NativePipelineCore:
             raise ValueError(f"Separated segment import failed: {result}")
 
     def separated_import_layout(
-        self, handle: int, object_id: int, object_kind: int,
-        rows: int, columns: int,
+        self,
+        handle: int,
+        object_id: int,
+        object_kind: int,
+        rows: int,
+        columns: int,
     ) -> None:
-        status = int(self._library.ittm_separated_import_layout(
-            handle, object_id, object_kind, rows, columns,
-        ))
+        status = int(
+            self._library.ittm_separated_import_layout(
+                handle,
+                object_id,
+                object_kind,
+                rows,
+                columns,
+            )
+        )
         if status != 0:
             raise ValueError(f"Separated layout import failed: {status}")
 
     def separated_layouts(self, handle: int) -> tuple[tuple[int, int, int, int], ...]:
         return tuple(
-            tuple(int(self._library.ittm_separated_layout_field(handle, index, field))
-                  for field in range(4))
+            tuple(int(self._library.ittm_separated_layout_field(handle, index, field)) for field in range(4))
             for index in range(int(self._library.ittm_separated_layout_count(handle)))
         )
 
@@ -841,14 +829,26 @@ class NativePipelineCore:
             raise ValueError(f"Separated block import failed: {result}")
 
     def separated_import_block_geometry(
-        self, handle: int, metadata: tuple[int, ...], width: int, height: int, stride: int,
+        self,
+        handle: int,
+        metadata: tuple[int, ...],
+        width: int,
+        height: int,
+        stride: int,
     ) -> None:
         if not metadata:
             raise ValueError("Imported block geometry must not be empty")
         buffer = (ctypes.c_uint32 * len(metadata))(*metadata)
-        status = int(self._library.ittm_separated_import_block_geometry(
-            handle, buffer, len(metadata), width, height, stride,
-        ))
+        status = int(
+            self._library.ittm_separated_import_block_geometry(
+                handle,
+                buffer,
+                len(metadata),
+                width,
+                height,
+                stride,
+            )
+        )
         if status != 0:
             raise ValueError(f"Separated block geometry import failed: {status}")
 
@@ -975,9 +975,7 @@ class NativePipelineCore:
         return value
 
     def separated_object_segment(self, handle: int, object_index: int, index: int) -> int:
-        value = int(
-            self._library.ittm_separated_object_segment(handle, object_index, index)
-        )
+        value = int(self._library.ittm_separated_object_segment(handle, object_index, index))
         if value < 0:
             raise ValueError(f"Invalid separated object segment: {object_index}:{index}")
         return value
@@ -1002,18 +1000,13 @@ class NativePipelineCore:
         handle: int,
         index: int,
     ) -> tuple[bytes, int, int, int, int]:
-        fields = tuple(
-            int(self._library.ittm_separated_block_raster_field(handle, index, field))
-            for field in range(4)
-        )
+        fields = tuple(int(self._library.ittm_separated_block_raster_field(handle, index, field)) for field in range(4))
         if any(value <= 0 for value in fields):
             raise ValueError(f"Invalid separated block raster fields: {index}:{fields}")
         width, height, stride, pixel_format = fields
         length = int(self._library.ittm_separated_block_raster_length(handle, index))
         if length != stride * height:
-            raise RuntimeError(
-                f"Separated block raster length {length} disagrees with {stride}x{height}"
-            )
+            raise RuntimeError(f"Separated block raster length {length} disagrees with {stride}x{height}")
         output = ctypes.create_string_buffer(length)
         copied = int(
             self._library.ittm_separated_block_raster_copy(
@@ -1024,9 +1017,7 @@ class NativePipelineCore:
             )
         )
         if copied != length:
-            raise RuntimeError(
-                f"Separated block raster copied {copied} bytes; expected {length}"
-            )
+            raise RuntimeError(f"Separated block raster copied {copied} bytes; expected {length}")
         return bytes(output.raw[:length]), width, height, stride, pixel_format
 
     def separated_topology_row_count(self, handle: int) -> int:
@@ -1051,9 +1042,7 @@ class NativePipelineCore:
         slot: int,
         field: int,
     ) -> int:
-        value = int(
-            self._library.ittm_separated_topology_slot_field(handle, row, slot, field)
-        )
+        value = int(self._library.ittm_separated_topology_slot_field(handle, row, slot, field))
         if value < 0:
             raise ValueError(f"Invalid separated topology slot field: {row}:{slot}:{field}")
         return value
@@ -1063,18 +1052,13 @@ class NativePipelineCore:
         handle: int,
         index: int,
     ) -> tuple[bytes, int, int, int, int]:
-        fields = tuple(
-            int(self._library.ittm_separated_job_raster_field(handle, index, field))
-            for field in range(4)
-        )
+        fields = tuple(int(self._library.ittm_separated_job_raster_field(handle, index, field)) for field in range(4))
         if any(value <= 0 for value in fields):
             raise ValueError(f"Invalid separated OCR raster fields: {index}:{fields}")
         width, height, stride, pixel_format = fields
         length = int(self._library.ittm_separated_job_raster_length(handle, index))
         if length != stride * height:
-            raise RuntimeError(
-                f"Separated OCR raster length {length} disagrees with {stride}x{height}"
-            )
+            raise RuntimeError(f"Separated OCR raster length {length} disagrees with {stride}x{height}")
         output = ctypes.create_string_buffer(length)
         copied = int(
             self._library.ittm_separated_job_raster_copy(
@@ -1085,9 +1069,7 @@ class NativePipelineCore:
             )
         )
         if copied != length:
-            raise RuntimeError(
-                f"Separated OCR raster copied {copied} bytes; expected {length}"
-            )
+            raise RuntimeError(f"Separated OCR raster copied {copied} bytes; expected {length}")
         return bytes(output.raw[:length]), width, height, stride, pixel_format
 
     def separated_set_ocr(

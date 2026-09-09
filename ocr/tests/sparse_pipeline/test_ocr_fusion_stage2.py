@@ -142,8 +142,7 @@ def _overlap_fixture(
     return plan, segments, _crops(plan, identical_blocks=identical_blocks)
 
 
-def _single_segment_fixture(
-) -> tuple[BlockPlan, tuple[Segment, ...], tuple[BlockCropPair, ...]]:
+def _single_segment_fixture() -> tuple[BlockPlan, tuple[Segment, ...], tuple[BlockCropPair, ...]]:
     segments = (_segment("segment-000000", Box(0, 0, 32, 12), 0),)
     block = RecognitionBlock(
         block_id="block-000000",
@@ -162,8 +161,7 @@ def _single_segment_fixture(
     return plan, segments, _crops(plan)
 
 
-def _three_block_fixture(
-) -> tuple[BlockPlan, tuple[Segment, ...], tuple[BlockCropPair, ...]]:
+def _three_block_fixture() -> tuple[BlockPlan, tuple[Segment, ...], tuple[BlockCropPair, ...]]:
     segments = tuple(
         _segment(
             f"segment-{index:06d}",
@@ -227,8 +225,7 @@ def _three_block_fixture(
     return plan, segments, _crops(plan)
 
 
-def _orthogonal_membership_fixture(
-) -> tuple[BlockPlan, tuple[Segment, ...], tuple[BlockCropPair, ...]]:
+def _orthogonal_membership_fixture() -> tuple[BlockPlan, tuple[Segment, ...], tuple[BlockCropPair, ...]]:
     """A 2x3 matrix encoded by two row windows and one column probe."""
 
     segments = tuple(
@@ -318,11 +315,7 @@ def _orthogonal_membership_fixture(
                 f"membership-unit-{index:06d}",
                 MembershipUnitKind.SEGMENT,
                 (segment.segment_id,),
-                tuple(
-                    block.block_id
-                    for block in blocks
-                    if segment.segment_id in block.segment_ids
-                ),
+                tuple(block.block_id for block in blocks if segment.segment_id in block.segment_ids),
                 "scope-000000",
             )
             for index, segment in enumerate(segments)
@@ -359,9 +352,7 @@ def _complete_job(
     words: tuple[OcrWord, ...] = (),
     engine_text: str | None = None,
 ) -> OcrJobResult:
-    resolved_text = (
-        " ".join(word.text for word in words) if engine_text is None else engine_text
-    )
+    resolved_text = " ".join(word.text for word in words) if engine_text is None else engine_text
     return OcrJobResult(
         job_id=f"ocr-job-{index:08d}",
         block_id=block.block_id,
@@ -372,11 +363,7 @@ def _complete_job(
         output=OcrEngineOutput(
             text=resolved_text,
             words=words,
-            geometry=(
-                OcrOutputGeometry.TEXT_ONLY
-                if resolved_text and not words
-                else OcrOutputGeometry.WORD_BOXES
-            ),
+            geometry=(OcrOutputGeometry.TEXT_ONLY if resolved_text and not words else OcrOutputGeometry.WORD_BOXES),
         ),
         error_type=None,
         error_message=None,
@@ -430,20 +417,13 @@ def _matrix_queue(
         assert key not in specified
         specified[key] = job
     crop_by_id = {crop.block_id: crop for crop in crops}
-    lane_contract = {
-        lane_id: next(job for job in specified_jobs if job.lane_id == lane_id)
-        for lane_id in lane_ids
-    }
+    lane_contract = {lane_id: next(job for job in specified_jobs if job.lane_id == lane_id) for lane_id in lane_ids}
     jobs: list[OcrJobResult] = []
     for block in plan.blocks:
         crop = crop_by_id[block.block_id]
         context_sha256 = hashlib.sha256(crop.raw.png_bytes).hexdigest()
         for transform in (OcrTransform.RAW, OcrTransform.GAMMA):
-            payload = (
-                crop.raw.png_bytes
-                if transform is OcrTransform.RAW
-                else crop.gamma.png_bytes
-            )
+            payload = crop.raw.png_bytes if transform is OcrTransform.RAW else crop.gamma.png_bytes
             input_sha256 = hashlib.sha256(payload).hexdigest()
             for lane_id in lane_ids:
                 key = (block.block_id, transform, lane_id)
@@ -606,9 +586,7 @@ def test_phrase_with_multiple_significant_intersections_is_preserved_unassigned(
         block=block,
         transform=OcrTransform.RAW,
         lane_id="cpu",
-        words=(
-            OcrWord("two segments", Box(30, 0, 70, 20), 0.9),
-        ),
+        words=(OcrWord("two segments", Box(30, 0, 70, 20), 0.9),),
     )
 
     result = OcrEvidenceFusion().fuse(
@@ -658,9 +636,7 @@ def test_word_crossing_line_boundary_routes_to_unique_center_owner() -> None:
                 OcrWord("line-two", Box(20, 19, 80, 30), 0.9),
             ),
         )
-        for index, transform in enumerate(
-            (OcrTransform.RAW, OcrTransform.GAMMA)
-        )
+        for index, transform in enumerate((OcrTransform.RAW, OcrTransform.GAMMA))
     )
 
     result = OcrEvidenceFusion().fuse(
@@ -797,9 +773,7 @@ def test_routed_words_are_line_major_before_left_to_right() -> None:
         queue=_matrix_queue(plan, crops, job),
     )
 
-    assert result.observations[0].text == (
-        "left-one right-one left-two right-two"
-    )
+    assert result.observations[0].text == ("left-one right-one left-two right-two")
 
 
 def test_text_only_output_is_unattributable_without_fake_segment_observations() -> None:
@@ -937,9 +911,7 @@ def test_existing_clean_raw_beats_repeated_short_script_confusable() -> None:
         queue=_matrix_queue(plan, crops, *jobs),
     )
 
-    assert _fused(result, target).selected_text == (
-        "Инструмент запущен, но без"
-    )
+    assert _fused(result, target).selected_text == ("Инструмент запущен, но без")
 
 
 def test_capability_replicas_cannot_outvote_two_independent_capabilities() -> None:
@@ -1011,8 +983,7 @@ def test_complete_queue_word_bbox_outside_bound_crop_is_rejected() -> None:
         )
 
 
-def test_canonical_slot_words_use_declared_canvas_and_overflow_fails_closed(
-) -> None:
+def test_canonical_slot_words_use_declared_canvas_and_overflow_fails_closed() -> None:
     plan, _segments, _original_crops = _single_segment_fixture()
     raster_block = replace(
         plan.blocks[0],
@@ -1032,9 +1003,7 @@ def test_canonical_slot_words_use_declared_canvas_and_overflow_fails_closed(
         object.__setattr__(
             metadata_crop,
             field_name,
-            block.bbox
-            if field_name == "bbox"
-            else getattr(raster_crop, field_name),
+            block.bbox if field_name == "bbox" else getattr(raster_crop, field_name),
         )
     crops = (metadata_crop,)
     doc_course_word = OcrWord(
@@ -1050,16 +1019,11 @@ def test_canonical_slot_words_use_declared_canvas_and_overflow_fails_closed(
             lane_id="cpu",
             words=(doc_course_word,),
         )
-        for index, transform in enumerate(
-            (OcrTransform.RAW, OcrTransform.GAMMA)
-        )
+        for index, transform in enumerate((OcrTransform.RAW, OcrTransform.GAMMA))
     )
     queue = replace(
         _matrix_queue(plan, crops, *jobs),
-        diagnostics=(
-            "geometry=canonical-membership-slots-v1;"
-            "width=720;height=1406",
-        ),
+        diagnostics=("geometry=canonical-membership-slots-v1;" "width=720;height=1406",),
     )
     fusion = OcrEvidenceFusion()
 
@@ -1067,9 +1031,7 @@ def test_canonical_slot_words_use_declared_canvas_and_overflow_fails_closed(
 
     legacy_v53_queue = replace(
         queue,
-        diagnostics=(
-            "block=block-000000;geometry=canonical-membership-slots-v1",
-        ),
+        diagnostics=("block=block-000000;geometry=canonical-membership-slots-v1",),
     )
     fusion._validate_sparse_jobs(
         plan=plan,
@@ -1079,10 +1041,7 @@ def test_canonical_slot_words_use_declared_canvas_and_overflow_fails_closed(
 
     oversized_canvas_queue = replace(
         queue,
-        diagnostics=(
-            "geometry=canonical-membership-slots-v1;"
-            "width=721;height=1406",
-        ),
+        diagnostics=("geometry=canonical-membership-slots-v1;" "width=721;height=1406",),
     )
     with pytest.raises(
         OcrFusionInvariantError,
@@ -1239,11 +1198,7 @@ def test_distinct_text_capability_clones_are_one_vote_and_block_resolution() -> 
     assert fused.independent_context_count == 1
     assert fused.selected_text == "RIGHT"
     assert fused.selected_lane_id in {"right-a", "right-b"}
-    selected = next(
-        item
-        for item in result.observations
-        if item.observation_id == fused.selected_observation_id
-    )
+    selected = next(item for item in result.observations if item.observation_id == fused.selected_observation_id)
     assert selected.capability_id in {"cap-right-a", "cap-right-b"}
     assert "capability_replica_conflict" in fused.uncertainty_reasons
     assert fused.unresolved is True
@@ -1745,9 +1700,7 @@ def test_exact_selected_text_across_two_transforms_confirms_overlap() -> None:
     assert fused.selected_transform is OcrTransform.RAW
     assert fused.unresolved is False
     assert overlap.confirmed_intersection_segment_ids == ()
-    assert overlap.cross_transform_confirmed_intersection_segment_ids == (
-        target,
-    )
+    assert overlap.cross_transform_confirmed_intersection_segment_ids == (target,)
     assert overlap.near_confirmed_intersection_segment_ids == ()
     assert overlap.deferred_intersection_segment_ids == ()
     assert overlap.conflicting_intersection_segment_ids == ()
@@ -1852,10 +1805,7 @@ def test_low_confidence_cross_transform_witness_cannot_clear_raw_conflict() -> N
     )
     assert jobs[1].output is not None
     shifted_words = tuple(
-        replace(word, bbox=Box(1, 0, 99, 10))
-        if word.text == "abce"
-        else word
-        for word in jobs[1].output.words
+        replace(word, bbox=Box(1, 0, 99, 10)) if word.text == "abce" else word for word in jobs[1].output.words
     )
     jobs = (
         jobs[0],
@@ -1929,11 +1879,7 @@ def test_exact_overlap_consensus_never_combines_capabilities() -> None:
 
     assert fused.selected_text == "abcdefghij"
     assert fused.selected_observation_id is not None
-    selected = next(
-        item
-        for item in result.observations
-        if item.observation_id == fused.selected_observation_id
-    )
+    selected = next(item for item in result.observations if item.observation_id == fused.selected_observation_id)
     assert selected.capability_id == "capability-b"
     assert selected.block_id == "block-000001"
     assert fused.unresolved is False
@@ -2059,10 +2005,7 @@ def test_deferred_overlap_reactivates_when_its_segment_becomes_resolved() -> Non
     )
     assert second.output is not None
     shifted_words = tuple(
-        replace(word, bbox=Box(1, 0, 99, 10))
-        if word.text == "abce"
-        else word
-        for word in second.output.words
+        replace(word, bbox=Box(1, 0, 99, 10)) if word.text == "abce" else word for word in second.output.words
     )
     second = replace(
         second,
@@ -2070,17 +2013,13 @@ def test_deferred_overlap_reactivates_when_its_segment_becomes_resolved() -> Non
     )
     queue = _matrix_queue(plan, crops, first, second)
 
-    unresolved = OcrEvidenceFusion(
-        replace(OcrFusionConfig(), minimum_stability=0.76)
-    ).fuse(
+    unresolved = OcrEvidenceFusion(replace(OcrFusionConfig(), minimum_stability=0.76)).fuse(
         plan=plan,
         segments=segments,
         crops=crops,
         queue=queue,
     )
-    resolved = OcrEvidenceFusion(
-        replace(OcrFusionConfig(), minimum_stability=0.75)
-    ).fuse(
+    resolved = OcrEvidenceFusion(replace(OcrFusionConfig(), minimum_stability=0.75)).fuse(
         plan=plan,
         segments=segments,
         crops=crops,
@@ -2224,10 +2163,7 @@ def test_observation_segment_overlap_and_alignment_order_is_canonical() -> None:
 
     assert first == second
     assert tuple(item.segment_id for item in first.segments) == plan.source_segment_ids
-    assert tuple(
-        (item.observation_id, item.job_id, item.segment_id)
-        for item in first.observations
-    ) == (
+    assert tuple((item.observation_id, item.job_id, item.segment_id) for item in first.observations) == (
         ("observation-00000000", "ocr-job-00000000", "segment-000000"),
         ("observation-00000001", "ocr-job-00000000", "segment-000001"),
         ("observation-00000002", "ocr-job-00000005", "segment-000001"),
@@ -2294,22 +2230,19 @@ def test_word_to_segment_routing_comparisons_have_an_exact_hard_budget() -> None
     queue = _matrix_queue(plan, crops, job)
 
     with pytest.raises(OcrFusionLimitError, match="routing|comparison"):
-        OcrEvidenceFusion(
-            replace(OcrFusionConfig(), max_routing_comparisons=3)
-        ).fuse(plan=plan, segments=segments, crops=crops, queue=queue)
+        OcrEvidenceFusion(replace(OcrFusionConfig(), max_routing_comparisons=3)).fuse(
+            plan=plan, segments=segments, crops=crops, queue=queue
+        )
 
-    result = OcrEvidenceFusion(
-        replace(OcrFusionConfig(), max_routing_comparisons=4)
-    ).fuse(plan=plan, segments=segments, crops=crops, queue=queue)
+    result = OcrEvidenceFusion(replace(OcrFusionConfig(), max_routing_comparisons=4)).fuse(
+        plan=plan, segments=segments, crops=crops, queue=queue
+    )
     assert "routing-comparisons=4" in result.diagnostics
 
 
 def test_production_profile_orthogonal_membership_decodes_all_six() -> None:
     plan, segments, crops = _orthogonal_membership_fixture()
-    texts = {
-        segment.segment_id: (f"value-{index}", 0.95)
-        for index, segment in enumerate(segments)
-    }
+    texts = {segment.segment_id: (f"value-{index}", 0.95) for index, segment in enumerate(segments)}
     jobs = tuple(
         _evidence_job(
             block_index * 2 + transform_index,
@@ -2318,15 +2251,10 @@ def test_production_profile_orthogonal_membership_decodes_all_six() -> None:
             block_index=block_index,
             transform=transform,
             lane_id="cpu",
-            evidence={
-                segment_id: texts[segment_id]
-                for segment_id in plan.blocks[block_index].segment_ids
-            },
+            evidence={segment_id: texts[segment_id] for segment_id in plan.blocks[block_index].segment_ids},
         )
         for block_index in range(len(plan.blocks))
-        for transform_index, transform in enumerate(
-            (OcrTransform.RAW, OcrTransform.GAMMA)
-        )
+        for transform_index, transform in enumerate((OcrTransform.RAW, OcrTransform.GAMMA))
     )
 
     profile = resolve_sparse_runtime_profile()
@@ -2341,36 +2269,23 @@ def test_production_profile_orthogonal_membership_decodes_all_six() -> None:
 
     assert result.status is OcrFusionStatus.COMPLETE
     assert result.unassigned_word_observations == ()
-    assert tuple(item.selected_text for item in result.segments) == tuple(
-        f"value-{index}" for index in range(6)
-    )
+    assert tuple(item.selected_text for item in result.segments) == tuple(f"value-{index}" for index in range(6))
     observed_blocks = {
         segment_id: {
             observation.block_id
             for observation in result.observations
-            if observation.segment_id == segment_id
-            and observation.comparison_text
+            if observation.segment_id == segment_id and observation.comparison_text
         }
         for segment_id in plan.source_segment_ids
     }
     assert observed_blocks == {
-        segment_id: {
-            block.block_id
-            for block in plan.blocks
-            if segment_id in block.segment_ids
-        }
+        segment_id: {block.block_id for block in plan.blocks if segment_id in block.segment_ids}
         for segment_id in plan.source_segment_ids
     }
     assert "routing-mode=block_membership" in result.diagnostics
     assert "or-xor=observed-block-membership-signatures" in result.diagnostics
-    assert (
-        "membership-completeness=explicit-complete-job-matrix"
-        in result.diagnostics
-    )
-    assert (
-        "membership-per-word-omission-risk=accepted-by-explicit-profile"
-        in result.diagnostics
-    )
+    assert "membership-completeness=explicit-complete-job-matrix" in result.diagnostics
+    assert "membership-per-word-omission-risk=accepted-by-explicit-profile" in result.diagnostics
 
 
 def test_canonical_polar_slots_prove_placement_omission() -> None:
@@ -2384,11 +2299,7 @@ def test_canonical_polar_slots_prove_placement_omission() -> None:
         object.__setattr__(
             local_block,
             "matrix_window_kind",
-            (
-                "polar-local-full"
-                if index == 0
-                else "polar-local-signature"
-            ),
+            ("polar-local-full" if index == 0 else "polar-local-signature"),
         )
         local_blocks.append(local_block)
     plan = replace(
@@ -2410,9 +2321,7 @@ def test_canonical_polar_slots_prove_placement_omission() -> None:
             },
         )
         for block_index in range(len(plan.blocks))
-        for transform_index, transform in enumerate(
-            (OcrTransform.RAW, OcrTransform.GAMMA)
-        )
+        for transform_index, transform in enumerate((OcrTransform.RAW, OcrTransform.GAMMA))
     )
     queue = _matrix_queue(plan, crops, *jobs)
     profile = replace(
@@ -2440,12 +2349,10 @@ def test_canonical_polar_slots_prove_placement_omission() -> None:
 
     assert without_provenance.status is OcrFusionStatus.UNRESOLVED
     assert with_provenance.unassigned_word_observations == ()
-    assert tuple(
-        item.selected_text for item in with_provenance.segments
-    ) == tuple(f"value-{index}" for index in range(6))
-    assert "overlap-contract=canonical-membership-slots" in (
-        with_provenance.diagnostics
+    assert tuple(item.selected_text for item in with_provenance.segments) == tuple(
+        f"value-{index}" for index in range(6)
     )
+    assert "overlap-contract=canonical-membership-slots" in (with_provenance.diagnostics)
 
 
 def test_production_membership_does_not_alias_incomplete_separator_signature() -> None:
@@ -2461,9 +2368,7 @@ def test_production_membership_does_not_alias_incomplete_separator_signature() -
     plan, segments, crops = _orthogonal_membership_fixture()
     jobs = []
     for block_index, block in enumerate(plan.blocks):
-        for transform_index, transform in enumerate(
-            (OcrTransform.RAW, OcrTransform.GAMMA)
-        ):
+        for transform_index, transform in enumerate((OcrTransform.RAW, OcrTransform.GAMMA)):
             evidence = {
                 segment_id: (f"value-{int(segment_id[-6:])}", 0.95)
                 for segment_id in block.segment_ids
@@ -2492,9 +2397,9 @@ def test_production_membership_does_not_alias_incomplete_separator_signature() -
 
     assert result.status is OcrFusionStatus.UNRESOLVED
     assert len(result.unassigned_word_observations) == 1
-    assert {
-        item.reason for item in result.unassigned_word_observations
-    } == {"membership-observation-lattice-incomplete"}
+    assert {item.reason for item in result.unassigned_word_observations} == {
+        "membership-observation-lattice-incomplete"
+    }
     assert all("|" not in (item.selected_text or "") for item in result.segments)
     assert _fused(result, "segment-000001").selected_text == "value-1"
 
@@ -2505,9 +2410,7 @@ def test_complete_replica_separator_missing_one_spatial_bit_is_unassigned() -> N
     plan, segments, crops = _orthogonal_membership_fixture()
     jobs = []
     for block_index, block in enumerate(plan.blocks):
-        for transform_index, transform in enumerate(
-            (OcrTransform.RAW, OcrTransform.GAMMA)
-        ):
+        for transform_index, transform in enumerate((OcrTransform.RAW, OcrTransform.GAMMA)):
             evidence = {
                 segment_id: (f"value-{int(segment_id[-6:])}", 0.95)
                 for segment_id in block.segment_ids
@@ -2536,9 +2439,7 @@ def test_complete_replica_separator_missing_one_spatial_bit_is_unassigned() -> N
 
     assert result.status is OcrFusionStatus.UNRESOLVED
     assert len(result.unassigned_word_observations) == 2
-    assert {
-        item.reason for item in result.unassigned_word_observations
-    } == {"membership-signature-omission-ambiguous"}
+    assert {item.reason for item in result.unassigned_word_observations} == {"membership-signature-omission-ambiguous"}
     assert all("|" not in (item.selected_text or "") for item in result.segments)
     assert _fused(result, "segment-000001").selected_text == "value-1"
 
@@ -2549,9 +2450,7 @@ def test_complete_separator_lattice_survives_near_geometry_correlation() -> None
     plan, segments, crops = _orthogonal_membership_fixture()
     jobs = []
     for block_index, block in enumerate(plan.blocks):
-        for transform_index, transform in enumerate(
-            (OcrTransform.RAW, OcrTransform.GAMMA)
-        ):
+        for transform_index, transform in enumerate((OcrTransform.RAW, OcrTransform.GAMMA)):
             job = _evidence_job(
                 block_index * 2 + transform_index,
                 plan=plan,
@@ -2561,9 +2460,7 @@ def test_complete_separator_lattice_survives_near_geometry_correlation() -> None
                 lane_id="cpu",
                 evidence={
                     segment_id: (
-                        "|"
-                        if segment_id == "segment-000000"
-                        else f"value-{int(segment_id[-6:])}",
+                        "|" if segment_id == "segment-000000" else f"value-{int(segment_id[-6:])}",
                         0.95,
                     )
                     for segment_id in block.segment_ids
@@ -2572,17 +2469,19 @@ def test_complete_separator_lattice_survives_near_geometry_correlation() -> None
             if block_index == 2:
                 assert job.output is not None
                 shifted = tuple(
-                    replace(
-                        word,
-                        bbox=Box(
-                            word.bbox.left,
-                            word.bbox.top + 1,
-                            word.bbox.right,
-                            word.bbox.bottom + 1,
-                        ),
+                    (
+                        replace(
+                            word,
+                            bbox=Box(
+                                word.bbox.left,
+                                word.bbox.top + 1,
+                                word.bbox.right,
+                                word.bbox.bottom + 1,
+                            ),
+                        )
+                        if word.text == "|"
+                        else word
                     )
-                    if word.text == "|"
-                    else word
                     for word in job.output.words
                 )
                 job = replace(job, output=replace(job.output, words=shifted))
@@ -2604,15 +2503,11 @@ def test_one_complete_capability_lattice_is_enough_for_genuine_separator() -> No
     plan, segments, crops = _orthogonal_membership_fixture()
     jobs = []
     for block_index, block in enumerate(plan.blocks):
-        for transform_index, transform in enumerate(
-            (OcrTransform.RAW, OcrTransform.GAMMA)
-        ):
+        for transform_index, transform in enumerate((OcrTransform.RAW, OcrTransform.GAMMA)):
             for lane_id in ("complete-capability", "partial-capability"):
                 evidence = {
                     segment_id: (
-                        "|"
-                        if segment_id == "segment-000000"
-                        else f"value-{int(segment_id[-6:])}",
+                        "|" if segment_id == "segment-000000" else f"value-{int(segment_id[-6:])}",
                         0.95,
                     )
                     for segment_id in block.segment_ids
@@ -2625,9 +2520,7 @@ def test_one_complete_capability_lattice_is_enough_for_genuine_separator() -> No
                 }
                 jobs.append(
                     _evidence_job(
-                        block_index * 4
-                        + transform_index * 2
-                        + (lane_id == "partial-capability"),
+                        block_index * 4 + transform_index * 2 + (lane_id == "partial-capability"),
                         plan=plan,
                         segments=segments,
                         block_index=block_index,
@@ -2653,9 +2546,7 @@ def test_near_duplicate_separator_boxes_are_unassigned_as_geometry_garbage() -> 
     plan, segments, crops = _orthogonal_membership_fixture()
     jobs = []
     for block_index, block in enumerate(plan.blocks):
-        for transform_index, transform in enumerate(
-            (OcrTransform.RAW, OcrTransform.GAMMA)
-        ):
+        for transform_index, transform in enumerate((OcrTransform.RAW, OcrTransform.GAMMA)):
             job = _evidence_job(
                 block_index * 2 + transform_index,
                 plan=plan,
@@ -2663,10 +2554,7 @@ def test_near_duplicate_separator_boxes_are_unassigned_as_geometry_garbage() -> 
                 block_index=block_index,
                 transform=transform,
                 lane_id="cpu",
-                evidence={
-                    segment_id: (f"value-{int(segment_id[-6:])}", 0.95)
-                    for segment_id in block.segment_ids
-                },
+                evidence={segment_id: (f"value-{int(segment_id[-6:])}", 0.95) for segment_id in block.segment_ids},
             )
             if block_index == 0 and transform is OcrTransform.RAW:
                 assert job.output is not None
@@ -2693,9 +2581,7 @@ def test_near_duplicate_separator_boxes_are_unassigned_as_geometry_garbage() -> 
 
     assert result.status is OcrFusionStatus.UNRESOLVED
     assert len(result.unassigned_word_observations) == 2
-    assert {
-        item.reason for item in result.unassigned_word_observations
-    } == {"membership-geometry-ambiguous"}
+    assert {item.reason for item in result.unassigned_word_observations} == {"membership-geometry-ambiguous"}
     assert all("|" not in (item.selected_text or "") for item in result.segments)
 
 
@@ -2709,15 +2595,10 @@ def test_production_membership_profile_rejects_one_failed_block_job() -> None:
             block_index=block_index,
             transform=transform,
             lane_id="cpu",
-            evidence={
-                segment_id: (segment_id, 0.95)
-                for segment_id in plan.blocks[block_index].segment_ids
-            },
+            evidence={segment_id: (segment_id, 0.95) for segment_id in plan.blocks[block_index].segment_ids},
         )
         for block_index in range(len(plan.blocks))
-        for transform_index, transform in enumerate(
-            (OcrTransform.RAW, OcrTransform.GAMMA)
-        )
+        for transform_index, transform in enumerate((OcrTransform.RAW, OcrTransform.GAMMA))
     )
     failed = _failed_job(
         0,
@@ -2758,9 +2639,7 @@ def test_membership_routing_missing_context_is_unmatched_and_fail_closed() -> No
             },
         )
         for block_index in range(len(plan.blocks))
-        for transform_index, transform in enumerate(
-            (OcrTransform.RAW, OcrTransform.GAMMA)
-        )
+        for transform_index, transform in enumerate((OcrTransform.RAW, OcrTransform.GAMMA))
     )
 
     result = OcrEvidenceFusion(
@@ -2778,10 +2657,7 @@ def test_membership_routing_missing_context_is_unmatched_and_fail_closed() -> No
 
     assert result.status is OcrFusionStatus.UNRESOLVED
     assert _fused(result, "segment-000000").selected_text is None
-    assert tuple(
-        (item.block_id, item.transform, item.reason)
-        for item in result.unassigned_word_observations
-    ) == (
+    assert tuple((item.block_id, item.transform, item.reason) for item in result.unassigned_word_observations) == (
         (
             "block-000002",
             OcrTransform.RAW,
@@ -2828,9 +2704,7 @@ def test_membership_default_rejects_exact_code_that_could_have_lost_a_bit() -> N
 
     assert result.status is OcrFusionStatus.UNRESOLVED
     assert len(result.unassigned_word_observations) == 2
-    assert {
-        item.reason for item in result.unassigned_word_observations
-    } == {"membership-signature-omission-ambiguous"}
+    assert {item.reason for item in result.unassigned_word_observations} == {"membership-signature-omission-ambiguous"}
     assert all(item.selected_text is None for item in result.segments)
     assert "membership-completeness=omission-safe" in result.diagnostics
 
@@ -2875,14 +2749,9 @@ def test_membership_routing_attributes_duplicate_signature_to_subblock() -> None
             block_index=0,
             transform=transform,
             lane_id="cpu",
-            evidence={
-                segment.segment_id: (f"value-{index}", 0.95)
-                for index, segment in enumerate(segments)
-            },
+            evidence={segment.segment_id: (f"value-{index}", 0.95) for index, segment in enumerate(segments)},
         )
-        for transform_index, transform in enumerate(
-            (OcrTransform.RAW, OcrTransform.GAMMA)
-        )
+        for transform_index, transform in enumerate((OcrTransform.RAW, OcrTransform.GAMMA))
     )
 
     result = OcrEvidenceFusion(
@@ -2902,9 +2771,7 @@ def test_membership_routing_attributes_duplicate_signature_to_subblock() -> None
     assert all(item.selected_text is None for item in result.segments)
     assert result.unassigned_word_observations == ()
     assert len(result.segment_groups) == 1
-    assert result.segment_groups[0].segment_ids == tuple(
-        item.segment_id for item in segments
-    )
+    assert result.segment_groups[0].segment_ids == tuple(item.segment_id for item in segments)
     assert result.segment_groups[0].selected_text == "value-0 value-1"
     assert result.segment_groups[0].selected_observation_id is not None
 
@@ -2919,10 +2786,7 @@ def test_membership_geometry_comparisons_have_a_hard_budget() -> None:
             block_index=block_index,
             transform=OcrTransform.RAW,
             lane_id="cpu",
-            evidence={
-                segment_id: (segment_id, 0.9)
-                for segment_id in plan.blocks[block_index].segment_ids
-            },
+            evidence={segment_id: (segment_id, 0.9) for segment_id in plan.blocks[block_index].segment_ids},
         )
         for block_index in range(len(plan.blocks))
     )
@@ -2973,9 +2837,7 @@ def test_aggregate_alignment_and_pair_limits_are_enforced() -> None:
     )
 
     with pytest.raises(OcrFusionLimitError, match="logical comparison"):
-        OcrEvidenceFusion(
-            replace(OcrFusionConfig(), max_pairwise_alignments=1)
-        ).fuse(
+        OcrEvidenceFusion(replace(OcrFusionConfig(), max_pairwise_alignments=1)).fuse(
             plan=plan,
             segments=segments,
             crops=crops,
@@ -3052,9 +2914,7 @@ def test_one_thousand_identical_observations_do_not_expand_quadratically() -> No
                 )
             )
 
-    result = OcrEvidenceFusion(
-        replace(OcrFusionConfig(), max_pairwise_alignments=5_000)
-    ).fuse(
+    result = OcrEvidenceFusion(replace(OcrFusionConfig(), max_pairwise_alignments=5_000)).fuse(
         plan=plan,
         segments=segments,
         crops=crops,
@@ -3065,9 +2925,7 @@ def test_one_thousand_identical_observations_do_not_expand_quadratically() -> No
     assert fused.observation_count == 1_000
     assert fused.selected_text == "identical"
     logical = next(
-        int(item.rsplit("=", 1)[1])
-        for item in result.diagnostics
-        if item.startswith("alignment-logical-comparisons=")
+        int(item.rsplit("=", 1)[1]) for item in result.diagnostics if item.startswith("alignment-logical-comparisons=")
     )
     assert logical <= 2_005
 
@@ -3100,13 +2958,13 @@ def test_reading_order_quadratic_work_has_an_exact_aggregate_boundary() -> None:
     )
 
     with pytest.raises(OcrFusionLimitError, match="reading-order"):
-        OcrEvidenceFusion(
-            replace(OcrFusionConfig(), max_reading_order_checks=9)
-        ).fuse(plan=plan, segments=segments, crops=crops, queue=queue)
+        OcrEvidenceFusion(replace(OcrFusionConfig(), max_reading_order_checks=9)).fuse(
+            plan=plan, segments=segments, crops=crops, queue=queue
+        )
 
-    result = OcrEvidenceFusion(
-        replace(OcrFusionConfig(), max_reading_order_checks=10)
-    ).fuse(plan=plan, segments=segments, crops=crops, queue=queue)
+    result = OcrEvidenceFusion(replace(OcrFusionConfig(), max_reading_order_checks=10)).fuse(
+        plan=plan, segments=segments, crops=crops, queue=queue
+    )
     assert result.segments[0].selected_text == "one two three"
     assert "reading-order-checks=10" in result.diagnostics
 
@@ -3140,9 +2998,7 @@ def test_job_matrix_product_is_preflighted_before_expected_tuple_materialization
 
 def test_identical_crop_fingerprint_under_two_block_ids_is_one_context() -> None:
     plan, segments, crops = _overlap_fixture(identical_blocks=True)
-    assert hashlib.sha256(crops[0].raw.png_bytes).digest() == hashlib.sha256(
-        crops[1].raw.png_bytes
-    ).digest()
+    assert hashlib.sha256(crops[0].raw.png_bytes).digest() == hashlib.sha256(crops[1].raw.png_bytes).digest()
     target = "segment-000001"
     jobs: list[OcrJobResult] = []
     for transform, text in (
@@ -3270,10 +3126,7 @@ def test_low_confidence_replicas_of_one_context_do_not_form_consensus() -> None:
     assert fused.observation_count == 2
     assert fused.independent_context_count == 1
     assert "low_confidence" in fused.uncertainty_reasons
-    assert (
-        "low_confidence_stable_context_consensus"
-        not in fused.uncertainty_reasons
-    )
+    assert "low_confidence_stable_context_consensus" not in fused.uncertainty_reasons
     assert fused.unresolved is True
 
 
@@ -3310,9 +3163,7 @@ def test_low_confidence_exact_raw_text_in_two_true_contexts_is_nonblocking() -> 
     assert fused.confidence == pytest.approx(0.4)
     assert fused.independent_context_count == 2
     assert fused.stability == pytest.approx(1.0)
-    assert fused.uncertainty_reasons == (
-        "low_confidence_stable_context_consensus",
-    )
+    assert fused.uncertainty_reasons == ("low_confidence_stable_context_consensus",)
     assert fused.unresolved is False
     assert result.status is OcrFusionStatus.COMPLETE
 
@@ -3347,10 +3198,7 @@ def test_low_confidence_similar_but_nonexact_contexts_remain_unresolved() -> Non
     assert fused.stability >= OcrFusionConfig().minimum_stability
     assert "unstable_raw_text" not in fused.uncertainty_reasons
     assert "low_confidence" in fused.uncertainty_reasons
-    assert (
-        "low_confidence_stable_context_consensus"
-        not in fused.uncertainty_reasons
-    )
+    assert "low_confidence_stable_context_consensus" not in fused.uncertainty_reasons
     assert fused.unresolved is True
     assert result.status is OcrFusionStatus.UNRESOLVED
 
@@ -3457,18 +3305,14 @@ def test_exact_job_matrix_and_crop_hashes_are_required() -> None:
             crops=crops,
             queue=missing,
         )
-    sparse = OcrEvidenceFusion(
-        OcrFusionConfig(require_exact_job_matrix=False)
-    ).fuse(
+    sparse = OcrEvidenceFusion(OcrFusionConfig(require_exact_job_matrix=False)).fuse(
         plan=plan,
         segments=segments,
         crops=crops,
         queue=_queue(valid.jobs[0]),
     )
     assert sparse.observations
-    sparse_gamma = OcrEvidenceFusion(
-        OcrFusionConfig(require_exact_job_matrix=False)
-    ).fuse(
+    sparse_gamma = OcrEvidenceFusion(OcrFusionConfig(require_exact_job_matrix=False)).fuse(
         plan=plan,
         segments=segments,
         crops=(replace(crops[0], gamma=None),),

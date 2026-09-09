@@ -541,9 +541,7 @@ def test_logical_rule_lanes_survive_low_raw_sparse_axis_density() -> None:
 
     assert len(result.objects) == 1
     assert result.objects[0].kind is ObjectKind.TABLE
-    assert result.objects[0].segment_ids == tuple(
-        segment.segment_id for segment in segments
-    )
+    assert result.objects[0].segment_ids == tuple(segment.segment_id for segment in segments)
 
 
 def test_merged_cell_is_one_table_without_joining_logical_lanes() -> None:
@@ -603,9 +601,7 @@ def test_two_vertically_consecutive_rule_networks_remain_two_tables() -> None:
             Box(left, top, right, top + 12),
             row_index=table_index * 2 + row,
         )
-        for table_index, (table, table_top) in enumerate(
-            (("first", 8), ("second", 68))
-        )
+        for table_index, (table, table_top) in enumerate((("first", 8), ("second", 68)))
         for row, top in enumerate((table_top, table_top + 20))
         for column, (left, right) in enumerate(((10, 35), (50, 85)))
     )

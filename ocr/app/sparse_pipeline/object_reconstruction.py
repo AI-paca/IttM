@@ -109,12 +109,9 @@ class DocumentObject:
         if not isinstance(self.kind, ObjectKind):
             raise ValueError("object kind must be an ObjectKind")
         if type(self.segment_ids) is not tuple or any(
-            type(segment_id) is not str or not segment_id
-            for segment_id in self.segment_ids
+            type(segment_id) is not str or not segment_id for segment_id in self.segment_ids
         ):
-            raise ValueError(
-                "object segment identifiers must be an immutable string tuple"
-            )
+            raise ValueError("object segment identifiers must be an immutable string tuple")
         if not self.segment_ids or len(self.segment_ids) != len(set(self.segment_ids)):
             raise ValueError("a document object must own unique segments")
         if not isinstance(self.bbox, Box):
@@ -140,9 +137,7 @@ class DocumentObject:
             or not 0.0 <= self.confidence <= 1.0
         ):
             raise ValueError("object confidence must be between zero and one")
-        if type(self.evidence) is not tuple or any(
-            type(item) is not str or not item for item in self.evidence
-        ):
+        if type(self.evidence) is not tuple or any(type(item) is not str or not item for item in self.evidence):
             raise ValueError("object evidence must be an immutable string tuple")
 
 
@@ -187,8 +182,7 @@ class ObjectReconstructionResult:
         ):
             raise ValueError("minimum topology confidence must be between zero and one")
         return all(
-            item.kind is not ObjectKind.UNKNOWN
-            and item.confidence >= float(minimum_confidence)
+            item.kind is not ObjectKind.UNKNOWN and item.confidence >= float(minimum_confidence)
             for item in self.objects
         )
 
@@ -203,9 +197,7 @@ class ObjectReconstructionResult:
         ):
             raise ValueError("minimum topology confidence must be between zero and one")
         return any(
-            item.kind is ObjectKind.TABLE
-            and item.confidence >= float(minimum_confidence)
-            for item in self.objects
+            item.kind is ObjectKind.TABLE and item.confidence >= float(minimum_confidence) for item in self.objects
         )
 
     def __post_init__(self) -> None:
@@ -216,65 +208,39 @@ class ObjectReconstructionResult:
         ):
             raise ValueError("aligned_size must contain two positive integers")
         if type(self.source_segment_ids) is not tuple or any(
-            type(segment_id) is not str or not segment_id
-            for segment_id in self.source_segment_ids
+            type(segment_id) is not str or not segment_id for segment_id in self.source_segment_ids
         ):
             raise ValueError("source segment identifiers must be an immutable tuple")
-        if type(self.objects) is not tuple or any(
-            not isinstance(item, DocumentObject) for item in self.objects
-        ):
+        if type(self.objects) is not tuple or any(not isinstance(item, DocumentObject) for item in self.objects):
             raise ValueError("objects must be an immutable DocumentObject tuple")
         if type(self.segment_ownership) is not tuple or any(
-            not isinstance(item, SegmentObjectOwnership)
-            for item in self.segment_ownership
+            not isinstance(item, SegmentObjectOwnership) for item in self.segment_ownership
         ):
             raise ValueError("segment ownership must be an immutable tuple")
         if not isinstance(self.status, ObjectReconstructionStatus):
             raise ValueError("object reconstruction status is invalid")
-        if type(self.diagnostics) is not tuple or any(
-            type(item) is not str or not item for item in self.diagnostics
-        ):
+        if type(self.diagnostics) is not tuple or any(type(item) is not str or not item for item in self.diagnostics):
             raise ValueError("diagnostics must be an immutable string tuple")
         if len(self.source_segment_ids) != len(set(self.source_segment_ids)):
             raise ValueError("source segment identifiers must be unique")
         object_ids = tuple(item.object_id for item in self.objects)
-        if object_ids != tuple(
-            f"object-{index:06d}" for index in range(len(object_ids))
-        ):
+        if object_ids != tuple(f"object-{index:06d}" for index in range(len(object_ids))):
             raise ValueError("object identifiers must be canonical")
-        if tuple(item.reading_index for item in self.objects) != tuple(
-            range(len(self.objects))
-        ):
+        if tuple(item.reading_index for item in self.objects) != tuple(range(len(self.objects))):
             raise ValueError("object reading indexes must be contiguous")
-        owned_ids = tuple(
-            segment_id for item in self.objects for segment_id in item.segment_ids
-        )
-        if len(owned_ids) != len(set(owned_ids)) or set(owned_ids) != set(
-            self.source_segment_ids
-        ):
+        owned_ids = tuple(segment_id for item in self.objects for segment_id in item.segment_ids)
+        if len(owned_ids) != len(set(owned_ids)) or set(owned_ids) != set(self.source_segment_ids):
             raise ValueError("objects must form an exact segment partition")
         ownership_ids = tuple(item.segment_id for item in self.segment_ownership)
         if ownership_ids != self.source_segment_ids:
             raise ValueError("segment ownership must follow canonical source order")
-        expected_owner = {
-            segment_id: item.object_id
-            for item in self.objects
-            for segment_id in item.segment_ids
-        }
-        if any(
-            item.object_id != expected_owner.get(item.segment_id)
-            for item in self.segment_ownership
-        ):
+        expected_owner = {segment_id: item.object_id for item in self.objects for segment_id in item.segment_ids}
+        if any(item.object_id != expected_owner.get(item.segment_id) for item in self.segment_ownership):
             raise ValueError("segment ownership disagrees with document objects")
-        source_order = {
-            segment_id: index
-            for index, segment_id in enumerate(self.source_segment_ids)
-        }
+        source_order = {segment_id: index for index, segment_id in enumerate(self.source_segment_ids)}
         if any(
             tuple(source_order[segment_id] for segment_id in item.segment_ids)
-            != tuple(
-                sorted(source_order[segment_id] for segment_id in item.segment_ids)
-            )
+            != tuple(sorted(source_order[segment_id] for segment_id in item.segment_ids))
             for item in self.objects
         ):
             raise ValueError("object segments must follow canonical source order")
@@ -345,25 +311,13 @@ class ObjectReconstructor:
         matrix: SparseSegmentMatrix,
     ) -> ObjectReconstructionResult:
         if type(aligned_size) is not tuple:
-            raise ObjectReconstructionInvariantError(
-                "aligned canvas size must be an immutable tuple"
-            )
-        if type(segments) is not tuple or any(
-            not isinstance(item, Segment) for item in segments
-        ):
-            raise ObjectReconstructionInvariantError(
-                "segments must be an immutable Segment tuple"
-            )
-        if type(rules) is not tuple or any(
-            not isinstance(item, Rule) for item in rules
-        ):
-            raise ObjectReconstructionInvariantError(
-                "rules must be an immutable Rule tuple"
-            )
+            raise ObjectReconstructionInvariantError("aligned canvas size must be an immutable tuple")
+        if type(segments) is not tuple or any(not isinstance(item, Segment) for item in segments):
+            raise ObjectReconstructionInvariantError("segments must be an immutable Segment tuple")
+        if type(rules) is not tuple or any(not isinstance(item, Rule) for item in rules):
+            raise ObjectReconstructionInvariantError("rules must be an immutable Rule tuple")
         if not isinstance(matrix, SparseSegmentMatrix):
-            raise ObjectReconstructionInvariantError(
-                "matrix must be a SparseSegmentMatrix"
-            )
+            raise ObjectReconstructionInvariantError("matrix must be a SparseSegmentMatrix")
         self._check_budgets(segments=segments, rules=rules, matrix=matrix)
         spans = self._validate_inputs(
             aligned_size=aligned_size,
@@ -371,9 +325,7 @@ class ObjectReconstructor:
             rules=rules,
             matrix=matrix,
         )
-        canonical_segments = tuple(
-            sorted(segments, key=lambda item: self._segment_key(item, spans))
-        )
+        canonical_segments = tuple(sorted(segments, key=lambda item: self._segment_key(item, spans)))
         source_segment_ids = tuple(item.segment_id for item in canonical_segments)
         if not canonical_segments:
             return ObjectReconstructionResult(
@@ -406,15 +358,9 @@ class ObjectReconstructor:
                 matrix=matrix,
                 spans=spans,
             )
-            remaining = tuple(
-                segment
-                for segment in canonical_segments
-                if segment.segment_id not in table_segment_ids
-            )
+            remaining = tuple(segment for segment in canonical_segments if segment.segment_id not in table_segment_ids)
             table_barriers = tuple(
-                draft.structural_barrier
-                for draft in table_drafts
-                if draft.structural_barrier is not None
+                draft.structural_barrier for draft in table_drafts if draft.structural_barrier is not None
             )
             drafts = table_drafts + self._flow_drafts(
                 remaining,
@@ -433,9 +379,7 @@ class ObjectReconstructor:
             )
         )
         if len(drafts) > self.config.max_objects:
-            raise ObjectReconstructionLimitError(
-                f"object count exceeds configured limit {self.config.max_objects}"
-            )
+            raise ObjectReconstructionLimitError(f"object count exceeds configured limit {self.config.max_objects}")
 
         objects = tuple(
             self._finish_draft(
@@ -445,15 +389,8 @@ class ObjectReconstructor:
             )
             for index, draft in enumerate(drafts)
         )
-        owners = {
-            segment_id: item.object_id
-            for item in objects
-            for segment_id in item.segment_ids
-        }
-        ownership = tuple(
-            SegmentObjectOwnership(segment_id, owners[segment_id])
-            for segment_id in source_segment_ids
-        )
+        owners = {segment_id: item.object_id for item in objects for segment_id in item.segment_ids}
+        ownership = tuple(SegmentObjectOwnership(segment_id, owners[segment_id]) for segment_id in source_segment_ids)
         return ObjectReconstructionResult(
             aligned_size=aligned_size,
             source_segment_ids=source_segment_ids,
@@ -469,22 +406,15 @@ class ObjectReconstructor:
         matrix: SparseSegmentMatrix,
     ) -> None:
         if len(segments) > self.config.max_segments:
-            raise ObjectReconstructionLimitError(
-                f"segment count exceeds configured limit {self.config.max_segments}"
-            )
+            raise ObjectReconstructionLimitError(f"segment count exceeds configured limit {self.config.max_segments}")
         if len(matrix.cells) > self.config.max_cells:
-            raise ObjectReconstructionLimitError(
-                f"cell count exceeds configured limit {self.config.max_cells}"
-            )
+            raise ObjectReconstructionLimitError(f"cell count exceeds configured limit {self.config.max_cells}")
         if len(rules) > self.config.max_rules:
-            raise ObjectReconstructionLimitError(
-                f"rule count exceeds configured limit {self.config.max_rules}"
-            )
+            raise ObjectReconstructionLimitError(f"rule count exceeds configured limit {self.config.max_rules}")
         axis_count = len(matrix.rows) + len(matrix.columns)
         if axis_count > self.config.max_axis_intervals:
             raise ObjectReconstructionLimitError(
-                "axis interval count exceeds configured limit "
-                f"{self.config.max_axis_intervals}"
+                "axis interval count exceeds configured limit " f"{self.config.max_axis_intervals}"
             )
 
     @staticmethod
@@ -495,12 +425,8 @@ class ObjectReconstructor:
         rules: tuple[Rule, ...],
         matrix: SparseSegmentMatrix,
     ) -> dict[str, SegmentSpan]:
-        if len(aligned_size) != 2 or any(
-            type(value) is not int or value < 1 for value in aligned_size
-        ):
-            raise ObjectReconstructionInvariantError(
-                "aligned canvas size must contain two positive integers"
-            )
+        if len(aligned_size) != 2 or any(type(value) is not int or value < 1 for value in aligned_size):
+            raise ObjectReconstructionInvariantError("aligned canvas size must contain two positive integers")
         width, height = aligned_size
         if not segments and not rules:
             if any(
@@ -513,54 +439,33 @@ class ObjectReconstructor:
                     matrix.vertical_rule_columns,
                 )
             ):
-                raise ObjectReconstructionInvariantError(
-                    "empty geometry evidence requires empty sparse axes"
-                )
+                raise ObjectReconstructionInvariantError("empty geometry evidence requires empty sparse axes")
             return {}
-        logical_projection = (
-            matrix.coordinate_mode is SparseCoordinateMode.LOGICAL_PROJECTION
-        )
+        logical_projection = matrix.coordinate_mode is SparseCoordinateMode.LOGICAL_PROJECTION
         if logical_projection:
             if rules:
-                raise ObjectReconstructionInvariantError(
-                    "logical sparse projection cannot carry physical rules"
-                )
+                raise ObjectReconstructionInvariantError("logical sparse projection cannot carry physical rules")
             for name, intervals in (
                 ("row", matrix.rows),
                 ("column", matrix.columns),
             ):
-                if any(
-                    item.start != item.index or item.end != item.index + 1
-                    for item in intervals
-                ):
-                    raise ObjectReconstructionInvariantError(
-                        f"logical sparse {name} axis must use ordinal intervals"
-                    )
+                if any(item.start != item.index or item.end != item.index + 1 for item in intervals):
+                    raise ObjectReconstructionInvariantError(f"logical sparse {name} axis must use ordinal intervals")
         else:
             if not matrix.rows or matrix.rows[-1].end != height:
-                raise ObjectReconstructionInvariantError(
-                    "sparse row axis does not exactly cover the aligned canvas"
-                )
+                raise ObjectReconstructionInvariantError("sparse row axis does not exactly cover the aligned canvas")
             if not matrix.columns or matrix.columns[-1].end != width:
-                raise ObjectReconstructionInvariantError(
-                    "sparse column axis does not exactly cover the aligned canvas"
-                )
+                raise ObjectReconstructionInvariantError("sparse column axis does not exactly cover the aligned canvas")
         segment_ids = tuple(item.segment_id for item in segments)
         if len(segment_ids) != len(set(segment_ids)):
-            raise ObjectReconstructionInvariantError(
-                "segment identifiers must be unique"
-            )
+            raise ObjectReconstructionInvariantError("segment identifiers must be unique")
         span_ids = tuple(item.segment_id for item in matrix.spans)
         if set(segment_ids) != set(span_ids):
-            raise ObjectReconstructionInvariantError(
-                "segment set disagrees with sparse matrix spans"
-            )
+            raise ObjectReconstructionInvariantError("segment set disagrees with sparse matrix spans")
         spans = {item.segment_id: item for item in matrix.spans}
         canvas = Box(0, 0, width, height)
         if any(item.bbox.intersection(canvas) != item.bbox for item in segments):
-            raise ObjectReconstructionInvariantError(
-                "segment lies outside aligned canvas"
-            )
+            raise ObjectReconstructionInvariantError("segment lies outside aligned canvas")
         if not logical_projection:
             for segment in segments:
                 span = spans[segment.segment_id]
@@ -580,25 +485,19 @@ class ObjectReconstructor:
         if any(item.bbox.intersection(canvas) != item.bbox for item in rules):
             raise ObjectReconstructionInvariantError("rule lies outside aligned canvas")
 
-        horizontal_rules = tuple(
-            item for item in rules if item.axis is RuleAxis.HORIZONTAL
-        )
+        horizontal_rules = tuple(item for item in rules if item.axis is RuleAxis.HORIZONTAL)
         vertical_rules = tuple(item for item in rules if item.axis is RuleAxis.VERTICAL)
         ObjectReconstructor._validate_rule_projection(
             name="horizontal rule row",
             intervals=matrix.rows,
             declared=matrix.horizontal_rule_rows,
-            projections=tuple(
-                (rule.bbox.top, rule.bbox.bottom) for rule in horizontal_rules
-            ),
+            projections=tuple((rule.bbox.top, rule.bbox.bottom) for rule in horizontal_rules),
         )
         ObjectReconstructor._validate_rule_projection(
             name="vertical rule column",
             intervals=matrix.columns,
             declared=matrix.vertical_rule_columns,
-            projections=tuple(
-                (rule.bbox.left, rule.bbox.right) for rule in vertical_rules
-            ),
+            projections=tuple((rule.bbox.left, rule.bbox.right) for rule in vertical_rules),
         )
         return spans
 
@@ -613,13 +512,9 @@ class ObjectReconstructor:
         for cell in matrix.cells:
             previous = row_by_segment.setdefault(cell.segment_id, cell.row)
             if previous != cell.row:
-                raise ObjectReconstructionInvariantError(
-                    "logical projection payload spans multiple rows"
-                )
+                raise ObjectReconstructionInvariantError("logical projection payload spans multiple rows")
         if set(row_by_segment) != {item.segment_id for item in segments}:
-            raise ObjectReconstructionInvariantError(
-                "logical projection needs one payload anchor per segment"
-            )
+            raise ObjectReconstructionInvariantError("logical projection needs one payload anchor per segment")
         occupied = tuple(sorted(set(row_by_segment.values())))
         row_group: dict[int, int] = {}
         group_index = -1
@@ -629,9 +524,7 @@ class ObjectReconstructor:
                 group_index += 1
             row_group[row] = group_index
             previous = row
-        groups: list[list[Segment]] = [
-            [] for _ in range(group_index + 1)
-        ]
+        groups: list[list[Segment]] = [[] for _ in range(group_index + 1)]
         for segment in segments:
             groups[row_group[row_by_segment[segment.segment_id]]].append(segment)
         return tuple(tuple(group) for group in groups)
@@ -644,21 +537,11 @@ class ObjectReconstructor:
         """Classify exactly one object inside one literal blank-row scope."""
 
         segment_ids = {item.segment_id for item in segments}
-        anchors = tuple(
-            cell for cell in matrix.cells if cell.segment_id in segment_ids
-        )
-        codes = tuple(
-            item
-            for item in matrix.structural_codes
-            if item.segment_id in segment_ids
-        )
+        anchors = tuple(cell for cell in matrix.cells if cell.segment_id in segment_ids)
+        codes = tuple(item for item in matrix.structural_codes if item.segment_id in segment_ids)
         anchor_columns = {item.column for item in anchors}
         projection_columns = anchor_columns | {item.column for item in codes}
-        merge_left = tuple(
-            item
-            for item in codes
-            if MERGE_LEFT_CODE in sparse_code_components(item.code)
-        )
+        merge_left = tuple(item for item in codes if MERGE_LEFT_CODE in sparse_code_components(item.code))
         merge_left_rows = {item.row for item in merge_left}
 
         # v16 projected a table rail as many merge-left/empty coordinates
@@ -671,11 +554,7 @@ class ObjectReconstructor:
         table_witness = (
             len(projection_columns) >= 4
             and len(merge_left) >= 2
-            and (
-                len(segments) == 1
-                or len(merge_left_rows) >= 2
-                or len(merge_left) >= len(segments)
-            )
+            and (len(segments) == 1 or len(merge_left_rows) >= 2 or len(merge_left) >= len(segments))
         )
         if table_witness:
             kind = ObjectKind.TABLE
@@ -689,14 +568,8 @@ class ObjectReconstructor:
             )
         else:
             minimum_column = min(anchor_columns)
-            indented = sum(
-                item.column > minimum_column for item in anchors
-            )
-            list_witness = (
-                not merge_left
-                and len(anchor_columns) >= 2
-                and indented * 2 >= len(anchors)
-            )
+            indented = sum(item.column > minimum_column for item in anchors)
+            list_witness = not merge_left and len(anchor_columns) >= 2 and indented * 2 >= len(anchors)
             if list_witness:
                 kind = ObjectKind.LIST
                 confidence = 0.72
@@ -738,9 +611,7 @@ class ObjectReconstructor:
         declared_set = set(declared)
         for interval in intervals:
             last_candidate = bisect_left(starts, interval.end) - 1
-            covered = (
-                last_candidate >= 0 and maximum_stops[last_candidate] > interval.start
-            )
+            covered = last_candidate >= 0 and maximum_stops[last_candidate] > interval.start
             if covered != (interval.index in declared_set):
                 raise ObjectReconstructionInvariantError(
                     f"{name} projection disagrees with rule evidence at {interval.index}"
@@ -802,8 +673,7 @@ class ObjectReconstructor:
                 pairwise_checks += 1
                 if pairwise_checks > self.config.max_pairwise_checks:
                     raise ObjectReconstructionLimitError(
-                        "rule pairwise checks exceed configured limit "
-                        f"{self.config.max_pairwise_checks}"
+                        "rule pairwise checks exceed configured limit " f"{self.config.max_pairwise_checks}"
                     )
                 if self._rules_intersect(horizontal_rule.bbox, vertical_rule.bbox):
                     disjoint.union(horizontal_index, vertical_offset + vertical_index)
@@ -811,9 +681,7 @@ class ObjectReconstructor:
         networks: dict[int, list[Rule]] = {}
         for index, rule in enumerate(combined):
             networks.setdefault(disjoint.find(index), []).append(rule)
-        cells_by_segment: dict[str, list[tuple[int, int]]] = {
-            segment.segment_id: [] for segment in segments
-        }
+        cells_by_segment: dict[str, list[tuple[int, int]]] = {segment.segment_id: [] for segment in segments}
         for cell in matrix.cells:
             cells_by_segment[cell.segment_id].append((cell.row, cell.column))
         candidates: list[
@@ -825,12 +693,8 @@ class ObjectReconstructor:
             ]
         ] = []
         for network in networks.values():
-            network_horizontal = tuple(
-                rule for rule in network if rule.axis is RuleAxis.HORIZONTAL
-            )
-            network_vertical = tuple(
-                rule for rule in network if rule.axis is RuleAxis.VERTICAL
-            )
+            network_horizontal = tuple(rule for rule in network if rule.axis is RuleAxis.HORIZONTAL)
+            network_vertical = tuple(rule for rule in network if rule.axis is RuleAxis.VERTICAL)
             if (
                 self._rule_band_count(network_horizontal, RuleAxis.HORIZONTAL) < 3
                 or self._rule_band_count(network_vertical, RuleAxis.VERTICAL) < 3
@@ -869,8 +733,7 @@ class ObjectReconstructor:
                 pairwise_checks += 1
                 if pairwise_checks > self.config.max_pairwise_checks:
                     raise ObjectReconstructionLimitError(
-                        "table candidate checks exceed configured limit "
-                        f"{self.config.max_pairwise_checks}"
+                        "table candidate checks exceed configured limit " f"{self.config.max_pairwise_checks}"
                     )
                 span = spans[segment.segment_id]
                 if (
@@ -881,14 +744,11 @@ class ObjectReconstructor:
                 ):
                     continue
                 logical_cells: set[tuple[int, int]] = set()
-                for matrix_row, matrix_column in cells_by_segment[
-                    segment.segment_id
-                ]:
+                for matrix_row, matrix_column in cells_by_segment[segment.segment_id]:
                     pairwise_checks += 1
                     if pairwise_checks > self.config.max_pairwise_checks:
                         raise ObjectReconstructionLimitError(
-                            "table sparse-cell checks exceed configured limit "
-                            f"{self.config.max_pairwise_checks}"
+                            "table sparse-cell checks exceed configured limit " f"{self.config.max_pairwise_checks}"
                         )
                     logical_row = self._logical_lane(
                         matrix.rows[matrix_row],
@@ -904,9 +764,7 @@ class ObjectReconstructor:
                         logical_cells.add((logical_row, logical_column))
                 if logical_cells:
                     members_list.append(segment)
-                    logical_cells_by_segment[segment.segment_id] = frozenset(
-                        logical_cells
-                    )
+                    logical_cells_by_segment[segment.segment_id] = frozenset(logical_cells)
             members = tuple(members_list)
             if not self._is_populated_table(
                 members,
@@ -938,17 +796,13 @@ class ObjectReconstructor:
             sparse_span,
             logical_cells_by_segment,
         ) in candidates:
-            unowned = tuple(
-                segment for segment in members if segment.segment_id not in owned
-            )
+            unowned = tuple(segment for segment in members if segment.segment_id not in owned)
             if not self._is_populated_table(
                 unowned,
                 logical_cells_by_segment,
             ):
                 continue
-            ordered = tuple(
-                sorted(unowned, key=lambda item: self._segment_key(item, spans))
-            )
+            ordered = tuple(sorted(unowned, key=lambda item: self._segment_key(item, spans)))
             drafts.append(
                 _ObjectDraft(
                     kind=ObjectKind.TABLE,
@@ -977,9 +831,7 @@ class ObjectReconstructor:
         column_left = min(rule.bbox.left for rule in vertical)
         column_right = max(rule.bbox.right for rule in vertical)
         rows = tuple(
-            interval.index
-            for interval in matrix.rows
-            if interval.start < row_bottom and interval.end > row_top
+            interval.index for interval in matrix.rows if interval.start < row_bottom and interval.end > row_top
         )
         columns = tuple(
             interval.index
@@ -987,9 +839,7 @@ class ObjectReconstructor:
             if interval.start < column_right and interval.end > column_left
         )
         if not rows or not columns:
-            raise ObjectReconstructionInvariantError(
-                "table rule network lies outside the sparse matrix"
-            )
+            raise ObjectReconstructionInvariantError("table rule network lies outside the sparse matrix")
         return (
             min(rows),
             max(rows) + 1,
@@ -1011,11 +861,7 @@ class ObjectReconstructor:
         axis: RuleAxis,
     ) -> tuple[tuple[int, int], ...]:
         intervals = sorted(
-            (
-                (rule.bbox.top, rule.bbox.bottom)
-                if axis is RuleAxis.HORIZONTAL
-                else (rule.bbox.left, rule.bbox.right)
-            )
+            ((rule.bbox.top, rule.bbox.bottom) if axis is RuleAxis.HORIZONTAL else (rule.bbox.left, rule.bbox.right))
             for rule in rules
         )
         merged: list[tuple[int, int]] = []
@@ -1061,12 +907,8 @@ class ObjectReconstructor:
         width, height = aligned_size
         if network_bbox != Box(0, 0, width, height):
             return False
-        interior_horizontal = any(
-            rule.bbox.top > 0 and rule.bbox.bottom < height for rule in horizontal
-        )
-        interior_vertical = any(
-            rule.bbox.left > 0 and rule.bbox.right < width for rule in vertical
-        )
+        interior_horizontal = any(rule.bbox.top > 0 and rule.bbox.bottom < height for rule in horizontal)
+        interior_vertical = any(rule.bbox.left > 0 and rule.bbox.right < width for rule in vertical)
         return not (interior_horizontal and interior_vertical)
 
     def _is_populated_table(
@@ -1126,15 +968,12 @@ class ObjectReconstructor:
             by_row.setdefault(fragment.row, []).append(index)
         pairwise_checks = 0
         for row_index in range(len(rows) - 1):
-            for first in by_row.get(
-                row_index, ()
-            ):  # pragma: no branch - canonical rows
+            for first in by_row.get(row_index, ()):  # pragma: no branch - canonical rows
                 for second in by_row.get(row_index + 1, ()):
                     pairwise_checks += 1
                     if pairwise_checks > self.config.max_pairwise_checks:
                         raise ObjectReconstructionLimitError(
-                            "fragment pairwise checks exceed configured limit "
-                            f"{self.config.max_pairwise_checks}"
+                            "fragment pairwise checks exceed configured limit " f"{self.config.max_pairwise_checks}"
                         )
                     if self._fragments_link(
                         fragments[first],
@@ -1147,14 +986,8 @@ class ObjectReconstructor:
             components.setdefault(disjoint.find(index), []).append(fragment)
         drafts = []
         for component in components.values():
-            ordered_fragments = tuple(
-                sorted(component, key=lambda item: (item.row, item.bbox.left))
-            )
-            component_segments = tuple(
-                segment
-                for fragment in ordered_fragments
-                for segment in fragment.segments
-            )
+            ordered_fragments = tuple(sorted(component, key=lambda item: (item.row, item.bbox.left)))
+            component_segments = tuple(segment for fragment in ordered_fragments for segment in fragment.segments)
             if self._inside_table_barrier(
                 ordered_fragments,
                 table_barriers,
@@ -1168,9 +1001,7 @@ class ObjectReconstructor:
                     ),
                 )
             else:
-                kind, confidence, evidence = self._classify_flow(
-                    ordered_fragments
-                )
+                kind, confidence, evidence = self._classify_flow(ordered_fragments)
             drafts.append(
                 _ObjectDraft(
                     kind=kind,
@@ -1187,9 +1018,7 @@ class ObjectReconstructor:
         table_barriers: tuple[Box, ...],
     ) -> bool:
         return any(
-            barrier.contains_point(*fragment.bbox.center)
-            for barrier in table_barriers
-            for fragment in fragments
+            barrier.contains_point(*fragment.bbox.center) for barrier in table_barriers for fragment in fragments
         )
 
     def _visual_rows(
@@ -1211,10 +1040,7 @@ class ObjectReconstructor:
                 rows[-1].append(segment)
             else:
                 rows.append([segment])
-        return tuple(
-            tuple(sorted(row, key=lambda item: (item.bbox.left, item.segment_id)))
-            for row in rows
-        )
+        return tuple(tuple(sorted(row, key=lambda item: (item.bbox.left, item.segment_id))) for row in rows)
 
     def _same_visual_row(
         self,
@@ -1230,12 +1056,7 @@ class ObjectReconstructor:
         capped to the smaller scale so it cannot bridge rows by itself.
         """
 
-        row_center = float(
-            median(
-                (segment.bbox.top + segment.bbox.bottom) / 2.0
-                for segment in row
-            )
-        )
+        row_center = float(median((segment.bbox.top + segment.bbox.bottom) / 2.0 for segment in row))
         row_height = float(median(segment.bbox.height for segment in row))
         candidate_center = (candidate.top + candidate.bottom) / 2.0
         candidate_height = float(candidate.height)
@@ -1245,9 +1066,7 @@ class ObjectReconstructor:
             scale = smaller_height
         else:
             scale = larger_height
-        return abs(row_center - candidate_center) <= (
-            self.config.row_center_tolerance * scale
-        )
+        return abs(row_center - candidate_center) <= (self.config.row_center_tolerance * scale)
 
     def _row_fragments(
         self,
@@ -1287,16 +1106,8 @@ class ObjectReconstructor:
         for barrier in table_barriers:
             if corridor_left >= barrier.right or corridor_right <= barrier.left:
                 continue
-            first_region = (
-                -1
-                if first_center < barrier.top
-                else 1 if first_center >= barrier.bottom else 0
-            )
-            second_region = (
-                -1
-                if second_center < barrier.top
-                else 1 if second_center >= barrier.bottom else 0
-            )
+            first_region = -1 if first_center < barrier.top else 1 if first_center >= barrier.bottom else 0
+            second_region = -1 if second_center < barrier.top else 1 if second_center >= barrier.bottom else 0
             if first_region != second_region:
                 return False
         vertical_gap = max(0, second.bbox.top - first.bbox.bottom)
@@ -1304,12 +1115,8 @@ class ObjectReconstructor:
         scale = smaller_height
         if vertical_gap > max(12.0, self.config.adjacent_row_gap_heights * scale):
             return False
-        horizontal_overlap = min(first.bbox.right, second.bbox.right) - max(
-            first.bbox.left, second.bbox.left
-        )
-        aligned_left = abs(first.bbox.left - second.bbox.left) <= max(
-            4.0, self.config.aligned_edge_heights * scale
-        )
+        horizontal_overlap = min(first.bbox.right, second.bbox.right) - max(first.bbox.left, second.bbox.left)
+        aligned_left = abs(first.bbox.left - second.bbox.left) <= max(4.0, self.config.aligned_edge_heights * scale)
         return horizontal_overlap > 0 or aligned_left
 
     def _classify_flow(
@@ -1353,9 +1160,7 @@ class ObjectReconstructor:
         if len(by_row) < 2 or any(count != 1 for count in by_row.values()):
             return False
         ordered_rows = tuple(sorted(by_row))
-        return ordered_rows == tuple(
-            range(ordered_rows[0], ordered_rows[-1] + 1)
-        )
+        return ordered_rows == tuple(range(ordered_rows[0], ordered_rows[-1] + 1))
 
     @staticmethod
     def _is_list(fragments: tuple[_Fragment, ...]) -> bool:
@@ -1365,8 +1170,7 @@ class ObjectReconstructor:
         bodies = tuple(item.segments[1] for item in fragments)
         scale = float(median(item.bbox.height for item in markers + bodies))
         if any(
-            marker.bbox.width > max(2.0 * scale, body.bbox.width * 0.35)
-            or body.bbox.width < marker.bbox.width * 2.0
+            marker.bbox.width > max(2.0 * scale, body.bbox.width * 0.35) or body.bbox.width < marker.bbox.width * 2.0
             for marker, body in zip(markers, bodies)
         ):
             return False
@@ -1375,10 +1179,7 @@ class ObjectReconstructor:
         return (
             max(marker_lefts) - min(marker_lefts) <= max(4.0, scale)
             and max(body_lefts) - min(body_lefts) <= max(4.0, scale)
-            and all(
-                marker.bbox.right < body.bbox.left
-                for marker, body in zip(markers, bodies)
-            )
+            and all(marker.bbox.right < body.bbox.left for marker, body in zip(markers, bodies))
         )
 
     def _finish_draft(
@@ -1388,9 +1189,7 @@ class ObjectReconstructor:
         index: int,
         spans: dict[str, SegmentSpan],
     ) -> DocumentObject:
-        ordered_segments = tuple(
-            sorted(draft.segments, key=lambda item: self._segment_key(item, spans))
-        )
+        ordered_segments = tuple(sorted(draft.segments, key=lambda item: self._segment_key(item, spans)))
         owned_spans = tuple(spans[item.segment_id] for item in ordered_segments)
         if draft.sparse_span is None:
             row_start = min(item.row_start for item in owned_spans)
@@ -1406,9 +1205,7 @@ class ObjectReconstructor:
                 or item.column_stop > column_stop
                 for item in owned_spans
             ):
-                raise ObjectReconstructionInvariantError(
-                    "table rule span does not contain every owned segment"
-                )
+                raise ObjectReconstructionInvariantError("table rule span does not contain every owned segment")
         return DocumentObject(
             object_id=f"object-{index:06d}",
             kind=draft.kind,

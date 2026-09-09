@@ -20,10 +20,4 @@ def is_isolated_heading(
             bounded_above,
             bounded_below,
         )
-    return (
-        0 < run_rows <= 2
-        and content_chars >= 6
-        and max_line_chars < 90
-        and bounded_above
-        and bounded_below
-    )
+    return 0 < run_rows <= 2 and content_chars >= 6 and max_line_chars < 90 and bounded_above and bounded_below

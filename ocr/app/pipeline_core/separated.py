@@ -176,11 +176,7 @@ class NativeSeparatedSession:
         raster = image.convert("RGB")
         try:
             width, height = raster.size
-            begin = (
-                self._core.separated_begin
-                if start_ocr
-                else self._core.separated_plan_begin
-            )
+            begin = self._core.separated_begin if start_ocr else self._core.separated_plan_begin
             self._handle = begin(
                 raster.tobytes(),
                 width,
@@ -224,7 +220,8 @@ class NativeSeparatedSession:
 
     @classmethod
     def from_block_geometry(
-        cls, blocks: tuple[SeparatedBlockGeometryInput, ...],
+        cls,
+        blocks: tuple[SeparatedBlockGeometryInput, ...],
         core: NativePipelineCore | None = None,
     ) -> NativeSeparatedSession:
         if not blocks:
@@ -238,7 +235,11 @@ class NativeSeparatedSession:
         try:
             for block in blocks:
                 value._core.separated_import_block_geometry(
-                    value._handle, block.metadata, block.width, block.height, block.stride,
+                    value._handle,
+                    block.metadata,
+                    block.width,
+                    block.height,
+                    block.stride,
                 )
         except BaseException:
             value.close()
@@ -264,8 +265,11 @@ class NativeSeparatedSession:
         try:
             for layout in layouts:
                 value._core.separated_import_layout(
-                    value._handle, layout.object_id, layout.object_kind,
-                    layout.logical_row_count, layout.logical_column_count,
+                    value._handle,
+                    layout.object_id,
+                    layout.object_kind,
+                    layout.logical_row_count,
+                    layout.logical_column_count,
                 )
             for segment in segments:
                 value._core.separated_import_segment(
@@ -292,8 +296,7 @@ class NativeSeparatedSession:
             profile = SEPARATED_LANGUAGE_PROFILES.index(job.languages)
             # Composite output is already mapped into source-block coordinates;
             # the import ABI preserves that fact without transforming its pixels.
-            transform = (2 if job.transform == "contextual/composite"
-                         else SEPARATED_TRANSFORMS.index(job.transform))
+            transform = 2 if job.transform == "contextual/composite" else SEPARATED_TRANSFORMS.index(job.transform)
             index = self._core.separated_import_ocr_job(
                 self._handle,
                 job.block_index,
@@ -318,8 +321,7 @@ class NativeSeparatedSession:
 
     @property
     def recognized_layouts(self) -> tuple[SeparatedObjectLayout, ...]:
-        return tuple(SeparatedObjectLayout(*value)
-                     for value in self._core.separated_layouts(self._handle))
+        return tuple(SeparatedObjectLayout(*value) for value in self._core.separated_layouts(self._handle))
 
     @property
     def recognized_segments(self) -> tuple[SeparatedRecognizedSegment, ...]:
@@ -477,20 +479,12 @@ class NativeSeparatedSession:
                     slots=tuple(
                         SeparatedTopologySlot(
                             x=(
-                                self._core.separated_topology_slot_field(
-                                    self._handle, row_index, slot_index, 0
-                                ),
-                                self._core.separated_topology_slot_field(
-                                    self._handle, row_index, slot_index, 1
-                                ),
+                                self._core.separated_topology_slot_field(self._handle, row_index, slot_index, 0),
+                                self._core.separated_topology_slot_field(self._handle, row_index, slot_index, 1),
                             ),
-                            code=self._core.separated_topology_slot_field(
-                                self._handle, row_index, slot_index, 2
-                            ),
+                            code=self._core.separated_topology_slot_field(self._handle, row_index, slot_index, 2),
                             empty=bool(
-                                self._core.separated_topology_slot_field(
-                                    self._handle, row_index, slot_index, 3
-                                )
+                                self._core.separated_topology_slot_field(self._handle, row_index, slot_index, 3)
                             ),
                         )
                         for slot_index in range(slot_count)

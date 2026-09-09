@@ -16,7 +16,6 @@ from app.sparse_pipeline.crop_enhancement import CropInput
 from app.sparse_pipeline.geometry import GeometryAnalyzer
 from app.sparse_pipeline.geometry_artifacts import GeometryArtifactWriter
 
-
 _SEGMENT_ID = "segment-000000"
 _OBJECT_ID = "object-000000"
 
@@ -87,10 +86,7 @@ def test_crop_hash_uses_white_composited_canonical_rgb() -> None:
 
 def test_crop_hash_is_exact_and_deterministic_across_internal_stripes() -> None:
     height, width = 1_025, 3
-    pixels = (
-        np.arange(height * width * 3, dtype=np.uint32).reshape(height, width, 3)
-        % 251
-    ).astype(np.uint8)
+    pixels = (np.arange(height * width * 3, dtype=np.uint32).reshape(height, width, 3) % 251).astype(np.uint8)
     page = CropInput("striped-page", _png_bytes(pixels, mode="RGB"))
     plan = _full_page_plan(width, height)
     cropper = BlockCropper()

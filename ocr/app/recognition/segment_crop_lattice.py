@@ -114,11 +114,7 @@ def fuse_identifier_segment_crops(
     if not callable(recognize_segment) or not candidate_passes or max_calls <= 0:
         return list(primary_words), (), 0
 
-    primary_rows = table_words_to_rows(table, primary_words)
-    candidate_rows = {
-        source: table_words_to_rows(table, words)
-        for source, words in candidate_passes
-    }
+    candidate_rows = {source: table_words_to_rows(table, words) for source, words in candidate_passes}
     replacements = []
     decisions = []
     replaced_cells = set()
@@ -192,9 +188,7 @@ def fuse_identifier_segment_crops(
                 {
                     **word,
                     "text": selected_text,
-                    "segment_crop_sources": tuple(
-                        decision.supporting_sources for decision in cell_decisions
-                    ),
+                    "segment_crop_sources": tuple(decision.supporting_sources for decision in cell_decisions),
                 }
             )
             decisions.extend(cell_decisions)

@@ -103,9 +103,7 @@ def _geometry(page: CropInput) -> GeometryResult:
     )
     aligned_size = (64, 32)
     with Image.open(io.BytesIO(page.png_bytes)) as opened:
-        aligned_rgb_sha256 = hashlib.sha256(
-            opened.convert("RGB").tobytes()
-        ).hexdigest()
+        aligned_rgb_sha256 = hashlib.sha256(opened.convert("RGB").tobytes()).hexdigest()
     return GeometryResult(
         alignment=AlignmentTrace(
             transform=AffineTransform.identity(aligned_size),
@@ -230,11 +228,7 @@ def _evidence() -> SparsePipelineEvidence:
     jobs = []
     context_sha256 = hashlib.sha256(crop.raw.png_bytes).hexdigest()
     for index, transform in enumerate((OcrTransform.RAW, OcrTransform.GAMMA)):
-        payload = (
-            crop.raw.png_bytes
-            if transform is OcrTransform.RAW
-            else crop.gamma.png_bytes
-        )
+        payload = crop.raw.png_bytes if transform is OcrTransform.RAW else crop.gamma.png_bytes
         jobs.append(
             OcrJobResult(
                 job_id=f"ocr-job-{index:08d}",
@@ -272,9 +266,7 @@ def _evidence() -> SparsePipelineEvidence:
     stage4_config = CropEnhancementConfig(
         backend=EnhancementBackend.NUMPY,
     )
-    stage4 = GammaDarkCropEnhancer(stage4_config).enhance(
-        CropInput("stage4-page", page.png_bytes)
-    )
+    stage4 = GammaDarkCropEnhancer(stage4_config).enhance(CropInput("stage4-page", page.png_bytes))
     return SparsePipelineEvidence(
         page=page,
         geometry=geometry,
@@ -486,9 +478,7 @@ def _overlapping_bbox_spatial_evidence(
     crop_config = BlockCropConfig(
         enhancement_backend=EnhancementBackend.NUMPY,
     )
-    crops, aligned_rgb_sha256 = BlockCropper(
-        crop_config
-    ).crop_with_rgb_sha256(
+    crops, aligned_rgb_sha256 = BlockCropper(crop_config).crop_with_rgb_sha256(
         page,
         aligned_size=aligned_size,
         plan=plan,
@@ -555,10 +545,7 @@ def test_spatial_evidence_accepts_foreign_bbox_overlap_after_exact_isolation() -
 def test_spatial_evidence_accepts_same_object_nonmember_exact_isolation() -> None:
     evidence = _overlapping_bbox_spatial_evidence(single_object=True)
 
-    owner_by_segment = {
-        item.segment_id: item.object_id
-        for item in evidence.objects.segment_ownership
-    }
+    owner_by_segment = {item.segment_id: item.object_id for item in evidence.objects.segment_ownership}
     masked = evidence.crops[0].masked_segment_ids
     assert masked == ("segment-000001",)
     assert evidence.crops[0].isolation_mask_png is not None
@@ -702,10 +689,7 @@ def test_rejects_plan_relabelled_with_a_stricter_pair_membership_limit() -> None
 
     evidence = _fixture().evidence
     assert evidence.planning_config is not None
-    pair_memberships = sum(
-        len(item.union_segment_ids)
-        for item in evidence.plan.adjacent_algebra
-    )
+    pair_memberships = sum(len(item.union_segment_ids) for item in evidence.plan.adjacent_algebra)
     assert pair_memberships > 1
     stricter = replace(
         evidence.planning_config,
@@ -763,19 +747,14 @@ def test_spatial_plan_roundtrip_validates_clamped_non_cascading_padding() -> Non
     # Naive padding would end at x=40 and expose segment-000002.  The spatial
     # crop stops at its half-open left boundary without adding it as a member.
     block_index, target = next(
-        (index, block)
-        for index, block in enumerate(plan.blocks)
-        if block.segment_ids == source_ids[:2]
+        (index, block) for index, block in enumerate(plan.blocks) if block.segment_ids == source_ids[:2]
     )
     assert target.bbox == Box(0, 0, 35, 20)
     validator = object.__new__(SparsePipelineEvidence)
     object.__setattr__(validator, "plan", plan)
     validator._validate_plan(
         segments=segments,
-        owner_by_segment={
-            item.segment_id: item.object_id
-            for item in object_result.segment_ownership
-        },
+        owner_by_segment={item.segment_id: item.object_id for item in object_result.segment_ownership},
         planning_config=config,
         matrix=_matrix_for_segments(segments, aligned_size=(50, 20)),
     )
@@ -791,10 +770,7 @@ def test_spatial_plan_roundtrip_validates_clamped_non_cascading_padding() -> Non
     ):
         validator._validate_plan(
             segments=segments,
-            owner_by_segment={
-                item.segment_id: item.object_id
-                for item in object_result.segment_ownership
-            },
+            owner_by_segment={item.segment_id: item.object_id for item in object_result.segment_ownership},
             planning_config=config,
             matrix=_matrix_for_segments(segments, aligned_size=(50, 20)),
         )
@@ -811,10 +787,7 @@ def test_spatial_plan_roundtrip_validates_clamped_non_cascading_padding() -> Non
     ):
         validator._validate_plan(
             segments=segments,
-            owner_by_segment={
-                item.segment_id: item.object_id
-                for item in object_result.segment_ownership
-            },
+            owner_by_segment={item.segment_id: item.object_id for item in object_result.segment_ownership},
             planning_config=config,
             matrix=_matrix_for_segments(segments, aligned_size=(50, 20)),
         )
@@ -880,10 +853,7 @@ def test_spatial_evidence_preserves_unseparable_matrix_as_subblock() -> None:
     object.__setattr__(validator, "plan", plan)
     validator._validate_plan(
         segments=segments,
-        owner_by_segment={
-            item.segment_id: item.object_id
-            for item in object_result.segment_ownership
-        },
+        owner_by_segment={item.segment_id: item.object_id for item in object_result.segment_ownership},
         planning_config=config,
         matrix=matrix,
     )

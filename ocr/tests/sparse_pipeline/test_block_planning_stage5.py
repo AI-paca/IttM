@@ -159,15 +159,11 @@ def _matrix_for_segments(
         column_cuts.update((segment.bbox.left, segment.bbox.right))
     rows = tuple(
         AxisInterval(index, start, stop)
-        for index, (start, stop) in enumerate(
-            zip(sorted(row_cuts), sorted(row_cuts)[1:])
-        )
+        for index, (start, stop) in enumerate(zip(sorted(row_cuts), sorted(row_cuts)[1:]))
     )
     columns = tuple(
         AxisInterval(index, start, stop)
-        for index, (start, stop) in enumerate(
-            zip(sorted(column_cuts), sorted(column_cuts)[1:])
-        )
+        for index, (start, stop) in enumerate(zip(sorted(column_cuts), sorted(column_cuts)[1:]))
     )
     cells = tuple(
         sorted(
@@ -239,11 +235,7 @@ def _canonical_subset(
 
 def _assert_plan_identities(plan: BlockPlan) -> None:
     source_ids = plan.source_segment_ids
-    core_ids = tuple(
-        segment_id
-        for block in plan.blocks
-        for segment_id in block.core_segment_ids
-    )
+    core_ids = tuple(segment_id for block in plan.blocks for segment_id in block.core_segment_ids)
     if plan.mode is BlockPlanningMode.FULL_WIDTH:
         assert core_ids == source_ids
     else:
@@ -296,9 +288,7 @@ def _assert_spatial_crop_closure(
     segment_by_id = {item.segment_id: item for item in segments}
     for block in plan.blocks:
         members = set(block.segment_ids)
-        member_bbox = Box.union(
-            segment_by_id[item].bbox for item in block.segment_ids
-        )
+        member_bbox = Box.union(segment_by_id[item].bbox for item in block.segment_ids)
         assert member_bbox.intersection(block.bbox) == member_bbox
         for segment in segments:
             if segment.bbox.intersection(member_bbox) is not None:
@@ -618,11 +608,7 @@ def test_interleaved_object_ownership_closes_without_reordering_core_partition()
 
     expected = tuple(segment.segment_id for segment in segments)
     assert plan.source_segment_ids == expected
-    assert tuple(
-        segment_id
-        for block in plan.blocks
-        for segment_id in block.core_segment_ids
-    ) == expected
+    assert tuple(segment_id for block in plan.blocks for segment_id in block.core_segment_ids) == expected
     assert len(plan.blocks) == 1
     assert plan.blocks[0].core_segment_ids == expected
     assert plan.blocks[0].object_ids == (
@@ -681,11 +667,7 @@ def test_oversized_interleaved_closure_splits_only_between_physical_rows() -> No
     )
     assert plan.blocks[1].context_segment_ids == expected_ids[2:4]
     assert plan.blocks[2].context_segment_ids == expected_ids[6:8]
-    core_owner = {
-        segment_id: block.block_id
-        for block in plan.blocks
-        for segment_id in block.core_segment_ids
-    }
+    core_owner = {segment_id: block.block_id for block in plan.blocks for segment_id in block.core_segment_ids}
     assert all(
         core_owner[expected_ids[index]] == core_owner[expected_ids[index + 1]]
         for index in range(0, len(expected_ids), 2)
@@ -732,9 +714,7 @@ def test_randomized_interleaved_ownership_never_reorders_or_loses_segments() -> 
                 )
             )
         )
-        main_indexes = tuple(
-            index for index in range(len(segments)) if index not in singleton_indexes
-        )
+        main_indexes = tuple(index for index in range(len(segments)) if index not in singleton_indexes)
         groups = (main_indexes,) + tuple((index,) for index in singleton_indexes)
         aligned_size = (180, top + 2)
         result = _objects_result(
@@ -763,30 +743,15 @@ def test_randomized_interleaved_ownership_never_reorders_or_loses_segments() -> 
         )
 
         assert plan == repeated, case_index
-        assert tuple(
-            segment_id
-            for block in plan.blocks
-            for segment_id in block.core_segment_ids
-        ) == source_ids, case_index
-        owner = {
-            segment_id: item.object_id
-            for item in result.objects
-            for segment_id in item.segment_ids
-        }
-        for block in plan.blocks:
-            expected_owners = tuple(
-                dict.fromkeys(owner[segment_id] for segment_id in block.core_segment_ids)
-            )
-            assert block.object_ids == expected_owners, case_index
-        core_block = {
-            segment_id: block.block_id
-            for block in plan.blocks
-            for segment_id in block.core_segment_ids
-        }
-        assert all(
-            len({core_block[segment_id] for segment_id in row}) == 1
-            for row in physical_rows
+        assert (
+            tuple(segment_id for block in plan.blocks for segment_id in block.core_segment_ids) == source_ids
         ), case_index
+        owner = {segment_id: item.object_id for item in result.objects for segment_id in item.segment_ids}
+        for block in plan.blocks:
+            expected_owners = tuple(dict.fromkeys(owner[segment_id] for segment_id in block.core_segment_ids))
+            assert block.object_ids == expected_owners, case_index
+        core_block = {segment_id: block.block_id for block in plan.blocks for segment_id in block.core_segment_ids}
+        assert all(len({core_block[segment_id] for segment_id in row}) == 1 for row in physical_rows), case_index
         _assert_plan_identities(plan)
 
 
@@ -927,17 +892,11 @@ def test_spatial_2d_mode_partitions_cores_and_overlaps_rows_and_columns() -> Non
         *source_ids[0:6],
         *source_ids[6:12],
     )
-    assert plan.blocks[0].context_segment_ids == (
-        *source_ids[6:12],
-    )
+    assert plan.blocks[0].context_segment_ids == (*source_ids[6:12],)
     assert plan.blocks[0].bbox == Box(4, 4, 76, 31)
     assert plan.blocks[1].bbox == Box(4, 19, 76, 46)
     assert plan.blocks[-1].core_segment_ids == ()
-    assert plan.blocks[-1].segment_ids == tuple(
-        source_ids[row * 6 + column]
-        for row in range(3)
-        for column in (3, 4)
-    )
+    assert plan.blocks[-1].segment_ids == tuple(source_ids[row * 6 + column] for row in range(3) for column in (3, 4))
     assert all(block.bbox.right - block.bbox.left < aligned_size[0] for block in plan.blocks)
     assert any(
         set(algebra.intersection_segment_ids) & set(source_ids[0:6])
@@ -946,10 +905,7 @@ def test_spatial_2d_mode_partitions_cores_and_overlaps_rows_and_columns() -> Non
     )
     assert "mode=spatial-2d" in plan.diagnostics
     assert "matrix-primary-row-families=2" in plan.diagnostics
-    assert (
-        "matrix-column-sliding2-or-orthogonal-families=4"
-        in plan.diagnostics
-    )
+    assert "matrix-column-sliding2-or-orthogonal-families=4" in plan.diagnostics
     _assert_plan_identities(plan)
 
 
@@ -990,9 +946,7 @@ def test_spatial_2d_uses_orthogonal_or_xor_code_for_three_by_two_grid() -> None:
     )
     signatures = {
         segment_id: tuple(
-            block_index
-            for block_index, block in enumerate(plan.blocks)
-            if segment_id in block.segment_ids
+            block_index for block_index, block in enumerate(plan.blocks) if segment_id in block.segment_ids
         )
         for segment_id in source_ids
     }
@@ -1027,10 +981,7 @@ def test_spatial_2d_uses_orthogonal_or_xor_code_for_three_by_two_grid() -> None:
     )
     assert "orthogonal-signature-probes=1" in plan.diagnostics
     assert "membership-signatures=unique-between-units" in plan.diagnostics
-    assert all(
-        item.kind is MembershipUnitKind.SEGMENT
-        for item in plan.membership_units
-    )
+    assert all(item.kind is MembershipUnitKind.SEGMENT for item in plan.membership_units)
     _assert_spatial_crop_closure(plan, segments)
     _assert_plan_identities(plan)
 
@@ -1069,33 +1020,18 @@ def test_spatial_membership_signatures_fail_closed_for_one_to_eight_segments(
 
     signature_groups: dict[tuple[str, ...], list[str]] = {}
     for segment_id in plan.source_segment_ids:
-        signature = tuple(
-            block.block_id
-            for block in plan.blocks
-            if segment_id in block.segment_ids
-        )
+        signature = tuple(block.block_id for block in plan.blocks if segment_id in block.segment_ids)
         signature_groups.setdefault(signature, []).append(segment_id)
-    expected = {
-        signature: tuple(segment_ids)
-        for signature, segment_ids in signature_groups.items()
-    }
-    actual = {
-        unit.block_ids: unit.segment_ids for unit in plan.membership_units
-    }
+    expected = {signature: tuple(segment_ids) for signature, segment_ids in signature_groups.items()}
+    actual = {unit.block_ids: unit.segment_ids for unit in plan.membership_units}
 
     assert actual == expected
-    assert tuple(
-        segment_id
-        for unit in plan.membership_units
-        for segment_id in unit.segment_ids
-    ) == plan.source_segment_ids
+    assert (
+        tuple(segment_id for unit in plan.membership_units for segment_id in unit.segment_ids)
+        == plan.source_segment_ids
+    )
     assert all(
-        unit.kind
-        is (
-            MembershipUnitKind.SEGMENT
-            if len(unit.segment_ids) == 1
-            else MembershipUnitKind.SUBBLOCK
-        )
+        unit.kind is (MembershipUnitKind.SEGMENT if len(unit.segment_ids) == 1 else MembershipUnitKind.SUBBLOCK)
         for unit in plan.membership_units
     )
     assert len(actual) == len(plan.membership_units)
@@ -1109,9 +1045,7 @@ def test_spatial_membership_closes_a_two_dimensional_enclosure() -> None:
         replace(_segment(1, Box(35, 5, 45, 35)), row_index=0),
         replace(_segment(2, Box(20, 15, 30, 25)), row_index=0),
     )
-    planner = OverlappingBlockPlanner(
-        _config(mode=BlockPlanningMode.SPATIAL_2D, padding=0)
-    )
+    planner = OverlappingBlockPlanner(_config(mode=BlockPlanningMode.SPATIAL_2D, padding=0))
 
     closed, checks = planner._spatial_membership_closure(
         {segments[0].segment_id, segments[1].segment_id},
@@ -1138,9 +1072,7 @@ def test_sixteen_pixel_legacy_overlap_is_absorbed_not_left_as_contamination() ->
             order_key=(15, 15),
         ),
     )
-    assert segments[0].bbox.intersection(segments[1].bbox) == Box(
-        15, 15, 25, 31
-    )
+    assert segments[0].bbox.intersection(segments[1].bbox) == Box(15, 15, 25, 31)
     plan = _plan(
         segments,
         ((0, 1),),
@@ -1150,11 +1082,7 @@ def test_sixteen_pixel_legacy_overlap_is_absorbed_not_left_as_contamination() ->
 
     assert plan.blocks
     for block in plan.blocks:
-        intersected = {
-            segment.segment_id
-            for segment in segments
-            if segment.bbox.intersection(block.bbox) is not None
-        }
+        intersected = {segment.segment_id for segment in segments if segment.bbox.intersection(block.bbox) is not None}
         assert intersected == set(block.segment_ids)
     assert plan.membership_units == (
         MembershipUnit(
@@ -1189,10 +1117,7 @@ def test_spatial_2d_one_by_two_uses_context_block_and_one_subblock() -> None:
             "scope-000000",
         ),
     )
-    assert not any(
-        not item.core_segment_ids and len(item.segment_ids) == 1
-        for item in plan.blocks
-    )
+    assert not any(not item.core_segment_ids and len(item.segment_ids) == 1 for item in plan.blocks)
 
 
 def test_spatial_2d_remote_flow_objects_never_gain_a_long_bridge() -> None:
@@ -1249,16 +1174,10 @@ def test_spatial_interleaved_objects_keep_local_cores_without_global_monotonicit
         config=_config(mode=BlockPlanningMode.SPATIAL_2D, padding=0),
     )
     owner = {
-        segment.segment_id: (
-            "object-000000" if index in (0, 2) else "object-000001"
-        )
+        segment.segment_id: ("object-000000" if index in (0, 2) else "object-000001")
         for index, segment in enumerate(segments)
     }
-    core_ids = tuple(
-        segment_id
-        for block in plan.blocks
-        for segment_id in block.core_segment_ids
-    )
+    core_ids = tuple(segment_id for block in plan.blocks for segment_id in block.core_segment_ids)
 
     assert set(core_ids) == set(plan.source_segment_ids)
     assert len(core_ids) == len(set(core_ids))
@@ -1267,9 +1186,7 @@ def test_spatial_interleaved_objects_keep_local_cores_without_global_monotonicit
         "scope-000001",
     )
     assert all(
-        {owner[segment_id] for segment_id in block.segment_ids}
-        == {block.object_ids[0]}
-        for block in plan.blocks
+        {owner[segment_id] for segment_id in block.segment_ids} == {block.object_ids[0]} for block in plan.blocks
     )
     _assert_plan_identities(plan)
 
@@ -1286,9 +1203,7 @@ def test_cross_object_bbox_overlap_is_deferred_to_literal_ownership_gate() -> No
         aligned_size=aligned_size,
         config=_config(mode=BlockPlanningMode.SPATIAL_2D, padding=0),
     )
-    assert segments[0].bbox.intersection(segments[1].bbox) == Box(
-        15, 15, 25, 25
-    )
+    assert segments[0].bbox.intersection(segments[1].bbox) == Box(15, 15, 25, 25)
     assert tuple(block.segment_ids for block in plan.blocks) == (
         (segments[0].segment_id,),
         (segments[1].segment_id,),
@@ -1374,10 +1289,22 @@ def test_spatial_plan_rejects_dense_component_plus_same_scope_artifact() -> None
         (source_ids[2],),
     )
     units = (
-        MembershipUnit("membership-unit-000000", MembershipUnitKind.SEGMENT, (source_ids[0],), ("block-000000",), "scope-000000"),
-        MembershipUnit("membership-unit-000001", MembershipUnitKind.SEGMENT, (source_ids[1],), ("block-000000", "block-000001"), "scope-000000"),
-        MembershipUnit("membership-unit-000002", MembershipUnitKind.SEGMENT, (source_ids[2],), ("block-000001",), "scope-000000"),
-        MembershipUnit("membership-unit-000003", MembershipUnitKind.SEGMENT, (source_ids[3],), ("block-000002",), "scope-000000"),
+        MembershipUnit(
+            "membership-unit-000000", MembershipUnitKind.SEGMENT, (source_ids[0],), ("block-000000",), "scope-000000"
+        ),
+        MembershipUnit(
+            "membership-unit-000001",
+            MembershipUnitKind.SEGMENT,
+            (source_ids[1],),
+            ("block-000000", "block-000001"),
+            "scope-000000",
+        ),
+        MembershipUnit(
+            "membership-unit-000002", MembershipUnitKind.SEGMENT, (source_ids[2],), ("block-000001",), "scope-000000"
+        ),
+        MembershipUnit(
+            "membership-unit-000003", MembershipUnitKind.SEGMENT, (source_ids[3],), ("block-000002",), "scope-000000"
+        ),
     )
 
     with pytest.raises(ValueError, match="disconnected block artifact"):
@@ -1390,6 +1317,7 @@ def test_spatial_plan_rejects_dense_component_plus_same_scope_artifact() -> None
             membership_units=units,
             matrix_sha256="0" * 64,
         )
+
 
 def test_spatial_2d_ragged_sparse_matrix_uses_row_and_prefix_codes() -> None:
     positions = (
@@ -1431,11 +1359,7 @@ def test_spatial_2d_ragged_sparse_matrix_uses_row_and_prefix_codes() -> None:
     assert "matrix-logical-row-bands=3" in plan.diagnostics
     assert "matrix-logical-column-bands=3" in plan.diagnostics
     signatures = {
-        segment_id: tuple(
-            index
-            for index, block in enumerate(plan.blocks)
-            if segment_id in block.segment_ids
-        )
+        segment_id: tuple(index for index, block in enumerate(plan.blocks) if segment_id in block.segment_ids)
         for segment_id in plan.source_segment_ids
     }
     assert len(set(signatures.values())) == len(segments)
@@ -1457,9 +1381,7 @@ def test_spatial_2d_keeps_disjoint_table_scopes_as_real_components() -> None:
         result,
         objects=tuple(replace(item, kind=ObjectKind.TABLE) for item in result.objects),
     )
-    plan = OverlappingBlockPlanner(
-        _config(mode=BlockPlanningMode.SPATIAL_2D)
-    ).plan(
+    plan = OverlappingBlockPlanner(_config(mode=BlockPlanningMode.SPATIAL_2D)).plan(
         aligned_size=(40, 60),
         segments=segments,
         objects_result=result,
@@ -1501,18 +1423,13 @@ def test_object_local_table_uses_one_block_per_segment() -> None:
         matrix=_matrix_for_segments(segments, aligned_size=(50, 40)),
     )
 
-    assert tuple(block.segment_ids for block in plan.blocks) == tuple(
-        (segment.segment_id,) for segment in segments
-    )
+    assert tuple(block.segment_ids for block in plan.blocks) == tuple((segment.segment_id,) for segment in segments)
     assert tuple(block.core_segment_ids for block in plan.blocks) == tuple(
         (segment.segment_id,) for segment in segments
     )
     assert all(block.context_segment_ids == () for block in plan.blocks)
     assert plan.adjacent_algebra == ()
-    assert all(
-        unit.kind is MembershipUnitKind.SEGMENT
-        for unit in plan.membership_units
-    )
+    assert all(unit.kind is MembershipUnitKind.SEGMENT for unit in plan.membership_units)
     assert "table-blocks=one-block-per-segment" in plan.diagnostics
     _assert_spatial_crop_closure(plan, segments)
     _assert_plan_identities(plan)
@@ -1539,14 +1456,10 @@ def test_object_local_paragraph_uses_one_block_for_whole_object() -> None:
     )
 
     assert len(plan.blocks) == 1
-    assert plan.blocks[0].segment_ids == tuple(
-        segment.segment_id for segment in segments
-    )
+    assert plan.blocks[0].segment_ids == tuple(segment.segment_id for segment in segments)
     assert plan.blocks[0].core_segment_ids == plan.blocks[0].segment_ids
     assert plan.blocks[0].context_segment_ids == ()
-    assert plan.blocks[0].bbox == Box.union(
-        segment.bbox for segment in segments
-    )
+    assert plan.blocks[0].bbox == Box.union(segment.bbox for segment in segments)
     assert plan.membership_units == (
         MembershipUnit(
             "membership-unit-000000",
@@ -1587,39 +1500,18 @@ def test_adaptive_table_uses_unique_non_cartesian_dyadic_masks() -> None:
 
     assert len(plan.blocks) <= 8
     assert plan.adjacent_algebra
-    assert {
-        item.matrix_window_kind for item in plan.blocks
-    } == {"dyadic-mask"}
+    assert {item.matrix_window_kind for item in plan.blocks} == {"dyadic-mask"}
     assert all(len(item.segment_ids) >= 2 for item in plan.blocks)
-    assert all(
-        item.matrix_segment_shape is not None
-        and max(item.matrix_segment_shape) <= 16
-        for item in plan.blocks
-    )
-    assert (
-        "matrix-table-window-mode=dyadic-axis-binary-code"
-        in plan.diagnostics
-    )
-    assert (
-        "matrix-table-dyadic-codes="
-        in next(
-            item
-            for item in plan.diagnostics
-            if item.startswith("matrix-table-dyadic-codes=")
-        )
+    assert all(item.matrix_segment_shape is not None and max(item.matrix_segment_shape) <= 16 for item in plan.blocks)
+    assert "matrix-table-window-mode=dyadic-axis-binary-code" in plan.diagnostics
+    assert "matrix-table-dyadic-codes=" in next(
+        item for item in plan.diagnostics if item.startswith("matrix-table-dyadic-codes=")
     )
     assert "matrix-table-generated-candidates=8" in plan.diagnostics
     assert "matrix-table-selected-candidates=7" in plan.diagnostics
-    assert (
-        "matrix-table-algebra=arbitrary-segment-set-and-xor"
-        in plan.diagnostics
-    )
+    assert "matrix-table-algebra=arbitrary-segment-set-and-xor" in plan.diagnostics
     signatures = {
-        segment_id: tuple(
-            index
-            for index, block in enumerate(plan.blocks)
-            if segment_id in block.segment_ids
-        )
+        segment_id: tuple(index for index, block in enumerate(plan.blocks) if segment_id in block.segment_ids)
         for segment_id in plan.source_segment_ids
     }
     assert all(signatures.values())
@@ -1695,19 +1587,13 @@ def test_adaptive_table_codes_merged_and_regular_cells_as_distinct_units() -> No
     )
 
     signatures = {
-        segment_id: tuple(
-            index
-            for index, block in enumerate(plan.blocks)
-            if segment_id in block.segment_ids
-        )
+        segment_id: tuple(index for index, block in enumerate(plan.blocks) if segment_id in block.segment_ids)
         for segment_id in plan.source_segment_ids
     }
     assert all(signatures.values())
     assert len(set(signatures.values())) == len(signatures)
     assert all(len(block.segment_ids) >= 2 for block in plan.blocks)
-    assert {block.matrix_window_kind for block in plan.blocks} == {
-        "dyadic-mask"
-    }
+    assert {block.matrix_window_kind for block in plan.blocks} == {"dyadic-mask"}
     _assert_plan_identities(plan)
 
 
@@ -1796,11 +1682,7 @@ def test_adaptive_table_masks_keep_every_cell_in_multi_segment_context() -> None
 
     assert min(len(block.segment_ids) for block in plan.blocks) >= 2
     signatures = {
-        segment_id: tuple(
-            index
-            for index, block in enumerate(plan.blocks)
-            if segment_id in block.segment_ids
-        )
+        segment_id: tuple(index for index, block in enumerate(plan.blocks) if segment_id in block.segment_ids)
         for segment_id in plan.source_segment_ids
     }
     assert all(signatures.values())
@@ -1826,9 +1708,7 @@ def test_adaptive_flow_object_keeps_whole_paragraph_context() -> None:
     )
 
     assert len(plan.blocks) == 1
-    assert plan.blocks[0].segment_ids == tuple(
-        item.segment_id for item in segments
-    )
+    assert plan.blocks[0].segment_ids == tuple(item.segment_id for item in segments)
     assert "matrix-table-window-shapes=none" in plan.diagnostics
     _assert_plan_identities(plan)
 
@@ -1866,10 +1746,7 @@ def test_spatial_2d_matrix_plan_is_deterministic_under_segment_reordering() -> N
     assert first == second
     assert len(first.blocks) == 5
     assert "matrix-primary-row-families=3" in first.diagnostics
-    assert (
-        "matrix-column-sliding2-or-orthogonal-families=2"
-        in first.diagnostics
-    )
+    assert "matrix-column-sliding2-or-orthogonal-families=2" in first.diagnostics
     _assert_plan_identities(first)
 
 
@@ -1881,9 +1758,7 @@ def test_spatial_2d_merged_header_splits_local_column_probe_region() -> None:
     )
     body = tuple(
         replace(item, segment_id=f"segment-{index + 1:06d}", component_ids=(index + 1,))
-        for index, item in enumerate(
-            _grid_segments(3, 2, column_pitch=12, row_pitch=15)
-        )
+        for index, item in enumerate(_grid_segments(3, 2, column_pitch=12, row_pitch=15))
     )
     body = tuple(
         replace(
@@ -1898,14 +1773,8 @@ def test_spatial_2d_merged_header_splits_local_column_probe_region() -> None:
     segments = (header, *body)
     aligned_size = (40, 70)
     matrix = _matrix_for_segments(segments, aligned_size=aligned_size)
-    gap_column = next(
-        item.index for item in matrix.columns if item.start == 15 and item.end == 17
-    )
-    gap_rows = tuple(
-        item.index
-        for item in matrix.rows
-        if item.start in (15, 30, 45) and item.end - item.start == 5
-    )
+    gap_column = next(item.index for item in matrix.columns if item.start == 15 and item.end == 17)
+    gap_rows = tuple(item.index for item in matrix.rows if item.start in (15, 30, 45) and item.end - item.start == 5)
     matrix = replace(
         matrix,
         horizontal_rule_rows=gap_rows,
@@ -1936,9 +1805,7 @@ def test_spatial_2d_merged_header_splits_local_column_probe_region() -> None:
     )
 
     column_probe = next(
-        block
-        for block in plan.blocks
-        if not block.core_segment_ids and header.segment_id not in block.segment_ids
+        block for block in plan.blocks if not block.core_segment_ids and header.segment_id not in block.segment_ids
     )
     assert column_probe.segment_ids == tuple(body[index].segment_id for index in (0, 2, 4))
     assert column_probe.bbox.top >= body[0].bbox.top
@@ -1967,14 +1834,8 @@ def test_spatial_2d_merged_row_without_safe_cut_preserves_subblocks() -> None:
         ),
     )
 
-    assert any(
-        item.kind is MembershipUnitKind.SUBBLOCK
-        for item in plan.membership_units
-    )
-    assert all(
-        block.core_segment_ids or len(block.segment_ids) != 1
-        for block in plan.blocks
-    )
+    assert any(item.kind is MembershipUnitKind.SUBBLOCK for item in plan.membership_units)
+    assert all(block.core_segment_ids or len(block.segment_ids) != 1 for block in plan.blocks)
     assert "singleton-signature-probes=0" in plan.diagnostics
 
 
@@ -2040,10 +1901,7 @@ def test_default_and_explicit_full_width_modes_are_identical() -> None:
 
     assert implicit == explicit
     assert implicit.mode is BlockPlanningMode.FULL_WIDTH
-    assert all(
-        block.bbox.left == 0 and block.bbox.right == implicit.aligned_size[0]
-        for block in implicit.blocks
-    )
+    assert all(block.bbox.left == 0 and block.bbox.right == implicit.aligned_size[0] for block in implicit.blocks)
 
 
 def test_deprecated_spatial_window_knobs_do_not_change_matrix_plan() -> None:
@@ -2201,22 +2059,15 @@ def test_spatial_2d_artifact_keeps_or_xor_manifest_with_local_bboxes(
         crops=crops,
         matrix=matrix,
     )
-    manifest = json.loads(
-        (artifact / "05-blocks/manifest.json").read_text(encoding="utf-8")
-    )
-    matrix_record = json.loads(
-        (artifact / "05-blocks/matrix.json").read_text(encoding="utf-8")
-    )
+    manifest = json.loads((artifact / "05-blocks/manifest.json").read_text(encoding="utf-8"))
+    matrix_record = json.loads((artifact / "05-blocks/matrix.json").read_text(encoding="utf-8"))
 
     assert manifest["planning_mode"] == "spatial_2d"
     assert matrix_record["sha256"] == sparse_matrix_sha256(matrix)
     assert manifest["invariants"]["full_width"] is False
     assert manifest["invariants"]["adjacent_overlap"] is True
     assert manifest["adjacent_algebra"] == [
-        json.loads(line)
-        for line in (artifact / "05-blocks/algebra.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
+        json.loads(line) for line in (artifact / "05-blocks/algebra.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     for item in manifest["adjacent_algebra"]:
         intersection = set(item["intersection_segment_ids"])
@@ -2248,14 +2099,8 @@ def test_spatial_block_artifact_rejects_forged_matrix_cells_and_spans(
     forged = SparseSegmentMatrix(
         rows=matrix.rows,
         columns=matrix.columns,
-        cells=tuple(
-            SparseCell(item.row, item.column, remap[item.segment_id])
-            for item in matrix.cells
-        ),
-        spans=tuple(
-            replace(item, segment_id=remap[item.segment_id])
-            for item in matrix.spans
-        ),
+        cells=tuple(SparseCell(item.row, item.column, remap[item.segment_id]) for item in matrix.cells),
+        spans=tuple(replace(item, segment_id=remap[item.segment_id]) for item in matrix.spans),
         horizontal_rule_rows=matrix.horizontal_rule_rows,
         vertical_rule_columns=matrix.vertical_rule_columns,
     )
@@ -2320,10 +2165,7 @@ def test_three_by_two_artifact_contains_three_distinct_actual_block_pngs(
         matrix=matrix,
     )
 
-    raw_payloads = tuple(
-        (artifact / "05-blocks/raw" / f"{block.block_id}.png").read_bytes()
-        for block in plan.blocks
-    )
+    raw_payloads = tuple((artifact / "05-blocks/raw" / f"{block.block_id}.png").read_bytes() for block in plan.blocks)
     assert len(raw_payloads) == 3
     assert len({hashlib.sha256(value).hexdigest() for value in raw_payloads}) == 3
     actual_color_sets = []
@@ -2548,9 +2390,7 @@ def test_spatial_crops_certify_literal_stage1_ownership_membership() -> None:
         ownership_segment_ids=segment_ids,
     )
 
-    assert tuple(item.segment_ids for item in crops) == tuple(
-        item.segment_ids for item in plan.blocks
-    )
+    assert tuple(item.segment_ids for item in crops) == tuple(item.segment_ids for item in plan.blocks)
 
 
 def test_spatial_crop_isolates_foreign_and_rejects_missing_literal_ownership(
@@ -2574,11 +2414,7 @@ def test_spatial_crop_isolates_foreign_and_rejects_missing_literal_ownership(
         copy=True,
     )
     first = plan.blocks[0]
-    foreign_label = next(
-        index
-        for index, segment_id in enumerate(segment_ids)
-        if segment_id not in first.segment_ids
-    )
+    foreign_label = next(index for index, segment_id in enumerate(segment_ids) if segment_id not in first.segment_ids)
     background = np.argwhere(
         ownership[
             first.bbox.top : first.bbox.bottom,
@@ -2620,18 +2456,11 @@ def test_spatial_crop_isolates_foreign_and_rejects_missing_literal_ownership(
         matrix=_matrix_for_segments(segments, aligned_size=aligned_size),
     )
     entries = tuple(
-        json.loads(line)
-        for line in (artifact / "05-blocks/blocks.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
+        json.loads(line) for line in (artifact / "05-blocks/blocks.jsonl").read_text(encoding="utf-8").splitlines()
     )
     assert entries[0]["masked_segment_ids"] == [segment_ids[foreign_label]]
-    assert entries[0]["isolation_mask"] == (
-        "isolation-masks/block-000000.png"
-    )
-    assert (
-        artifact / "05-blocks/isolation-masks/block-000000.png"
-    ).read_bytes() == isolated[0].isolation_mask_png
+    assert entries[0]["isolation_mask"] == ("isolation-masks/block-000000.png")
+    assert (artifact / "05-blocks/isolation-masks/block-000000.png").read_bytes() == isolated[0].isolation_mask_png
 
     missing = np.array(
         _ownership_raster(segments, aligned_size=aligned_size),
@@ -2711,19 +2540,14 @@ def test_spatial_isolation_replay_rejects_erased_member_and_wrong_foreign_id() -
     )
     first = plan.blocks[0]
     member_label = segment_ids.index(first.segment_ids[0])
-    foreign_labels = tuple(
-        index
-        for index, segment_id in enumerate(segment_ids)
-        if segment_id not in first.segment_ids
-    )
+    foreign_labels = tuple(index for index, segment_id in enumerate(segment_ids) if segment_id not in first.segment_ids)
     assert len(foreign_labels) >= 2
 
     forged_ownership = np.array(ownership, copy=True)
     member_pixel = next(
         (int(row), int(column))
         for row, column in np.argwhere(forged_ownership == member_label)
-        if first.bbox.top <= row < first.bbox.bottom
-        and first.bbox.left <= column < first.bbox.right
+        if first.bbox.top <= row < first.bbox.bottom and first.bbox.left <= column < first.bbox.right
     )
     forged_ownership[member_pixel] = foreign_labels[0]
     member_erasing_crops = BlockCropper().crop(

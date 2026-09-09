@@ -12,12 +12,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 DEBUG_INPUTS = REPO_ROOT / "debug" / "fixtures"
 DEBUG_EXPECTED = REPO_ROOT / "debug" / "reference"
 REPORT_PATH = REPO_ROOT / "scripts" / "debug" / "debug_report.py"
-MIXED_SAMPLE_SHA256 = (
-    "fdaa86963bb686ed2bbbb82d043ee5a494655901874ec04b915ea1c8fbc4932b"
-)
-MIXED_LITERAL_REFERENCE_SHA256 = (
-    "ee99e49febd2c8e9e39f51fbd74988986a8f6832b48e25a9afd303b09a30fe45"
-)
+MIXED_SAMPLE_SHA256 = "fdaa86963bb686ed2bbbb82d043ee5a494655901874ec04b915ea1c8fbc4932b"
+MIXED_LITERAL_REFERENCE_SHA256 = "ee99e49febd2c8e9e39f51fbd74988986a8f6832b48e25a9afd303b09a30fe45"
 
 
 def _load_debug_report():

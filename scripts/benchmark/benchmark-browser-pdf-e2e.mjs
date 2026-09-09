@@ -1,13 +1,8 @@
 import { writeFile } from "node:fs/promises";
 import { chromium } from "playwright";
 
-const [
-  url,
-  pdfPath,
-  outputPath,
-  timeoutArg = "1200",
-  sourceArg = "browser",
-] = process.argv.slice(2);
+const [url, pdfPath, outputPath, timeoutArg = "1200", sourceArg = "browser"] =
+  process.argv.slice(2);
 if (!url || !pdfPath || !outputPath) {
   console.error(
     "Usage: benchmark-browser-pdf-e2e.mjs URL PDF OUTPUT_JSON [TIMEOUT_SECONDS] [browser|auto|local_tess|local_easy]",
@@ -114,7 +109,10 @@ try {
       .getByRole("button", { name: /^(Остановить|Отменить)$/ })
       .isVisible()
       .catch(() => false);
-    const bodyText = await page.locator("body").innerText().catch(() => "");
+    const bodyText = await page
+      .locator("body")
+      .innerText()
+      .catch(() => "");
     const pageProgress = bodyText.match(/Страница\s+(\d+)\s+из\s+(\d+)/i);
     currentPage = pageProgress ? Number(pageProgress[1]) : null;
     totalPages = pageProgress ? Number(pageProgress[2]) : null;

@@ -86,9 +86,7 @@ def test_stable_object_text_cannot_override_conflicting_low_confidence_segments(
 def test_xor_subtraction_requires_an_observed_object_boundary() -> None:
     """A suffix match inside one token is not a unique structural anchor."""
 
-    result = _assemble(
-        _two_object_overlap_fixture(anchor_text="CAT", source_text="SCAT")
-    )
+    result = _assemble(_two_object_overlap_fixture(anchor_text="CAT", source_text="SCAT"))
 
     assert result.status is AssemblyStatus.UNRESOLVED
     assert result.text is None
@@ -271,9 +269,6 @@ def test_runner_final_publication_primitive_refuses_an_empty_destination(
     assert (staging / "summary.json").is_file()
     assert final.is_dir() and not tuple(final.iterdir())
     runner_source = (
-        Path(__file__).resolve().parents[3]
-        / "scripts"
-        / "debug"
-        / "debug_document_assembly.py"
+        Path(__file__).resolve().parents[3] / "scripts" / "debug" / "debug_document_assembly.py"
     ).read_text(encoding="utf-8")
     assert runner_source.count("rename_no_replace(staging, final_dir)") == 2

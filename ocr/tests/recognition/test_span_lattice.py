@@ -127,8 +127,7 @@ def _one_row_span_table() -> TableLayout:
         x_lines=(0, 100, 200, 300, 400, 500),
         y_lines=(0, 60),
         cells=tuple(
-            TableCell(row=0, col=column, bbox=(column * 100, 0, (column + 1) * 100, 60))
-            for column in range(5)
+            TableCell(row=0, col=column, bbox=(column * 100, 0, (column + 1) * 100, 60)) for column in range(5)
         ),
     )
 
@@ -147,9 +146,7 @@ def test_slash_bounded_cjk_crop_replaces_only_third_phrase():
     span = SpanFusionDecision(0, 0, 4, ("rus", "eng", "eng", "eng", "rus"), text)
     image = Image.new("RGB", (500, 60), "white")
     try:
-        result, decisions, calls = apply_slash_bounded_cjk_crops(
-            _CropEngine(), image, table, raw, fused, (span,)
-        )
+        result, decisions, calls = apply_slash_bounded_cjk_crops(_CropEngine(), image, table, raw, fused, (span,))
     finally:
         image.close()
 

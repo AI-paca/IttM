@@ -56,4 +56,3 @@ def add_sparse_signal(code: int, signal: int) -> int:
         raise ValueError(f"Unknown sparse code: {code}")
     components.add(signal)
     return sum(components)
-

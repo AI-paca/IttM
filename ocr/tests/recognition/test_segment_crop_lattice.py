@@ -56,9 +56,7 @@ def test_segment_crop_requires_whole_cell_corroboration_and_high_crop_confidence
 
     assert calls == 3
     assert [word["text"] for word in fused] == ["й-B2-RU-2026"]
-    assert [(decision.segment, decision.primary, decision.selected) for decision in decisions] == [
-        (2, "KY", "RU")
-    ]
+    assert [(decision.segment, decision.primary, decision.selected) for decision in decisions] == [(2, "KY", "RU")]
     assert decisions[0].supporting_sources == ("chi_sim", "eng")
 
 

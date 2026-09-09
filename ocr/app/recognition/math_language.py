@@ -8,9 +8,7 @@ _SUPERSCRIPT = re.compile(r"[⁰¹²³⁴⁵⁶⁷⁸⁹]")
 _FRACTION = re.compile(r"\b\d+\s*/\s*\d+\b")
 _VARIABLE = re.compile(r"\b[A-Za-z\u0370-\u03ff]\b", re.UNICODE)
 _NUMBER_TOKEN = re.compile(r"\b\d+(?:[.,]\d+)?\b")
-_DATE_LIKE = re.compile(
-    r"^\s*\d{1,4}([./-])\d{1,2}\1\d{1,4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\s*$"
-)
+_DATE_LIKE = re.compile(r"^\s*\d{1,4}([./-])\d{1,2}\1\d{1,4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\s*$")
 _GREEK_LETTERS = re.compile(r"[\u0370-\u03ff]", re.UNICODE)
 _SPACED_UNIT = (
     r"(?:"
@@ -58,11 +56,7 @@ def score_math_language(text: str) -> dict[str, float]:
 
     is_date_like = bool(_DATE_LIKE.fullmatch(normalized))
 
-    has_formula_signature = (
-        not is_date_like
-        and operators > 0
-        and (variables > 0 or digits > 0)
-    )
+    has_formula_signature = not is_date_like and operators > 0 and (variables > 0 or digits > 0)
 
     equ_score = 0.0
     ell_score = 0.0

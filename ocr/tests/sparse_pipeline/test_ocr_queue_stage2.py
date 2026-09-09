@@ -115,17 +115,11 @@ def _plan(block_count: int) -> BlockPlan:
             BlockSetAlgebra(
                 first_block_id=first.block_id,
                 second_block_id=second.block_id,
-                intersection_segment_ids=_ordered(
-                    source_ids, first_ids & second_ids
-                ),
+                intersection_segment_ids=_ordered(source_ids, first_ids & second_ids),
                 union_segment_ids=_ordered(source_ids, first_ids | second_ids),
                 xor_segment_ids=_ordered(source_ids, first_ids ^ second_ids),
-                first_only_segment_ids=_ordered(
-                    source_ids, first_ids - second_ids
-                ),
-                second_only_segment_ids=_ordered(
-                    source_ids, second_ids - first_ids
-                ),
+                first_only_segment_ids=_ordered(source_ids, first_ids - second_ids),
+                second_only_segment_ids=_ordered(source_ids, second_ids - first_ids),
             )
         )
     return BlockPlan(
@@ -224,20 +218,13 @@ def test_queue_expands_raw_gamma_blocks_and_lanes_in_canonical_order() -> None:
     )
     assert result.status is OcrQueueStatus.COMPLETE
     assert (result.complete, result.failed) == (len(expected), 0)
-    assert tuple(
-        (job.block_id, job.transform, job.lane_id) for job in result.jobs
-    ) == expected
-    assert tuple(job.job_id for job in result.jobs) == tuple(
-        f"ocr-job-{index:08d}" for index in range(len(expected))
-    )
+    assert tuple((job.block_id, job.transform, job.lane_id) for job in result.jobs) == expected
+    assert tuple(job.job_id for job in result.jobs) == tuple(f"ocr-job-{index:08d}" for index in range(len(expected)))
     assert all(job.status is OcrJobStatus.COMPLETE for job in result.jobs)
     assert all(job.output is not None for job in result.jobs)
     assert all(job.error_type is job.error_message is None for job in result.jobs)
     assert all(math.isfinite(job.elapsed_seconds) and job.elapsed_seconds >= 0.0 for job in result.jobs)
-    assert {
-        (lane_id, block_id, transform)
-        for lane_id, block_id, transform in calls
-    } == {
+    assert {(lane_id, block_id, transform) for lane_id, block_id, transform in calls} == {
         (lane.lane_id, block.block_id, transform)
         for lane in lanes
         for block in plan.blocks
@@ -245,11 +232,7 @@ def test_queue_expands_raw_gamma_blocks_and_lanes_in_canonical_order() -> None:
     }
     assert tuple(input_sha256(job, crops) for job in result.jobs) == tuple(
         hashlib.sha256(
-            (
-                crops[block_index].raw.png_bytes
-                if transform is OcrTransform.RAW
-                else crops[block_index].gamma.png_bytes
-            )
+            (crops[block_index].raw.png_bytes if transform is OcrTransform.RAW else crops[block_index].gamma.png_bytes)
         ).hexdigest()
         for block_index in range(len(crops))
         for transform in (OcrTransform.RAW, OcrTransform.GAMMA)
@@ -289,9 +272,7 @@ def test_independent_lane_pools_really_start_together_without_global_bottleneck(
         _lane("cpu", OcrResource.CPU, lane_factory("cpu"), max_workers=2),
         _lane("gpu", OcrResource.GPU, lane_factory("gpu"), max_workers=2),
     )
-    result = ParallelOcrQueue(
-        _config(max_pending_per_lane=2)
-    ).run(plan=plan, crops=crops, lanes=lanes)
+    result = ParallelOcrQueue(_config(max_pending_per_lane=2)).run(plan=plan, crops=crops, lanes=lanes)
 
     assert result.status is OcrQueueStatus.COMPLETE
     assert (result.complete, result.failed) == (8, 0)
@@ -331,9 +312,7 @@ def test_worker_factory_is_lazy_thread_local_and_reused_on_its_executor_thread()
 
         return _Worker(recognize)
 
-    result = ParallelOcrQueue(
-        _config(max_pending_per_lane=4)
-    ).run(
+    result = ParallelOcrQueue(_config(max_pending_per_lane=4)).run(
         plan=plan,
         crops=crops,
         lanes=(_lane("cpu", OcrResource.CPU, factory, max_workers=2),),
@@ -349,11 +328,7 @@ def test_worker_factory_is_lazy_thread_local_and_reused_on_its_executor_thread()
 
 def test_result_order_is_canonical_even_when_jobs_finish_in_reverse_order() -> None:
     plan, crops, labels = _fixtures(2)
-    canonical_payloads = [
-        payload
-        for crop in crops
-        for payload in (crop.raw.png_bytes, crop.gamma.png_bytes)
-    ]
+    canonical_payloads = [payload for crop in crops for payload in (crop.raw.png_bytes, crop.gamma.png_bytes)]
     delays = {
         hashlib.sha256(payload).hexdigest(): (len(canonical_payloads) - index) * 0.01
         for index, payload in enumerate(canonical_payloads)
@@ -371,18 +346,14 @@ def test_result_order_is_canonical_even_when_jobs_finish_in_reverse_order() -> N
 
         return _Worker(recognize)
 
-    result = ParallelOcrQueue(
-        _config(max_pending_per_lane=4)
-    ).run(
+    result = ParallelOcrQueue(_config(max_pending_per_lane=4)).run(
         plan=plan,
         crops=crops,
         lanes=(_lane("cpu", OcrResource.CPU, factory, max_workers=4),),
     )
 
     canonical = tuple(
-        (block.block_id, transform)
-        for block in plan.blocks
-        for transform in (OcrTransform.RAW, OcrTransform.GAMMA)
+        (block.block_id, transform) for block in plan.blocks for transform in (OcrTransform.RAW, OcrTransform.GAMMA)
     )
     assert tuple((job.block_id, job.transform) for job in result.jobs) == canonical
     assert tuple(completed) != canonical
@@ -474,11 +445,7 @@ def test_hard_job_and_input_preflight_limits_run_before_any_factory() -> None:
         return _Worker(lambda _payload: _output())
 
     lane = _lane("cpu", OcrResource.CPU, factory)
-    payloads = tuple(
-        payload
-        for crop in crops
-        for payload in (crop.raw.png_bytes, crop.gamma.png_bytes)
-    )
+    payloads = tuple(payload for crop in crops for payload in (crop.raw.png_bytes, crop.gamma.png_bytes))
     jobs = len(payloads)
     total_bytes = sum(len(payload) for payload in payloads)
     configs = (
@@ -509,11 +476,7 @@ def test_job_and_byte_limits_fail_before_spec_allocation_or_hashing(
         OcrResource.CPU,
         lambda: _Worker(lambda _payload: _output()),
     )
-    payloads = tuple(
-        payload
-        for crop in crops
-        for payload in (crop.raw.png_bytes, crop.gamma.png_bytes)
-    )
+    payloads = tuple(payload for crop in crops for payload in (crop.raw.png_bytes, crop.gamma.png_bytes))
     calls = {"build": 0, "hash": 0}
 
     def forbidden_build(_self: object, **_values: object) -> object:
@@ -665,9 +628,7 @@ def test_word_quota_and_crop_local_bbox_violations_fail_only_their_jobs() -> Non
 
         return _Worker(recognize)
 
-    result = ParallelOcrQueue(
-        _config(max_words=10, max_total_words=2)
-    ).run(
+    result = ParallelOcrQueue(_config(max_words=10, max_total_words=2)).run(
         plan=plan,
         crops=crops,
         lanes=(_lane("cpu", OcrResource.CPU, factory),),
@@ -781,9 +742,7 @@ def test_pending_window_and_running_workers_stay_bounded_per_lane() -> None:
 
         return _Worker(recognize)
 
-    result = ParallelOcrQueue(
-        _config(max_pending_per_lane=2)
-    ).run(
+    result = ParallelOcrQueue(_config(max_pending_per_lane=2)).run(
         plan=plan,
         crops=crops,
         lanes=(_lane("cpu", OcrResource.CPU, factory, max_workers=1),),
@@ -798,20 +757,15 @@ def test_factory_reusing_one_worker_across_threads_is_detected_per_job() -> None
     plan, crops, _ = _fixtures(2)
     shared = _Worker(lambda _payload: (time.sleep(0.03), _output("shared"))[1])
 
-    result = ParallelOcrQueue(
-        _config(max_pending_per_lane=4)
-    ).run(
+    result = ParallelOcrQueue(_config(max_pending_per_lane=4)).run(
         plan=plan,
         crops=crops,
-        lanes=(
-            _lane("cpu", OcrResource.CPU, lambda: shared, max_workers=2),
-        ),
+        lanes=(_lane("cpu", OcrResource.CPU, lambda: shared, max_workers=2),),
     )
 
     assert result.failed >= 1
     assert any(
-        job.error_type == OcrInvalidOutputError.__name__
-        and "reused one worker" in (job.error_message or "")
+        job.error_type == OcrInvalidOutputError.__name__ and "reused one worker" in (job.error_message or "")
         for job in result.jobs
     )
     assert len(result.jobs) == 4
@@ -862,9 +816,7 @@ def test_stateful_worker_outputs_are_delay_independent_via_deterministic_shards(
 
             return _Worker(recognize)
 
-        result = ParallelOcrQueue(
-            _config(max_pending_per_lane=8)
-        ).run(
+        result = ParallelOcrQueue(_config(max_pending_per_lane=8)).run(
             plan=plan,
             crops=crops,
             lanes=(_lane("cpu", OcrResource.CPU, factory, max_workers=2),),
@@ -897,9 +849,7 @@ def test_raw_gamma_pair_is_atomic_on_one_worker_shard_for_every_block() -> None:
 
         return _Worker(recognize)
 
-    result = ParallelOcrQueue(
-        _config(max_pending_per_lane=4)
-    ).run(
+    result = ParallelOcrQueue(_config(max_pending_per_lane=4)).run(
         plan=plan,
         crops=crops,
         lanes=(_lane("cpu", OcrResource.CPU, factory, max_workers=2),),
@@ -908,9 +858,7 @@ def test_raw_gamma_pair_is_atomic_on_one_worker_shard_for_every_block() -> None:
     assert result.failed == 0
     owner = {label: worker_id for worker_id, label in calls}
     for block in plan.blocks:
-        assert owner[(block.block_id, OcrTransform.RAW)] == owner[
-            (block.block_id, OcrTransform.GAMMA)
-        ]
+        assert owner[(block.block_id, OcrTransform.RAW)] == owner[(block.block_id, OcrTransform.GAMMA)]
     for worker_id in {item[0] for item in calls}:
         sequence = tuple(label for owner_id, label in calls if owner_id == worker_id)
         assert len(sequence) % 2 == 0
@@ -973,9 +921,7 @@ def test_job_results_bind_exact_input_and_raw_context_sha256() -> None:
         block_index = int(job.block_id.rsplit("-", 1)[1])
         crop = crops[block_index]
         expected_input = hashlib.sha256(
-            crop.raw.png_bytes
-            if job.transform is OcrTransform.RAW
-            else crop.gamma.png_bytes
+            crop.raw.png_bytes if job.transform is OcrTransform.RAW else crop.gamma.png_bytes
         ).hexdigest()
         expected_context = hashlib.sha256(crop.raw.png_bytes).hexdigest()
         assert job.input_sha256 == expected_input

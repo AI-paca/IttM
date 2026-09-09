@@ -11,9 +11,7 @@ def test_pipeline_control_is_nonempty_recursive_and_exactly_ordered() -> None:
     assert outcome.status is RunStatus.COMPLETE
     assert outcome.root is not None
     assert len(outcome.evidence) == len(PIPELINE_ORDER)
-    assert tuple(int(atom.payload.split(":", 1)[0]) for atom in outcome.evidence) == (
-        PIPELINE_ORDER
-    )
+    assert tuple(int(atom.payload.split(":", 1)[0]) for atom in outcome.evidence) == (PIPELINE_ORDER)
     assert {event.event for event in outcome.trace} >= {
         "ENTER",
         "EXPAND",

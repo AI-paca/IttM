@@ -102,9 +102,7 @@ class OcrCapability:
             type(self.python_executable) is not str or not self.python_executable
         ):
             raise ValueError("OCR capability Python executable is invalid")
-        if self.executable is not None and (
-            type(self.executable) is not str or not self.executable
-        ):
+        if self.executable is not None and (type(self.executable) is not str or not self.executable):
             raise ValueError("OCR capability executable is invalid")
         if (
             type(self.languages) is not tuple
@@ -112,14 +110,10 @@ class OcrCapability:
             or len(self.languages) != len(set(self.languages))
         ):
             raise ValueError("OCR capability languages must be unique and immutable")
-        if type(self.models) is not tuple or any(
-            not isinstance(item, OcrModelFile) for item in self.models
-        ):
+        if type(self.models) is not tuple or any(not isinstance(item, OcrModelFile) for item in self.models):
             raise ValueError("OCR capability models must be immutable")
         if type(self.options) is not tuple or any(
-            type(item) is not tuple
-            or len(item) != 2
-            or any(type(value) is not str for value in item)
+            type(item) is not tuple or len(item) != 2 or any(type(value) is not str for value in item)
             for item in self.options
         ):
             raise ValueError("OCR capability options must be immutable string pairs")

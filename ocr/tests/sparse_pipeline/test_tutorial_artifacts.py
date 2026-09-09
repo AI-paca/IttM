@@ -112,9 +112,7 @@ def _fixture(*, unassigned: bool = False) -> _Fixture:
     crop_config = BlockCropConfig(
         enhancement_backend=EnhancementBackend.NUMPY,
     )
-    crops, aligned_rgb_sha256 = BlockCropper(
-        crop_config
-    ).crop_with_rgb_sha256(
+    crops, aligned_rgb_sha256 = BlockCropper(crop_config).crop_with_rgb_sha256(
         page,
         aligned_size=geometry.segmentation.aligned_size,
         plan=plan,
@@ -162,9 +160,7 @@ def _fixture(*, unassigned: bool = False) -> _Fixture:
     )
     # Deliberately use a stage-local ID.  The tutorial writer must preserve
     # page bytes while safely normalizing this ID for the stage writer.
-    stage4 = GammaDarkCropEnhancer(stage4_config).enhance(
-        CropInput("tutorial-stage4-page", page.png_bytes)
-    )
+    stage4 = GammaDarkCropEnhancer(stage4_config).enhance(CropInput("tutorial-stage4-page", page.png_bytes))
     evidence = SparsePipelineEvidence(
         page=page,
         geometry=geometry,
@@ -221,11 +217,7 @@ def _publish(root: Path, fixture: _Fixture, *, run_id: str) -> Path:
 
 
 def _tree_bytes(root: Path) -> dict[str, bytes]:
-    return {
-        item.relative_to(root).as_posix(): item.read_bytes()
-        for item in sorted(root.rglob("*"))
-        if item.is_file()
-    }
+    return {item.relative_to(root).as_posix(): item.read_bytes() for item in sorted(root.rglob("*")) if item.is_file()}
 
 
 def test_publishes_all_stages_and_tutorial_visuals_atomically(
@@ -253,9 +245,7 @@ def test_publishes_all_stages_and_tutorial_visuals_atomically(
         "02-ocr",
         "07-document",
     ]
-    assert [item["status"] for item in manifest["stages"]] == [
-        "COMPLETE"
-    ] * 7
+    assert [item["status"] for item in manifest["stages"]] == ["COMPLETE"] * 7
     expected_visuals = (
         "04-enhancement/abs-diff.png",
         "04-enhancement/source/tutorial-stage4-page.png",
@@ -277,52 +267,31 @@ def test_publishes_all_stages_and_tutorial_visuals_atomically(
         "02-ocr/word-box-overlay.png",
     )
     assert all((published / item).is_file() for item in expected_visuals)
-    pair_manifest = json.loads(
-        (
-            published
-            / "05-blocks/adjacent-pairs/pair-000000/manifest.json"
-        ).read_text("utf-8")
-    )
+    pair_manifest = json.loads((published / "05-blocks/adjacent-pairs/pair-000000/manifest.json").read_text("utf-8"))
     assert pair_manifest["mask_basis"] == {
         "bbox": "filled half-open stage-1 segment bounding boxes",
         "ink_region": "stage-1 ownership intersected with foreground-mask",
     }
     assert pair_manifest["visuals_rendered"] is True
-    block_visuals = json.loads(
-        (published / "05-blocks/tutorial-visuals.json").read_text("utf-8")
-    )
+    block_visuals = json.loads((published / "05-blocks/tutorial-visuals.json").read_text("utf-8"))
     assert block_visuals["adjacent_pair_count"] == 1
     assert block_visuals["rendered_adjacent_pair_count"] == 1
     assert block_visuals["visual_pair_limit"] == 8
-    segment_crops = json.loads(
-        (
-            published / "01-geometry/segment-crops/manifest.json"
-        ).read_text("utf-8")
-    )
+    segment_crops = json.loads((published / "01-geometry/segment-crops/manifest.json").read_text("utf-8"))
     assert segment_crops["segments"] == 2
     assert [item["segment_id"] for item in segment_crops["items"]] == [
         "segment-000000",
         "segment-000001",
     ]
-    assert all(
-        item["ownership_pixels"] == item["ink_pixels"]
-        for item in segment_crops["items"]
-    )
+    assert all(item["ownership_pixels"] == item["ink_pixels"] for item in segment_crops["items"])
     isolated = np.asarray(
-        Image.open(
-            published
-            / "01-geometry/segment-crops/isolated/segment-000000.png"
-        ).convert("RGB")
+        Image.open(published / "01-geometry/segment-crops/isolated/segment-000000.png").convert("RGB")
     )
     assert isolated.shape == (12, 104, 3)
     assert int(np.count_nonzero(np.any(isolated != 255, axis=2))) == 312
-    block_crops = json.loads(
-        (published / "05-blocks/crop-gallery.json").read_text("utf-8")
-    )
+    block_crops = json.loads((published / "05-blocks/crop-gallery.json").read_text("utf-8"))
     assert block_crops["blocks"] == 2
-    assert block_crops["items"][0]["core_segment_ids"] == [
-        "segment-000000"
-    ]
+    assert block_crops["items"][0]["core_segment_ids"] == ["segment-000000"]
     assert block_crops["items"][0]["context_segment_ids"] == []
     assert block_crops["items"][0]["segment_ids"] == ["segment-000000"]
     assert block_crops["stage4_calibration"] == {
@@ -331,9 +300,7 @@ def test_publishes_all_stages_and_tutorial_visuals_atomically(
         "recipe": "kornia-gamma-dark-v1",
         "scope": "full aligned page",
     }
-    assert block_crops["stage5_application"]["scope"] == (
-        "each raw block independently"
-    )
+    assert block_crops["stage5_application"]["scope"] == ("each raw block independently")
     assert block_crops["invariants"] == {
         "gamma_backend_matches_stage4": True,
         "gamma_geometry_unchanged": True,
@@ -346,16 +313,10 @@ def test_publishes_all_stages_and_tutorial_visuals_atomically(
         and item["gamma_geometry_unchanged"]
         for item in block_crops["items"]
     )
-    stage4_gallery = (
-        published / "04-enhancement/candidate-gallery.md"
-    ).read_text("utf-8")
+    stage4_gallery = (published / "04-enhancement/candidate-gallery.md").read_text("utf-8")
     assert "GLOBAL CALIBRATION ONLY — NOT OCR INPUT" in stage4_gallery
     assert "abs-diff" not in stage4_gallery
-    production = json.loads(
-        (
-            published / "04-enhancement/production-block-manifest.json"
-        ).read_text("utf-8")
-    )
+    production = json.loads((published / "04-enhancement/production-block-manifest.json").read_text("utf-8"))
     assert production["scope"] == "each Stage 5 raw block independently"
     assert production["global_calibration"]["not_ocr_input"] is True
     assert production["invariants"] == {
@@ -381,16 +342,12 @@ def test_publishes_all_stages_and_tutorial_visuals_atomically(
         published / "07-document/certified/document.md"
     ).read_text("utf-8")
     assert len(tuple((published / "logs").glob("*.log"))) == 7
-    assert "2\t1\tgeometry-sparse-matrix" in (
-        published / "logs/stages.tsv"
-    ).read_text("utf-8")
+    assert "2\t1\tgeometry-sparse-matrix" in (published / "logs/stages.tsv").read_text("utf-8")
     provenance = json.loads((published / "provenance.json").read_text("utf-8"))
     assert provenance["execution_order"] == [3, 1, 6, 4, 5, 2, 7]
     assert provenance["provided"] == {}
 
-    objects = json.loads(
-        (published / "objects/manifest.json").read_text("utf-8")
-    )
+    objects = json.loads((published / "objects/manifest.json").read_text("utf-8"))
     assert objects["literal_crops_only"] is True
     assert objects["overlay_is_evidence"] is False
     assert objects["objects"]
@@ -402,38 +359,22 @@ def test_publishes_all_stages_and_tutorial_visuals_atomically(
         object_record = json.loads((object_root / "object.json").read_text("utf-8"))
         for segment_id in object_record["segment_ids"]:
             assert (object_root / "segments" / f"{segment_id}.txt").is_file()
-            assert (
-                object_root / "segments" / f"{segment_id}.png"
-            ).read_bytes() == (
-                published
-                / "01-geometry/segment-crops/raw"
-                / f"{segment_id}.png"
+            assert (object_root / "segments" / f"{segment_id}.png").read_bytes() == (
+                published / "01-geometry/segment-crops/raw" / f"{segment_id}.png"
             ).read_bytes()
-            assert (
-                object_root / "segments" / f"{segment_id}.isolated.png"
-            ).read_bytes() == (
-                published
-                / "01-geometry/segment-crops/isolated"
-                / f"{segment_id}.png"
+            assert (object_root / "segments" / f"{segment_id}.isolated.png").read_bytes() == (
+                published / "01-geometry/segment-crops/isolated" / f"{segment_id}.png"
             ).read_bytes()
         for block_id in object_record["block_ids"]:
             block_root = object_root / "blocks" / block_id
-            assert (
-                block_root / "raw.png"
-            ).read_bytes() == (
+            assert (block_root / "raw.png").read_bytes() == (
                 published / "05-blocks/raw" / f"{block_id}.png"
             ).read_bytes()
-            assert (
-                block_root / "enhanced.png"
-            ).read_bytes() == (
+            assert (block_root / "enhanced.png").read_bytes() == (
                 published / "05-blocks/gamma" / f"{block_id}.png"
             ).read_bytes()
-            membership = json.loads(
-                (block_root / "membership.json").read_text("utf-8")
-            )
-            isolation = json.loads(
-                (block_root / "isolation.json").read_text("utf-8")
-            )
+            membership = json.loads((block_root / "membership.json").read_text("utf-8"))
+            isolation = json.loads((block_root / "isolation.json").read_text("utf-8"))
             assert membership["isolation"] == "isolation.json"
             assert membership["isolation_mask"] is None
             assert membership["masked_segment_ids"] == []
@@ -441,9 +382,7 @@ def test_publishes_all_stages_and_tutorial_visuals_atomically(
             assert isolation["mask_png"] is None
             assert isolation["masked_segment_ids"] == []
             assert isolation["provenance"]["source_stage"] == 1
-            assert len(
-                isolation["provenance"]["ownership_raster_sha256"]
-            ) == 64
+            assert len(isolation["provenance"]["ownership_raster_sha256"]) == 64
             assert (block_root / "ocr.json").is_file()
     assert not tuple(tmp_path.glob(".tutorial-complete.partial-*"))
 
@@ -496,17 +435,14 @@ def test_block_isolation_artifact_persists_exact_mask_and_provenance(
     assert record["mask_png"] == result
     assert record["mask_sha256"] == hashlib.sha256(mask_png).hexdigest()
     assert record["masked_segment_ids"] == [foreign_id]
-    assert record["masked_segment_owners"] == {
-        foreign_id: "object-000001"
-    }
+    assert record["masked_segment_owners"] == {foreign_id: "object-000001"}
     assert record["provenance"] == {
         "source_stage": 1,
         "source": "exact Stage 1 ownership raster",
         "ownership_raster_sha256": "a" * 64,
         "ownership_segment_ids": [block.segment_ids[0], foreign_id],
         "validation": (
-            "mask and masked IDs were recomputed from Stage 1 ownership and "
-            "checked before artifact publication"
+            "mask and masked IDs were recomputed from Stage 1 ownership and " "checked before artifact publication"
         ),
         "declared_members_preserved": True,
         "masked_segments_are_foreign_objects": True,
@@ -554,9 +490,7 @@ def test_pair_manifest_survives_when_raster_visual_budget_is_exhausted(
     assert manifest["visuals_rendered"] is False
     assert manifest["files"] == {}
     assert not tuple(pair.glob("*-mask.png"))
-    block_visuals = json.loads(
-        (published / "05-blocks/tutorial-visuals.json").read_text("utf-8")
-    )
+    block_visuals = json.loads((published / "05-blocks/tutorial-visuals.json").read_text("utf-8"))
     assert block_visuals["adjacent_pair_count"] == 1
     assert block_visuals["rendered_adjacent_pair_count"] == 0
     assert block_visuals["visual_pair_limit"] == 0
@@ -577,9 +511,7 @@ def test_unresolved_ocr_and_document_are_not_reported_complete(
     assert manifest["stages"][6]["semantic_stage"] == 7
     assert manifest["stages"][6]["status"] == "UNRESOLVED"
     assert manifest["status"] == "UNRESOLVED"
-    overlay = np.asarray(
-        Image.open(published / "02-ocr/word-box-overlay.png").convert("RGB")
-    )
+    overlay = np.asarray(Image.open(published / "02-ocr/word-box-overlay.png").convert("RGB"))
     assert np.any(np.all(overlay == (220, 35, 45), axis=2))
 
 

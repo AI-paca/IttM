@@ -180,8 +180,16 @@ async function buildEdgeFallbackInput(
   if (width < 80 || height < 40) return null;
 
   const pixels = context.getImageData(0, 0, width, height).data;
-  const edge = Math.max(2, Math.min(12, Math.floor(Math.min(width, height) / 80)));
-  const inkRatio = (left: number, top: number, right: number, bottom: number) => {
+  const edge = Math.max(
+    2,
+    Math.min(12, Math.floor(Math.min(width, height) / 80)),
+  );
+  const inkRatio = (
+    left: number,
+    top: number,
+    right: number,
+    bottom: number,
+  ) => {
     let ink = 0;
     let total = 0;
     for (let y = top; y < bottom; y += 1) {
@@ -237,7 +245,9 @@ function projectEdgeFallback(
   return { ...result, words };
 }
 
-function edgeFallbackScore(result: BrowserOcrDetailedResult): readonly number[] {
+function edgeFallbackScore(
+  result: BrowserOcrDetailedResult,
+): readonly number[] {
   const confidence = result.words.reduce(
     (sum, word) => sum + (word.confidence ?? 0),
     0,
@@ -414,11 +424,7 @@ async function buildDenseGridBlockVariant(
   if ("close" in image && typeof image.close === "function") image.close();
 
   const imageData = context.getImageData(0, 0, width, height);
-  const { rows, columns } = denseGridLineIndexes(
-    imageData.data,
-    width,
-    height,
-  );
+  const { rows, columns } = denseGridLineIndexes(imageData.data, width, height);
   if (!rows.size && !columns.size) return null;
   for (const y of rows) {
     for (let x = 0; x < width; x += 1) {

@@ -61,9 +61,7 @@ def test_workers_reuse_one_process_local_capability_probe(
     monkeypatch.setattr(adapters.subprocess, "run", _successful_probe(calls))
 
     first = adapters.TesseractWorker(adapters.TesseractConfig())
-    second = adapters.TesseractWorker(
-        adapters.TesseractConfig(languages=("chi_sim",))
-    )
+    second = adapters.TesseractWorker(adapters.TesseractConfig(languages=("chi_sim",)))
 
     assert first.capabilities is second.capabilities
     assert len(calls) == 2
@@ -81,12 +79,8 @@ def test_capability_cache_separates_different_tessdata_keys(
     monkeypatch.setattr(adapters.shutil, "which", lambda _name: "/fake/tesseract")
     monkeypatch.setattr(adapters.subprocess, "run", _successful_probe(calls))
 
-    adapters.TesseractWorker(
-        adapters.TesseractConfig(tessdata_directory=first_tessdata)
-    )
-    adapters.TesseractWorker(
-        adapters.TesseractConfig(tessdata_directory=second_tessdata)
-    )
+    adapters.TesseractWorker(adapters.TesseractConfig(tessdata_directory=first_tessdata))
+    adapters.TesseractWorker(adapters.TesseractConfig(tessdata_directory=second_tessdata))
 
     assert len(calls) == 4
     assert {call[-1] for call in calls if "--list-langs" in call} == {
@@ -125,10 +119,7 @@ def test_concurrent_workers_share_one_inflight_probe(
     monkeypatch.setattr(adapters.subprocess, "run", run)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
-        futures = [
-            executor.submit(adapters.TesseractWorker, adapters.TesseractConfig())
-            for _ in range(worker_count)
-        ]
+        futures = [executor.submit(adapters.TesseractWorker, adapters.TesseractConfig()) for _ in range(worker_count)]
         assert probe_started.wait(timeout=2.0)
         time.sleep(0.05)
         release_probe.set()
@@ -146,7 +137,6 @@ def test_failed_probe_is_not_cached_permanently(
     monkeypatch.setattr(adapters.shutil, "which", lambda _name: "/fake/tesseract")
 
     def run(command: object, **kwargs: object) -> subprocess.CompletedProcess[object]:
-        nonlocal failing
         values = tuple(command)  # type: ignore[arg-type]
         calls.append(values)
         if failing:

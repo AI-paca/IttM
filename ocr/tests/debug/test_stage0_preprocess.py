@@ -9,18 +9,11 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-SCRIPT = (
-    Path(__file__).resolve().parents[3]
-    / "scripts"
-    / "debug"
-    / "debug_stage0_preprocess.py"
-)
+SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "debug" / "debug_stage0_preprocess.py"
 
 
 def _load_script():
-    spec = importlib.util.spec_from_file_location(
-        "_debug_stage0_preprocess_under_test", SCRIPT
-    )
+    spec = importlib.util.spec_from_file_location("_debug_stage0_preprocess_under_test", SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -85,9 +78,7 @@ def test_projector_step_is_explicit_and_records_transformed_rgb(
         assert raster.size == (2000, 1200)
         raster_sha256 = hashlib.sha256(raster.tobytes()).hexdigest()
     assert manifest["step"] == "projector_slide_dewarp"
-    assert manifest["profile"]["image_preprocessing"] == [
-        "projector_slide_dewarp"
-    ]
+    assert manifest["profile"]["image_preprocessing"] == ["projector_slide_dewarp"]
     assert manifest["output"]["size"] == [2000, 1200]
     assert manifest["output_rgb_sha256"] == raster_sha256
 

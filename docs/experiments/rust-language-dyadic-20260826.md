@@ -28,17 +28,17 @@ affecting the queue, and a bad 16-line block therefore reached
 
 ## Validation
 
-| Gate | Result |
-| --- | --- |
-| Rust unit and ABI | 20/20 pass |
-| Native/WASM parity verifier | pass |
-| Browser pipeline and persistent worker | 33/33 pass |
-| GitHub Pages/lite production bundle | pass |
-| Native Python syntax/import in OCR image | pass |
-| Shared production/debug recognizer import | pass |
-| Visual `SAMPLE_4k` separate-block smoke | one non-empty bounded block; no background jobs |
-| Three-fixture OCR smoke | pending until the uncontaminated baseline timing run releases OCR resources |
-| Full corpus | pending; do not merge to clean before comparison |
+| Gate                                      | Result                                                                      |
+| ----------------------------------------- | --------------------------------------------------------------------------- |
+| Rust unit and ABI                         | 20/20 pass                                                                  |
+| Native/WASM parity verifier               | pass                                                                        |
+| Browser pipeline and persistent worker    | 33/33 pass                                                                  |
+| GitHub Pages/lite production bundle       | pass                                                                        |
+| Native Python syntax/import in OCR image  | pass                                                                        |
+| Shared production/debug recognizer import | pass                                                                        |
+| Visual `SAMPLE_4k` separate-block smoke   | one non-empty bounded block; no background jobs                             |
+| Three-fixture OCR smoke                   | pending until the uncontaminated baseline timing run releases OCR resources |
+| Full corpus                               | pending; do not merge to clean before comparison                            |
 
 ## Baseline observation
 

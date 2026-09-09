@@ -162,26 +162,17 @@ def _render_irregular_lines(
     fonts = tuple(ImageFont.truetype(font_path, size) for size in font_sizes)
     probe = Image.new("RGB", (1, 1), "white")
     probe_draw = ImageDraw.Draw(probe)
-    boxes = tuple(
-        probe_draw.textbbox((0, 0), line, font=font, anchor="lt")
-        for line, font in zip(lines, fonts)
-    )
+    boxes = tuple(probe_draw.textbbox((0, 0), line, font=font, anchor="lt") for line, font in zip(lines, fonts))
     left_pad, top_pad, right_pad, bottom_pad = padding
     widths = tuple(box[2] - box[0] for box in boxes)
     heights = tuple(max(1, box[3] - box[1]) for box in boxes)
-    width = (
-        max(offset + value for offset, value in zip(x_offsets, widths))
-        + left_pad
-        + right_pad
-    )
+    width = max(offset + value for offset, value in zip(x_offsets, widths)) + left_pad + right_pad
     height = top_pad + sum(heights) + sum(spacings) + bottom_pad
     image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
     masks: list[np.ndarray] = []
     y = top_pad
-    for line, font, box, line_height, x_offset in zip(
-        lines, fonts, boxes, heights, x_offsets
-    ):
+    for line, font, box, line_height, x_offset in zip(lines, fonts, boxes, heights, x_offsets):
         origin = (left_pad + x_offset - box[0], y - box[1])
         draw.text(origin, line, font=font, fill="black", anchor="lt")
         mask_image = Image.new("L", (width, height), 0)
@@ -205,34 +196,22 @@ def test_all_73_known_smoke_samples_are_pixel_lossless_and_consistent() -> None:
         bundle = GeometryAnalyzer().analyze_bundle(sample.image)
 
         assert sample.image.tobytes() == source_bytes, spec.case_id
-        assert bundle.result.alignment.correction_degrees == pytest.approx(
-            0.0
-        ), spec.case_id
+        assert bundle.result.alignment.correction_degrees == pytest.approx(0.0), spec.case_id
         _assert_exact_pixel_ownership(bundle, sample.expected_ink_mask)
         _assert_no_segment_crosses_known_lines(bundle, sample)
         matrix = bundle.result.matrix
-        segment_ids = tuple(
-            segment.segment_id for segment in bundle.result.segmentation.segments
-        )
-        assert (
-            tuple(span.segment_id for span in matrix.spans) == segment_ids
-        ), spec.case_id
-        assert {cell.segment_id for cell in matrix.cells} == set(
-            segment_ids
-        ), spec.case_id
+        segment_ids = tuple(segment.segment_id for segment in bundle.result.segmentation.segments)
+        assert tuple(span.segment_id for span in matrix.spans) == segment_ids, spec.case_id
+        assert {cell.segment_id for cell in matrix.cells} == set(segment_ids), spec.case_id
         assert matrix.cells == tuple(
-            sorted(
-                matrix.cells, key=lambda cell: (cell.row, cell.column, cell.segment_id)
-            )
+            sorted(matrix.cells, key=lambda cell: (cell.row, cell.column, cell.segment_id))
         ), spec.case_id
 
         known_line_count = len(sample.expected_text.splitlines())
         # Zero spacing is part of the promised corpus, not a relaxed case.  A
         # lossless foreground mask can still be structurally wrong when
         # adjacent rendered lines touch and collapse into one segment.
-        assert (
-            len(bundle.result.segmentation.segments) >= known_line_count
-        ), spec.case_id
+        assert len(bundle.result.segmentation.segments) >= known_line_count, spec.case_id
         if spec.border_pt == 0 and spec.layout in {"paragraph", "list"}:
             assert bundle.result.segmentation.rules == (), spec.case_id
 
@@ -280,9 +259,7 @@ def test_zero_spacing_rows_use_lossless_component_fallback(language: str) -> Non
     bundle = GeometryAnalyzer().analyze_bundle(sample.image)
 
     _assert_exact_pixel_ownership(bundle, sample.expected_ink_mask)
-    assert len(bundle.result.segmentation.segments) >= len(
-        sample.expected_text.splitlines()
-    )
+    assert len(bundle.result.segmentation.segments) >= len(sample.expected_text.splitlines())
 
 
 def test_text_strokes_are_not_rules_but_a_compact_grid_is() -> None:
@@ -357,34 +334,23 @@ def test_neutral_fills_keep_rule_bounded_cells_and_one_merged_row() -> None:
 
     geometry = GeometryAnalyzer().analyze(image)
 
-    horizontal = tuple(
-        rule for rule in geometry.segmentation.rules if rule.axis is RuleAxis.HORIZONTAL
-    )
-    vertical = tuple(
-        rule for rule in geometry.segmentation.rules if rule.axis is RuleAxis.VERTICAL
-    )
+    horizontal = tuple(rule for rule in geometry.segmentation.rules if rule.axis is RuleAxis.HORIZONTAL)
+    vertical = tuple(rule for rule in geometry.segmentation.rules if rule.axis is RuleAxis.VERTICAL)
     assert len(horizontal) == len(row_edges)
     assert len(vertical) >= 2 + 2 * (len(column_edges) - 2)
     assert len(geometry.segmentation.segments) >= 26
     assert not any(
         segment.bbox.width == 1
         and segment.bbox.right == left
-        and (
-            segment.bbox.bottom <= row_edges[0] + 8
-            or segment.bbox.top >= row_edges[-1] - 8
-        )
+        and (segment.bbox.bottom <= row_edges[0] + 8 or segment.bbox.top >= row_edges[-1] - 8)
         for segment in geometry.segmentation.segments
     )
 
     merged = tuple(
-        segment
-        for segment in geometry.segmentation.segments
-        if row_edges[2] < segment.bbox.center[1] < row_edges[3]
+        segment for segment in geometry.segmentation.segments if row_edges[2] < segment.bbox.center[1] < row_edges[3]
     )
     assert len(merged) == 1
-    merged_span = next(
-        span for span in geometry.matrix.spans if span.segment_id == merged[0].segment_id
-    )
+    merged_span = next(span for span in geometry.matrix.spans if span.segment_id == merged[0].segment_id)
     assert merged[0].bbox.width >= right - left - 8
     assert merged_span.column_stop - merged_span.column_start >= 5
 
@@ -398,9 +364,7 @@ def test_neutral_fills_keep_rule_bounded_cells_and_one_merged_row() -> None:
     assert len(tables) == 1
     assert len(tables[0].segment_ids) >= 26
 
-    plan = OverlappingBlockPlanner(
-        BlockPlanningConfig(max_core_segments=10, context_segments=2, padding=2)
-    ).plan(
+    plan = OverlappingBlockPlanner(BlockPlanningConfig(max_core_segments=10, context_segments=2, padding=2)).plan(
         aligned_size=geometry.segmentation.aligned_size,
         segments=geometry.segmentation.segments,
         objects_result=objects,
@@ -455,9 +419,7 @@ def test_aligned_chinese_strokes_across_zero_spaced_rows_are_not_rules(
 def test_large_display_text_columns_are_not_structural_rules() -> None:
     """Exercise the real old fixture that exposed page-fraction false rules."""
 
-    fixture = Path(
-        "/home/alpaca/GitHub/IttM-engine-v18-offline/debug/fixtures/SAMPLE_4k.png"
-    )
+    fixture = Path("/home/alpaca/GitHub/IttM-engine-v18-offline/debug/fixtures/SAMPLE_4k.png")
     if not fixture.is_file():
         pytest.skip("old SAMPLE_4k fixture is unavailable")
 
@@ -469,9 +431,7 @@ def test_large_display_text_columns_are_not_structural_rules() -> None:
 
 
 def test_colored_old_table_keeps_row_rules_and_internal_divider() -> None:
-    fixture = Path(
-        "/home/alpaca/GitHub/IttM-engine-v18-offline/debug/fixtures/image (10).png"
-    )
+    fixture = Path("/home/alpaca/GitHub/IttM-engine-v18-offline/debug/fixtures/image (10).png")
     if not fixture.is_file():
         pytest.skip("old colored-table fixture is unavailable")
 
@@ -479,14 +439,11 @@ def test_colored_old_table_keeps_row_rules_and_internal_divider() -> None:
         opened.load()
         result = GeometryAnalyzer().analyze(opened)
 
-    horizontal = tuple(
-        rule for rule in result.segmentation.rules if rule.axis is RuleAxis.HORIZONTAL
-    )
+    horizontal = tuple(rule for rule in result.segmentation.rules if rule.axis is RuleAxis.HORIZONTAL)
     internal_vertical = tuple(
         rule
         for rule in result.segmentation.rules
-        if rule.axis is RuleAxis.VERTICAL
-        and 5 < rule.bbox.left < result.segmentation.aligned_size[0] - 5
+        if rule.axis is RuleAxis.VERTICAL and 5 < rule.bbox.left < result.segmentation.aligned_size[0] - 5
     )
     # There are thirteen visible horizontal separators and one cyan divider;
     # allow slight grouping while still rejecting a one-segment false success.
@@ -495,11 +452,9 @@ def test_colored_old_table_keeps_row_rules_and_internal_divider() -> None:
     for rule in (*horizontal, *internal_vertical):
         assert not any(
             (
-                segment.bbox.left < rule.bbox.left
-                and segment.bbox.right > rule.bbox.right
+                segment.bbox.left < rule.bbox.left and segment.bbox.right > rule.bbox.right
                 if rule.axis is RuleAxis.VERTICAL
-                else segment.bbox.top < rule.bbox.top
-                and segment.bbox.bottom > rule.bbox.bottom
+                else segment.bbox.top < rule.bbox.top and segment.bbox.bottom > rule.bbox.bottom
             )
             for segment in result.segmentation.segments
         )
@@ -595,9 +550,7 @@ def test_zero_spaced_short_row_is_not_merged_by_pixel_balance_guard() -> None:
     bundle = GeometryAnalyzer().analyze_bundle(sample.image)
 
     _assert_exact_pixel_ownership(bundle, sample.expected_ink_mask)
-    assert len(bundle.result.segmentation.segments) >= len(
-        sample.expected_text.splitlines()
-    )
+    assert len(bundle.result.segmentation.segments) >= len(sample.expected_text.splitlines())
 
 
 @pytest.mark.parametrize(
@@ -630,9 +583,7 @@ def test_zero_spaced_list_keeps_three_rows_across_body_and_diacritic_guards(
     foreground: tuple[int, int, int],
 ) -> None:
     try:
-        font_path = next(
-            path for path in available_fonts("en") if Path(path).name == font_name
-        )
+        font_path = next(path for path in available_fonts("en") if Path(path).name == font_name)
     except (FileNotFoundError, StopIteration):
         pytest.skip(f"{font_name} is unavailable")
     sample = render_sample(
@@ -661,9 +612,7 @@ def test_zero_spaced_cyrillic_paragraph_has_no_accent_only_micro_segments() -> N
         fonts = available_fonts("ru")
     except FileNotFoundError:
         pytest.skip("Cyrillic fonts are unavailable")
-    font_path = next(
-        (path for path in fonts if Path(path).name == "DejaVuSans.ttf"), None
-    )
+    font_path = next((path for path in fonts if Path(path).name == "DejaVuSans.ttf"), None)
     if font_path is None:
         pytest.skip("DejaVu Sans is unavailable")
     sample = render_sample(
@@ -682,9 +631,7 @@ def test_zero_spaced_cyrillic_paragraph_has_no_accent_only_micro_segments() -> N
     bundle = GeometryAnalyzer().analyze_bundle(sample.image)
 
     _assert_exact_pixel_ownership(bundle, sample.expected_ink_mask)
-    assert all(
-        segment.bbox.height >= 6 for segment in bundle.result.segmentation.segments
-    )
+    assert all(segment.bbox.height >= 6 for segment in bundle.result.segmentation.segments)
 
 
 @pytest.mark.parametrize("border_pt", (1, 2, 3))
@@ -727,11 +674,7 @@ def test_zero_margin_frame_never_claims_an_adjacent_text_row(
     border_pt: int,
 ) -> None:
     try:
-        font_path = next(
-            path
-            for path in available_fonts(language)
-            if Path(path).name == "LiberationSerif-Regular.ttf"
-        )
+        font_path = next(path for path in available_fonts(language) if Path(path).name == "LiberationSerif-Regular.ttf")
     except (FileNotFoundError, StopIteration):
         pytest.skip("Liberation Serif is unavailable")
     sample = render_sample(
@@ -782,9 +725,7 @@ def test_synthetic_margin_zero_never_clips_text_and_frame_never_overpaints_it() 
 
     border_pixels = round(3 * 300 / 72)
     width, height = framed.image.size
-    frame_ink = width * height - (width - 2 * border_pixels) * (
-        height - 2 * border_pixels
-    )
+    frame_ink = width * height - (width - 2 * border_pixels) * (height - 2 * border_pixels)
     assert int(framed.expected_ink_mask.sum()) == text_ink + frame_ink
     assert len(GeometryAnalyzer().analyze(framed.image).segmentation.rules) == 4
 
@@ -823,9 +764,7 @@ def test_deskew_applies_the_estimated_correction_in_the_same_convention() -> Non
         (399.0, 199.0),
         (147.25, 83.75),
     ):
-        assert transform.point_to_source(
-            *transform.point_to_aligned(*point)
-        ) == pytest.approx(point, rel=0.0, abs=1e-6)
+        assert transform.point_to_source(*transform.point_to_aligned(*point)) == pytest.approx(point, rel=0.0, abs=1e-6)
     aligned_width, aligned_height = transform.aligned_size
     for box in (
         Box(0, 0, 1, 1),
@@ -927,9 +866,9 @@ def test_run_and_component_limits_bound_pathological_rasters() -> None:
     isolated = np.full((24, 24, 3), 255, dtype=np.uint8)
     isolated[1:24:3, 1:24:3] = 0
     with pytest.raises(GeometryLimitError, match="component count limit"):
-        GeometryAnalyzer(
-            GeometryConfig(max_runs=100, max_components=5, deskew_max_degrees=0.0)
-        ).analyze(Image.fromarray(isolated, mode="RGB"))
+        GeometryAnalyzer(GeometryConfig(max_runs=100, max_components=5, deskew_max_degrees=0.0)).analyze(
+            Image.fromarray(isolated, mode="RGB")
+        )
 
 
 def test_body_height_ignores_abundant_single_pixel_raster_fragments() -> None:
@@ -954,13 +893,7 @@ def test_body_height_ignores_dust_for_short_text_too(body_count: int) -> None:
         mask[10:22, left : left + 5] = True
     components = geometry_module._connected_components(mask)
 
-    assert (
-        sum(
-            component.pixels >= 4 and component.bbox.height >= 3
-            for component in components
-        )
-        == body_count
-    )
+    assert sum(component.pixels >= 4 and component.bbox.height >= 3 for component in components) == body_count
     assert geometry_module._body_component_height(components, 75) == 12.0
 
 
@@ -971,11 +904,7 @@ def test_single_cyrillic_diacritic_stays_with_its_body_despite_dust(
     with_dust: bool,
 ) -> None:
     try:
-        font_path = next(
-            path
-            for path in available_fonts("ru")
-            if Path(path).name == "DejaVuSans.ttf"
-        )
+        font_path = next(path for path in available_fonts("ru") if Path(path).name == "DejaVuSans.ttf")
     except (FileNotFoundError, StopIteration):
         pytest.skip("DejaVu Sans Cyrillic font is unavailable")
     image = Image.new("RGB", (360, 100), "white")
@@ -992,9 +921,7 @@ def test_single_cyrillic_diacritic_stays_with_its_body_despite_dust(
             draw.point(((index * 7) % 140, 2 + (index % 2) * 3), fill="black")
 
     result = GeometryAnalyzer(GeometryConfig(deskew_max_degrees=0.0)).analyze(image)
-    glyph_segments = tuple(
-        segment for segment in result.segmentation.segments if segment.bbox.right > 140
-    )
+    glyph_segments = tuple(segment for segment in result.segmentation.segments if segment.bbox.right > 140)
 
     assert len(glyph_segments) == 1
     assert glyph_segments[0].bbox.height >= 20
@@ -1023,9 +950,7 @@ def test_tiny_valley_relaxation_does_not_slice_single_text_rows() -> None:
                     anchor="lt",
                 )
 
-                result = GeometryAnalyzer(
-                    GeometryConfig(deskew_max_degrees=0.0)
-                ).analyze(image)
+                result = GeometryAnalyzer(GeometryConfig(deskew_max_degrees=0.0)).analyze(image)
 
                 assert len(result.segmentation.segments) == 1, (
                     language,
@@ -1056,16 +981,11 @@ def test_tight_symmetric_single_rows_never_invent_a_repeated_row_lattice() -> No
                     font_path,
                     font_size,
                 )
-                bundle = GeometryAnalyzer(
-                    GeometryConfig(deskew_max_degrees=0.0)
-                ).analyze_bundle(image)
+                bundle = GeometryAnalyzer(GeometryConfig(deskew_max_degrees=0.0)).analyze_bundle(image)
 
                 np.testing.assert_array_equal(bundle.foreground_mask, expected_mask)
                 assert bundle.result.segmentation.rules == ()
-                assert not any(
-                    node.axis is SplitAxis.ROWS
-                    for node in bundle.result.segmentation.nodes
-                ), (
+                assert not any(node.axis is SplitAxis.ROWS for node in bundle.result.segmentation.nodes), (
                     language,
                     Path(font_path).name,
                     font_size,
@@ -1100,9 +1020,7 @@ def test_all_cyrillic_diacritic_glyphs_keep_one_owner_with_and_without_dust() ->
                                 ),
                                 fill="black",
                             )
-                    bundle = GeometryAnalyzer(
-                        GeometryConfig(deskew_max_degrees=0.0)
-                    ).analyze_bundle(image)
+                    bundle = GeometryAnalyzer(GeometryConfig(deskew_max_degrees=0.0)).analyze_bundle(image)
                     glyph_owners = np.unique(bundle.ownership[glyph_mask])
                     glyph_owners = glyph_owners[glyph_owners >= 0]
                     assert len(glyph_owners) == 1, (
@@ -1147,19 +1065,19 @@ def test_asymmetric_pages_keep_irregular_rows_semantically_separate(
         padding=(2, 1, 137, 29),
     )
 
-    bundle = GeometryAnalyzer(GeometryConfig(deskew_max_degrees=0.0)).analyze_bundle(
-        image
-    )
+    bundle = GeometryAnalyzer(GeometryConfig(deskew_max_degrees=0.0)).analyze_bundle(image)
 
     _assert_custom_line_oracle(bundle, line_masks)
     for node in bundle.result.segmentation.nodes:
         if node.axis is not SplitAxis.ROWS or node.split_coordinate is None:
             continue
         coordinate = node.split_coordinate
-        assert not any(
-            line_mask[:coordinate].any() and line_mask[coordinate:].any()
-            for line_mask in line_masks
-        ), (language, node.node_id, coordinate, bundle.result.diagnostics)
+        assert not any(line_mask[:coordinate].any() and line_mask[coordinate:].any() for line_mask in line_masks), (
+            language,
+            node.node_id,
+            coordinate,
+            bundle.result.diagnostics,
+        )
 
 
 @pytest.mark.parametrize("border_pt", (0, 1, 2, 3))
@@ -1177,11 +1095,7 @@ def test_frame_aware_background_keeps_tiny_text_and_only_real_frames(
     foreground: tuple[int, int, int],
 ) -> None:
     try:
-        font_path = next(
-            path
-            for path in available_fonts("en")
-            if Path(path).name == "LiberationSans-Regular.ttf"
-        )
+        font_path = next(path for path in available_fonts("en") if Path(path).name == "LiberationSans-Regular.ttf")
     except (FileNotFoundError, StopIteration):
         pytest.skip("Liberation Sans is unavailable")
     sample = render_sample(
@@ -1210,21 +1124,13 @@ def test_frame_aware_background_keeps_tiny_text_and_only_real_frames(
         assert bundle.result.segmentation.rules == ()
 
 
-def test_root_segment_ids_follow_global_segment_order_and_tree_debug_is_preorder() -> (
-    None
-):
+def test_root_segment_ids_follow_global_segment_order_and_tree_debug_is_preorder() -> None:
     result = GeometryAnalyzer().analyze(_draw_four_groups())
-    root = next(
-        node
-        for node in result.segmentation.nodes
-        if node.node_id == result.segmentation.root_node_id
-    )
+    root = next(node for node in result.segmentation.nodes if node.node_id == result.segmentation.root_node_id)
     expected_ids = tuple(segment.segment_id for segment in result.segmentation.segments)
     assert root.segment_ids == expected_ids
 
-    positions = {
-        node.node_id: index for index, node in enumerate(result.segmentation.nodes)
-    }
+    positions = {node.node_id: index for index, node in enumerate(result.segmentation.nodes)}
     for node in result.segmentation.nodes:
         if not node.child_ids:
             continue
@@ -1245,9 +1151,7 @@ def test_geometry_is_deterministic_under_parallel_independent_runs() -> None:
     def run(_: int) -> tuple[object, str]:
         bundle = GeometryAnalyzer().analyze_bundle(image)
         digest = hashlib.sha256(
-            bundle.foreground_mask.tobytes()
-            + bundle.rule_mask.tobytes()
-            + bundle.ownership.tobytes()
+            bundle.foreground_mask.tobytes() + bundle.rule_mask.tobytes() + bundle.ownership.tobytes()
         ).hexdigest()
         return bundle.result, digest
 
@@ -1292,25 +1196,17 @@ def test_failed_artifact_write_rolls_back_the_partial_directory(tmp_path: Path) 
 
 
 def test_limit_is_explicitly_degraded_in_result_and_artifact(tmp_path: Path) -> None:
-    bundle = GeometryAnalyzer(GeometryConfig(max_nodes=1)).analyze_bundle(
-        _draw_four_groups()
-    )
+    bundle = GeometryAnalyzer(GeometryConfig(max_nodes=1)).analyze_bundle(_draw_four_groups())
 
     assert bundle.result.status is GeometryStatus.DEGRADED
     assert bundle.result.limit_leaf_count == 1
     run_dir = GeometryArtifactWriter().write(tmp_path, run_id="limited", bundle=bundle)
-    manifest = json.loads(
-        (run_dir / "01-geometry" / "manifest.json").read_text(encoding="utf-8")
-    )
+    manifest = json.loads((run_dir / "01-geometry" / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "degraded"
     assert manifest["limit_leaf_count"] == 1
     crop_root = run_dir / "01-geometry" / "segment-crops"
-    crop_manifest = json.loads(
-        (crop_root / "manifest.json").read_text(encoding="utf-8")
-    )
-    assert crop_manifest["segments"] == len(
-        bundle.result.segmentation.segments
-    )
+    crop_manifest = json.loads((crop_root / "manifest.json").read_text(encoding="utf-8"))
+    assert crop_manifest["segments"] == len(bundle.result.segmentation.segments)
     assert (crop_root / "gallery.md").is_file()
     for item in crop_manifest["items"]:
         assert (crop_root / item["raw"]).is_file()

@@ -95,36 +95,22 @@ class BlockCropPair:
             or len(self.segment_ids) != len(set(self.segment_ids))
         ):
             raise ValueError("block crop segment IDs must be a unique immutable tuple")
-        if not isinstance(self.raw, CropInput) or (
-            self.gamma is not None
-            and not isinstance(self.gamma, EnhancedCrop)
-        ):
+        if not isinstance(self.raw, CropInput) or (self.gamma is not None and not isinstance(self.gamma, EnhancedCrop)):
             raise ValueError("block crop candidates have invalid types")
         if (
             type(self.masked_segment_ids) is not tuple
-            or any(
-                type(segment_id) is not str or not segment_id
-                for segment_id in self.masked_segment_ids
-            )
-            or len(self.masked_segment_ids)
-            != len(set(self.masked_segment_ids))
+            or any(type(segment_id) is not str or not segment_id for segment_id in self.masked_segment_ids)
+            or len(self.masked_segment_ids) != len(set(self.masked_segment_ids))
         ):
-            raise ValueError(
-                "masked segment IDs must be a unique immutable string tuple"
-            )
+            raise ValueError("masked segment IDs must be a unique immutable string tuple")
         if (self.isolation_mask_png is None) != (not self.masked_segment_ids):
-            raise ValueError(
-                "an isolation mask and masked segment IDs must occur together"
-            )
+            raise ValueError("an isolation mask and masked segment IDs must occur together")
         if self.raw.crop_id != f"{self.block_id}-raw":
             raise ValueError("raw crop identifier disagrees with its block")
         if self.gamma is not None:
             if self.gamma.crop_id != f"{self.block_id}-gamma":
                 raise ValueError("gamma crop identifier disagrees with its block")
-            if (
-                hashlib.sha256(self.raw.png_bytes).hexdigest()
-                != self.gamma.source_sha256
-            ):
+            if hashlib.sha256(self.raw.png_bytes).hexdigest() != self.gamma.source_sha256:
                 raise ValueError("gamma candidate was not derived from the raw crop")
             if (self.gamma.width, self.gamma.height) != (
                 self.bbox.width,
@@ -143,11 +129,7 @@ class BlockCropPair:
                     or len(embedded_dpi) != 2
                     or any(
                         not isinstance(value, (int, float))
-                        or abs(
-                            float(value)
-                            - (self.gamma.dpi if self.gamma is not None else 300)
-                        )
-                        > 0.01
+                        or abs(float(value) - (self.gamma.dpi if self.gamma is not None else 300)) > 0.01
                         for value in embedded_dpi
                     )
                 ):
@@ -171,9 +153,7 @@ class BlockCropPair:
                         or extrema != (0, 255)
                         or any(histogram[1:255])
                     ):
-                        raise ValueError(
-                            "isolation mask metadata or values are invalid"
-                        )
+                        raise ValueError("isolation mask metadata or values are invalid")
                     mask_values = np.asarray(mask, dtype=np.uint8) == 255
                 with Image.open(io.BytesIO(self.raw.png_bytes)) as raw:
                     raw.load()
@@ -183,9 +163,7 @@ class BlockCropPair:
                         copy=True,
                     )
                 if np.any(raw_values[mask_values] != 255):
-                    raise ValueError(
-                        "isolation mask pixels must be white in the raw crop"
-                    )
+                    raise ValueError("isolation mask pixels must be white in the raw crop")
             except ValueError:
                 raise
             except (OSError, UnidentifiedImageError, SyntaxError) as exc:
@@ -296,45 +274,31 @@ class BlockCropper:
         """
 
         if (ownership is None) != (ownership_segment_ids is None):
-            raise BlockCropInvariantError(
-                "ownership raster and segment order must be supplied together"
-            )
+            raise BlockCropInvariantError("ownership raster and segment order must be supplied together")
         if isolation_source is not None:
             if (
                 type(isolation_source) is not tuple
                 or len(isolation_source) != len(plan.blocks)
-                or any(
-                    not isinstance(item, BlockCropPair)
-                    for item in isolation_source
-                )
+                or any(not isinstance(item, BlockCropPair) for item in isolation_source)
             ):
-                raise BlockCropInvariantError(
-                    "isolation replay must follow the complete block plan"
-                )
+                raise BlockCropInvariantError("isolation replay must follow the complete block plan")
             for block, crop in zip(plan.blocks, isolation_source):
                 if (
                     crop.block_id != block.block_id
                     or crop.bbox != block.bbox
                     or crop.segment_ids != block.segment_ids
                     or any(
-                        segment_id not in plan.source_segment_ids
-                        or segment_id in block.segment_ids
+                        segment_id not in plan.source_segment_ids or segment_id in block.segment_ids
                         for segment_id in crop.masked_segment_ids
                     )
                 ):
-                    raise BlockCropInvariantError(
-                        "isolation replay disagrees with the block plan"
-                    )
+                    raise BlockCropInvariantError("isolation replay disagrees with the block plan")
             if plan.mode is BlockPlanningMode.SPATIAL_2D and ownership is None:
-                raise BlockCropInvariantError(
-                    "spatial isolation replay requires the Stage 1 ownership raster"
-                )
+                raise BlockCropInvariantError("spatial isolation replay requires the Stage 1 ownership raster")
             if plan.mode is not BlockPlanningMode.SPATIAL_2D and any(
                 crop.isolation_mask_png is not None for crop in isolation_source
             ):
-                raise BlockCropInvariantError(
-                    "non-spatial isolation replay cannot contain ownership masks"
-                )
+                raise BlockCropInvariantError("non-spatial isolation replay cannot contain ownership masks")
         if ownership is None:
             return {}
         assert ownership_segment_ids is not None
@@ -342,37 +306,23 @@ class BlockCropper:
             raise BlockCropInvariantError("ownership must be a NumPy array")
         width, height = aligned_size
         if ownership.ndim != 2 or ownership.shape != (height, width):
-            raise BlockCropInvariantError(
-                "ownership raster geometry disagrees with the aligned page"
-            )
+            raise BlockCropInvariantError("ownership raster geometry disagrees with the aligned page")
         if ownership.dtype.kind != "i":
-            raise BlockCropInvariantError(
-                "ownership raster must use signed integer labels"
-            )
+            raise BlockCropInvariantError("ownership raster must use signed integer labels")
         if (
             type(ownership_segment_ids) is not tuple
-            or any(
-                type(segment_id) is not str or not segment_id
-                for segment_id in ownership_segment_ids
-            )
+            or any(type(segment_id) is not str or not segment_id for segment_id in ownership_segment_ids)
             or len(ownership_segment_ids) != len(set(ownership_segment_ids))
         ):
-            raise BlockCropInvariantError(
-                "ownership segment order must be a unique immutable string tuple"
-            )
-        if (
-            len(ownership_segment_ids) != len(plan.source_segment_ids)
-            or set(ownership_segment_ids) != set(plan.source_segment_ids)
+            raise BlockCropInvariantError("ownership segment order must be a unique immutable string tuple")
+        if len(ownership_segment_ids) != len(plan.source_segment_ids) or set(ownership_segment_ids) != set(
+            plan.source_segment_ids
         ):
-            raise BlockCropInvariantError(
-                "ownership segment order disagrees with the block plan"
-            )
+            raise BlockCropInvariantError("ownership segment order disagrees with the block plan")
         minimum = int(ownership.min())
         maximum = int(ownership.max())
         if minimum < -1 or maximum >= len(ownership_segment_ids):
-            raise BlockCropInvariantError(
-                "ownership raster contains an unknown segment label"
-            )
+            raise BlockCropInvariantError("ownership raster contains an unknown segment label")
         if plan.mode is not BlockPlanningMode.SPATIAL_2D:
             return {}
 
@@ -384,17 +334,9 @@ class BlockCropper:
                     block.bbox.left : block.bbox.right,
                 ]
             )
-            visible_ids = {
-                ownership_segment_ids[int(label)]
-                for label in visible_labels
-                if int(label) >= 0
-            }
+            visible_ids = {ownership_segment_ids[int(label)] for label in visible_labels if int(label) >= 0}
             declared_ids = set(block.segment_ids)
-            missing = tuple(
-                segment_id
-                for segment_id in block.segment_ids
-                if segment_id not in visible_ids
-            )
+            missing = tuple(segment_id for segment_id in block.segment_ids if segment_id not in visible_ids)
             foreign = tuple(
                 segment_id
                 for segment_id in ownership_segment_ids
@@ -402,25 +344,18 @@ class BlockCropper:
             )
             if missing:
                 raise BlockCropInvariantError(
-                    f"spatial crop {block.block_id} has missing ownership "
-                    f"members: missing={missing[:8]!r}"
+                    f"spatial crop {block.block_id} has missing ownership " f"members: missing={missing[:8]!r}"
                 )
             foreign_by_block[block.block_id] = foreign
         if isolation_source is not None:
-            replay_by_block = {
-                crop.block_id: crop for crop in isolation_source
-            }
-            label_by_segment = {
-                segment_id: label
-                for label, segment_id in enumerate(ownership_segment_ids)
-            }
+            replay_by_block = {crop.block_id: crop for crop in isolation_source}
+            label_by_segment = {segment_id: label for label, segment_id in enumerate(ownership_segment_ids)}
             for block in plan.blocks:
                 crop = replay_by_block[block.block_id]
                 expected_ids = foreign_by_block[block.block_id]
                 if crop.masked_segment_ids != expected_ids:
                     raise BlockCropInvariantError(
-                        f"isolation replay {block.block_id} masked segment IDs "
-                        "disagree with Stage 1 ownership"
+                        f"isolation replay {block.block_id} masked segment IDs " "disagree with Stage 1 ownership"
                     )
                 expected_mask = BlockCropper._ownership_isolation_mask(
                     ownership,
@@ -429,8 +364,7 @@ class BlockCropper:
                 )
                 if crop.isolation_mask_png != expected_mask:
                     raise BlockCropInvariantError(
-                        f"isolation replay {block.block_id} mask disagrees "
-                        "with Stage 1 ownership"
+                        f"isolation replay {block.block_id} mask disagrees " "with Stage 1 ownership"
                     )
         return foreign_by_block
 
@@ -440,9 +374,7 @@ class BlockCropper:
         digest = hashlib.sha256()
         stripe_height = 512
         for top in range(0, image.height, stripe_height):
-            stripe = image.crop(
-                (0, top, image.width, min(image.height, top + stripe_height))
-            )
+            stripe = image.crop((0, top, image.width, min(image.height, top + stripe_height)))
             try:
                 digest.update(stripe.tobytes())
             finally:
@@ -492,9 +424,7 @@ class BlockCropper:
                 batch_masked_ids,
             ):
                 output_bytes += (
-                    len(raw.png_bytes)
-                    + len(gamma.png_bytes)
-                    + (len(mask_png) if mask_png is not None else 0)
+                    len(raw.png_bytes) + len(gamma.png_bytes) + (len(mask_png) if mask_png is not None else 0)
                 )
                 if output_bytes > self.config.max_total_output_bytes:
                     raise BlockCropLimitError(
@@ -517,16 +447,9 @@ class BlockCropper:
             batch_masked_ids = []
             batch_pixels = 0
 
-        replay_by_block = (
-            {item.block_id: item for item in isolation_source}
-            if isolation_source is not None
-            else {}
-        )
+        replay_by_block = {item.block_id: item for item in isolation_source} if isolation_source is not None else {}
         label_by_segment = (
-            {
-                segment_id: label
-                for label, segment_id in enumerate(ownership_segment_ids)
-            }
+            {segment_id: label for label, segment_id in enumerate(ownership_segment_ids)}
             if ownership_segment_ids is not None
             else {}
         )
@@ -537,11 +460,7 @@ class BlockCropper:
             )
             if batch_blocks and would_overflow:
                 flush()
-            replay = (
-                replay_by_block.get(block.block_id)
-                if ownership is None
-                else None
-            )
+            replay = replay_by_block.get(block.block_id) if ownership is None else None
             if replay is not None:
                 mask_png = replay.isolation_mask_png
                 masked_ids = replay.masked_segment_ids
@@ -638,15 +557,11 @@ class BlockCropper:
         if not foreign_labels:
             return None
         if ownership is None:
-            raise BlockCropInvariantError(
-                "foreign ownership isolation requires the Stage 1 raster"
-            )
+            raise BlockCropInvariantError("foreign ownership isolation requires the Stage 1 raster")
         local = ownership[bbox.top : bbox.bottom, bbox.left : bbox.right]
         mask_values = np.isin(local, foreign_labels)
         if not bool(mask_values.any()):
-            raise BlockCropInvariantError(
-                "declared foreign ownership has no physical crop pixels"
-            )
+            raise BlockCropInvariantError("declared foreign ownership has no physical crop pixels")
         mask_image = Image.fromarray(mask_values.astype(np.uint8) * 255, mode="L")
         output = io.BytesIO()
         try:

@@ -19,8 +19,7 @@ def _quadratic_oracle(left: str, right: str) -> int:
                 min(
                     current[-1] + 1,
                     previous[right_index] + 1,
-                    previous[right_index - 1]
-                    + int(left_character != right_character),
+                    previous[right_index - 1] + int(left_character != right_character),
                 )
             )
         previous = current
@@ -28,11 +27,7 @@ def _quadratic_oracle(left: str, right: str) -> int:
 
 
 def test_bit_vector_distance_matches_quadratic_oracle_for_short_unicode() -> None:
-    values = tuple(
-        "".join(characters)
-        for length in range(5)
-        for characters in itertools.product("a中", repeat=length)
-    )
+    values = tuple("".join(characters) for length in range(5) for characters in itertools.product("a中", repeat=length))
 
     for left in values:
         for right in values:
@@ -61,11 +56,14 @@ def test_common_document_edges_are_removed_before_work_budgeting() -> None:
     prefix = "общий префикс" * 2_000
     suffix = "общий суффикс" * 2_000
 
-    assert exact_levenshtein(
-        prefix + "x" + suffix,
-        prefix + "y" + suffix,
-        max_cells=1,
-    ) == 1
+    assert (
+        exact_levenshtein(
+            prefix + "x" + suffix,
+            prefix + "y" + suffix,
+            max_cells=1,
+        )
+        == 1
+    )
 
 
 def test_bit_vector_work_limit_still_fails_closed() -> None:

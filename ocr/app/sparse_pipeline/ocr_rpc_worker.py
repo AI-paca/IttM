@@ -30,9 +30,7 @@ def _make_worker(engine: str, config: dict[str, object]) -> object:
         return EasyOcrWorker(
             EasyOcrConfig(
                 languages=tuple(str(value) for value in config["languages"]),
-                model_storage_directory=Path(
-                    str(config["model_storage_directory"])
-                ),
+                model_storage_directory=Path(str(config["model_storage_directory"])),
                 gpu=bool(config["gpu"]),
                 download_enabled=False,
                 decoder=str(config["decoder"]),

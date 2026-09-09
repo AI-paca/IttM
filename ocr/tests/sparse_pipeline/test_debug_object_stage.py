@@ -119,15 +119,9 @@ def test_legacy_two_field_table_recovery_reconstructs_rows(
         "table-row-000000\tMetric\tValue",
         "table-row-000001\tBrain %\t2%",
     )
-    result_text = (
-        "| Metric | Value |\n"
-        "| --- | --- |\n"
-        "| Brain % | 2% |\n"
-    )
+    result_text = "| Metric | Value |\n" "| --- | --- |\n" "| Brain % | 2% |\n"
 
-    normalized = stage._normalize_table_recovery(
-        (segment_lines, result_text)
-    )
+    normalized = stage._normalize_table_recovery((segment_lines, result_text))
 
     assert normalized == (
         segment_lines,
@@ -202,20 +196,15 @@ def test_sparse_table_coordinates_project_to_logical_rows_with_evidence(
     )
 
     assert len(projected) == 10
-    assert {
-        segment_id
-        for segment in projected
-        for segment_id in segment["source_segment_ids"]
-    } == {f"segment-{index}" for index in range(7)}
-    assert {
-        (segment["topology"]["row"], segment["topology"]["column"])
-        for segment in projected
-    } == {(row, column) for row in range(5) for column in range(2)}
+    assert {segment_id for segment in projected for segment_id in segment["source_segment_ids"]} == {
+        f"segment-{index}" for index in range(7)
+    }
+    assert {(segment["topology"]["row"], segment["topology"]["column"]) for segment in projected} == {
+        (row, column) for row in range(5) for column in range(2)
+    }
     assert all(segment["segment_id"] for segment in projected)
     assert all(
-        segment["source_segment_ids"]
-        or segment["evidence"]["ocr_job_ids"] == ("ocr-job-0",)
-        for segment in projected
+        segment["source_segment_ids"] or segment["evidence"]["ocr_job_ids"] == ("ocr-job-0",) for segment in projected
     )
 
 
@@ -237,11 +226,7 @@ def test_sparse_table_handoff_keeps_empty_rows_and_cell_provenance(
         SimpleNamespace(
             segment_id=cell.segment_id,
             row_start=cell.row,
-            row_stop=(
-                cell.row + 2
-                if cell.segment_id == "segment-noise-source"
-                else cell.row + 1
-            ),
+            row_stop=(cell.row + 2 if cell.segment_id == "segment-noise-source" else cell.row + 1),
             column_start=cell.column,
             column_stop=cell.column + 1,
         )
@@ -269,13 +254,9 @@ def test_sparse_table_handoff_keeps_empty_rows_and_cell_provenance(
         ): segment
         for segment in projected
     }
-    assert set(by_coordinate) == {
-        (row, column) for row in range(3) for column in range(2)
-    }
+    assert set(by_coordinate) == {(row, column) for row in range(3) for column in range(2)}
     assert by_coordinate[(1, 0)]["text"] == ""
-    assert by_coordinate[(1, 0)]["source_segment_ids"] == (
-        "segment-empty-source",
-    )
+    assert by_coordinate[(1, 0)]["source_segment_ids"] == ("segment-empty-source",)
     assert by_coordinate[(1, 1)]["text"] == ""
     assert by_coordinate[(1, 1)]["source_segment_ids"] == (
         "segment-empty-value",
@@ -283,17 +264,9 @@ def test_sparse_table_handoff_keeps_empty_rows_and_cell_provenance(
     )
     assert by_coordinate[(2, 1)]["text"] == ""
     assert by_coordinate[(2, 1)]["source_segment_ids"] == ()
-    projected_source_ids = {
-        segment_id
-        for segment in projected
-        for segment_id in segment["source_segment_ids"]
-    }
-    assert len({segment["segment_id"] for segment in projected}) == len(
-        projected
-    )
-    assert projected_source_ids == {
-        cell.segment_id for cell in cells
-    }
+    projected_source_ids = {segment_id for segment in projected for segment_id in segment["source_segment_ids"]}
+    assert len({segment["segment_id"] for segment in projected}) == len(projected)
+    assert projected_source_ids == {cell.segment_id for cell in cells}
     assert "segment-actually-missing" not in projected_source_ids
 
 

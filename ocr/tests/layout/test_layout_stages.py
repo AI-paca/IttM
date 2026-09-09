@@ -536,9 +536,7 @@ def test_recursive_grid_ignores_bright_annotation_overlay_for_row_splits():
     annotated_leaves = segment_recursive_grid(row_image(annotated=True), config)
 
     try:
-        assert [leaf.source_bbox for leaf in annotated_leaves] == [
-            leaf.source_bbox for leaf in plain_leaves
-        ]
+        assert [leaf.source_bbox for leaf in annotated_leaves] == [leaf.source_bbox for leaf in plain_leaves]
         assert len(annotated_leaves) == 3
     finally:
         for leaf in (*plain_leaves, *annotated_leaves):

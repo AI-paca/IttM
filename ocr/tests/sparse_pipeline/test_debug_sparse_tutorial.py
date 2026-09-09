@@ -12,12 +12,7 @@ import pytest
 
 
 def _load_runner() -> ModuleType:
-    path = (
-        Path(__file__).resolve().parents[3]
-        / "scripts"
-        / "debug"
-        / "debug_sparse_tutorial.py"
-    )
+    path = Path(__file__).resolve().parents[3] / "scripts" / "debug" / "debug_sparse_tutorial.py"
     name = "_debug_sparse_tutorial_under_test"
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
@@ -114,9 +109,7 @@ def test_stage_links_keep_manifests_but_do_not_embed_overlay_or_one_crop(
 
     links = runner._stage_links(artifact, "05-blocks")
 
-    assert links.index(stage / "manifest.json") < links.index(
-        stage / "adjacent-pairs/pair-000000/manifest.json"
-    )
+    assert links.index(stage / "manifest.json") < links.index(stage / "adjacent-pairs/pair-000000/manifest.json")
     assert stage / "page-block-overlay.png" not in links
     assert stage / "raw/block-000000.png" not in links
     assert stage / "gamma/block-000000.png" not in links
@@ -169,12 +162,8 @@ def test_actual_galleries_embed_first_eight_individual_crops(
         )
     segment_root.mkdir(parents=True)
     block_root.mkdir(parents=True, exist_ok=True)
-    (segment_root / "manifest.json").write_text(
-        json.dumps({"items": segment_items}), encoding="utf-8"
-    )
-    (block_root / "crop-gallery.json").write_text(
-        json.dumps({"items": block_items}), encoding="utf-8"
-    )
+    (segment_root / "manifest.json").write_text(json.dumps({"items": segment_items}), encoding="utf-8")
+    (block_root / "crop-gallery.json").write_text(json.dumps({"items": block_items}), encoding="utf-8")
 
     segments = "\n".join(runner._actual_segment_gallery(artifact))
     blocks = "\n".join(runner._actual_block_gallery(artifact))
@@ -493,18 +482,16 @@ def test_multi_engine_lanes_and_provenance_are_built_without_inference() -> None
 
 def test_v20_wrapper_passes_the_same_engine_and_easyocr_configuration() -> None:
     repository_root = Path(__file__).resolve().parents[3]
-    source = (
-        repository_root / "scripts" / "debug" / "run-sparse-v20.sh"
-    ).read_text(encoding="utf-8")
+    source = (repository_root / "scripts" / "debug" / "run-sparse-v20.sh").read_text(encoding="utf-8")
 
     assert source.count('--engines "${V20_ENGINES:-tesseract}"') == 2
-    assert source.count(
-        '--easy-python "${V20_EASY_PYTHON:-/home/alpaca/GitHub/'
-        'IttM-engine-original/ocr/.venv/bin/python}"'
-    ) == 2
-    assert source.count(
-        '--easy-models "${V20_EASY_MODELS:-/home/alpaca/.EasyOCR/model}"'
-    ) == 2
+    assert (
+        source.count(
+            '--easy-python "${V20_EASY_PYTHON:-/home/alpaca/GitHub/' 'IttM-engine-original/ocr/.venv/bin/python}"'
+        )
+        == 2
+    )
+    assert source.count('--easy-models "${V20_EASY_MODELS:-/home/alpaca/.EasyOCR/model}"') == 2
     assert source.count('--easy-device "${V20_EASY_DEVICE:-cuda}"') == 2
     assert '--tesseract-psm "${V20_SINGLE_CONTEXT_PSM:-6}"' in source
     assert '--single-context-psm "${V20_SINGLE_CONTEXT_PSM:-6}"' in source

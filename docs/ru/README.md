@@ -1,101 +1,42 @@
 # Документация IttM
 
-<p align="right">
-  <a href="../../README.md"><img alt="Русский" src="https://img.shields.io/badge/%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9-%F0%9F%87%B7%F0%9F%87%BA-blue"></a>
-  <a href="../en/README.md"><img alt="English" src="https://img.shields.io/badge/English-%F0%9F%87%AC%F0%9F%87%A7-lightgrey"></a>
-</p>
-
 [Корневой README](../../README.md) | [English](../en/README.md)
 
-Пользовательская вводная — в [корневом `README.md`](../../README.md). Этот
-индекс собирает техническую документацию для разработчиков и контрибьюторов:
-архитектура, контракты, ограничения, тесты, направления развития.
+Документация предназначена для сопровождения действующего сервиса:
 
-## Карта документации
+| Документ                                             | Когда нужен                                         |
+| ---------------------------------------------------- | --------------------------------------------------- |
+| [Сопровождение pipeline](./pipeline/README.md)       | Проверить сервис, прочитать запрос и результат      |
+| [Архитектура](./architecture.md)                     | Найти компонент и публичный интерфейс               |
+| [Этапы pipeline](./architecture-unified-pipeline.md) | Раскрыть pipeline black box и найти runtime handler |
+| [Ограничения](./architecture-limitations.md)         | Проверить upload, память, PDF и очередь             |
+| [Полный пример](../../debug/EXAMPLE.md)              | Проследить matrix, objects, blocks и результат      |
+| [Безопасность](./security.md)                        | Проверить trust boundary, SAST и SCA                |
+| [Развитие](./roadmap/development-branches.md)        | Увидеть текущую работу и критерии готовности        |
+| [История по commits](./roadmap/history.md)           | Проверяемая историческая ось проекта                |
+| [Видение](./roadmap/vision.md)                       | Будущие и далёкие направления                       |
+| [Тестирование](./testing.md)                         | Выбрать тест по его ответственности                 |
+| [SAST](./sast.md)                                    | Разобрать first-party security finding              |
+| [SCA/SBOM](./sbom-report.md)                         | Разобрать dependency/image finding                  |
 
-| Документ                                                                | О чём                                                                         |
-| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| [Архитектура проекта](./architecture.md)                                | Runtime-топология (локальный/Docker), shared contract, Mermaid-схема потоков. |
-| [Целевой единый пайплайн](./architecture-unified-pipeline.md)           | Целевая модель: один контракт, один resolver флагов, один PDF-контракт.       |
-| [Текущая реализация флагов и профилей](./architecture-current-flags.md) | Что есть в коде: `OcrPipelineProfile`, `pipeline_flags`, `pdf_mode`, engines. |
-| [Ограничения OCR-архитектуры](./architecture-limitations.md)            | Жёсткие лимиты памяти, PDF, таблиц.                                           |
-| [Видение развития проекта](./roadmap/vision.md)                         | Расширение, Linux-pipeline длинных скриншотов, marketplace-cart с whitelist.  |
-| [Движок и профили](./engine/README.md)                                  | Backend profiles, pipeline flags, CI-контракт документации.                   |
-| [Тестирование](./testing.md)                                            | Tiers тестов, oracle выбора профиля, PR gate.                                 |
-| [Debug](./debug.md)                                                     | Локальные воспроизводимые OCR-входы и артефакты.                              |
-| [Политика безопасности](./security.md)                                  | Границы доверия, незакрытые риски, модель угроз.                              |
-| [SAST](./sast.md)                                                       | Запуск Semgrep, разбор findings, добавление правил и CI-артефакты.            |
-| [SBOM и зависимости](./sbom-report.md)                                  | SCA/SBOM workflow, accepted risk и границы анализа зависимостей.              |
-| [Ручной запуск Docker](./docker-manual-launch.md)                       | `docker build` / `docker run` без Compose.                                    |
-| [Границы ответственности](./course/boundaries.md)                       | Точки входа и владельцы файлов по компонентам.                                |
-| [Эксперимент качества Tesseract](./experiments/tesseract-quality.md)    | Почему нужен oracle и какие артефакты собраны.                                |
-| [История roadmap](./roadmap/history.md)                                 | Как архитектура пришла к текущему виду.                                       |
-| [Ветки развития](./roadmap/development-branches.md)                     | Фактические ветки, активные линии и архивы.                                   |
-| [Критерии заданий курса](./course/course_tasks.md)                      | Таблица соответствия заданий курса и реализации.                              |
+Технические справочники:
 
-## Движки
+- [Task API](../en/task-api.md);
+- [backend pipeline](../en/backend-pipeline.md);
+- [opt-in sparse pipeline](../en/sparse-pipeline.md);
+- [runtime scripts](../en/runtime-scripts.md);
+- [debug scripts](../en/scripts.md);
+- [локальные OCR/VLM deployments](../en/ollama-deploy.md);
+- [полная English-карта тестов](../en/testing.md);
+- [`pipeline-core/README.md`](../../pipeline-core/README.md) — Rust ABI.
 
-| Движок          | Где выполняется                | Передача исходного файла                          |
-| --------------- | ------------------------------ | ------------------------------------------------- |
-| Local Tesseract | Python FastAPI (backend)       | multipart без browser-side `arrayBuffer()`/Base64 |
-| Local EasyOCR   | Python FastAPI (backend)       | multipart без browser-side `arrayBuffer()`/Base64 |
-| Browser OCR     | Tesseract.js worker в браузере | файл не покидает вкладку                          |
-| External LLM    | API выбранного провайдера      | только после явного согласия пользователя         |
+Архитектура, pipeline и SAST имеют редактируемые Draw.io-исходники и
+экспортированные SVG/PNG в [`docs/assets`](../assets/). Roadmap редактируется
+непосредственно как SVG.
 
-## Extraction contract
+Инструкции для AI-агентов:
 
-Один набор маршрутов для Web UI, CLI и `curl`. Формат ответа — по заголовку
-`Accept`: `text/plain`, `text/markdown`, `application/json`, `text/event-stream`,
-`application/x-ndjson`.
-
-| Маршрут                                                              | Метод    | Назначение                                                           |
-| -------------------------------------------------------------------- | -------- | -------------------------------------------------------------------- |
-| `/api/extract/text`                                                  | POST     | Синхронное извлечение.                                               |
-| `/api/tasks`                                                         | POST/GET | Async-задачи: `queued → running → ... → cancelled/partial/complete`. |
-| `/api/tasks/:id`                                                     | GET      | Статус и результат задачи.                                           |
-| `/api/tasks/:id/events`                                              | GET      | SSE-стрим прогресса; resume по `Last-Event-ID`.                      |
-| `/api/tasks/:id/cancel`                                              | POST     | Отмена задачи.                                                       |
-| `/convert`, `/convert/stream`                                        | POST     | Совместимые OCR-маршруты.                                            |
-| `/api/health`, `/api/capabilities`, `/api/diagnostics`, `/api/probe` | GET/POST | Состояние runtime, лимиты, тестовый прогон.                          |
-| `/v1/pipeline/flags`                                                 | GET      | Каталог effective flag keys (общий для backend, browser, LLM).       |
-| `/api/install-easyocr` (+`/status`)                                  | POST/GET | Установка EasyOCR и её статус.                                       |
-
-`pdf_mode=auto|raster` принимается в query (`?pdf_mode=...`), HTTP-header
-(`X-PDF-Mode`), JSON-поле (`pdfMode`) и CLI-флаг (`--pdf-mode`). Неизвестные
-значения → HTTP 400. Фактически использованный режим возвращается в
-`meta.pdf_mode`.
-
-In-memory task queue: `maxWorkers: 1`, `maxQueued: 32`. Задачи живут в памяти
-процесса gateway и не переживают рестарт; durable queue, retry и retention
-отсутствуют.
-
-## Запуск
-
-```bash
-# Полная версия (Web UI + backend)
-bash scripts/runtime/run-local.sh
-
-# Статический Web UI без backend OCR
-bash scripts/runtime/build-lite.sh
-
-# Docker Compose (Web UI + backend)
-docker compose up -d && docker compose port nginx 80
-```
-
-Подробные требования и команды без Compose — в [docker-manual-launch.md](./docker-manual-launch.md).
-
-## Проверки
-
-```bash
-npm run format:check
-npm run lint
-npm test
-npm run test:contract
-npm run test:smoke
-npm run build
-npm run build:pages && npm run test:pages
-docker compose config --quiet
-```
-
-Python-проверки (flake8 / Black / Ruff / pytest) и OCR tiers описаны в
-[тестировании](./testing.md).
+- [`.semgrep/AGENTS.md`](../../.semgrep/AGENTS.md) — какой тест отвечает за
+  SAST finding и какую часть ruleset читать;
+- [`.sca/AGENTS.md`](../../.sca/AGENTS.md) — как разбирать SCA без полного
+  чтения больших JSON/SBOM и когда допустимо менять accepted risk.

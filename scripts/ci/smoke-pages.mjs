@@ -6,10 +6,19 @@ const expectedBase = normalizeBase(process.argv[3] || "/IttM/");
 const retries = Number(process.env.PAGES_SMOKE_RETRIES || 12);
 const retryDelayMs = Number(process.env.PAGES_SMOKE_DELAY_MS || 5_000);
 const requiredAssets = [
+  "wasm/ittm_pipeline_core.wasm",
   "vendor/tesseract/worker.min.js",
+  "vendor/tesseract/tesseract-core.wasm.js",
+  "vendor/tesseract/tesseract-core-simd.wasm.js",
+  "vendor/tesseract/tesseract-core-relaxedsimd.wasm.js",
   "vendor/tesseract/tesseract-core-lstm.wasm.js",
   "vendor/tesseract/tesseract-core-simd-lstm.wasm.js",
   "vendor/tesseract/tesseract-core-relaxedsimd-lstm.wasm.js",
+  "vendor/tesseract/lang/eng.traineddata",
+  "vendor/tesseract/lang/rus.traineddata",
+  "vendor/tesseract/lang/chi_sim.traineddata",
+  "vendor/tesseract/lang/ell.traineddata",
+  "vendor/tesseract/lang/equ.traineddata",
   "vendor/pdfjs/wasm/jbig2.wasm",
   "vendor/pdfjs/wasm/jbig2_nowasm_fallback.js",
   "vendor/pdfjs/wasm/openjpeg.wasm",

@@ -2,7 +2,6 @@ import { useEffect, useRef } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { processPdfIntelligently } from "../lib/pdf-parser";
 import { effectivePdfCropMode, readCropMode } from "../lib/crop-preference";
-import { debugMarkdownForFile } from "./debug-sample-markdown";
 import {
   buildApiUrl,
   buildBackendGatewayCandidates,
@@ -22,7 +21,7 @@ import {
   backendPipelineParams,
   browserPipelineProfileForSource,
 } from "./pipeline-config";
-import { hasAvailableLocalBackend } from "./source-availability";
+import { shouldIncludeLocalBackend } from "./source-availability";
 import type {
   AppDiagnostics,
   ExtractionDocumentProgress,
@@ -33,6 +32,7 @@ import type {
   SourceType,
 } from "./types";
 import type { AppState } from "../types/app.types";
+import { IS_LITE_RUNTIME } from "../runtime-mode";
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
@@ -82,6 +82,7 @@ interface UseOcrExtractionArgs {
   totalPdfPages: number | null;
   externalLlmConsent: boolean;
   lexicalCorrectionEnabled: boolean;
+  pdfRasterMode: boolean;
   llmKey: string;
   llmModel: string;
   llmProvider: LlmProvider;
@@ -109,6 +110,7 @@ export function useOcrExtraction({
   totalPdfPages,
   externalLlmConsent,
   lexicalCorrectionEnabled,
+  pdfRasterMode,
   llmKey,
   llmModel,
   llmProvider,
@@ -140,10 +142,11 @@ export function useOcrExtraction({
   useEffect(() => {
     if (previousFileRef.current === file) return;
 
+    // Keep the idle browser worker warm for the next file. Explicit
+    // cancellation still releases it through cancelExtraction().
     previousFileRef.current = file;
     activeExtractRef.current.current = false;
     setIsExtracting(false);
-    void releaseBrowserOcrCache();
   }, [file, setIsExtracting]);
 
   useEffect(() => {
@@ -268,6 +271,15 @@ export function useOcrExtraction({
             : browserPipelineProfile,
         );
         const pdfCropMode = effectivePdfCropMode(readCropMode());
+        const pdfModeParams =
+          file.type === "application/pdf" ||
+          file.name.toLowerCase().endsWith(".pdf")
+            ? { pdf_mode: pdfRasterMode ? "raster" : "auto" }
+            : {};
+        const backendParamsFor = (source: SourceType) => ({
+          ...(backendPipelineParams(source, lexicalCorrectionEnabled) || {}),
+          ...pdfModeParams,
+        });
         const activateSource = (source: SourceType) => {
           if (active.current) setActiveSource(source);
         };
@@ -343,6 +355,7 @@ export function useOcrExtraction({
                 maxPagePixels: browserProfile.maxImagePixels,
                 maxDimension: browserProfile.maxDimension,
                 cropMode: pdfCropMode,
+                forceRaster: pdfRasterMode,
                 shouldContinue: () => active.current,
               },
             );
@@ -358,19 +371,12 @@ export function useOcrExtraction({
           );
         };
 
-        const debugMarkdown = debugMarkdownForFile(file);
-        if (debugMarkdown) {
-          activateSource("browser");
-          setProgress("Показываем debug Markdown sample...");
-          result = {
-            markdown: debugMarkdown,
-            meta: { debugFixture: true },
-          };
-        }
-
         if (!result) {
           let effectiveSource = selectedSource;
-          const localBackendAvailable = hasAvailableLocalBackend(diagnostics);
+          const localBackendAvailable = shouldIncludeLocalBackend(
+            diagnostics,
+            IS_LITE_RUNTIME,
+          );
           const autoBackendCandidates = buildBackendGatewayCandidates({
             customBaseUrl: pingUrl,
             includeLocal: localBackendAvailable,
@@ -378,7 +384,8 @@ export function useOcrExtraction({
 
           if (
             effectiveSource === "auto" &&
-            autoBackendCandidates.length === 0
+            autoBackendCandidates.length === 0 &&
+            IS_LITE_RUNTIME
           ) {
             console.log(
               "[OCR] No backend candidates are available, auto-switching to browser source",
@@ -397,10 +404,7 @@ export function useOcrExtraction({
               effectiveSource === "local_tess" ? "tesseract" : "easyocr";
             const url = buildApiUrl("", "/api/convert/stream", {
               engine_type: engineType,
-              ...(backendPipelineParams(
-                effectiveSource,
-                lexicalCorrectionEnabled,
-              ) || {}),
+              ...backendParamsFor(effectiveSource),
             });
 
             result = await executeBackendOcrStreaming(
@@ -426,6 +430,7 @@ export function useOcrExtraction({
               lastExtractedPage,
               rememberTotalPdfPages,
               browserProfile.pdfRenderScale,
+              pdfRasterMode,
             );
           } else if (effectiveSource === "gateway") {
             activateSource("gateway");
@@ -439,6 +444,7 @@ export function useOcrExtraction({
                 lastExtractedPage,
                 rememberTotalPdfPages,
                 browserProfile.pdfRenderScale,
+                pdfRasterMode,
               );
               if (file.type !== "application/pdf")
                 handleChunk(result.markdown || "");
@@ -446,7 +452,7 @@ export function useOcrExtraction({
               const gatewayUrl = buildApiUrl(
                 pingUrl,
                 "/api/convert/stream",
-                backendPipelineParams("gateway", lexicalCorrectionEnabled),
+                backendParamsFor("gateway"),
               );
               result = await executeBackendOcrStreaming(
                 file,
@@ -464,14 +470,17 @@ export function useOcrExtraction({
                 autoBackendCandidates,
                 active,
                 setProgress,
-                backendPipelineParams("auto", lexicalCorrectionEnabled),
+                backendParamsFor("auto"),
                 handleChunk,
                 { stallTimeoutMs: 35_000 },
               );
             } catch (backendError) {
               const normalizedBackendError =
                 normalizePlatformError(backendError);
-              if (normalizedBackendError.code === "OCR_STREAM_STALLED") {
+              if (
+                normalizedBackendError.code === "OCR_STREAM_STALLED" &&
+                IS_LITE_RUNTIME
+              ) {
                 progressiveText = "";
                 setExtractedText("");
                 setLastExtractedPage(1);
@@ -502,6 +511,7 @@ export function useOcrExtraction({
                     lastExtractedPage,
                     rememberTotalPdfPages,
                     browserProfile.pdfRenderScale,
+                    pdfRasterMode,
                   );
                 } catch (llmError) {
                   console.warn("[OCR] LLM fallback failed:", llmError);
@@ -509,6 +519,7 @@ export function useOcrExtraction({
               }
 
               if (!result) {
+                if (!IS_LITE_RUNTIME) throw backendError;
                 if (active.current)
                   setProgress(
                     "Cloud/локальный gateway недоступен, выполняем в браузере (WASM)...",

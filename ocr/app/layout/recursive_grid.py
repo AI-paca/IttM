@@ -17,6 +17,7 @@ from app.preprocessing import IMAGE_PREPROCESSING_STEPS
 
 Box = tuple[int, int, int, int]
 SPARSE_SHADOW_CODES = _sparse_codes.SPARSE_SHADOW_CODES
+RECURSIVE_GRID_TRACE_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,109 @@ class SparseShadowProfile:
     merge_up_rows: int
     merge_left_rows: int
     dash_rows: int
+
+
+@dataclass(frozen=True)
+class RecursiveGridAnalysis:
+    """Immutable hand-off between recursive layout phases.
+
+    Keeping the leaves, sparse projection, stable signature and classification
+    together prevents downstream code from recomputing only part of the
+    pipeline with subtly different ordering or thresholds.
+    """
+
+    leaves: tuple[RecursiveGridLeaf, ...]
+    projection: SparseShadowProjection
+    signature: SparseShadowSignature
+    profile: SparseShadowProfile
+
+
+@dataclass(frozen=True)
+class RecursiveGridLeafTrace:
+    source_bbox: Box
+    content_bbox: Box
+    left_tracks: tuple[int, ...]
+    dash_track: int | None
+    merge_left_tracks: tuple[int, ...]
+    decisions: tuple[RegionDecision, ...]
+
+
+@dataclass(frozen=True)
+class RecursiveGridProjectionTrace:
+    leaf_index: int
+    anchor: tuple[int, int]
+    codes: tuple[tuple[int, int, int], ...]
+
+
+@dataclass(frozen=True)
+class RecursiveGridTrace:
+    """Image-free, deterministic ABI candidate for golden tests and WASM."""
+
+    version: int
+    rows: int
+    cols: int
+    x_tracks: tuple[int, ...]
+    codes: tuple[tuple[int, int, int], ...]
+    leaves: tuple[RecursiveGridLeafTrace, ...]
+    projections: tuple[RecursiveGridProjectionTrace, ...]
+    profile: SparseShadowProfile
+
+
+def recursive_grid_trace(analysis: RecursiveGridAnalysis) -> RecursiveGridTrace:
+    leaf_indexes = {id(leaf): index for index, leaf in enumerate(analysis.leaves)}
+    return RecursiveGridTrace(
+        version=RECURSIVE_GRID_TRACE_VERSION,
+        rows=analysis.signature.rows,
+        cols=analysis.signature.cols,
+        x_tracks=analysis.signature.x_tracks,
+        codes=analysis.signature.codes,
+        leaves=tuple(
+            RecursiveGridLeafTrace(
+                source_bbox=leaf.source_bbox,
+                content_bbox=leaf.content_bbox,
+                left_tracks=leaf.left_tracks,
+                dash_track=leaf.dash_track,
+                merge_left_tracks=leaf.merge_left_tracks,
+                decisions=leaf.decisions,
+            )
+            for leaf in analysis.leaves
+        ),
+        projections=tuple(
+            RecursiveGridProjectionTrace(
+                leaf_index=leaf_indexes[id(leaf)],
+                anchor=anchor,
+                codes=codes,
+            )
+            for leaf, anchor, codes in analysis.projection.leaf_projection
+        ),
+        profile=analysis.profile,
+    )
+
+
+def analyze_recursive_grid(
+    image: Image.Image,
+    config: RecursiveGridConfig,
+) -> RecursiveGridAnalysis:
+    """Run segmentation -> sparse projection -> structural classification."""
+
+    leaves = tuple(
+        sorted(
+            segment_recursive_grid(image, config),
+            key=lambda leaf: (
+                leaf.source_bbox[1],
+                leaf.source_bbox[0],
+                leaf.source_bbox[3],
+            ),
+        )
+    )
+    projection = project_sparse_shadow(list(leaves))
+    signature = sparse_shadow_signature(projection)
+    return RecursiveGridAnalysis(
+        leaves=leaves,
+        projection=projection,
+        signature=signature,
+        profile=classify_sparse_shadow(signature),
+    )
 
 
 def segment_recursive_grid(
@@ -640,8 +744,11 @@ def _apply_region_preprocessing(
 def _adaptive_foreground_mask(
     image: Image.Image,
 ) -> tuple[np.ndarray, np.ndarray, str, int]:
-    gray_image = image.convert("L")
+    rgb_image = image.convert("RGB")
+    rgb = np.asarray(rgb_image, dtype=np.int16)
+    gray_image = rgb_image.convert("L")
     gray = np.asarray(gray_image, dtype=np.int16)
+    overlay_mask = _bright_saturated_overlay_mask(rgb, gray)
     radius = max(3, min(12, min(image.size) // 220))
     blurred = np.asarray(
         gray_image.filter(ImageFilter.GaussianBlur(radius=radius)),
@@ -662,6 +769,7 @@ def _adaptive_foreground_mask(
                 mask = gray - delta > blurred
             else:
                 mask = gray + delta < blurred
+            mask = mask & ~overlay_mask
             ratio = float(np.mean(mask))
             valid = 0.002 <= ratio <= 0.28
             score = (0.0 if valid else 1.0) + abs(ratio - 0.065)
@@ -674,6 +782,19 @@ def _adaptive_foreground_mask(
         mode,
         delta,
     )
+
+
+def _bright_saturated_overlay_mask(rgb: np.ndarray, gray: np.ndarray) -> np.ndarray:
+    """Ignore bright annotation fills/guides while segmenting OCR rows.
+
+    Debug overlays and UI annotations often use saturated pastel fills and
+    guide lines that are much brighter than text. They should not split or join
+    recursive OCR blocks, but the original pixels are still passed to OCR.
+    """
+    high = np.max(rgb, axis=2)
+    low = np.min(rgb, axis=2)
+    chroma = high - low
+    return (chroma >= 38) & (high >= 145) & (gray >= 115)
 
 
 def _dominant_vertical_rule_tracks(

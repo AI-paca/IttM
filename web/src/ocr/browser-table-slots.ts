@@ -131,6 +131,355 @@ function positionToInterval(
   return null;
 }
 
+function tableCellsForLines(
+  rows: readonly SlotWord[][],
+  xLines: readonly number[],
+): string[][] {
+  return rows.map((rowWords) => {
+    const cells = Array<string>(xLines.length - 1).fill("");
+    const mergeCells = new Set<number>();
+    for (const word of rowWords) {
+      const center = (word.left + word.right) / 2;
+      const col = positionToInterval(center, xLines);
+      if (col === null) continue;
+      cells[col] = [cells[col], word.text].filter(Boolean).join(" ").trim();
+      for (
+        let boundary = col + 1;
+        boundary < xLines.length - 1;
+        boundary += 1
+      ) {
+        if (
+          word.left + 1 < xLines[boundary] &&
+          xLines[boundary] < word.right - 1
+        ) {
+          mergeCells.add(boundary);
+        }
+      }
+    }
+    for (const col of mergeCells) {
+      if (!cells[col].trim()) cells[col] = MERGE_LEFT;
+    }
+    return cells;
+  });
+}
+
+function validateTableRows(
+  cellRows: readonly string[][],
+  columnCount: number,
+  options: { allowMediumWide?: boolean } = {},
+): boolean {
+  const allowMediumWide = options.allowMediumWide ?? false;
+  if (
+    columnCount > 4 &&
+    (!allowMediumWide || cellRows.length < 10) &&
+    (columnCount < 8 || cellRows.length < 10)
+  ) {
+    return false;
+  }
+
+  const populatedCellCount = cellRows.reduce(
+    (count, row) =>
+      count + row.filter((cell) => cell.trim() && cell !== MERGE_LEFT).length,
+    0,
+  );
+  if (populatedCellCount / Math.max(1, cellRows.length * columnCount) < 0.35) {
+    return false;
+  }
+
+  const populatedRows = cellRows.filter(
+    (row) =>
+      row.filter((cell) => cell.trim() && cell !== MERGE_LEFT).length >= 2,
+  );
+  return populatedRows.length >= Math.max(3, Math.ceil(cellRows.length * 0.45));
+}
+
+function populatedCellCount(row: readonly string[]): number {
+  return row.filter((cell) => cell.trim() && cell !== MERGE_LEFT).length;
+}
+
+function selectDenseTableBand(
+  cellRows: readonly string[][],
+  columnCount: number,
+): string[][] {
+  if (cellRows.length < 12 || columnCount < 5) {
+    return cellRows.map((row) => [...row]);
+  }
+
+  const goodThreshold = Math.max(4, Math.ceil(columnCount * 0.65));
+  const minGoodRows = 3;
+  const maxWeakGap = 2;
+  const counts = cellRows.map(populatedCellCount);
+  const goodIndexes = counts
+    .map((count, index) => (count >= goodThreshold ? index : -1))
+    .filter((index) => index >= 0);
+  if (goodIndexes.length < minGoodRows) return cellRows.map((row) => [...row]);
+
+  type Band = { start: number; end: number; goodRows: number; score: number };
+  const bands: Band[] = [];
+  let start = goodIndexes[0];
+  let lastGood = goodIndexes[0];
+  let goodRows = 1;
+  for (const index of goodIndexes.slice(1)) {
+    if (index - lastGood - 1 <= maxWeakGap) {
+      lastGood = index;
+      goodRows += 1;
+      continue;
+    }
+    bands.push({
+      start,
+      end: lastGood,
+      goodRows,
+      score: counts
+        .slice(start, lastGood + 1)
+        .reduce((sum, count) => sum + count, 0),
+    });
+    start = index;
+    lastGood = index;
+    goodRows = 1;
+  }
+  bands.push({
+    start,
+    end: lastGood,
+    goodRows,
+    score: counts
+      .slice(start, lastGood + 1)
+      .reduce((sum, count) => sum + count, 0),
+  });
+
+  const best = bands
+    .filter((band) => band.goodRows >= minGoodRows)
+    .sort(
+      (left, right) =>
+        right.score - left.score || right.goodRows - left.goodRows,
+    )[0];
+  if (!best) return cellRows.map((row) => [...row]);
+  if (best.end - best.start + 1 >= cellRows.length * 0.85) {
+    return cellRows.map((row) => [...row]);
+  }
+  return cellRows.slice(best.start, best.end + 1).map((row) => [...row]);
+}
+
+function looksLikeLongProseGrid(
+  cellRows: readonly string[][],
+  columnCount: number,
+): boolean {
+  if (columnCount > 3 || cellRows.length < 40) return false;
+
+  const firstRowPopulated = populatedCellCount(cellRows[0] || []);
+  if (firstRowPopulated >= columnCount) return false;
+
+  const sparseRows = cellRows.filter(
+    (row) => populatedCellCount(row) < columnCount,
+  ).length;
+  return sparseRows / cellRows.length >= 0.35;
+}
+
+function looksLikeSparseWidePseudoGrid(
+  cellRows: readonly string[][],
+  columnCount: number,
+): boolean {
+  if (columnCount < 5 || cellRows.length < 20) return false;
+
+  const populatedCounts = cellRows.map(populatedCellCount);
+  const populatedCells = populatedCounts.reduce((sum, count) => sum + count, 0);
+  const totalCells = Math.max(1, cellRows.length * columnCount);
+  const sparseRatio = 1 - populatedCells / totalCells;
+  const denseThreshold = Math.max(3, Math.ceil(columnCount * 0.65));
+  const denseRows = populatedCounts.filter(
+    (count) => count >= denseThreshold,
+  ).length;
+  const sparseRowThreshold = Math.max(2, Math.floor(columnCount * 0.35));
+  const verySparseRows = populatedCounts.filter(
+    (count) => count <= sparseRowThreshold,
+  ).length;
+
+  return (
+    sparseRatio >= 0.52 &&
+    denseRows / cellRows.length < 0.25 &&
+    verySparseRows / cellRows.length >= 0.35
+  );
+}
+
+function nonEmptyCells(row: readonly string[]): string[] {
+  return row.filter((cell) => cell.trim() && cell !== MERGE_LEFT);
+}
+
+function isCurrencyLike(value: string): boolean {
+  return /(?:[€$£₽]\s*\d|\d+[.,]\d{2})/.test(value);
+}
+
+function isRatingLike(value: string): boolean {
+  return /\b[0-5][.,]\d\b|\(\s*\d+\s*\)/.test(value);
+}
+
+function isDealLike(value: string): boolean {
+  return /\b(?:deal|prime|exclusive|off|rrp|median|delivery|basket|options|bought|past|month|price)\b/i.test(
+    value,
+  );
+}
+
+function rowMatchCount(
+  row: readonly string[],
+  startColumn: number,
+  predicate: (value: string) => boolean,
+): number {
+  return row.slice(startColumn).filter((cell) => predicate(cell)).length;
+}
+
+function compactJoin(parts: readonly string[]): string {
+  return parts
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function firstMatchingCell(
+  rows: readonly string[][],
+  column: number,
+  predicate: (value: string) => boolean,
+): string {
+  return rows.find((row) => predicate(row[column] || ""))?.[column] || "";
+}
+
+interface NormalizedProductGrid {
+  rows: string[][];
+  prefixLines: string[];
+}
+
+function normalizeProductGridRows(
+  cellRows: readonly string[][],
+  columnCount: number,
+): NormalizedProductGrid | null {
+  if (columnCount < 5 || cellRows.length < 7) return null;
+
+  const resultStart = columnCount >= 6 ? 1 : 0;
+  const resultCount = columnCount - resultStart;
+  if (resultCount < 3) return null;
+
+  const resultColumns = Array.from(
+    { length: resultCount },
+    (_, index) => resultStart + index,
+  );
+  const ratingIndex = cellRows.findIndex(
+    (row) =>
+      rowMatchCount(row, resultStart, isRatingLike) >=
+      Math.max(2, Math.ceil(resultCount * 0.45)),
+  );
+  const priceIndex = cellRows.findIndex(
+    (row) =>
+      rowMatchCount(row, resultStart, isCurrencyLike) >=
+      Math.max(2, Math.ceil(resultCount * 0.35)),
+  );
+  const dealIndex = cellRows.findIndex(
+    (row) =>
+      rowMatchCount(row, resultStart, isDealLike) >=
+      Math.max(2, Math.ceil(resultCount * 0.3)),
+  );
+  const firstStructuredIndex = Math.min(
+    ...[ratingIndex, priceIndex, dealIndex].filter((index) => index >= 0),
+  );
+  if (!Number.isFinite(firstStructuredIndex) || firstStructuredIndex < 2) {
+    return null;
+  }
+
+  const productRows = cellRows.slice(0, firstStructuredIndex);
+  const productSignal = resultColumns.reduce(
+    (count, column) =>
+      count +
+      (compactJoin(productRows.map((row) => row[column] || "")).length >= 24
+        ? 1
+        : 0),
+    0,
+  );
+  if (productSignal < Math.max(2, Math.ceil(resultCount * 0.55))) return null;
+
+  const structuredRows = cellRows.slice(firstStructuredIndex);
+  const ratingRow = ratingIndex >= 0 ? cellRows[ratingIndex] : undefined;
+  const priceRows = structuredRows.filter(
+    (row) => rowMatchCount(row, resultStart, isCurrencyLike) > 0,
+  );
+  const dealRows = structuredRows.filter(
+    (row) => rowMatchCount(row, resultStart, isDealLike) > 0,
+  );
+  const boughtRows = structuredRows.filter(
+    (row) =>
+      rowMatchCount(row, resultStart, isCurrencyLike) === 0 &&
+      rowMatchCount(row, resultStart, isDealLike) === 0 &&
+      row !== ratingRow &&
+      nonEmptyCells(row.slice(resultStart)).length >= 2,
+  );
+
+  const prefixLines =
+    resultStart > 0
+      ? cellRows
+          .map((row) => row[0] || "")
+          .map((cell) => compactJoin([cell]))
+          .filter(Boolean)
+      : [];
+
+  const output = [
+    ["Field", ...resultColumns.map((_, index) => `Result ${index + 1}`)],
+    ["Badge", ...resultColumns.map(() => "")],
+    [
+      "Product",
+      ...resultColumns.map((column) =>
+        compactJoin(productRows.map((row) => row[column] || "")),
+      ),
+    ],
+    [
+      "Rating",
+      ...resultColumns.map((column) => ratingRow?.[column]?.trim() || ""),
+    ],
+    [
+      "Bought",
+      ...resultColumns.map((column) =>
+        compactJoin(boughtRows.map((row) => row[column] || "")),
+      ),
+    ],
+    [
+      "Deal",
+      ...resultColumns.map((column) =>
+        compactJoin(
+          dealRows
+            .map((row) => row[column] || "")
+            .filter((cell) => !isCurrencyLike(cell)),
+        ),
+      ),
+    ],
+    [
+      "Price",
+      ...resultColumns.map((column) =>
+        firstMatchingCell(priceRows, column, isCurrencyLike),
+      ),
+    ],
+    [
+      "Extra",
+      ...resultColumns.map((column) =>
+        compactJoin(
+          dealRows
+            .map((row) => row[column] || "")
+            .filter(
+              (cell) =>
+                isDealLike(cell) && !/\b(?:deal|basket|options)\b/i.test(cell),
+            ),
+        ),
+      ),
+    ],
+    [
+      "Action",
+      ...resultColumns.map((column) =>
+        firstMatchingCell(structuredRows, column, (cell) =>
+          /\b(?:options|basket)\b/i.test(cell),
+        ),
+      ),
+    ],
+  ];
+
+  return { rows: output, prefixLines };
+}
+
 function tableRowsToMarkdown(
   rows: string[][],
   preserveEmptyRows = false,
@@ -156,6 +505,150 @@ function tableRowsToMarkdown(
   ]
     .map((row) => `| ${row.join(" | ")} |`)
     .join("\n");
+}
+
+function tableMarkdownForLines(
+  rows: readonly SlotWord[][],
+  xLines: readonly number[],
+  options: {
+    maxColumns: number;
+    allowMediumWide?: boolean;
+  },
+): string {
+  if (xLines.length < 4) return "";
+  const columnCount = xLines.length - 1;
+  if (columnCount > options.maxColumns) return "";
+
+  const cellRows = tableCellsForLines(rows, xLines);
+  if (looksLikeLongProseGrid(cellRows, columnCount)) return "";
+  if (looksLikeSparseWidePseudoGrid(cellRows, columnCount)) return "";
+
+  const tableRows = options.allowMediumWide
+    ? selectDenseTableBand(cellRows, columnCount)
+    : cellRows;
+  if (looksLikeSparseWidePseudoGrid(tableRows, columnCount)) return "";
+  const normalizedRows =
+    options.allowMediumWide && normalizeProductGridRows(tableRows, columnCount);
+  if (normalizedRows) {
+    return [
+      ...normalizedRows.prefixLines,
+      tableRowsToMarkdown(normalizedRows.rows),
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  if (
+    !validateTableRows(tableRows, columnCount, {
+      allowMediumWide: options.allowMediumWide,
+    })
+  ) {
+    return "";
+  }
+
+  return tableRowsToMarkdown(tableRows);
+}
+
+function coarseColumnLines(
+  rows: readonly SlotWord[][],
+  words: readonly SlotWord[],
+  maxColumns: number,
+): number[] {
+  if (maxColumns < 5 || rows.length < 4 || words.length < 12) return [];
+
+  const widths = words.map((word) => word.right - word.left);
+  const heights = words.map((word) => word.bottom - word.top);
+  const left = Math.min(...words.map((word) => word.left));
+  const right = Math.max(...words.map((word) => word.right));
+  const tableWidth = Math.max(1, right - left);
+  const denseRowThreshold = Math.min(
+    8,
+    Math.max(4, Math.floor(maxColumns * 0.55)),
+  );
+  const denseRows = rows.filter((row) => row.length >= denseRowThreshold);
+  if (denseRows.length < 4) return [];
+
+  const minGap = Math.max(
+    14,
+    median(widths, 24) * 0.9,
+    median(heights, 12) * 1.4,
+    tableWidth * 0.012,
+  );
+  const gaps: Array<{ center: number; gap: number; row: number }> = [];
+  denseRows.forEach((row, rowIndex) => {
+    for (let index = 1; index < row.length; index += 1) {
+      const gap = row[index].left - row[index - 1].right;
+      if (gap >= minGap) {
+        gaps.push({
+          center: (row[index].left + row[index - 1].right) / 2,
+          gap,
+          row: rowIndex,
+        });
+      }
+    }
+  });
+  if (gaps.length < 2) return [];
+
+  const mergeTolerance = Math.max(12, median(widths, 24) * 0.8);
+  const clusters: Array<{
+    center: number;
+    gaps: typeof gaps;
+    rows: Set<number>;
+  }> = [];
+  for (const gap of gaps.sort((a, b) => a.center - b.center)) {
+    const current = clusters[clusters.length - 1];
+    if (!current || gap.center - current.center > mergeTolerance) {
+      clusters.push({
+        center: gap.center,
+        gaps: [gap],
+        rows: new Set([gap.row]),
+      });
+      continue;
+    }
+    current.gaps.push(gap);
+    current.rows.add(gap.row);
+    current.center =
+      current.gaps.reduce((sum, item) => sum + item.center, 0) /
+      current.gaps.length;
+  }
+
+  const supportMin = Math.max(2, Math.ceil(denseRows.length * 0.22));
+  const minSeparation = Math.max(
+    60,
+    tableWidth / Math.max(6, maxColumns * 1.25),
+  );
+  const chosen: Array<{ center: number; score: number }> = [];
+  const candidates = clusters
+    .map((cluster) => {
+      const avgGap =
+        cluster.gaps.reduce((sum, gap) => sum + gap.gap, 0) /
+        cluster.gaps.length;
+      return {
+        center: Math.round(cluster.center),
+        support: cluster.rows.size,
+        score: cluster.rows.size * 100 + avgGap,
+      };
+    })
+    .filter((cluster) => cluster.support >= supportMin)
+    .sort((a, b) => b.score - a.score);
+
+  for (const candidate of candidates) {
+    if (
+      chosen.every(
+        (existing) =>
+          Math.abs(existing.center - candidate.center) >= minSeparation,
+      )
+    ) {
+      chosen.push(candidate);
+    }
+    if (chosen.length >= maxColumns - 1) break;
+  }
+  if (chosen.length < 2) return [];
+
+  return mergeLines(
+    [left, right, ...chosen.map((candidate) => candidate.center)],
+    Math.max(3, tableWidth * 0.003),
+  );
 }
 
 export function browserWordsToTableMarkdown(
@@ -185,55 +678,15 @@ export function browserWordsToTableMarkdown(
     [left, right, ...rows.flatMap((row) => recursiveCuts(row, minGap))],
     Math.max(3, tableWidth * 0.003),
   );
-  if (xLines.length < 4) return "";
-  const columnCount = xLines.length - 1;
-  if (columnCount > (options.maxColumns ?? 4)) return "";
-  if (columnCount > 4 && (columnCount < 8 || rows.length < 10)) return "";
+  const maxColumns = options.maxColumns ?? 4;
+  const fineMarkdown = tableMarkdownForLines(rows, xLines, { maxColumns });
+  if (fineMarkdown) return fineMarkdown;
 
-  const cellRows = rows.map((rowWords) => {
-    const cells = Array<string>(xLines.length - 1).fill("");
-    const mergeCells = new Set<number>();
-    for (const word of rowWords) {
-      const center = (word.left + word.right) / 2;
-      const col = positionToInterval(center, xLines);
-      if (col === null) continue;
-      cells[col] = [cells[col], word.text].filter(Boolean).join(" ").trim();
-      for (
-        let boundary = col + 1;
-        boundary < xLines.length - 1;
-        boundary += 1
-      ) {
-        if (
-          word.left + 1 < xLines[boundary] &&
-          xLines[boundary] < word.right - 1
-        ) {
-          mergeCells.add(boundary);
-        }
-      }
-    }
-    for (const col of mergeCells) {
-      if (!cells[col].trim()) cells[col] = MERGE_LEFT;
-    }
-    return cells;
+  const coarseLines = coarseColumnLines(rows, words, maxColumns);
+  return tableMarkdownForLines(rows, coarseLines, {
+    maxColumns,
+    allowMediumWide: true,
   });
-
-  const populatedCellCount = cellRows.reduce(
-    (count, row) =>
-      count + row.filter((cell) => cell.trim() && cell !== MERGE_LEFT).length,
-    0,
-  );
-  if (populatedCellCount / Math.max(1, cellRows.length * columnCount) < 0.35) {
-    return "";
-  }
-
-  const populatedRows = cellRows.filter(
-    (row) =>
-      row.filter((cell) => cell.trim() && cell !== MERGE_LEFT).length >= 2,
-  );
-  if (populatedRows.length < Math.max(3, Math.ceil(cellRows.length * 0.45)))
-    return "";
-
-  return tableRowsToMarkdown(cellRows);
 }
 
 export async function browserWordsToReviewedTableMarkdown(
@@ -245,6 +698,7 @@ export async function browserWordsToReviewedTableMarkdown(
   if (!markdown) return "";
 
   const rows = markdown.split(/\r?\n/);
+  const nonTableRows = rows.filter((line) => !line.trim().startsWith("|"));
   const tableRows = rows
     .filter((line) => line.startsWith("|") && !/^\|\s*---/.test(line))
     .map((line) =>
@@ -282,5 +736,7 @@ export async function browserWordsToReviewedTableMarkdown(
       if (!isText) reviewed[rowIndex][colIndex] = "";
     }
   }
-  return tableRowsToMarkdown(reviewed, true);
+  return [...nonTableRows, tableRowsToMarkdown(reviewed, true)]
+    .filter(Boolean)
+    .join("\n");
 }

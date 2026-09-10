@@ -2168,21 +2168,23 @@ def _prepare_cell_crop(image: Image.Image, bbox: Box) -> Image.Image:
 
 
 def _cell_has_visible_content(image: Image.Image) -> bool:
-    gray = np.array(image.convert("L"))
+    gray = np.array(image.convert("L"), dtype=np.uint8)
     if gray.size == 0:
         return False
 
-    dark = gray < 225
-    dark_pixels = int(np.count_nonzero(dark))
-    min_ink_pixels = max(5, int(gray.size * 0.0008))
-    if dark_pixels < min_ink_pixels:
+    if _cell_is_uniform_background(image):
+        return False
+
+    mask = _cell_foreground_mask(image, gray=gray)
+    min_ink_pixels = max(3, int(gray.size * 0.0005))
+    if int(np.count_nonzero(mask)) < min_ink_pixels:
         return False
 
     try:
         import cv2
 
-        mask = (dark.astype(np.uint8)) * 255
-        component_count, _, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+        component_mask = (mask.astype(np.uint8)) * 255
+        component_count, _, stats, _ = cv2.connectedComponentsWithStats(component_mask, 8)
         meaningful_pixels = 0
         for index in range(1, component_count):
             _, _, width, height, area = stats[index]
@@ -2200,14 +2202,80 @@ def _cell_is_uniform_background(image: Image.Image) -> bool:
     gray = np.array(image.convert("L"), dtype=np.uint8)
     if gray.size == 0:
         return True
-    if int(gray.max()) - int(gray.min()) <= 3:
-        return True
 
     histogram = np.bincount(gray.reshape(-1), minlength=256)
     background = int(np.argmax(histogram))
-    outliers = np.abs(gray.astype(np.int16) - background) > 4
+    gray_outliers = np.abs(gray.astype(np.int16) - background) > 4
+    if int(np.count_nonzero(gray_outliers)) > 1:
+        return False
+
+    outliers = _cell_color_foreground_mask(image)
     # Permit a single compression/noise pixel, but never suppress a thin glyph.
     return int(np.count_nonzero(outliers)) <= 1
+
+
+def _dominant_rgb_color(rgb: np.ndarray) -> np.ndarray:
+    pixels = rgb.reshape(-1, 3)
+    if pixels.size == 0:
+        return np.array([255, 255, 255], dtype=np.int16)
+    max_samples = 20_000
+    if pixels.shape[0] > max_samples:
+        step = max(1, pixels.shape[0] // max_samples)
+        pixels = pixels[::step]
+    colors, counts = np.unique(pixels, axis=0, return_counts=True)
+    return colors[int(np.argmax(counts))].astype(np.int16)
+
+
+def _cell_color_foreground_mask(image: Image.Image, *, threshold: int = 12) -> np.ndarray:
+    rgb = np.array(image.convert("RGB"), dtype=np.uint8)
+    if rgb.size == 0:
+        return np.zeros((0, 0), dtype=bool)
+    background = _dominant_rgb_color(rgb)
+    delta = np.max(np.abs(rgb.astype(np.int16) - background), axis=2)
+    return delta > threshold
+
+
+def _cell_foreground_mask(image: Image.Image, *, gray: np.ndarray | None = None) -> np.ndarray:
+    if gray is None:
+        gray = np.array(image.convert("L"), dtype=np.uint8)
+    if gray.size == 0:
+        return np.zeros((0, 0), dtype=bool)
+
+    histogram = np.bincount(gray.reshape(-1), minlength=256)
+    background = int(np.argmax(histogram))
+    gray_mask = np.abs(gray.astype(np.int16) - background) > 4
+    if int(gray.max()) - int(gray.min()) > 8:
+        return gray_mask
+
+    color_mask = _cell_color_foreground_mask(image)
+    if color_mask.shape != gray_mask.shape:
+        return gray_mask
+    return np.logical_or(gray_mask, color_mask)
+
+
+def _color_separated_cell_image(image: Image.Image) -> Image.Image | None:
+    gray = np.array(image.convert("L"), dtype=np.uint8)
+    if gray.size == 0:
+        return None
+
+    color_mask = _cell_color_foreground_mask(image)
+    if color_mask.shape != gray.shape:
+        return None
+
+    histogram = np.bincount(gray.reshape(-1), minlength=256)
+    background = int(np.argmax(histogram))
+    gray_mask = np.abs(gray.astype(np.int16) - background) > 4
+    if int(gray.max()) - int(gray.min()) > 8:
+        return None
+
+    min_ink_pixels = max(3, int(gray.size * 0.0005))
+    color_pixels = int(np.count_nonzero(color_mask))
+    if color_pixels < min_ink_pixels:
+        return None
+
+    separated = np.full(gray.shape, 255, dtype=np.uint8)
+    separated[np.logical_or(gray_mask, color_mask)] = 0
+    return Image.fromarray(separated, mode="L")
 
 
 def _sampled_cell_background_luma(gray: Image.Image) -> int:
@@ -2231,10 +2299,12 @@ def _sampled_cell_background_luma(gray: Image.Image) -> int:
 
 
 def _prepare_cell_for_ocr(image: Image.Image) -> Image.Image:
-    gray = image.convert("L")
-    if _sampled_cell_background_luma(gray) < 150:
-        gray = ImageOps.invert(gray)
-    gray = ImageOps.autocontrast(gray)
+    gray = _color_separated_cell_image(image)
+    if gray is None:
+        gray = image.convert("L")
+        if _sampled_cell_background_luma(gray) < 150:
+            gray = ImageOps.invert(gray)
+        gray = ImageOps.autocontrast(gray)
     width, height = gray.size
     if width <= 0 or height <= 0:
         return gray
@@ -2312,6 +2382,16 @@ def mark_table_empty_slots(
     )
 
 
+def table_cell_is_visually_empty(image: Image.Image, cell: TableCell) -> bool:
+    if not cell.is_empty:
+        return False
+    cell_image = _prepare_cell_crop(image, cell.bbox)
+    try:
+        return _cell_is_uniform_background(cell_image)
+    finally:
+        cell_image.close()
+
+
 def table_layout_to_rows(
     image: Image.Image,
     table: TableLayout,
@@ -2347,7 +2427,7 @@ def table_layout_to_rows(
 
     recognition_count = 0
     for cell in cells:
-        if cell.is_empty:
+        if table_cell_is_visually_empty(image, cell):
             continue
         if only_missing and rows[cell.row][cell.col].strip():
             continue

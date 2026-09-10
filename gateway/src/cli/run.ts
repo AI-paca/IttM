@@ -25,6 +25,11 @@ export async function runCli(
   client = new HeadlessExtractionClient(),
   signal?: AbortSignal,
 ): Promise<number> {
+  if (args.includes("--help") || args.includes("-h")) {
+    io.stdout(USAGE.trimEnd());
+    return 0;
+  }
+
   const fileArg = args.find((arg) => !arg.startsWith("--"));
   const endpointArg = args.find((arg) => arg.startsWith("--endpoint="));
   const pdfModeArg = args.find((arg) => arg.startsWith("--pdf-mode="));

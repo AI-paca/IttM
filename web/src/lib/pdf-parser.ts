@@ -1,7 +1,9 @@
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { loadBrowserPipelineCore } from "../ocr/pipeline-core";
 import { findContentBounds } from "./image-content-bounds";
 import { assertBrowserPdfSize } from "./pdf-limits";
+import { buildNativePdfOracle } from "./pdf-native-oracle";
 import { boundedViewportScale, processPreparedPages } from "./pdf-processing";
 import type {
   PdfProcessingOptions,
@@ -244,8 +246,14 @@ async function processPdfOnMainThread(
           });
           canvas.width = 1;
           canvas.height = 1;
+          const textItems = textContent.items as PdfTextItem[];
+          const pipelineCore = await loadBrowserPipelineCore();
           return {
-            nativeText: normalizedPdfText(textContent.items as PdfTextItem[]),
+            nativeText: normalizedPdfText(textItems),
+            nativeOracle: buildNativePdfOracle(
+              textItems as Parameters<typeof buildNativePdfOracle>[0],
+              pipelineCore,
+            ),
             image,
           };
         } finally {

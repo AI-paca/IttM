@@ -10,6 +10,7 @@ from app.layout.sparse_codes import (
     MERGE_UP_CODES,
     MERGE_UP_ONLY_CODES,
 )
+from app.pipeline_core.structure import is_isolated_heading
 
 DERIVED_TABLE_CODE = 7
 
@@ -33,6 +34,62 @@ class StructuralMarkdownResult:
 class _TableIsland:
     rows: tuple[SparseMarkdownRow, ...]
     width: int
+
+
+def render_isolated_sparse_headings(
+    rows: list[SparseMarkdownRow],
+) -> list[str]:
+    """Render only geometry-proven headings when a sparse grid is not a table.
+
+    A heading candidate is one or two adjacent short rows bounded by an empty
+    matrix row above and below. OCR casing and fixture vocabulary are ignored.
+    """
+
+    materialized = [(row.anchor[0], tuple(row.parts)) for row in rows]
+    if not materialized:
+        return []
+    content_by_row: dict[int, list[str]] = {}
+    output: list[tuple[int, str]] = []
+    for row_number, parts in materialized:
+        for part in parts:
+            if part.strip():
+                content_by_row.setdefault(row_number, []).append(part)
+                output.append((row_number, part))
+
+    heading_rows: set[int] = set()
+    occupied = sorted(content_by_row)
+    index = 0
+    while index < len(occupied):
+        start = index
+        while index + 1 < len(occupied) and occupied[index + 1] == occupied[index] + 1:
+            index += 1
+        run = occupied[start : index + 1]
+        lines = [line for row_number in run for line in content_by_row[row_number]]
+        max_line_chars = max((len(line.strip()) for line in lines), default=0)
+        single_line = all("\n" not in line for line in lines)
+        content_chars = len(re.sub(r"[^\w]+", "", " ".join(lines), flags=re.UNICODE))
+        bounded_above = bool(run and run[0] > 0 and run[0] - 1 not in content_by_row)
+        max_matrix_row = max(row_number for row_number, _parts in materialized)
+        bounded_below = bool(run and run[-1] < max_matrix_row and run[-1] + 1 not in content_by_row)
+        if single_line and is_isolated_heading(
+            run_rows=len(run),
+            content_chars=content_chars,
+            max_line_chars=max_line_chars,
+            bounded_above=bounded_above,
+            bounded_below=bounded_below,
+        ):
+            heading_rows.add(run[0])
+        index += 1
+
+    rendered: list[str] = []
+    heading_emitted: set[int] = set()
+    for row_number, part in output:
+        if row_number in heading_rows and row_number not in heading_emitted:
+            rendered.append(f"## {part.strip()}")
+            heading_emitted.add(row_number)
+        else:
+            rendered.append(part)
+    return rendered
 
 
 def render_sparse_markdown_rows(

@@ -13,7 +13,7 @@ from PIL import Image
 
 from app import upload_limits
 from app.main import app, create_app
-from app.routers import convert, install
+from app.routers import convert, health, install
 from app.services import convert_service
 
 client = TestClient(app)
@@ -138,7 +138,21 @@ def test_readiness():
         "pytesseract",
         "pdf2image",
         "opencv",
+        "pipeline_core_abi6",
     }
+
+
+def test_readiness_rejects_missing_or_incompatible_pipeline_core(monkeypatch):
+    def fail_core():
+        raise RuntimeError("Unsupported pipeline core ABI")
+
+    monkeypatch.setattr(health, "native_pipeline_core", fail_core)
+
+    response = client.get("/readiness")
+
+    assert response.status_code == 200
+    assert response.json()["checks"]["pipeline_core_abi6"] is False
+    assert response.json()["ready"] is False
 
 
 def test_diagnostics_v1_alias():
@@ -486,6 +500,9 @@ def test_image_bytes_do_not_use_pdf_temp_directory(monkeypatch):
         def recognize(self, image, mode="text_mode", psm=6):
             return "image text"
 
+        def recognize_words_for_language(self, image, _languages, **_kwargs):
+            return [{"text": "image text", "bbox": (0, 0, *image.size), "conf": 100}]
+
         def info(self):
             return {"engine": "fake"}
 
@@ -495,11 +512,17 @@ def test_image_bytes_do_not_use_pdf_temp_directory(monkeypatch):
     monkeypatch.setattr(convert_service, "AutoEngine", lambda **_kwargs: FakeEngine())
     monkeypatch.setattr(convert_service.tempfile, "TemporaryDirectory", fail_temp_directory)
 
-    image = Image.new("RGB", (100, 30), color="white")
+    image = Image.new("RGB", (80, 60), color="white")
+    image.paste("black", (8, 7, 55, 15))
+    image.paste("black", (12, 40, 70, 48))
     content = io.BytesIO()
     image.save(content, format="PNG")
 
     markdown, meta = convert_service.convert_bytes(content.getvalue(), filename="test.png", engine_type="auto")
 
-    assert markdown == "image text"
+    assert markdown == "image text\n\nimage text"
     assert meta["pages"] == 1
+    assert meta["pipeline"] == "rust_separated_v1"
+    assert meta["pipeline_stages"] == list(convert_service.SEPARATED_STAGES)
+    assert meta["preprocess_steps"] == ["rust:preprocess"]
+    assert "pipeline_stage:generate-object" in meta["flags"]

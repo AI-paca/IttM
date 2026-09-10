@@ -1,5 +1,16 @@
-import { createWorker } from "tesseract.js";
+import { createWorker, OEM, PSM } from "tesseract.js";
 import type { BrowserOcrProfile } from "./browser-profile";
+import { denseGridLineIndexes } from "./browser-dense-grid";
+import { scoreMathLanguage } from "./math-language";
+import {
+  loadBrowserPipelineCore,
+  type BrowserPipelineCore,
+} from "./pipeline-core";
+import {
+  fallbackEvidenceTokens,
+  ocrCompactCharCount,
+  sharedOcrTokenCount,
+} from "./text-block-metrics";
 import { toTesseractRecognizeInput } from "./tesseract-recognize-input";
 import type { ProgressSink } from "./types";
 
@@ -46,6 +57,7 @@ interface TesseractBlockLike {
 
 interface TesseractPageLike {
   text: string;
+  confidence?: number;
   blocks?: TesseractBlockLike[] | null;
 }
 
@@ -63,6 +75,404 @@ export interface BrowserOcrWordBox {
 export interface BrowserOcrDetailedResult {
   text: string;
   words: BrowserOcrWordBox[];
+  confidence?: number;
+}
+
+type SpanEvidenceScorer = Pick<BrowserPipelineCore, "spanEvidenceScore">;
+type BrowserOcrDecisionCore = Pick<
+  BrowserPipelineCore,
+  "spanEvidenceScore" | "shouldReplacePrimary"
+>;
+type PipelineCoreLoader = () => Promise<BrowserOcrDecisionCore>;
+
+type BrowserCanvasLike = OffscreenCanvas | HTMLCanvasElement;
+
+function createCanvas(width: number, height: number): BrowserCanvasLike | null {
+  if (typeof OffscreenCanvas !== "undefined")
+    return new OffscreenCanvas(width, height);
+  if (typeof document === "undefined") return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
+function clampByte(value: number): number {
+  if (value < 0) return 0;
+  if (value > 255) return 255;
+  return Math.round(value);
+}
+
+async function loadBrowserImage(
+  input: Blob,
+): Promise<
+  (ImageBitmap & { width: number; height: number }) | HTMLImageElement | null
+> {
+  if (typeof createImageBitmap === "function") {
+    try {
+      return await createImageBitmap(input);
+    } catch {
+      // fall back
+    }
+  }
+
+  if (
+    typeof document === "undefined" ||
+    typeof Image === "undefined" ||
+    typeof URL === "undefined" ||
+    typeof URL.createObjectURL !== "function"
+  ) {
+    return null;
+  }
+  return await new Promise<HTMLImageElement | null>((resolve) => {
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(input);
+
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(null);
+    };
+
+    image.src = objectUrl;
+  });
+}
+
+async function canvasToImageBlob(
+  canvas: BrowserCanvasLike,
+): Promise<Blob | null> {
+  if ("convertToBlob" in canvas) {
+    return await canvas.convertToBlob({ type: "image/png" });
+  }
+  return await new Promise<Blob | null>((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), "image/png");
+  });
+}
+
+interface EdgeFallbackInput {
+  input: Blob;
+  border: number;
+  width: number;
+  height: number;
+}
+
+async function buildEdgeFallbackInput(
+  input: Blob,
+  borderPixels: number,
+): Promise<EdgeFallbackInput | null> {
+  const image = await loadBrowserImage(input);
+  if (!image) return null;
+  const { width, height } = image;
+  const source = createCanvas(width, height);
+  const context = source?.getContext("2d", { willReadFrequently: true });
+  if (!source || !context) {
+    if ("close" in image && typeof image.close === "function") image.close();
+    return null;
+  }
+  context.fillStyle = "white";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+  if ("close" in image && typeof image.close === "function") image.close();
+  if (width < 80 || height < 40) return null;
+
+  const pixels = context.getImageData(0, 0, width, height).data;
+  const edge = Math.max(
+    2,
+    Math.min(12, Math.floor(Math.min(width, height) / 80)),
+  );
+  const inkRatio = (
+    left: number,
+    top: number,
+    right: number,
+    bottom: number,
+  ) => {
+    let ink = 0;
+    let total = 0;
+    for (let y = top; y < bottom; y += 1) {
+      for (let x = left; x < right; x += 1) {
+        const offset = (y * width + x) * 4;
+        const gray = Math.round(
+          pixels[offset] * 0.299 +
+            pixels[offset + 1] * 0.587 +
+            pixels[offset + 2] * 0.114,
+        );
+        ink += Number(gray < 220);
+        total += 1;
+      }
+    }
+    return total > 0 ? ink / total : 0;
+  };
+  if (
+    [
+      inkRatio(0, 0, width, edge),
+      inkRatio(0, height - edge, width, height),
+      inkRatio(0, 0, edge, height),
+      inkRatio(width - edge, 0, width, height),
+    ].some((ratio) => ratio < 0.02)
+  ) {
+    return null;
+  }
+
+  const border = Math.max(0, Math.floor(borderPixels));
+  if (!border) return null;
+  const expanded = createCanvas(width + border * 2, height + border * 2);
+  const expandedContext = expanded?.getContext("2d");
+  if (!expanded || !expandedContext) return null;
+  expandedContext.fillStyle = "white";
+  expandedContext.fillRect(0, 0, expanded.width, expanded.height);
+  expandedContext.drawImage(source, border, border);
+  const blob = await canvasToImageBlob(expanded);
+  return blob ? { input: blob, border, width, height } : null;
+}
+
+function projectEdgeFallback(
+  result: BrowserOcrDetailedResult,
+  fallback: EdgeFallbackInput,
+): BrowserOcrDetailedResult {
+  const words = result.words.flatMap((word) => {
+    const bbox = {
+      x0: Math.max(0, word.bbox.x0 - fallback.border),
+      y0: Math.max(0, word.bbox.y0 - fallback.border),
+      x1: Math.min(fallback.width, word.bbox.x1 - fallback.border),
+      y1: Math.min(fallback.height, word.bbox.y1 - fallback.border),
+    };
+    return bbox.x1 > bbox.x0 && bbox.y1 > bbox.y0 ? [{ ...word, bbox }] : [];
+  });
+  return { ...result, words };
+}
+
+function edgeFallbackScore(
+  result: BrowserOcrDetailedResult,
+): readonly number[] {
+  const confidence = result.words.reduce(
+    (sum, word) => sum + (word.confidence ?? 0),
+    0,
+  );
+  return [
+    Number(result.words.length > 0),
+    result.words.length ? confidence / result.words.length : 0,
+    result.text.replace(/\s+/g, "").length,
+  ];
+}
+
+function strongerEdgeFallback(
+  left: BrowserOcrDetailedResult,
+  right: BrowserOcrDetailedResult,
+): BrowserOcrDetailedResult {
+  const leftScore = edgeFallbackScore(left);
+  const rightScore = edgeFallbackScore(right);
+  for (let index = 0; index < leftScore.length; index += 1) {
+    if (rightScore[index] !== leftScore[index]) {
+      return rightScore[index] > leftScore[index] ? right : left;
+    }
+  }
+  return left;
+}
+
+async function buildImageVariants(
+  input: Blob,
+  maxPixels: number,
+): Promise<Blob[]> {
+  const variants: Blob[] = [];
+  if (
+    typeof OffscreenCanvas === "undefined" &&
+    typeof document === "undefined"
+  ) {
+    return variants;
+  }
+
+  const image = await loadBrowserImage(input);
+  if (!image) return variants;
+
+  const width = image.width;
+  const height = image.height;
+  if (width <= 1 || height <= 1 || width * height > maxPixels) {
+    if ("close" in image && typeof image.close === "function") image.close();
+    return variants;
+  }
+
+  const sourceCanvas = createCanvas(width, height);
+  if (!sourceCanvas) {
+    if ("close" in image && typeof image.close === "function") image.close();
+    return variants;
+  }
+
+  const sourceContext = sourceCanvas.getContext("2d");
+  if (!sourceContext) {
+    if ("close" in image && typeof image.close === "function") image.close();
+    return variants;
+  }
+
+  sourceContext.fillStyle = "white";
+  sourceContext.fillRect(0, 0, width, height);
+  sourceContext.drawImage(image, 0, 0, width, height);
+  if ("close" in image && typeof image.close === "function") image.close();
+
+  const addCanvasVariant = async (
+    mutation?: (imageData: Uint8ClampedArray) => void,
+  ) => {
+    const variantCanvas = createCanvas(width, height);
+    if (!variantCanvas) return;
+    const context = variantCanvas.getContext("2d");
+    if (!context) return;
+    context.drawImage(sourceCanvas, 0, 0);
+    if (mutation) {
+      const imageData = context.getImageData(0, 0, width, height);
+      mutation(imageData.data);
+      context.putImageData(imageData, 0, 0);
+    }
+    const blob = await canvasToImageBlob(variantCanvas);
+    if (blob) variants.push(blob);
+  };
+
+  await addCanvasVariant((data) => {
+    for (let index = 0; index < data.length; index += 4) {
+      data[index] = 255 - data[index];
+      data[index + 1] = 255 - data[index + 1];
+      data[index + 2] = 255 - data[index + 2];
+    }
+  });
+  await addCanvasVariant((data) => {
+    const contrast = 1.45;
+    const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
+    for (let index = 0; index < data.length; index += 4) {
+      data[index] = clampByte((data[index] - 128) * factor + 128);
+      data[index + 1] = clampByte((data[index + 1] - 128) * factor + 128);
+      data[index + 2] = clampByte((data[index + 2] - 128) * factor + 128);
+    }
+  });
+  await addCanvasVariant((data) => {
+    const histogram = new Uint32Array(256);
+    const gray = new Uint8Array(data.length / 4);
+    for (
+      let index = 0, pixel = 0;
+      index < data.length;
+      index += 4, pixel += 1
+    ) {
+      const level = Math.round(
+        data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114,
+      );
+      gray[pixel] = level;
+      histogram[level] += 1;
+    }
+    const total = gray.length;
+    let weightedTotal = 0;
+    for (let level = 0; level < histogram.length; level += 1) {
+      weightedTotal += level * histogram[level];
+    }
+    let backgroundWeight = 0;
+    let backgroundTotal = 0;
+    let threshold = 127;
+    let bestVariance = -1;
+    for (let level = 0; level < histogram.length; level += 1) {
+      backgroundWeight += histogram[level];
+      if (backgroundWeight === 0) continue;
+      const foregroundWeight = total - backgroundWeight;
+      if (foregroundWeight === 0) break;
+
+      backgroundTotal += level * histogram[level];
+      const backgroundMean = backgroundTotal / backgroundWeight;
+      const foregroundMean =
+        (weightedTotal - backgroundTotal) / foregroundWeight;
+      const variance =
+        backgroundWeight *
+        foregroundWeight *
+        (backgroundMean - foregroundMean) ** 2;
+      if (variance > bestVariance) {
+        bestVariance = variance;
+        threshold = level;
+      }
+    }
+    for (let index = 0; index < data.length; index += 4) {
+      const light = Math.round(
+        data[index] * 0.299 + data[index + 1] * 0.587 + data[index + 2] * 0.114,
+      );
+      const value = light <= threshold ? 0 : 255;
+      data[index] = value;
+      data[index + 1] = value;
+      data[index + 2] = value;
+    }
+  });
+
+  return variants;
+}
+
+async function buildDenseGridBlockVariant(
+  input: Blob,
+  maxPixels: number,
+): Promise<Blob | null> {
+  const image = await loadBrowserImage(input);
+  if (!image) return null;
+  const { width, height } = image;
+  if (width <= 1 || height <= 1 || width * height > maxPixels) {
+    if ("close" in image && typeof image.close === "function") image.close();
+    return null;
+  }
+  const canvas = createCanvas(width, height);
+  const context = canvas?.getContext("2d");
+  if (!canvas || !context) {
+    if ("close" in image && typeof image.close === "function") image.close();
+    return null;
+  }
+  context.fillStyle = "white";
+  context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+  if ("close" in image && typeof image.close === "function") image.close();
+
+  const imageData = context.getImageData(0, 0, width, height);
+  const { rows, columns } = denseGridLineIndexes(imageData.data, width, height);
+  if (!rows.size && !columns.size) return null;
+  for (const y of rows) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4;
+      imageData.data[offset] = 255;
+      imageData.data[offset + 1] = 255;
+      imageData.data[offset + 2] = 255;
+      imageData.data[offset + 3] = 255;
+    }
+  }
+  for (const x of columns) {
+    for (let y = 0; y < height; y += 1) {
+      const offset = (y * width + x) * 4;
+      imageData.data[offset] = 255;
+      imageData.data[offset + 1] = 255;
+      imageData.data[offset + 2] = 255;
+      imageData.data[offset + 3] = 255;
+    }
+  }
+  context.putImageData(imageData, 0, 0);
+  return await canvasToImageBlob(canvas);
+}
+
+function ocrGarbageRatio(text: string): number {
+  const characters = Array.from(text).filter((character) => character.trim());
+  if (!characters.length) return 1;
+  const allowedSymbols = "._:/+-%()[]№₽$€|,;\"'";
+  const weird = characters.filter(
+    (character) =>
+      !/[\p{L}\p{N}]/u.test(character) && !allowedSymbols.includes(character),
+  ).length;
+  // Single-character tokens are valid table cells and are also normal in CJK
+  // OCR output. Treating them as garbage forced clean blocks into language
+  // retries, where a lower-confidence single-language result could win.
+  return weird / characters.length;
+}
+
+function isStrongImageCandidate(result: BrowserOcrDetailedResult): boolean {
+  const text = result.text.trim();
+  if (!text) return false;
+  const tokenCount = text.match(/[\p{L}\p{N}_]+/gu)?.length ?? 0;
+  const confidence = result.confidence ?? 0;
+  const garbageRatio = ocrGarbageRatio(text);
+  if (garbageRatio >= 0.16) return false;
+  return (
+    (tokenCount >= 4 && confidence >= 70) ||
+    (tokenCount >= 2 && confidence >= 88 && garbageRatio < 0.12)
+  );
 }
 
 interface TesseractWorkerOptions {
@@ -72,6 +482,8 @@ interface TesseractWorkerOptions {
   workerPath?: string;
   corePath?: string;
   workerBlobURL?: boolean;
+  legacyCore?: boolean;
+  legacyLang?: boolean;
   logger?: (message: TesseractLoggerMessage) => void;
 }
 
@@ -86,7 +498,9 @@ const LANGUAGE_SCRIPTS: Record<string, string> = {
   equ: "math",
 };
 
+const REVIEWER_EMPTY_STATE = "empty";
 const REVIEWER_EXTRA_LANGUAGES = ["ell", "equ"];
+const REVIEWER_STATE_TYPES = [REVIEWER_EMPTY_STATE];
 
 const SCRIPT_PATTERNS: Record<string, RegExp> = {
   latin: /[A-Za-z]/g,
@@ -120,6 +534,9 @@ const compiledTesseractAssetRoot = `${
 const compiledTesseractWorkerUrl = `${
   import.meta.env?.BASE_URL ?? "/"
 }vendor/tesseract/worker.min.js`;
+const compiledTesseractLangPath = `${
+  import.meta.env?.BASE_URL ?? "/"
+}vendor/tesseract/lang`;
 
 export function normalizeAppBaseUrl(base: string | undefined): string {
   if (!base || base === "./") return "/";
@@ -132,15 +549,20 @@ function browserTesseractOptions(): Partial<TesseractWorkerOptions> {
   }
 
   return {
+    langPath: compiledTesseractLangPath,
+    gzip: false,
     workerPath: compiledTesseractWorkerUrl,
     corePath: compiledTesseractAssetRoot,
     workerBlobURL: false,
+    legacyCore: true,
+    legacyLang: true,
   };
 }
 
 function cacheKey(profile: BrowserOcrProfile): string {
   return JSON.stringify({
     languages: profile.languages,
+    availableLanguages: (profile.availableLanguages || []).join("+"),
     langPath: profile.langPath || "",
     cachePath: profile.cachePath || "",
     gzip: profile.gzip ?? null,
@@ -148,6 +570,9 @@ function cacheKey(profile: BrowserOcrProfile): string {
     edgeWordFallbackPsm: profile.edgeWordFallbackPsm,
     edgeWordFallbackMinTokens: profile.edgeWordFallbackMinTokens,
     ocrLanguageRetry: profile.ocrLanguageRetry,
+    lexicalCorrection: profile.lexicalCorrection,
+    tableSlotBuilder: profile.tableSlotBuilder,
+    tableSlotMaxColumns: profile.tableSlotMaxColumns,
   });
 }
 
@@ -159,9 +584,38 @@ function splitLanguages(languages: string): string[] {
   return Array.from(new Set(languages.split("+").filter(Boolean)));
 }
 
-function reviewerRetryLanguages(languages: string): string[] {
+function languagesAreAvailable(
+  languages: string,
+  availableLanguages?: readonly string[],
+): boolean {
+  if (!availableLanguages) return true;
+  const available = new Set(availableLanguages);
+  return splitLanguages(languages).every((language) => available.has(language));
+}
+
+function reviewerRetryLanguages(
+  languages: string,
+  availableLanguages?: readonly string[],
+): string[] {
+  const configured = splitLanguages(languages);
+  const available = new Set(availableLanguages || configured);
   return Array.from(
-    new Set([...splitLanguages(languages), ...REVIEWER_EXTRA_LANGUAGES]),
+    new Set([
+      ...configured,
+      ...REVIEWER_EXTRA_LANGUAGES.filter((language) => available.has(language)),
+    ]),
+  );
+}
+
+function reviewerAgendaStates(
+  languages: string,
+  availableLanguages?: readonly string[],
+): string[] {
+  return Array.from(
+    new Set([
+      ...reviewerRetryLanguages(languages, availableLanguages),
+      ...REVIEWER_STATE_TYPES,
+    ]),
   );
 }
 
@@ -189,14 +643,14 @@ function normalizeProbabilities(
 
 function initialLanguageProbabilities(
   languages: string,
+  availableLanguages?: readonly string[],
 ): Record<string, number> {
   const configured = splitLanguages(languages);
   const singles = configured.length ? configured : ["eng"];
   const weights = Object.fromEntries(
-    reviewerRetryLanguages(singles.join("+")).map((language) => [
-      language,
-      singles.includes(language) ? 1 : 0.05,
-    ]),
+    reviewerAgendaStates(singles.join("+"), availableLanguages).map(
+      (language) => [language, singles.includes(language) ? 1 : 0.05],
+    ),
   );
   return normalizeProbabilities(weights);
 }
@@ -213,6 +667,9 @@ function numericTextEvidence(text: string): number {
   if (!numericTokens.length) return 0;
   const digitCount = text.match(/\p{N}/gu)?.length ?? 0;
   const letterCount = text.match(/\p{L}/gu)?.length ?? 0;
+  if (letterCount === 0 && numericTokens.length === 1) {
+    return digitCount;
+  }
   if (numericTokens.length < 2 && digitCount < Math.max(2, letterCount)) {
     return 0;
   }
@@ -223,23 +680,36 @@ function languageEvidence(
   text: string,
   priors: Record<string, number>,
 ): Record<string, number> {
+  if (!text.trim() && priors[REVIEWER_EMPTY_STATE] !== undefined) {
+    return { [REVIEWER_EMPTY_STATE]: 1 };
+  }
+
   const scriptCounts = Object.fromEntries(
     Object.entries(SCRIPT_PATTERNS).map(([script, pattern]) => [
       script,
       countPattern(text, pattern),
     ]),
   );
+  const mathLanguageScores = scoreMathLanguage(text);
   const evidence = Object.fromEntries(
     Object.keys(priors).map((language) => [
       language,
-      languageScript(language) === "math"
+      (languageScript(language) === "math"
         ? (scriptCounts[languageScript(language)] || 0) * 3 +
           numericTextEvidence(text)
-        : scriptCounts[languageScript(language)] || 0,
+        : scriptCounts[languageScript(language)] || 0) +
+        (mathLanguageScores[language as "equ" | "ell"] || 0),
     ]),
   );
   const total = Object.values(evidence).reduce((sum, value) => sum + value, 0);
-  return total >= 2 ? normalizeProbabilities(evidence) : {};
+  const alphaEvidence =
+    (scriptCounts.latin || 0) +
+    (scriptCounts.cyrillic || 0) +
+    (scriptCounts.cjk || 0) +
+    (scriptCounts.greek || 0);
+  return total >= 2 || ((evidence.equ || 0) > 0 && alphaEvidence === 0)
+    ? normalizeProbabilities(evidence)
+    : {};
 }
 
 function updateLanguageProbabilities(
@@ -261,28 +731,21 @@ function updateLanguageProbabilities(
 function rankedLanguageCandidates(
   languages: string,
   priors: Record<string, number>,
-  splayOrder: readonly string[],
   context: readonly string[] = [],
+  includeLanguageRetries = true,
+  availableLanguages?: readonly string[],
 ): string[] {
-  const singles = reviewerRetryLanguages(languages);
+  const agendaStates = includeLanguageRetries
+    ? reviewerAgendaStates(languages, availableLanguages)
+    : REVIEWER_STATE_TYPES;
   const originalOrder = Object.fromEntries(
-    singles.map((language, index) => [language, index]),
-  );
-  const splayRank = Object.fromEntries(
-    splayOrder.map((language, index) => [language, index]),
+    agendaStates.map((language, index) => [language, index]),
   );
   const contextEvidence = languageEvidence(context.join(" "), priors);
-  const splaySize = Math.max(1, splayOrder.length);
   const score = (language: string): number => {
-    const rank = Math.min(splayRank[language] ?? splaySize, splaySize);
-    const splayScore = (splaySize - rank) / splaySize;
-    return (
-      (priors[language] || 0) * 10 +
-      (contextEvidence[language] || 0) * 8 +
-      splayScore * 4
-    );
+    return (priors[language] || 0) * 10 + (contextEvidence[language] || 0) * 8;
   };
-  const ranked = [...singles].sort(
+  const ranked = [...agendaStates].sort(
     (left, right) =>
       score(right) - score(left) ||
       (originalOrder[left] || 0) - (originalOrder[right] || 0),
@@ -290,79 +753,82 @@ function rankedLanguageCandidates(
   return Array.from(new Set([languages, ...ranked]));
 }
 
-function promoteLanguages(
-  order: readonly string[],
-  languages: readonly string[],
-): string[] {
-  const promoted = [...order];
-  for (const language of [...languages].reverse()) {
-    const index = promoted.indexOf(language);
-    if (index < 0) continue;
-    promoted.splice(index, 1);
-    promoted.unshift(language);
+interface ObservedOcrCandidate {
+  result: BrowserOcrDetailedResult;
+  languages: string;
+}
+
+function normalizedCandidateText(text: string): string {
+  return text.trim().replace(/\s+/g, " ");
+}
+
+function scoreObservedCandidates(
+  core: SpanEvidenceScorer,
+  candidates: readonly ObservedOcrCandidate[],
+  priors: Record<string, number>,
+  countSourceAgreement = true,
+): Array<ObservedOcrCandidate & { score: number }> {
+  const agreement = new Map<string, number>();
+  for (const candidate of candidates) {
+    const text = normalizedCandidateText(candidate.result.text);
+    if (text) agreement.set(text, (agreement.get(text) || 0) + 1);
   }
-  return promoted;
-}
-
-function selectedLanguageOrder(
-  languages: string,
-  text: string,
-  priors: Record<string, number>,
-): string[] {
-  const selected = splitLanguages(languages);
-  const evidence = languageEvidence(text, priors);
-  return [...selected].sort(
-    (left, right) => (evidence[right] || 0) - (evidence[left] || 0),
-  );
-}
-
-function textQualityScore(text: string): number {
-  const tokens = text.match(/[\p{L}\p{N}_]+(?:[.+:/-][\p{L}\p{N}_]+)*/gu);
-  if (!tokens?.length) return 0;
-  return tokens.reduce((score, token) => {
-    const letters = token.match(/\p{L}/gu)?.length ?? 0;
-    const digits = token.match(/\p{N}/gu)?.length ?? 0;
-    const weird = Array.from(token).filter(
-      (character) =>
-        !/[\p{L}\p{N}]/u.test(character) &&
-        !"._:/+-%()[]№₽$€".includes(character),
-    ).length;
-    const scriptCount = [
-      /[A-Za-z]/,
-      /[\u0400-\u04ff]/,
-      /[\u3400-\u9fff]/,
-      /[\u0370-\u03ff]/,
-    ].filter((pattern) => pattern.test(token)).length;
-    return (
-      score +
-      Math.max(1, token.length) +
-      (letters || digits ? 2 : 0) +
-      (token.length >= 3 ? 1 : 0) -
-      (scriptCount > 1 && !digits ? 2 : 0) -
-      weird * 2.5
-    );
-  }, 0);
-}
-
-function textCandidateScore(
-  text: string,
-  languages: string,
-  priors: Record<string, number>,
-): number {
-  if (!text.trim()) return -1;
-  const candidateLanguages = splitLanguages(languages);
-  const priorScore = candidateLanguages.length
-    ? candidateLanguages.reduce(
-        (sum, language) => sum + (priors[language] || 0),
-        0,
-      ) / candidateLanguages.length
-    : 0;
-  const evidence = languageEvidence(text, priors);
-  const evidenceScore = candidateLanguages.reduce(
-    (sum, language) => sum + (evidence[language] || 0),
-    0,
-  );
-  return textQualityScore(text) + priorScore * 1.5 + evidenceScore * 2;
+  return candidates.map((candidate) => {
+    const text = candidate.result.text;
+    const languages = splitLanguages(candidate.languages);
+    const evidence = languageEvidence(text, priors);
+    const scriptConsistency = languages.some((language) => {
+      const script = languageScript(language);
+      if (script === "math") return (evidence[language] || 0) > 0;
+      const pattern = SCRIPT_PATTERNS[script];
+      return pattern ? countPattern(text, pattern) > 0 : false;
+    })
+      ? 1
+      : 0;
+    let contextConsistency = languages.length
+      ? languages.reduce((sum, language) => sum + (priors[language] || 0), 0) /
+        languages.length
+      : 0;
+    if (
+      languages.some((language) => language === "equ" || language === "ell") &&
+      scoreMathLanguage(text)[languages.includes("equ") ? "equ" : "ell"] > 0
+    ) {
+      contextConsistency += 0.25;
+    }
+    const garbageRatio = ocrGarbageRatio(text);
+    const contradictions =
+      Number(!text.trim()) * 2 +
+      Number(Boolean(text.trim()) && !/[\p{L}\p{N}]/u.test(text)) +
+      Number(garbageRatio >= 0.16) +
+      Number(
+        Boolean(text.trim()) && languages.length > 0 && scriptConsistency === 0,
+      ) *
+        2;
+    const score = core.spanEvidenceScore({
+      ocrConfidenceMilli: Math.round(
+        candidate.result.confidence === undefined
+          ? 0
+          : Math.max(0, Math.min(100, candidate.result.confidence)) * 10,
+      ),
+      scriptConsistencyMilli: Math.round(
+        Math.max(0, Math.min(1, scriptConsistency)) * 1000,
+      ),
+      contextConsistencyMilli: Math.round(
+        Math.max(0, Math.min(1, contextConsistency)) * 1000,
+      ),
+      sourceAgreement: Math.min(
+        4,
+        countSourceAgreement
+          ? agreement.get(normalizedCandidateText(text)) || 0
+          : Number(Boolean(text.trim())),
+      ),
+      contradictions,
+    });
+    return {
+      ...candidate,
+      score,
+    };
+  });
 }
 
 function normalizeWorkerError(error: unknown, workerPath?: string): Error {
@@ -396,7 +862,7 @@ class BrowserOcrWorkerSession {
   private readonly profile: BrowserOcrProfile;
   private readonly workerPromise: Promise<TesseractWorkerLike>;
   private languageProbabilities: Record<string, number>;
-  private languageSplayOrder: string[];
+  private separatedLanguages: string;
   private progressSink: ProgressSink;
   private busy = false;
 
@@ -404,13 +870,15 @@ class BrowserOcrWorkerSession {
     profile: BrowserOcrProfile,
     onProgress: ProgressSink,
     createWorkerFn: CreateWorkerFn,
+    private readonly corePromise: Promise<BrowserOcrDecisionCore>,
   ) {
     this.key = cacheKey(profile);
     this.profile = profile;
     this.languageProbabilities = initialLanguageProbabilities(
       profile.languages,
+      profile.availableLanguages,
     );
-    this.languageSplayOrder = reviewerRetryLanguages(profile.languages);
+    this.separatedLanguages = profile.languages;
     this.progressSink = onProgress;
     const workerOptions: TesseractWorkerOptions = {
       ...browserTesseractOptions(),
@@ -421,7 +889,7 @@ class BrowserOcrWorkerSession {
     };
     this.workerPromise = createWorkerFn(
       profile.languages,
-      1,
+      OEM.DEFAULT,
       workerOptions,
     ).catch((error) => {
       throw normalizeWorkerError(error, workerOptions.workerPath);
@@ -459,6 +927,84 @@ class BrowserOcrWorkerSession {
     return this.recognizePage(input, pageSegmentationMode, true);
   }
 
+  async recognizeSeparatedBlock(
+    input: File | Blob,
+    pageSegmentationMode: string,
+  ): Promise<string> {
+    return (
+      await this.recognizeSeparatedBlockDetailed(input, pageSegmentationMode)
+    ).text;
+  }
+
+  async recognizeSeparatedBlockDetailed(
+    input: File | Blob,
+    pageSegmentationMode: string,
+    languages: string = this.profile.languages,
+  ): Promise<BrowserOcrDetailedResult> {
+    // Rust has already bounded the block. Re-running language and image
+    // candidates here would reinitialize Tesseract for every segment.
+    if (!languagesAreAvailable(languages, this.profile.availableLanguages)) {
+      return { text: "", words: [], confidence: 0 };
+    }
+    this.busy = true;
+    try {
+      const worker = await this.workerPromise;
+      if (languages !== this.separatedLanguages) {
+        if (!worker.reinitialize) {
+          return { text: "", words: [], confidence: 0 };
+        }
+        await worker.reinitialize(languages);
+        this.separatedLanguages = languages;
+      }
+      const recognizeInput = await toTesseractRecognizeInput(input);
+      await worker.setParameters?.({
+        tessedit_pageseg_mode: pageSegmentationMode,
+      });
+      const primary = await this.recognizeWithOutput(
+        worker,
+        recognizeInput,
+        true,
+      );
+      if (
+        primary.words.length > 0 ||
+        primary.text.trim() ||
+        pageSegmentationMode === PSM.SINGLE_WORD ||
+        pageSegmentationMode === PSM.RAW_LINE
+      ) {
+        return primary;
+      }
+      let selected = primary;
+      for (const fallbackPsm of [PSM.SINGLE_WORD, PSM.RAW_LINE]) {
+        await worker.setParameters?.({ tessedit_pageseg_mode: fallbackPsm });
+        selected = strongerEdgeFallback(
+          selected,
+          await this.recognizeWithOutput(worker, recognizeInput, true),
+        );
+      }
+      if (selected.words.length > 0 || selected.text.trim()) return selected;
+
+      const edgeFallback = await buildEdgeFallbackInput(
+        input,
+        this.profile.ocrBorderPixels,
+      );
+      if (!edgeFallback) return selected;
+      const fallbackInput = await toTesseractRecognizeInput(edgeFallback.input);
+      for (const fallbackPsm of [PSM.SINGLE_WORD, PSM.RAW_LINE]) {
+        await worker.setParameters?.({ tessedit_pageseg_mode: fallbackPsm });
+        selected = strongerEdgeFallback(
+          selected,
+          projectEdgeFallback(
+            await this.recognizeWithOutput(worker, fallbackInput, true),
+            edgeFallback,
+          ),
+        );
+      }
+      return selected;
+    } finally {
+      this.busy = false;
+    }
+  }
+
   private async recognizePage(
     input: File | Blob,
     pageSegmentationMode: string | undefined,
@@ -472,8 +1018,9 @@ class BrowserOcrWorkerSession {
         tessedit_pageseg_mode:
           pageSegmentationMode || this.profile.textRegionPsm,
       });
-      const primary = await this.recognizeWithLanguageCandidates(
+      const primary = await this.recognizeWithImageCandidates(
         worker,
+        input,
         recognizeInput,
         detailed,
       );
@@ -482,14 +1029,24 @@ class BrowserOcrWorkerSession {
       await worker.setParameters?.({
         tessedit_pageseg_mode: this.profile.edgeWordFallbackPsm,
       });
-      const fallback = await this.recognizeWithLanguageCandidates(
+      const fallback = await this.recognizeWithImageCandidates(
         worker,
+        input,
         recognizeInput,
         detailed,
       );
-      const fallbackTokens =
-        fallback.text.match(/[\p{L}\p{N}_]+/gu)?.length ?? 0;
-      return fallbackTokens >= this.profile.edgeWordFallbackMinTokens
+      const core = await this.corePromise;
+      const primaryTokens = fallbackEvidenceTokens(primary.text);
+      const fallbackTokens = fallbackEvidenceTokens(fallback.text);
+      return core.shouldReplacePrimary({
+        primaryChars: ocrCompactCharCount(primary.text),
+        fallbackChars: ocrCompactCharCount(fallback.text),
+        primaryTokens: primaryTokens.length,
+        retainedPrimaryTokens: sharedOcrTokenCount(
+          primaryTokens,
+          fallbackTokens,
+        ),
+      })
         ? fallback
         : primary;
     } finally {
@@ -506,33 +1063,97 @@ class BrowserOcrWorkerSession {
     const { data } = await worker.recognize(input, undefined, output);
     return {
       text: data.text,
+      confidence:
+        typeof data.confidence === "number" ? data.confidence : undefined,
       words: detailed ? extractWordBoxes(data) : [],
     };
+  }
+
+  private async prepareAdditionalRecognitionVariants(
+    input: File | Blob,
+  ): Promise<Array<File | Blob>> {
+    if (
+      this.profile.ocrLanguageRetry !== "t9_small" &&
+      this.profile.lexicalCorrection !== "t9_small"
+    ) {
+      return [];
+    }
+    if (!(input instanceof Blob) || !input.type.startsWith("image/")) {
+      return [];
+    }
+    return buildImageVariants(input, this.profile.maxImagePixels);
+  }
+
+  private async recognizeWithImageCandidates(
+    worker: TesseractWorkerLike,
+    sourceInput: File | Blob,
+    recognizeInput: unknown,
+    detailed: boolean,
+  ): Promise<BrowserOcrDetailedResult> {
+    const core = await this.corePromise;
+    const primary = await this.recognizeWithLanguageCandidates(
+      worker,
+      recognizeInput,
+      detailed,
+    );
+    const observed: ObservedOcrCandidate[] = [primary];
+    if (!isStrongImageCandidate(primary.result)) {
+      const variantInputs = await Promise.all(
+        (await this.prepareAdditionalRecognitionVariants(sourceInput)).map(
+          (variant) => toTesseractRecognizeInput(variant),
+        ),
+      );
+      for (const input of variantInputs) {
+        const selection = await this.recognizeWithLanguageCandidates(
+          worker,
+          input,
+          detailed,
+        );
+        observed.push(selection);
+      }
+    }
+    const best = scoreObservedCandidates(
+      core,
+      observed,
+      this.languageProbabilities,
+    ).reduce((selected, candidate) =>
+      candidate.score > selected.score ? candidate : selected,
+    );
+    this.languageProbabilities = updateLanguageProbabilities(
+      this.languageProbabilities,
+      best.result.text,
+    );
+    return best.result;
   }
 
   private async recognizeWithLanguageCandidates(
     worker: TesseractWorkerLike,
     input: unknown,
     detailed: boolean,
-  ): Promise<BrowserOcrDetailedResult> {
+  ): Promise<{ result: BrowserOcrDetailedResult; languages: string }> {
+    const core = await this.corePromise;
     const candidates =
-      this.profile.ocrLanguageRetry === "t9_small" && worker.reinitialize
+      this.profile.ocrLanguageRetry === "t9_small"
         ? rankedLanguageCandidates(
             this.profile.languages,
             this.languageProbabilities,
-            this.languageSplayOrder,
+            [],
+            Boolean(worker.reinitialize),
+            this.profile.availableLanguages,
           )
         : [this.profile.languages];
     let activeLanguages = this.profile.languages;
-    let best: BrowserOcrDetailedResult | null = null;
-    let bestLanguages = "";
-    let bestScore = -1;
-    let primary: BrowserOcrDetailedResult | null = null;
-    let primaryScore = -1;
+    const observed: ObservedOcrCandidate[] = [];
+    let hasEmptyState = false;
 
     try {
       for (const languages of candidates) {
+        if (languages === REVIEWER_EMPTY_STATE) {
+          hasEmptyState = true;
+          continue;
+        }
         if (languages !== activeLanguages) {
+          if (!worker.reinitialize) continue;
           try {
             await worker.reinitialize?.(languages);
           } catch {
@@ -541,20 +1162,7 @@ class BrowserOcrWorkerSession {
           activeLanguages = languages;
         }
         const result = await this.recognizeWithOutput(worker, input, detailed);
-        const score = textCandidateScore(
-          result.text,
-          languages,
-          this.languageProbabilities,
-        );
-        if (languages === this.profile.languages) {
-          primary = result;
-          primaryScore = score;
-        }
-        if (score > bestScore) {
-          best = result;
-          bestLanguages = languages;
-          bestScore = score;
-        }
+        observed.push({ result, languages });
       }
     } finally {
       if (activeLanguages !== this.profile.languages) {
@@ -562,27 +1170,29 @@ class BrowserOcrWorkerSession {
       }
     }
 
-    const selected =
-      bestLanguages !== this.profile.languages &&
-      primary?.text.trim() &&
-      bestScore < primaryScore + Math.max(12, primaryScore * 0.2)
-        ? primary
-        : best || { text: "", words: [] };
-    const selectedLanguages =
-      selected === primary ? this.profile.languages : bestLanguages;
-    this.languageProbabilities = updateLanguageProbabilities(
+    if (
+      hasEmptyState &&
+      observed.length > 0 &&
+      observed.every(
+        ({ result }) =>
+          !/[\p{L}\p{N}]/u.test(result.text) ||
+          ocrGarbageRatio(result.text) >= 0.16,
+      )
+    ) {
+      return {
+        result: { text: "", words: [] },
+        languages: REVIEWER_EMPTY_STATE,
+      };
+    }
+    const selected = scoreObservedCandidates(
+      core,
+      observed,
       this.languageProbabilities,
-      selected.text,
+      false,
+    ).reduce((best, candidate) =>
+      candidate.score > best.score ? candidate : best,
     );
-    this.languageSplayOrder = promoteLanguages(
-      this.languageSplayOrder,
-      selectedLanguageOrder(
-        selectedLanguages,
-        selected.text,
-        this.languageProbabilities,
-      ),
-    );
-    return selected;
+    return { result: selected.result, languages: selected.languages };
   }
 
   async terminate(): Promise<void> {
@@ -658,6 +1268,25 @@ export class BrowserOcrWorkerLease {
     return this.session.recognizeDetailed(input, pageSegmentationMode);
   }
 
+  recognizeSeparatedBlock(
+    input: File | Blob,
+    pageSegmentationMode: string,
+  ): Promise<string> {
+    return this.session.recognizeSeparatedBlock(input, pageSegmentationMode);
+  }
+
+  recognizeSeparatedBlockDetailed(
+    input: File | Blob,
+    pageSegmentationMode: string,
+    languages?: string,
+  ): Promise<BrowserOcrDetailedResult> {
+    return this.session.recognizeSeparatedBlockDetailed(
+      input,
+      pageSegmentationMode,
+      languages,
+    );
+  }
+
   async release(): Promise<void> {
     if (!this.keepAlive) {
       await this.session.terminate();
@@ -670,6 +1299,7 @@ export class BrowserOcrWorkerPool {
 
   constructor(
     private readonly createWorkerFn: CreateWorkerFn = createTesseractWorker,
+    private readonly loadCore: PipelineCoreLoader = loadBrowserPipelineCore,
   ) {}
 
   async acquire(
@@ -678,7 +1308,12 @@ export class BrowserOcrWorkerPool {
   ): Promise<BrowserOcrWorkerLease> {
     if (!profile.cacheWorker) {
       return new BrowserOcrWorkerLease(
-        new BrowserOcrWorkerSession(profile, onProgress, this.createWorkerFn),
+        new BrowserOcrWorkerSession(
+          profile,
+          onProgress,
+          this.createWorkerFn,
+          this.loadCore(),
+        ),
         false,
       );
     }
@@ -705,6 +1340,7 @@ export class BrowserOcrWorkerPool {
       profile,
       onProgress,
       this.createWorkerFn,
+      this.loadCore(),
     );
     if (!this.cachedSession) {
       this.cachedSession = session;

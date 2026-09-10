@@ -1,11 +1,12 @@
+import math
+
 from PIL import Image, ImageDraw
 
+import app.preprocessing as preprocessing
 from app.preprocessing import (
     MobileScreenUpscaleStep,
     ProjectedDocumentDewarpStep,
     ProjectorSlideDewarpStep,
-    RecursivePageDewarpStep,
-    _detected_projector_quad,
     _is_suspicious_horizontal_dewarp_crop,
     SmallTextUpscaleStep,
     _projector_slide_source_ratios,
@@ -78,43 +79,25 @@ def test_projector_slide_dewarp_targets_projector_photo_shape_only():
         dewarped.close()
 
 
-def test_projector_quad_detection_aligns_the_page_as_one_rectangle():
-    image = Image.new("RGB", (960, 1280), (120, 130, 140))
-    draw = ImageDraw.Draw(image)
-    expected = ((40, 320), (950, 190), (950, 1000), (40, 1020))
-    draw.polygon(expected, fill=(160, 205, 225))
-    for offset in range(0, 420, 70):
-        draw.line(
-            (110, 430 + offset, 820, 330 + offset),
-            fill=(60, 80, 100),
-            width=8,
-        )
+def test_projector_slide_dewarp_preserves_detected_quad_aspect(monkeypatch):
+    image = Image.new("RGB", (960, 1280), (210, 220, 220))
+    source = ((20, 260), (940, 120), (900, 1040), (40, 980))
+    monkeypatch.setattr(
+        preprocessing,
+        "_detected_projector_quad",
+        lambda _image: source,
+    )
+    expected = (
+        round((math.dist(source[0], source[1]) + math.dist(source[3], source[2])) / 2),
+        round((math.dist(source[0], source[3]) + math.dist(source[1], source[2])) / 2),
+    )
 
-    aligned = None
     try:
-        detected = _detected_projector_quad(image)
-        assert detected is not None
-        for actual, target in zip(detected, expected):
-            assert abs(actual[0] - target[0]) <= 20
-            assert abs(actual[1] - target[1]) <= 35
-
-        aligned = RecursivePageDewarpStep().apply(image)
-        assert aligned is not image
-        assert aligned.width >= 850
-        assert aligned.height >= 700
+        dewarped = ProjectorSlideDewarpStep().apply(image)
+        assert dewarped.size == expected
     finally:
         image.close()
-        if aligned is not None:
-            aligned.close()
-
-
-def test_recursive_page_dewarp_does_not_rewarp_an_aligned_color_field():
-    image = Image.new("RGB", (900, 700), (160, 205, 225))
-    try:
-        assert _detected_projector_quad(image) is None
-        assert RecursivePageDewarpStep().apply(image) is image
-    finally:
-        image.close()
+        dewarped.close()
 
 
 def test_projected_document_dewarp_skips_dewarped_projector_slide_canvas():

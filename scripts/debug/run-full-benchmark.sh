@@ -50,8 +50,6 @@ fi
 suffix="v$version"
 tag="schedule-$suffix"
 
-ENGINE_FLAGS_TESS="tesseract=structural_output:markdown"
-ENGINE_FLAGS_EASY="easyocr=structural_output:markdown"
 ENGINES="tesseract,easyocr,browser-tesseract"
 MAX_PAGES="5"
 ADOBE_LIMIT="Adobe Scan Oct 26, 2022 (1).pdf=5"
@@ -74,9 +72,7 @@ run_phase1() {
     --max-pages "$MAX_PAGES" \
     --fixture-max-pages "$ADOBE_LIMIT" \
     --no-pdf-raster \
-    --fixture '*.pdf' \
-    --engine-flags "$ENGINE_FLAGS_TESS" \
-    --engine-flags "$ENGINE_FLAGS_EASY"
+    --fixture '*.pdf'
 }
 
 run_phase2() {
@@ -90,10 +86,11 @@ run_phase2() {
     --timeout "$TIMEOUT" \
     --max-pages "$MAX_PAGES" \
     --fixture-max-pages "$ADOBE_LIMIT" \
+    --fixture '*.pdf' \
     --pdf-raster-only \
+    --require-complete-scoring \
     --pdf-raster-max-pages "$MAX_PAGES" \
-    --engine-flags "$ENGINE_FLAGS_TESS" \
-    --engine-flags "$ENGINE_FLAGS_EASY"
+    --pdf-raster-formats png
 }
 
 run_phase3() {
@@ -106,8 +103,10 @@ run_phase3() {
     --output-root debug/artifacts/image-fixtures \
     --timeout "$TIMEOUT" \
     --no-pdf-raster \
-    --engine-flags "$ENGINE_FLAGS_TESS" \
-    --engine-flags "$ENGINE_FLAGS_EASY"
+    --fixture '*.png' \
+    --fixture '*.jpg' \
+    --fixture '*.jpeg' \
+    --fixture '*.webp'
 }
 
 rename_to_version() {
@@ -137,7 +136,7 @@ log "scheduled full $suffix benchmark to start now (waiting 0s)..."
 log "delay elapsed. starting full benchmark now."
 echo "Full fresh benchmark suite (3 passes, from scratch, no --resume)"
 echo "engines: $ENGINES   timeout: ${TIMEOUT}s   max-pages: $MAX_PAGES   dpi: 300"
-echo "engine-flags: $ENGINE_FLAGS_TESS ; $ENGINE_FLAGS_EASY"
+echo "backend profiles: automatic per engine"
 echo "started: $(stamp)"
 echo
 
@@ -152,12 +151,13 @@ elapsed=$((end_s - start_s))
 log "benchmark finished (phase exits p1=$p1 p2=$p2 p3=$p3) after ${elapsed}s"
 
 rename_to_version
-log "${suffix^^} DONE (benchmark + rename in ${elapsed}s)"
 log "results:"
 log "  debug/artifacts/full-pdf-native-$suffix/result.csv"
 log "  debug/artifacts/full-pdf-as-png-$suffix/result.csv"
 log "  debug/artifacts/image-fixtures-$suffix/result.csv"
 
 if [[ "$p1" -ne 0 || "$p2" -ne 0 || "$p3" -ne 0 ]]; then
+  log "${suffix^^} FAILED (phase exits p1=$p1 p2=$p2 p3=$p3)"
   exit 1
 fi
+log "${suffix^^} DONE (benchmark + rename in ${elapsed}s)"

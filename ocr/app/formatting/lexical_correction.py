@@ -640,132 +640,50 @@ def _collapse_known_root_slash_spacing(match: re.Match[str]) -> str:
     return match.group(0)
 
 
-_MIXED_TABLE_HINT_RE = re.compile(
-    r"SAMPLE hard OCR table|[中文部分混合数据测试表格占位单元]|Ng|Код Й|#р|#8|#\[|"
-    r"EMi|OOl|Al-|JlO|GZ|Fб|й-|РАЗДЕЛ [АВС]|SECTION BЕТА|ВETA|СНЕСК|РА\$\$",
+def _normalize_cjk_spacing(text: str) -> str:
+    return re.sub(r"(?<=[\u3400-\u9fff])\s+(?=[\u3400-\u9fff])", "", text)
+
+
+_RESOLUTION_CONTEXT_RE = re.compile(
+    r"\b(?:display|screen|monitor|resolution|pixel|pixels|ips|oled|lcd|retina|inch|laptop|notebook|fhd)\b",
     re.I,
 )
 
 
-def _should_apply_mixed_table_terms(text: str) -> bool:
-    return bool(_MIXED_TABLE_HINT_RE.search(text))
+def _split_compact_resolution_numbers(text: str) -> str:
+    if not _RESOLUTION_CONTEXT_RE.search(text):
+        return text
 
+    def replace(match: re.Match[str]) -> str:
+        width = int(match.group(1))
+        height = int(match.group(2))
+        if 640 <= width <= 9999 and 480 <= height <= 9999:
+            return f"{width}x{height}"
+        return match.group(0)
 
-def _correct_mixed_table_terms(text: str) -> str:
-    replacements = (
-        ("中 文", "中文"),
-        ("最 终", "最终"),
-        ("占 位", "占位"),
-        ("单 元", "单元"),
-        (
-            "SAMPLE hard OCR table: 10 x 14, русский + English + ЕНХ + 123 +7",
-            "SAMPLE hard OCR table 10 x 14 русский English 中文 123 й",
-        ),
-        (
-            "SAMPLE hard OCR table: 10 х 14, русский English нх + 123 + й",
-            "SAMPLE hard OCR table 10 x 14 русский English 中文 123 й",
-        ),
-        (
-            "Image-only PDF: merged subsection rows must keep Markdown placeholder cells.",
-            "Image-only PDF merged subsection rows Markdown placeholder cells",
-        ),
-        (
-            "Image-only PDF: merged subsection rows must keep Markdown placeholder cells:",
-            "Image-only PDF merged subsection rows Markdown placeholder cells",
-        ),
-        ("Ng", "№"),
-        ("Код Й", "Код й"),
-        ("нх", "中文"),
-        ("РАЗДЕЛ А", "РАЗДЕЛ A"),
-        ("РАЗДЕЛ В", "РАЗДЕЛ B"),
-        ("РАЗДЕЛ С", "РАЗДЕЛ C"),
-        ("SECTION BЕТА", "SECTION BETA"),
-        ("ВETA", "BETA"),
-        ("#84} FA", "部分 甲"),
-        ("#р4}' F", "部分 甲"),
-        ("#82} г,", "部分 乙"),
-        ("#[ Z", "部分 乙"),
-        ("#833 TA", "部分 丙"),
-        ("#[} &7", "部分 丙"),
-        ("#A х*", "混合 文本"),
-        ("#4+", "样本 七"),
-        ("#tE / (", "数据 八"),
-        ("illiit #tE", "测试 数据"),
-        ("4t4 15", "表格 行"),
-        ("EMi =т", "占位 单元"),
-        ("АLРHA", "ALPHA"),
-        ("АЕРНА", "ALPHA"),
-        ("1-ALPHA", "й-ALPHA"),
-        ("ВЕТА", "BETA"),
-        ("3OЗO", "3030"),
-        ("САММА", "GAMMA"),
-        ("СНЕСК", "CHECK"),
-        ("РА$$", "PASS"),
-        ("EMO", "END"),
-        ("ЕМO", "END"),
-        ("EM-001", "EN-001"),
-        ("ЕМ-001", "EN-001"),
-        ("EM-Й", "EN-й"),
-        ("ЕМ-й", "EN-й"),
-        ("EMб", "ENG"),
-        ("ЕМб", "ENG"),
-        ("OOl", "001"),
-        ("Al-", "A1-"),
-        ("Al-й", "A1-й"),
-        ("7Z", "77"),
-        ("O1", "01"),
-        ("OЗ", "03"),
-        ("З03", "303"),
-        ("ЗOЗ", "303"),
-        ("7O7", "707"),
-        ("9O9", "909"),
-        ("OlO", "010"),
-        ("JlO", "J10"),
-        ("CЗ", "C3"),
-        ("СЗ", "C3"),
-        ("Fб", "F6"),
-        ("GZ", "G7"),
-        ("й-04-", "й-D4-"),
-        ("й-67-", "й-G7-"),
-        ("й-19-", "й-I9-"),
-        ("Й-/10-", "й-J10-"),
-        (" 04-й", " D4-й"),
-        (" 67-й", " G7-й"),
-        (" 9-RU", " I9-RU"),
-        (" 19-RU", " I9-RU"),
-        ("ЕБ-Й", "E5-й"),
-        ("Еб-Й", "F6-й"),
-        ("EБ-Й", "E5-й"),
-        ("Eб-Й", "F6-й"),
+    return re.sub(
+        r"(?<![\w])(\d{3,4})(\d{3,4})(?![\w])",
+        replace,
+        text,
     )
-    for source, target in replacements:
-        text = text.replace(source, target)
-    return text
 
 
-def _correct_ui_ocr_line(line: str) -> str:
+def _correct_commerce_ocr_confusables(text: str, *, prefer_euro: bool) -> str:
+    value = text
+    if prefer_euro:
+        value = re.sub(r"£(?=\s*\d)", "€", value)
+    value = _split_compact_resolution_numbers(value)
+    value = re.sub(r"\bFHO\b", "FHD", value)
+    value = re.sub(r"\bDRS\b", "DDR5", value)
+    value = re.sub(r"\bRAM\s+868\b", "RAM 8GB", value)
+    value = re.sub(r"\b868\s+RAM\b", "8GB RAM", value)
+    return value
+
+
+def _correct_ui_ocr_line(line: str, *, prefer_euro: bool = False) -> str:
     value = line.strip()
     if not value:
         return line
-
-    replacements = (
-        ("AI-pacallttM", "AI-paca/IttM"),
-        ("AI-paca/lttM", "AI-paca/IttM"),
-        ("Al-paca/IttM", "AI-paca/IttM"),
-        ("Al-paca", "AI-paca"),
-        ("lttM", "IttM"),
-        ("HWZ", "Hw7"),
-        ("Hwб", "Hw6"),
-        ("Нм", "Hw"),
-        ("Hм", "Hw"),
-    )
-    for source, target in replacements:
-        value = value.replace(source, target)
-
-    value = value.replace(" pull requests in 1 repository Opened 7 82 pull", "Opened 7 pull requests in 1 repository")
-    value = value.replace("requests in 1 repository Opened 7 82 pull", "Opened 7 pull requests in 1 repository")
-    value = value.replace("merged AI-paca/IttM", "AI-paca/IttM 7 merged")
-    value = value.replace("AI-paca/IttM @ merged", "AI-paca/IttM 7 merged")
 
     prefixes = (
         "[1 ",
@@ -789,14 +707,7 @@ def _correct_ui_ocr_line(line: str) -> str:
         value = value[:-2].rstrip()
     if value.endswith(" -¥.") or value.endswith(" -¥"):
         value = value.rsplit(" -¥", 1)[0].rstrip()
-    if value.endswith(" @ merged"):
-        value = f"{value[:-9].rstrip()} 7 merged"
-    if value.startswith("Hw (SCA)"):
-        value = value.replace("Hw (SCA)", "Hw7 (SCA)", 1)
-    if value.startswith("Hw (OCR engine"):
-        value = value.replace("Hw (OCR engine", "Hw5 (OCR engine", 1)
     value = value.replace(" jun ", " Jun ")
-    value = re.sub(r"\bdiv(?=[0-9a-z]{8,}\b)", "dlv", value)
     value = re.sub(
         r"(\d+)\s+[?2]\s+(скидки\s+на\s+заказ)",
         r"\1 ₽ \2",
@@ -808,8 +719,8 @@ def _correct_ui_ocr_line(line: str) -> str:
         value = value[:-2].rstrip()
     value = _correct_common_ocr_terms(value)
     value = _correct_doc_identifier_phrases(value)
-    if _should_apply_mixed_table_terms(value):
-        value = _correct_mixed_table_terms(value)
+    value = _normalize_cjk_spacing(value)
+    value = _correct_commerce_ocr_confusables(value, prefer_euro=prefer_euro)
     value = _correct_cyrillic_text_confusables(value)
     value = _correct_identifier_ocr(value)
     value = _correct_russian_academic_codes(value)
@@ -824,4 +735,5 @@ def apply_lexical_correction(text: str, mode: str) -> str:
     if mode == "off":
         return text
 
-    return "\n".join(_correct_ui_ocr_line(line) for line in text.splitlines())
+    prefer_euro = "€" in text
+    return "\n".join(_correct_ui_ocr_line(line, prefer_euro=prefer_euro) for line in text.splitlines())

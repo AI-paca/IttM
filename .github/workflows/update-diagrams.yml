@@ -1,0 +1,91 @@
+name: Update images from Drawio
+
+on:
+  push:
+    paths:
+      - "docs/assets/*.drawio"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: drawio-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  update-images:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the complete history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find changed Drawio sources
+        id: drawio
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        shell: bash
+        run: |
+          if [[ "$BEFORE_SHA" =~ ^0+$ ]] ||
+             ! git cat-file -e "${BEFORE_SHA}^{commit}" 2>/dev/null; then
+            mapfile -t files < <(git ls-files -- "docs/assets/*.drawio")
+          else
+            mapfile -t files < <(
+              git diff --name-only --diff-filter=ACMRT \
+                "$BEFORE_SHA" "$GITHUB_SHA" -- "docs/assets/*.drawio"
+            )
+          fi
+
+          if (( ${#files[@]} == 0 )); then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          {
+            echo "files<<DRAWIO_FILES"
+            printf '%s\n' "${files[@]}"
+            echo "DRAWIO_FILES"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Export SVG and PNG
+        if: steps.drawio.outputs.changed == 'true'
+        env:
+          DRAWIO_FILES: ${{ steps.drawio.outputs.files }}
+        shell: bash
+        run: |
+          while IFS= read -r source; do
+            [[ -n "$source" ]] || continue
+            output_dir=$(dirname "$source")
+            echo "Rendering $source"
+
+            for format in svg png; do
+              docker run --rm \
+                -v "$PWD:/workspace" \
+                rlespinasse/drawio-export@sha256:d761a731ae8cb0e4482caf3b69cf274f823823ada94aed90983ecd12f9f60786 \
+                -f "$format" --remove-page-suffix \
+                -o "/workspace/$output_dir" "/workspace/$source"
+            done
+
+            stem=${source%.drawio}
+            test -s "${stem}.svg"
+            test -s "${stem}.png"
+          done <<< "$DRAWIO_FILES"
+
+      - name: Commit generated images
+        if: steps.drawio.outputs.changed == 'true'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/assets/*.svg docs/assets/*.png
+
+          if git diff --cached --quiet; then
+            echo "Generated images are already current"
+            exit 0
+          fi
+
+          git commit -m "docs: update Drawio exports"
+          git push

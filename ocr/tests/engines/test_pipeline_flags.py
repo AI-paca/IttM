@@ -87,7 +87,20 @@ def test_pipeline_flags_payload_exposes_profiles_and_disabled_overrides():
 
     assert payload["overrides_enabled"] is False
     assert payload["override_parameter"] == "pipeline_flags"
+    supported = {entry["key"]: entry for entry in payload["supported_overrides"]}
+    assert supported["structural_output"]["status"] == "active"
+    assert supported["lexical_correction"]["status"] == "legacy_coupled_language_retry"
     assert "backend_easyocr_standard" in payload["profiles"]
+
+
+def test_combined_language_overrides_have_stable_stage_order():
+    profile = apply_pipeline_flag_overrides(
+        resolve_pipeline_profile("tesseract"),
+        "ocr_language_retry:off;lexical_correction:t9_small",
+    )
+
+    assert profile.lexical_correction == "t9_small"
+    assert profile.ocr_language_retry == "off"
 
 
 def test_pipeline_flag_overrides_fail_closed(monkeypatch):

@@ -1,6 +1,9 @@
 import type { AppDiagnostics } from "./types";
 import type { BrowserPipelineProfile } from "./pipeline-config";
-import { BROWSER_PIPELINE_PROFILES } from "./pipeline-config";
+import {
+  BROWSER_PIPELINE_PROFILES,
+  normalizeBrowserPipelineProfile,
+} from "./pipeline-config";
 
 export const STRICT_LANGUAGES = "rus+eng+chi_sim";
 
@@ -32,6 +35,7 @@ export interface BrowserOcrProfile {
   langPath?: string;
   cachePath?: string;
   gzip?: boolean;
+  availableLanguages?: string[];
 }
 
 function numberOrNull(value: unknown): number | null {
@@ -42,95 +46,96 @@ export function createBrowserOcrProfile(
   diagnostics: AppDiagnostics | null,
   pipelineProfile: BrowserPipelineProfile = BROWSER_PIPELINE_PROFILES.browser_tesseract_standard,
 ): BrowserOcrProfile {
+  const profile = normalizeBrowserPipelineProfile(pipelineProfile);
   const memory = numberOrNull(diagnostics?.browser.memory);
   const cores = numberOrNull(diagnostics?.browser.cores);
-  const backendOffline = !diagnostics?.backend || Boolean(diagnostics?.error);
 
   if ((memory !== null && memory <= 2) || (cores !== null && cores <= 2)) {
     return {
-      languages: pipelineProfile.languages || STRICT_LANGUAGES,
-      cacheWorker: false,
+      languages: profile.languages || STRICT_LANGUAGES,
+      // Reuse the bounded worker; rebuilding it for every PDF page costs more
+      // memory and time than keeping its already-loaded language data alive.
+      cacheWorker: true,
       maxImagePixels: 4_000_000,
       maxDimension: 2200,
       pdfRenderScale: 1,
       reason: "low-memory-browser",
-      preprocessingProfile: pipelineProfile.name,
-      imagePreprocessing: pipelineProfile.imagePreprocessing,
-      textRegionPsm: pipelineProfile.textRegionPsm,
-      denseGridFallback: pipelineProfile.denseGridFallback,
-      spatialFullPageFallback: pipelineProfile.spatialFullPageFallback,
-      darkUiTextFallback: pipelineProfile.darkUiTextFallback,
-      contextualMarkdownGrammar: pipelineProfile.contextualMarkdownGrammar,
-      denseGridTargetWidth: pipelineProfile.denseGridTargetWidth,
-      ocrBorderPixels: pipelineProfile.ocrBorderPixels,
-      edgeWordFallbackPsm: pipelineProfile.edgeWordFallbackPsm,
-      edgeWordFallbackMinTokens: pipelineProfile.edgeWordFallbackMinTokens,
-      lexicalCorrection: pipelineProfile.lexicalCorrection,
-      ocrLanguageRetry: pipelineProfile.ocrLanguageRetry,
-      tableSlotBuilder: pipelineProfile.tableSlotBuilder,
-      tableSlotMaxColumns: pipelineProfile.tableSlotMaxColumns,
-      recursiveTableCellOcr: pipelineProfile.recursiveTableCellOcr,
+      preprocessingProfile: profile.name,
+      imagePreprocessing: profile.imagePreprocessing,
+      textRegionPsm: profile.textRegionPsm,
+      denseGridFallback: profile.denseGridFallback,
+      spatialFullPageFallback: profile.spatialFullPageFallback,
+      darkUiTextFallback: profile.darkUiTextFallback,
+      contextualMarkdownGrammar: profile.contextualMarkdownGrammar,
+      denseGridTargetWidth: profile.denseGridTargetWidth,
+      ocrBorderPixels: profile.ocrBorderPixels,
+      edgeWordFallbackPsm: profile.edgeWordFallbackPsm,
+      edgeWordFallbackMinTokens: profile.edgeWordFallbackMinTokens,
+      lexicalCorrection: profile.lexicalCorrection,
+      ocrLanguageRetry: profile.ocrLanguageRetry,
+      tableSlotBuilder: profile.tableSlotBuilder,
+      tableSlotMaxColumns: profile.tableSlotMaxColumns,
+      recursiveTableCellOcr: profile.recursiveTableCellOcr,
       recursiveTableCellOcrBatchPixels:
-        pipelineProfile.recursiveTableCellOcrBatchPixels,
-      layout: pipelineProfile.layout,
+        profile.recursiveTableCellOcrBatchPixels,
+      layout: profile.layout,
     };
   }
 
-  if (backendOffline || (memory !== null && memory <= 4)) {
+  if (memory !== null && memory <= 4) {
     return {
-      languages: pipelineProfile.languages || STRICT_LANGUAGES,
+      languages: profile.languages || STRICT_LANGUAGES,
       cacheWorker: true,
       maxImagePixels: 8_000_000,
       maxDimension: 3200,
       pdfRenderScale: 1.25,
       reason: "balanced-browser-fallback",
-      preprocessingProfile: pipelineProfile.name,
-      imagePreprocessing: pipelineProfile.imagePreprocessing,
-      textRegionPsm: pipelineProfile.textRegionPsm,
-      denseGridFallback: pipelineProfile.denseGridFallback,
-      spatialFullPageFallback: pipelineProfile.spatialFullPageFallback,
-      darkUiTextFallback: pipelineProfile.darkUiTextFallback,
-      contextualMarkdownGrammar: pipelineProfile.contextualMarkdownGrammar,
-      denseGridTargetWidth: pipelineProfile.denseGridTargetWidth,
-      ocrBorderPixels: pipelineProfile.ocrBorderPixels,
-      edgeWordFallbackPsm: pipelineProfile.edgeWordFallbackPsm,
-      edgeWordFallbackMinTokens: pipelineProfile.edgeWordFallbackMinTokens,
-      lexicalCorrection: pipelineProfile.lexicalCorrection,
-      ocrLanguageRetry: pipelineProfile.ocrLanguageRetry,
-      tableSlotBuilder: pipelineProfile.tableSlotBuilder,
-      tableSlotMaxColumns: pipelineProfile.tableSlotMaxColumns,
-      recursiveTableCellOcr: pipelineProfile.recursiveTableCellOcr,
+      preprocessingProfile: profile.name,
+      imagePreprocessing: profile.imagePreprocessing,
+      textRegionPsm: profile.textRegionPsm,
+      denseGridFallback: profile.denseGridFallback,
+      spatialFullPageFallback: profile.spatialFullPageFallback,
+      darkUiTextFallback: profile.darkUiTextFallback,
+      contextualMarkdownGrammar: profile.contextualMarkdownGrammar,
+      denseGridTargetWidth: profile.denseGridTargetWidth,
+      ocrBorderPixels: profile.ocrBorderPixels,
+      edgeWordFallbackPsm: profile.edgeWordFallbackPsm,
+      edgeWordFallbackMinTokens: profile.edgeWordFallbackMinTokens,
+      lexicalCorrection: profile.lexicalCorrection,
+      ocrLanguageRetry: profile.ocrLanguageRetry,
+      tableSlotBuilder: profile.tableSlotBuilder,
+      tableSlotMaxColumns: profile.tableSlotMaxColumns,
+      recursiveTableCellOcr: profile.recursiveTableCellOcr,
       recursiveTableCellOcrBatchPixels:
-        pipelineProfile.recursiveTableCellOcrBatchPixels,
-      layout: pipelineProfile.layout,
+        profile.recursiveTableCellOcrBatchPixels,
+      layout: profile.layout,
     };
   }
 
   return {
-    languages: pipelineProfile.languages || STRICT_LANGUAGES,
+    languages: profile.languages || STRICT_LANGUAGES,
     cacheWorker: true,
     maxImagePixels: 14_000_000,
     maxDimension: 4200,
     pdfRenderScale: 1.5,
     reason: "quality-first",
-    preprocessingProfile: pipelineProfile.name,
-    imagePreprocessing: pipelineProfile.imagePreprocessing,
-    textRegionPsm: pipelineProfile.textRegionPsm,
-    denseGridFallback: pipelineProfile.denseGridFallback,
-    spatialFullPageFallback: pipelineProfile.spatialFullPageFallback,
-    darkUiTextFallback: pipelineProfile.darkUiTextFallback,
-    contextualMarkdownGrammar: pipelineProfile.contextualMarkdownGrammar,
-    denseGridTargetWidth: pipelineProfile.denseGridTargetWidth,
-    ocrBorderPixels: pipelineProfile.ocrBorderPixels,
-    edgeWordFallbackPsm: pipelineProfile.edgeWordFallbackPsm,
-    edgeWordFallbackMinTokens: pipelineProfile.edgeWordFallbackMinTokens,
-    lexicalCorrection: pipelineProfile.lexicalCorrection,
-    ocrLanguageRetry: pipelineProfile.ocrLanguageRetry,
-    tableSlotBuilder: pipelineProfile.tableSlotBuilder,
-    tableSlotMaxColumns: pipelineProfile.tableSlotMaxColumns,
-    recursiveTableCellOcr: pipelineProfile.recursiveTableCellOcr,
-    recursiveTableCellOcrBatchPixels:
-      pipelineProfile.recursiveTableCellOcrBatchPixels,
-    layout: pipelineProfile.layout,
+    preprocessingProfile: profile.name,
+    imagePreprocessing: profile.imagePreprocessing,
+    textRegionPsm: profile.textRegionPsm,
+    denseGridFallback: profile.denseGridFallback,
+    spatialFullPageFallback: profile.spatialFullPageFallback,
+    darkUiTextFallback: profile.darkUiTextFallback,
+    contextualMarkdownGrammar: profile.contextualMarkdownGrammar,
+    denseGridTargetWidth: profile.denseGridTargetWidth,
+    ocrBorderPixels: profile.ocrBorderPixels,
+    edgeWordFallbackPsm: profile.edgeWordFallbackPsm,
+    edgeWordFallbackMinTokens: profile.edgeWordFallbackMinTokens,
+    lexicalCorrection: profile.lexicalCorrection,
+    ocrLanguageRetry: profile.ocrLanguageRetry,
+    tableSlotBuilder: profile.tableSlotBuilder,
+    tableSlotMaxColumns: profile.tableSlotMaxColumns,
+    recursiveTableCellOcr: profile.recursiveTableCellOcr,
+    recursiveTableCellOcrBatchPixels: profile.recursiveTableCellOcrBatchPixels,
+    layout: profile.layout,
   };
 }

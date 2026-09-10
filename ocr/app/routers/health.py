@@ -4,6 +4,7 @@ import shutil
 from fastapi import APIRouter
 
 from app.schemas import HealthResponse
+from app.pipeline_core.native import native_pipeline_core
 
 router = APIRouter()
 
@@ -23,6 +24,7 @@ def readiness_endpoint():
         "pytesseract": _module_available("pytesseract"),
         "pdf2image": _module_available("pdf2image"),
         "opencv": _module_available("cv2"),
+        "pipeline_core_abi6": _pipeline_core_available(),
     }
 
     return {"ready": all(checks.values()), "checks": checks}
@@ -33,6 +35,13 @@ def _module_available(name: str) -> bool:
         __import__(name)
         return True
     except Exception:
+        return False
+
+
+def _pipeline_core_available() -> bool:
+    try:
+        return native_pipeline_core() is not None
+    except (OSError, RuntimeError):
         return False
 
 

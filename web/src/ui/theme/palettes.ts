@@ -257,9 +257,9 @@ function hslToHex(h: number, s: number, l: number): string {
   const c = (1 - Math.abs(2 * ll - 1)) * ss;
   const x = c * (1 - Math.abs(((hh / 60) % 2) - 1));
   const m = ll - c / 2;
-  let r = 0,
-    g = 0,
-    b = 0;
+  let r: number;
+  let g: number;
+  let b: number;
   if (hh < 60) [r, g, b] = [c, x, 0];
   else if (hh < 120) [r, g, b] = [x, c, 0];
   else if (hh < 180) [r, g, b] = [0, c, x];

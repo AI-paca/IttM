@@ -1,6 +1,8 @@
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { loadBrowserPipelineCore } from "../ocr/pipeline-core";
 import { findContentBounds } from "./image-content-bounds";
+import { buildNativePdfOracle } from "./pdf-native-oracle";
 import {
   PdfWorkerCanvasFactory,
   PdfWorkerFilterFactory,
@@ -80,9 +82,10 @@ async function renderPage(pageNumber: number) {
   if (!pdfDocument) throw new Error("PDF worker is not initialized.");
   const page = await pdfDocument.getPage(pageNumber);
   try {
-    const [textContent, viewport] = await Promise.all([
+    const [textContent, viewport, pipelineCore] = await Promise.all([
       page.getTextContent(),
       Promise.resolve(boundedViewport(page)),
+      loadBrowserPipelineCore(),
     ]);
     const canvas = new OffscreenCanvas(
       Math.max(1, Math.ceil(viewport.width)),
@@ -128,8 +131,13 @@ async function renderPage(pageNumber: number) {
     canvas.width = 1;
     canvas.height = 1;
 
+    const textItems = textContent.items as PdfTextItem[];
     return {
-      nativeText: normalizedText(textContent.items as PdfTextItem[]),
+      nativeText: normalizedText(textItems),
+      nativeOracle: buildNativePdfOracle(
+        textItems as Parameters<typeof buildNativePdfOracle>[0],
+        pipelineCore,
+      ),
       image: await output.convertToBlob({ type: "image/jpeg", quality: 0.9 }),
     };
   } finally {

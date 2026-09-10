@@ -1,0 +1,175 @@
+<mxfile host="app.diagrams.net" agent="IttM" version="24.0.0">
+  <diagram id="project-architecture" name="Архитектура проекта">
+    <mxGraphModel dx="2000" dy="1080" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2000" pageHeight="1080" math="0" shadow="0" background="#111820">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="background" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#111820;strokeColor=none;movable=0;resizable=0;connectable=0;" vertex="1" parent="1">
+          <mxGeometry x="0" y="0" width="2000" height="1080" as="geometry"/>
+        </mxCell>
+        <mxCell id="title" value="IttM — callers enter one opaque pipeline; the result API returns to the caller's output" style="text;html=1;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;fontColor=#DCE7F3;" vertex="1" parent="1">
+          <mxGeometry x="270" y="18" width="1460" height="38" as="geometry"/>
+        </mxCell>
+        <mxCell id="entry-title" value="CALLER" style="text;html=1;align=center;fontSize=12;fontStyle=1;fontColor=#AAB8C8;" vertex="1" parent="1">
+          <mxGeometry x="20" y="75" width="170" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="transport-title" value="TRANSPORT / SCHEDULING" style="text;html=1;align=center;fontSize=12;fontStyle=1;fontColor=#AAB8C8;" vertex="1" parent="1">
+          <mxGeometry x="215" y="75" width="330" height="24" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="browser-entry" value="Web UI&lt;br&gt;&lt;b&gt;browser source&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#183C4B;strokeColor=#42A5BD;strokeWidth=2;fontColor=#E5F8FC;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="20" y="115" width="170" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="browser-transport" value="PDF.js / image tiles&lt;br&gt;worker pool per tab&lt;br&gt;&lt;b&gt;no cross-tab queue&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#183C4B;strokeColor=#42A5BD;strokeWidth=2;fontColor=#E5F8FC;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="215" y="107" width="330" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="backend-entry" value="Web UI&lt;br&gt;&lt;b&gt;local backend&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#203B32;strokeColor=#46B37B;strokeWidth=2;fontColor=#D8F4E4;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="20" y="215" width="170" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="backend-transport" value="/api/convert/stream&lt;br&gt;direct gateway proxy&lt;br&gt;&lt;b&gt;no TaskService queue&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#203B32;strokeColor=#46B37B;strokeWidth=2;fontColor=#D8F4E4;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="215" y="207" width="330" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="task-entry" value="CLI / curl&lt;br&gt;manual Hyprland pipe" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#203B32;strokeColor=#46B37B;strokeWidth=2;fontColor=#D8F4E4;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="20" y="315" width="170" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="task-transport" value="/api/tasks · /api/extract/text&lt;br&gt;&lt;b&gt;SERIAL BOTTLENECK&lt;/b&gt;&lt;br&gt;1 active · 32 queued" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#4C2024;strokeColor=#E4565B;strokeWidth=3;fontColor=#FFE1E1;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="215" y="307" width="330" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="provider-entry" value="Web UI&lt;br&gt;&lt;b&gt;Ollama / cloud&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#46341D;strokeColor=#D3A747;strokeWidth=2;fontColor=#FFF0C6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="20" y="515" width="170" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="provider-transport" value="direct fetch from each tab&lt;br&gt;Ollama / Gemini / OpenRouter&lt;br&gt;&lt;b&gt;provider owns scheduling&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#46341D;strokeColor=#D3A747;strokeWidth=2;fontColor=#FFF0C6;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="215" y="507" width="330" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="debug-entry" value="Debug runner&lt;br&gt;&lt;b&gt;local evidence run&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#392D47;strokeColor=#9A77E8;strokeWidth=2;fontColor=#F0EAFE;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="20" y="615" width="170" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="debug-transport" value="scripts/debug/run-debug.sh&lt;br&gt;local Python runtime&lt;br&gt;&lt;b&gt;full evidence requested&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#392D47;strokeColor=#9A77E8;strokeWidth=2;fontColor=#F0EAFE;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="215" y="607" width="330" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="hypr-entry" value="Hyprland package / lifecycle&lt;br&gt;&lt;b&gt;FUTURE CALLER&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#152B3D;strokeColor=#63A8D6;strokeWidth=2;dashed=1;fontColor=#BFE6FF;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="20" y="415" width="170" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="hypr-transport" value="grim/slurp → curl /api/extract/text → wl-copy&lt;br&gt;wrap existing Task API path" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#152B3D;strokeColor=#63A8D6;strokeWidth=2;dashed=1;fontColor=#BFE6FF;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="215" y="407" width="330" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="extension-entry" value="Browser extension&lt;br&gt;&lt;b&gt;FUTURE CALLER&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#152B3D;strokeColor=#63A8D6;strokeWidth=2;dashed=1;fontColor=#BFE6FF;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="20" y="725" width="170" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="extension-transport" value="transport not selected&lt;br&gt;must call the same request contract" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#152B3D;strokeColor=#63A8D6;strokeWidth=2;dashed=1;fontColor=#BFE6FF;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="215" y="717" width="330" height="74" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="pipeline-shell" value="" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;fillColor=#171A27;strokeColor=#7961C8;strokeWidth=3;connectable=0;container=1;" vertex="1" parent="1">
+          <mxGeometry x="620" y="105" width="620" height="690" as="geometry"/>
+        </mxCell>
+        <mxCell id="pipeline-title" value="PIPELINE ENGINE · BLACK BOX AT THIS LEVEL" style="text;html=1;align=center;verticalAlign=middle;fontSize=15;fontStyle=1;fontColor=#DCCFFF;" vertex="1" parent="pipeline-shell">
+          <mxGeometry x="20" y="15" width="580" height="26" as="geometry"/>
+        </mxCell>
+        <mxCell id="pipeline-detail" value="internal stages and OCR call/return: ocr-pipeline.svg" style="text;html=1;align=center;verticalAlign=middle;fontSize=10;fontColor=#A887F4;" vertex="1" parent="pipeline-shell">
+          <mxGeometry x="20" y="44" width="580" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="request-port" value="" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#222133;strokeColor=#9A77E8;strokeWidth=2;container=1;" vertex="1" parent="pipeline-shell">
+          <mxGeometry x="25" y="35" width="200" height="570" as="geometry"/>
+        </mxCell>
+        <mxCell id="request-title" value="REQUEST API" style="text;html=1;align=center;verticalAlign=middle;fontSize=11;fontStyle=1;fontColor=#F0EAFE;" vertex="1" parent="request-port">
+          <mxGeometry x="15" y="15" width="170" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="request-note" value="normalizes caller input&lt;br&gt;and records the return mode" style="text;html=1;align=center;verticalAlign=middle;fontSize=9;fontColor=#DCCFFF;" vertex="1" parent="request-port">
+          <mxGeometry x="15" y="65" width="170" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="normalized-artifact" value="&lt;b&gt;PipelineArtifact&lt;/b&gt;&lt;br&gt;payload · capabilities&lt;br&gt;runtime · profile" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#28214A;strokeColor=#9A77E8;strokeWidth=2;fontColor=#F0EAFE;fontSize=9;" vertex="1" parent="request-port">
+          <mxGeometry x="17" y="420" width="166" height="115" as="geometry"/>
+        </mxCell>
+        <mxCell id="pipeline-black-box" value="&lt;b&gt;ONE PIPELINE&lt;/b&gt;&lt;br&gt;&lt;br&gt;opaque at this level&lt;br&gt;expanded in ocr-pipeline.svg" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#25242E;strokeColor=#B8A6F2;strokeWidth=3;fontColor=#F5F1FF;fontSize=12;" vertex="1" parent="pipeline-shell">
+          <mxGeometry x="260" y="115" width="325" height="465" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="result-shell" value="" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;fillColor=#171A27;strokeColor=#2A8EA4;strokeWidth=3;connectable=0;container=1;" vertex="1" parent="1">
+          <mxGeometry x="1325" y="105" width="645" height="690" as="geometry"/>
+        </mxCell>
+        <mxCell id="result-title" value="RESULT API · routes the return to the caller" style="text;html=1;align=center;verticalAlign=middle;fontSize=15;fontStyle=1;fontColor=#DDF9F2;" vertex="1" parent="result-shell">
+          <mxGeometry x="20" y="15" width="605" height="26" as="geometry"/>
+        </mxCell>
+        <mxCell id="result-contract" value="&lt;b&gt;PipelineResult&lt;/b&gt;&lt;br&gt;Markdown · meta · events&lt;br&gt;optional debug evidence" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#18474A;strokeColor=#2A8EA4;strokeWidth=2;fontColor=#DDF9F2;fontSize=10;" vertex="1" parent="result-shell">
+          <mxGeometry x="40" y="85" width="220" height="95" as="geometry"/>
+        </mxCell>
+        <mxCell id="web-output" value="" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#203B32;strokeColor=#46B37B;strokeWidth=2;container=1;connectable=0;" vertex="1" parent="result-shell">
+          <mxGeometry x="315" y="70" width="285" height="145" as="geometry"/>
+        </mxCell>
+        <mxCell id="web-adapter" value="Web result adapter&lt;br&gt;browser / backend / provider" style="text;html=1;align=center;verticalAlign=middle;fontSize=9;fontColor=#D8F4E4;" vertex="1" parent="web-output">
+          <mxGeometry x="15" y="15" width="255" height="36" as="geometry"/>
+        </mxCell>
+        <mxCell id="reading-panel" value="&lt;b&gt;ReadingPanel&lt;/b&gt;&lt;br&gt;user-visible Markdown" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#18474A;strokeColor=#2A8EA4;strokeWidth=2;fontColor=#DDF9F2;fontSize=10;" vertex="1" parent="web-output">
+          <mxGeometry x="30" y="70" width="225" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="api-output" value="" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#203B32;strokeColor=#46B37B;strokeWidth=2;container=1;connectable=0;" vertex="1" parent="result-shell">
+          <mxGeometry x="40" y="270" width="560" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="api-adapter" value="HTTP / Task result adapter&lt;br&gt;JSON · NDJSON · text/plain · task record/events" style="text;html=1;align=center;verticalAlign=middle;fontSize=9;fontColor=#D8F4E4;" vertex="1" parent="api-output">
+          <mxGeometry x="20" y="12" width="520" height="38" as="geometry"/>
+        </mxCell>
+        <mxCell id="cli-output" value="&lt;b&gt;CLI stdout&lt;/b&gt;&lt;br&gt;or wl-copy in manual Hyprland pipe" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#18474A;strokeColor=#2A8EA4;strokeWidth=2;fontColor=#DDF9F2;fontSize=10;" vertex="1" parent="api-output">
+          <mxGeometry x="70" y="72" width="420" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="debug-output" value="" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#392D47;strokeColor=#9A77E8;strokeWidth=2;container=1;connectable=0;" vertex="1" parent="result-shell">
+          <mxGeometry x="40" y="475" width="560" height="155" as="geometry"/>
+        </mxCell>
+        <mxCell id="debug-adapter" value="Debug artifact writer&lt;br&gt;serializes stage evidence, matrices, blocks and final Markdown" style="text;html=1;align=center;verticalAlign=middle;fontSize=9;fontColor=#F0EAFE;" vertex="1" parent="debug-output">
+          <mxGeometry x="20" y="12" width="520" height="38" as="geometry"/>
+        </mxCell>
+        <mxCell id="debug-folder" value="&lt;b&gt;output directory&lt;/b&gt;&lt;br&gt;debug/tmp or explicit --output / --output-root" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#28214A;strokeColor=#9A77E8;strokeWidth=2;fontColor=#F0EAFE;fontSize=10;" vertex="1" parent="debug-output">
+          <mxGeometry x="70" y="75" width="420" height="58" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="rust-shell" value="" style="rounded=1;arcSize=6;whiteSpace=wrap;html=1;fillColor=#171A27;strokeColor=#596679;strokeWidth=2;container=1;connectable=0;" vertex="1" parent="1">
+          <mxGeometry x="620" y="845" width="620" height="180" as="geometry"/>
+        </mxCell>
+        <mxCell id="rust-title" value="ONE RUST SOURCE · native and WASM executors" style="text;html=1;align=center;verticalAlign=middle;fontSize=12;fontStyle=1;fontColor=#AAB8C8;" vertex="1" parent="rust-shell">
+          <mxGeometry x="20" y="10" width="580" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="rust-source" value="&lt;b&gt;pipeline-core/src/*.rs&lt;/b&gt;&lt;br&gt;8 stages · block geometry · assembly" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#28214A;strokeColor=#9A77E8;strokeWidth=2;fontColor=#F0EAFE;fontSize=10;" vertex="1" parent="rust-shell">
+          <mxGeometry x="25" y="60" width="245" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="compiled-group" value="" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#202A30;strokeColor=#66788A;strokeWidth=2;container=1;connectable=0;" vertex="1" parent="rust-shell">
+          <mxGeometry x="300" y="42" width="295" height="115" as="geometry"/>
+        </mxCell>
+        <mxCell id="rust-wasm" value="WASM ABI 6" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#183C4B;strokeColor=#42A5BD;strokeWidth=2;fontColor=#E5F8FC;fontSize=9;fontStyle=1;" vertex="1" parent="compiled-group">
+          <mxGeometry x="15" y="35" width="125" height="45" as="geometry"/>
+        </mxCell>
+        <mxCell id="rust-native" value="native .so ABI 6" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#203B32;strokeColor=#46B37B;strokeWidth=2;fontColor=#D8F4E4;fontSize=9;fontStyle=1;" vertex="1" parent="compiled-group">
+          <mxGeometry x="155" y="35" width="125" height="45" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e-browser-entry" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#42A5BD;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="browser-entry" target="browser-transport"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-backend-entry" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#46B37B;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="backend-entry" target="backend-transport"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-task-entry" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#46B37B;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="task-entry" target="task-transport"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-provider-entry" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#D3A747;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="provider-entry" target="provider-transport"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-debug-entry" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#9A77E8;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="1" source="debug-entry" target="debug-transport"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-hypr-entry" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#63A8D6;strokeWidth=2;dashed=1;endArrow=block;endFill=1;" edge="1" parent="1" source="hypr-entry" target="hypr-transport"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-hypr-task" value="future call" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#63A8D6;strokeWidth=2;dashed=1;endArrow=block;endFill=1;fontColor=#BFE6FF;fontSize=8;labelBackgroundColor=#111820;exitX=0.5;exitY=0;entryX=0.5;entryY=1;" edge="1" parent="1" source="hypr-transport" target="task-transport">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="380" y="395"/></Array></mxGeometry>
+        </mxCell>
+        <mxCell id="e-extension-entry" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#63A8D6;strokeWidth=2;dashed=1;endArrow=block;endFill=1;" edge="1" parent="1" source="extension-entry" target="extension-transport"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e-browser-request" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#42A5BD;strokeWidth=2;endArrow=block;endFill=1;entryX=0;entryY=0.02;" edge="1" parent="1" source="browser-transport" target="request-port"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-backend-request" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#46B37B;strokeWidth=2;endArrow=block;endFill=1;entryX=0;entryY=0.2;" edge="1" parent="1" source="backend-transport" target="request-port"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-task-request" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#46B37B;strokeWidth=2;endArrow=block;endFill=1;entryX=0;entryY=0.38;" edge="1" parent="1" source="task-transport" target="request-port"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-provider-request" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#D3A747;strokeWidth=2;endArrow=block;endFill=1;entryX=0;entryY=0.72;" edge="1" parent="1" source="provider-transport" target="request-port"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-debug-request" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#9A77E8;strokeWidth=2;endArrow=block;endFill=1;entryX=0;entryY=0.9;" edge="1" parent="1" source="debug-transport" target="request-port"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-extension-request" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#63A8D6;strokeWidth=2;dashed=1;endArrow=block;endFill=1;entryX=0;entryY=1;" edge="1" parent="1" source="extension-transport" target="request-port"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e-request-pipeline" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#9A77E8;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="pipeline-shell" source="normalized-artifact" target="pipeline-black-box"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-pipeline-result" value="return" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#2A8EA4;strokeWidth=2;endArrow=block;endFill=1;fontColor=#DDF9F2;fontSize=8;labelBackgroundColor=#111820;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="pipeline-black-box" target="result-contract"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e-result-web" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#46B37B;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="result-shell" source="result-contract" target="web-output"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-result-api" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#46B37B;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0;entryY=0.5;" edge="1" parent="result-shell" source="result-contract" target="api-output"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="150" y="240"/></Array></mxGeometry></mxCell>
+        <mxCell id="e-result-debug" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#9A77E8;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0;entryY=0.5;" edge="1" parent="result-shell" source="result-contract" target="debug-output"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="150" y="450"/></Array></mxGeometry></mxCell>
+
+        <mxCell id="e-rust-compiled" value="compile once" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#9A77E8;strokeWidth=2;endArrow=block;endFill=1;fontColor=#DCCFFF;fontSize=8;labelBackgroundColor=#171A27;" edge="1" parent="rust-shell" source="rust-source" target="compiled-group"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-wasm-blackbox" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#42A5BD;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=0;entryX=0.25;entryY=1;" edge="1" parent="1" source="rust-wasm" target="pipeline-black-box"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-native-blackbox" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#46B37B;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=0;entryX=0.75;entryY=1;" edge="1" parent="1" source="rust-native" target="pipeline-black-box"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

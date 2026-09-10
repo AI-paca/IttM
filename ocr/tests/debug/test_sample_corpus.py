@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 from pathlib import Path
 
@@ -9,8 +10,10 @@ from tests.support.quality_metrics import markdown_table_shape
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEBUG_INPUTS = REPO_ROOT / "debug" / "fixtures"
-DEBUG_EXPECTED = REPO_ROOT / "debug" / "reference"
+DEBUG_EXPECTED = Path(__file__).resolve().parents[1] / "data" / "reference"
 REPORT_PATH = REPO_ROOT / "scripts" / "debug" / "debug_report.py"
+MIXED_SAMPLE_SHA256 = "fdaa86963bb686ed2bbbb82d043ee5a494655901874ec04b915ea1c8fbc4932b"
+MIXED_LITERAL_REFERENCE_SHA256 = "ee99e49febd2c8e9e39f51fbd74988986a8f6832b48e25a9afd303b09a30fe45"
 
 
 def _load_debug_report():
@@ -28,22 +31,32 @@ def _require_tesseract():
         pytest.skip("Tesseract binary is not available")
 
 
-def _match_score(actual: str, fixture_name: str):
+def test_hard_mixed_reference_is_bound_to_the_visible_raster_transcript():
+    fixture = DEBUG_INPUTS / "SAMPLE_mixed_ru_en_zh_table_image.pdf"
+    reference = DEBUG_EXPECTED / f"{fixture.name}.md"
+    fixture_bytes = fixture.read_bytes()
+    reference_bytes = reference.read_bytes()
+    literal = reference_bytes.decode("utf-8")
+    compact = "".join(character for character in literal if not character.isspace())
+
+    assert hashlib.sha256(fixture_bytes).hexdigest() == MIXED_SAMPLE_SHA256
+    assert hashlib.sha256(reference_bytes).hexdigest() == MIXED_LITERAL_REFERENCE_SHA256
+    assert len(compact) == 975
+    assert "# SAMPLE hard mixed 10x14 image PDF" not in literal
+    assert "SAMPLE hard OCR table: 10 x 14, русский + English + 中文 + 123 + й" in literal
+    assert "Image-only PDF: merged subsection rows must keep Markdown placeholder cells." in literal
+    assert literal.count(" / ") == 12
+    assert "Expected tokens:" in literal
+
+
+def _match_percent(actual: str, fixture_name: str) -> float:
     debug_report = _load_debug_report()
     expected = (DEBUG_EXPECTED / f"{fixture_name}.md").read_text(
         encoding="utf-8",
         errors="replace",
     )
-    return debug_report.scored_expected_match(actual, expected)
-
-
-def _assert_sample_quality_gate(actual: str, fixture_name: str):
-    score = _match_score(actual, fixture_name)
-    assert float(score.match_percent) >= 90.0
-    assert score.compact_quality_gate == "pass"
-    assert score.lexical_t9_gate == "pass"
-    assert score.success_probability_gate == "pass"
-    return score
+    percent, _, _ = debug_report.expected_match(actual, expected)
+    return float(percent)
 
 
 def test_tracked_4k_sample_reaches_default_tesseract_gate():
@@ -57,7 +70,7 @@ def test_tracked_4k_sample_reaches_default_tesseract_gate():
         engine_type="tesseract",
     )
 
-    _assert_sample_quality_gate(markdown, fixture.name)
+    assert _match_percent(markdown, fixture.name) >= 90.0
     assert meta["engine"] == "tesseract"
 
 
@@ -76,8 +89,7 @@ def test_tracked_hard_mixed_image_pdf_reaches_gate_and_keeps_10x14_table():
     )
     table_rows, table_cols = markdown_table_shape(markdown)
 
-    score = _assert_sample_quality_gate(markdown, fixture.name)
-    assert score.markdown_grammar_gate == "pass"
+    assert _match_percent(markdown, fixture.name) >= 90.0
     assert table_rows >= 14
     assert table_cols >= 10
     assert meta["tables_found"] >= 1

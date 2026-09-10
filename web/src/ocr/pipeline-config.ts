@@ -82,10 +82,10 @@ export const BROWSER_PIPELINE_PROFILES: Record<string, BrowserPipelineProfile> =
       ocrBorderPixels: 10,
       edgeWordFallbackPsm: "7",
       edgeWordFallbackMinTokens: 1,
-      lexicalCorrection: "off",
-      ocrLanguageRetry: "off",
-      tableSlotBuilder: "off",
-      tableSlotMaxColumns: 4,
+      lexicalCorrection: "t9_small",
+      ocrLanguageRetry: "t9_small",
+      tableSlotBuilder: "recursive_gaps_v1",
+      tableSlotMaxColumns: 14,
       recursiveTableCellOcr: "auto",
       recursiveTableCellOcrBatchPixels: 8_000_000,
       layout: {
@@ -244,10 +244,10 @@ export const BROWSER_PIPELINE_PROFILES: Record<string, BrowserPipelineProfile> =
       ocrBorderPixels: 10,
       edgeWordFallbackPsm: "7",
       edgeWordFallbackMinTokens: 1,
-      lexicalCorrection: "off",
-      ocrLanguageRetry: "off",
-      tableSlotBuilder: "off",
-      tableSlotMaxColumns: 4,
+      lexicalCorrection: "t9_small",
+      ocrLanguageRetry: "t9_small",
+      tableSlotBuilder: "recursive_gaps_v1",
+      tableSlotMaxColumns: 14,
       recursiveTableCellOcr: "auto",
       recursiveTableCellOcrBatchPixels: 8_000_000,
       layout: {
@@ -262,6 +262,21 @@ export const BROWSER_PIPELINE_PROFILES: Record<string, BrowserPipelineProfile> =
       },
     },
   };
+
+export function normalizeBrowserPipelineProfile(
+  profile: BrowserPipelineProfile,
+): BrowserPipelineProfile {
+  const tinyReviewEnabled =
+    profile.lexicalCorrection === "t9_small" ||
+    profile.ocrLanguageRetry === "t9_small";
+  if (!tinyReviewEnabled) return profile;
+
+  return {
+    ...profile,
+    lexicalCorrection: "t9_small",
+    ocrLanguageRetry: "t9_small",
+  };
+}
 
 export const SOURCE_PIPELINE_PROFILES: Record<
   SourceType,
@@ -298,8 +313,9 @@ export function browserPipelineProfileForSource(
   const profileName =
     SOURCE_PIPELINE_PROFILES[source]?.browserProfile ||
     "browser_tesseract_standard";
-  return (
+  const profile =
     BROWSER_PIPELINE_PROFILES[profileName] ||
-    BROWSER_PIPELINE_PROFILES.browser_tesseract_standard
-  );
+    BROWSER_PIPELINE_PROFILES.browser_tesseract_standard;
+
+  return normalizeBrowserPipelineProfile(profile);
 }

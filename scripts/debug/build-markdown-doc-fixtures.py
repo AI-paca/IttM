@@ -15,11 +15,9 @@ import markdown
 DEFAULT_DOCS = (
     "README.md",
     "docs/ru/architecture.md",
-    "docs/ru/architecture-current-flags.md",
-    "docs/ru/architecture-unified-pipeline.md",
-    "docs/ru/testing.md",
+    "docs/ru/architecture-limitations.md",
     "docs/ru/security.md",
-    "docs/ru/engine/README.md",
+    "docs/ru/pipeline/README.md",
 )
 
 

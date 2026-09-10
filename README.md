@@ -19,12 +19,12 @@
 
 ## Режимы обработки
 
-| Режим           | Сетевая зона                                                      | Куда уходит файл                                               | Как это работает внутри                                                                                                 |
-| --------------- | ----------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Browser         | Внутри вкладки                                                    | Никуда                                                         | Tesseract.js worker в V8; downscale до `2200-4200px` / `4-14MP`; OOM на вкладке при превышении квот.                    |
-| Local Tesseract | Backend на loopback / Compose                                     | Multipart-`POST` на `http://127.0.0.1:<port>/api/extract/text` | Gateway проксирует тело в `OCR_URL`; Python собирает upload в `bytes`; decode-guard `80MP`; PDF — `tempfile` Poppler.   |
-| Local EasyOCR   | Backend на loopback / Compose                                     | То же                                                          | + VRAM/CPU-fallback: без 6 ГБ VRAM выбран CPU-путь; медленнее, больше RAM.                                              |
-| External LLM    | Публичный API: высокий риск на 100-страничном PDF и тонких линиях | По явному согласию — выбранному провайдеру                     | Ключ хранится в state frontend, в Gateway не передаётся; payload уходит по `Content-Type: image/*` или `text/markdown`. |
+| Режим           | Сетевая зона                                                      | Куда уходит файл                                               | Как это работает внутри                                                                                                           |
+| --------------- | ----------------------------------------------------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Browser         | Внутри вкладки                                                    | Никуда                                                         | Tesseract.js worker в V8; downscale до `2200-4200px` / `4-14MP`; OOM на вкладке при превышении квот.                              |
+| Local Tesseract | Backend на loopback / Compose                                     | Multipart-`POST` на `http://127.0.0.1:<port>/api/extract/text` | Gateway проксирует тело в `OCR_URL`; Python собирает upload в `bytes`; decode-guard `80MP`; PDF — `tempfile` Poppler.             |
+| Local EasyOCR   | Backend на loopback / Compose                                     | То же                                                          | + GPU/CPU selection: доступный CUDA или MPS выбирается автоматически, иначе используется CPU; CPU медленнее и требует больше RAM. |
+| External LLM    | Публичный API: высокий риск на 100-страничном PDF и тонких линиях | По явному согласию — выбранному провайдеру                     | Ключ хранится в state frontend, в Gateway не передаётся; payload уходит по `Content-Type: image/*` или `text/markdown`.           |
 
 Для локальных режимов frontend не декодирует файл через `arrayBuffer()` и не
 кодирует его в Base64. Gateway передает исходное тело запроса в OCR backend.
@@ -56,6 +56,8 @@ curl -fsS "http://127.0.0.1:<порт>/api/health"
 bash scripts/runtime/run-local.sh
 ```
 
+В следующих примерах замените `<порт>` значением gateway из вывода скрипта.
+
 Статическая сборка без Python backend:
 
 ```bash
@@ -66,7 +68,7 @@ bash scripts/runtime/build-lite.sh
 <summary>Hyprland: скриншот в буфер обмена через pipe</summary>
 
 ```bash
-grim -g "$(slurp)" - | curl --data-binary @- http://127.0.0.1:3000/api/extract/text | wl-copy
+grim -g "$(slurp)" - | curl --data-binary @- "http://127.0.0.1:<порт>/api/extract/text" | wl-copy
 ```
 
 CLI-обёртка с тем же контрактом: `npm run extract -- --help`.
@@ -78,9 +80,10 @@ CLI-обёртка с тем же контрактом: `npm run extract -- --he
 
 ```bash
 curl --data-binary @plan.pdf \
-  "http://127.0.0.1:3000/api/extract/text?filename=plan.pdf&pdf_mode=raster"
+  "http://127.0.0.1:<порт>/api/extract/text?filename=plan.pdf&pdf_mode=raster"
 
-npm run extract -- plan.pdf --pdf-mode=raster
+npm run extract -- plan.pdf \
+  --endpoint="http://127.0.0.1:<порт>/api/extract/text" --pdf-mode=raster
 ```
 
 `pdf_mode=auto` (по умолчанию) — backend проверяет текстовый слой и не запускает OCR, если слой пригоден. `pdf_mode=raster` — пропускает проверку и сразу рендерит/распознаёт каждую страницу. Фактически использованный режим возвращается в `meta.pdf_mode`.
@@ -94,7 +97,7 @@ npm run extract -- plan.pdf --pdf-mode=raster
 | Browser (OCR/PDF) | Worker, resize до `2200-4200px` / `4-14MP`; постраничный PDF.js + `OffscreenCanvas` | Весь PDF сначала попадает в worker `ArrayBuffer`; downscale может терять мелкие цифры и линии. |
 | Gateway           | Потоковое multipart-проксирование и NDJSON                                          | Нет task queue, durable retry и backend cancellation.                                          |
 | Python OCR        | Страницы PDF рендерятся по одной; decode guard `80MP`                               | Upload целиком существует в RAM; PDF временно спуливается для Poppler.                         |
-| EasyOCR           | CPU fallback без обязательных 6 ГБ VRAM                                             | CPU-путь заметно медленнее и требует больше памяти.                                            |
+| EasyOCR           | CUDA/MPS при доступности, иначе CPU                                                 | CPU-путь заметно медленнее и требует больше памяти.                                            |
 
 Полная матрица: [ограничения OCR-архитектуры](./docs/ru/architecture-limitations.md).
 

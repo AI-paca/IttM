@@ -42,14 +42,15 @@ export function SettingsSidebar({
     easyOcrInstallMessage,
     easyOcrInstallProgress,
     easyOcrInstalling,
-    lexicalCorrectionEnabled,
+    isPdfFile,
+    pdfRasterMode,
     pingUrl,
     rememberChoice,
     selectedSource,
     themeLevel,
     themeAuto,
     onInstallEasyOcr,
-    onLexicalCorrectionChange,
+    onPdfRasterModeChange,
     onRememberChange,
     onSourceSelect,
     setPingUrl,
@@ -202,17 +203,21 @@ export function SettingsSidebar({
 
                   {/* Нижняя секция: reveal ниже не влияет на позицию темы. */}
                   <div className="mt-auto flex flex-col gap-3 shrink-0">
-                    <label className="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] px-3 py-2.5 text-sm text-secondary">
-                      <span className="font-medium text-primary">T9 OCR</span>
-                      <input
-                        type="checkbox"
-                        checked={lexicalCorrectionEnabled}
-                        onChange={(event) =>
-                          onLexicalCorrectionChange(event.target.checked)
-                        }
-                        className="h-4 w-4 accent-[var(--color-accent)]"
-                      />
-                    </label>
+                    {isPdfFile && (
+                      <label className="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border-subtle)] bg-[var(--color-bg-elevated)] px-3 py-2.5 text-sm text-secondary">
+                        <span className="font-medium text-primary">
+                          PDF как изображение
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={pdfRasterMode}
+                          onChange={(event) =>
+                            onPdfRasterModeChange(event.target.checked)
+                          }
+                          className="h-4 w-4 accent-[var(--color-accent)]"
+                        />
+                      </label>
+                    )}
                     <RememberToggle
                       checked={rememberChoice}
                       onChange={onRememberChange}

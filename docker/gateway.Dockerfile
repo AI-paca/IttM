@@ -14,8 +14,11 @@ FROM ${NODE_RUNTIME_IMAGE}
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
+ARG SECURITY_REFRESH=manual
 
-RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+RUN echo "$SECURITY_REFRESH" >/dev/null \
+    && apk upgrade --no-cache \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
     && rm -f \
       /usr/local/bin/corepack \
       /usr/local/bin/npm \

@@ -32,6 +32,7 @@ else
     web/src
     edge/cloudflare-worker.ts
     ocr/app
+    pipeline-core/src
     scripts/ci
     scripts/runtime
     scripts/cli
@@ -77,7 +78,11 @@ docker run --rm \
     "${targets[@]}" \
   >"$repo_root/$sarif_output" || true
 
-node "$repo_root/scripts/ci/summarize-sast.mjs" "$json_output" || true
+summary_status=0
+node "$repo_root/scripts/ci/summarize-sast.mjs" "$json_output" || summary_status=$?
+if [[ "$status" -eq 0 && "$summary_status" -ne 0 ]]; then
+  status="$summary_status"
+fi
 
 echo "SAST JSON: $json_output"
 echo "SAST SARIF: $sarif_output"

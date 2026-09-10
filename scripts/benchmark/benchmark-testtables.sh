@@ -47,7 +47,11 @@ fixture_page_limit_rules=()
 timeout_seconds=300
 fixture_patterns=()
 resume=0
-runtime_image="${OCR_BENCHMARK_IMAGE:-ittm-ocr}"
+runtime_image_override="${OCR_BENCHMARK_IMAGE:-}"
+runtime_image_base="${OCR_BENCHMARK_BASE_IMAGE:-ittm-ocr}"
+runtime_image=""
+runtime_image_owned=0
+runtime_image_source=""
 python_packages_volume="${OCR_PYTHON_PACKAGES_VOLUME:-ittm_ocr-python-packages}"
 models_volume="${OCR_EASYOCR_MODELS_VOLUME:-ittm_ocr-easyocr-models}"
 
@@ -153,6 +157,17 @@ output_root="$(realpath "$output_root")"
 if [[ ! -d "$source_root/ocr/app" ]]; then
   echo "OCR source not found under $source_root" >&2
   exit 2
+fi
+
+source_pipeline_core=""
+if [[ -x "$source_root/scripts/runtime/build-pipeline-core-native.sh" &&
+  -f "$source_root/pipeline-core/Cargo.toml" ]]; then
+  source_pipeline_core="$($source_root/scripts/runtime/build-pipeline-core-native.sh | tail -n 1)"
+  source_pipeline_core="$(realpath "$source_pipeline_core")"
+  if [[ ! -f "$source_pipeline_core" ]]; then
+    echo "Native pipeline core build did not produce a library: $source_pipeline_core" >&2
+    exit 2
+  fi
 fi
 
 mapfile -t fixtures < <(
@@ -265,6 +280,34 @@ IFS=',' read -r -a engines <<< "$engines_csv"
 commit="$(git -C "$source_root" rev-parse HEAD)"
 subject="$(git -C "$source_root" show -s --format=%s HEAD)"
 ocr_tree="$(git -C "$source_root" rev-parse HEAD:ocr)"
+pipeline_core_tree="$(git -C "$source_root" rev-parse HEAD:pipeline-core)"
+if [[ -n "$runtime_image_override" ]]; then
+  runtime_image="$runtime_image_override"
+  runtime_image_source="explicit override"
+else
+  runtime_image="ittm-ocr-benchmark:${commit:0:12}-$$"
+  docker image inspect "$runtime_image_base" >/dev/null
+  docker build \
+    --build-arg "BASE_IMAGE=$runtime_image_base" \
+    --build-arg "RUST_BUILD_IMAGE=rust@sha256:1f0dbad1df66647807e6952d1db85d0b2bda7606cb2139d82517e4f009967376" \
+    -f - \
+    -t "$runtime_image" \
+    "$source_root" <<'DOCKERFILE'
+ARG RUST_BUILD_IMAGE
+ARG BASE_IMAGE
+FROM ${RUST_BUILD_IMAGE} AS pipeline-core-builder
+WORKDIR /core
+COPY pipeline-core/Cargo.toml pipeline-core/Cargo.lock ./
+COPY pipeline-core/src ./src
+RUN cargo test --locked && cargo build --locked --release
+
+FROM ${BASE_IMAGE}
+COPY --from=pipeline-core-builder /core/target/release/libittm_pipeline_core.so /opt/ittm-pipeline-core/libittm_pipeline_core.so
+COPY ocr/app /app/app
+DOCKERFILE
+  runtime_image_owned=1
+  runtime_image_source="pipeline-core and Python app overlay built from --source on $runtime_image_base"
+fi
 runtime_image_id="$(docker image inspect --format '{{.Id}}' "$runtime_image")"
 container_name="ittm-benchmark-${commit:0:8}-$$"
 server_log="$output_root/server.log"
@@ -340,6 +383,9 @@ cleanup() {
   if [[ -n "$page_limited_dir" ]]; then
     rm -rf "$page_limited_dir"
   fi
+  if [[ "$runtime_image_owned" -eq 1 ]]; then
+    docker image rm "$runtime_image" >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup EXIT
 
@@ -363,24 +409,69 @@ if [[ -n "$page_selection" || ${#fixture_page_selection_rules[@]} -gt 0 ]]; then
     exit 2
   fi
   page_limited_dir="$(mktemp -d)"
+  page_limited_expected_root="$page_limited_dir/expected"
+  mkdir -p "$page_limited_expected_root"
   limited_fixtures=()
   for fixture in "${fixtures[@]}"; do
+    file_name="$(basename "$fixture")"
+    reference_file="$expected_root/$file_name.md"
+    limited_reference="$page_limited_expected_root/$file_name.md"
     if [[ "${fixture,,}" != *.pdf ]]; then
       limited_fixtures+=("$fixture")
+      if [[ -f "$reference_file" ]]; then
+        cp "$reference_file" "$limited_reference"
+      fi
       continue
     fi
-    file_name="$(basename "$fixture")"
     selected_pages="$(page_selection_for_fixture "$file_name")"
     if [[ -z "$selected_pages" ]]; then
       limited_fixtures+=("$fixture")
+      if [[ -f "$reference_file" ]]; then
+        cp "$reference_file" "$limited_reference"
+      fi
       continue
     fi
     selected_pages="$(normalize_page_selection_for_pdf "$fixture" "$selected_pages")"
     limited_fixture="$page_limited_dir/$file_name"
     qpdf --empty --pages "$fixture" "$selected_pages" -- "$limited_fixture"
     limited_fixtures+=("$limited_fixture")
+    if [[ -f "$reference_file" ]]; then
+      read -r -a selected_page_tokens <<<"$selected_pages"
+      python3 - "$reference_file" "$limited_reference" "${selected_page_tokens[@]}" <<'PY'
+import pathlib
+import sys
+
+source = pathlib.Path(sys.argv[1])
+target = pathlib.Path(sys.argv[2])
+tokens = sys.argv[3:]
+text = source.read_text(encoding="utf-8", errors="replace")
+separator = "\f" if "\f" in text else "\n\n---\n\n" if "\n\n---\n\n" in text else ""
+if not separator:
+    target.write_text(text, encoding="utf-8")
+    raise SystemExit(0)
+
+pages = text.split(separator)
+if pages and not pages[-1].strip():
+    pages.pop()
+
+selected: list[int] = []
+for token in tokens:
+    for part in token.split(","):
+        if not part:
+            continue
+        if "-" in part:
+            start, end = (int(value) for value in part.split("-", 1))
+            selected.extend(range(start, end + 1))
+        else:
+            selected.append(int(part))
+
+limited_pages = [pages[index - 1] for index in selected if 1 <= index <= len(pages)]
+target.write_text(separator.join(limited_pages).rstrip() + "\n", encoding="utf-8")
+PY
+    fi
   done
   fixtures=("${limited_fixtures[@]}")
+  expected_root="$page_limited_expected_root"
 fi
 
 : >"$server_log"
@@ -392,10 +483,17 @@ start_container() {
     -e PORT=8000 \
     -e PYTHONDONTWRITEBYTECODE=1 \
     -e PYTHONUNBUFFERED=1 \
-    -e PYTHONPATH=/opt/ittm-python-packages \
+    -e PYTHONPATH=/app:/opt/ittm-python-packages \
     -e EASY_INSTALL_TARGET=/opt/ittm-python-packages \
     -e EASYOCR_MODULE_PATH=/models/easyocr
   )
+  source_pipeline_core_args=()
+  if [[ -n "$source_pipeline_core" ]]; then
+    docker_env+=(-e ITTM_PIPELINE_CORE_LIB=/opt/ittm-source-pipeline-core/libittm_pipeline_core.so)
+    source_pipeline_core_args+=(
+      -v "$source_pipeline_core:/opt/ittm-source-pipeline-core/libittm_pipeline_core.so:ro"
+    )
+  fi
   if [[ "$gpu_enabled" -eq 1 ]]; then
     docker_env+=(
       -e NVIDIA_VISIBLE_DEVICES=all
@@ -409,11 +507,12 @@ start_container() {
     "${docker_env[@]}" \
     -p 127.0.0.1::8000 \
     -v "$source_root/ocr:/app:ro" \
+    "${source_pipeline_core_args[@]}" \
     -v "$python_packages_volume:/opt/ittm-python-packages" \
     -v "$models_volume:/models/easyocr" \
     -w /app \
     "$runtime_image" \
-    uvicorn app.main:app --host 0.0.0.0 --port 8000 \
+    sh -lc 'python -c "from app.pipeline_core.native import PIPELINE_CORE_ABI_VERSION, native_pipeline_core; core = native_pipeline_core(); assert core is not None; print(f\"pipeline-core ABI {PIPELINE_CORE_ABI_VERSION}: {core.path}\")" && exec uvicorn app.main:app --host 0.0.0.0 --port 8000' \
     >/dev/null
 
   port="$(docker port "$container_name" 8000/tcp | sed 's/.*://')"
@@ -441,7 +540,10 @@ cat >"$manifest" <<EOF
 - commit: \`$commit\`
 - subject: $subject
 - OCR tree: \`$ocr_tree\`
+- pipeline-core tree: \`$pipeline_core_tree\`
 - runtime image: \`$runtime_image_id\`
+- runtime image source: \`$runtime_image_source\`
+- native pipeline core: \`${source_pipeline_core:-runtime image}\`
 - engines: \`$engines_csv\`
 - pipeline profile: \`${pipeline_profile:-per-engine default}\`
 - engine profile overrides: \`${engine_profile_rules[*]:-none}\`
@@ -684,8 +786,6 @@ PY
   done
 done
 
-cleanup
-trap - EXIT
 python3 "$script_dir/../debug/debug_report.py" \
   --summary "$summary" \
   --output-root "$output_root" \
@@ -693,4 +793,6 @@ python3 "$script_dir/../debug/debug_report.py" \
   --markdown "$output_root/comparison.md" \
   --tables-root "$output_root/tables" \
   --csv "$output_root/comparison.csv"
+cleanup
+trap - EXIT
 printf 'Benchmark complete: %s\n' "$output_root"

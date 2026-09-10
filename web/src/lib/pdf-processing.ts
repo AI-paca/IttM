@@ -1,15 +1,18 @@
 import { mergeNativeAndOcrText } from "../ocr/pdf-text";
+import type { NativePdfOracle } from "./pdf-native-oracle";
 
 export interface PdfProcessingOptions {
   renderScale?: number;
   maxPagePixels?: number;
   maxDimension?: number;
   cropMode?: "auto" | "none";
+  forceRaster?: boolean;
   shouldContinue?: () => boolean;
 }
 
 export interface PreparedPdfPage {
   nativeText: string;
+  nativeOracle?: NativePdfOracle | null;
   image: Blob;
 }
 
@@ -66,10 +69,15 @@ export async function processPreparedPages(
     });
     const prepared = await preparePage(pageNumber);
     assertActive(options);
+    const nativeMarkdown = options.forceRaster
+      ? ""
+      : (prepared.nativeOracle?.assembled.markdown.trim() ?? "");
     onProgress(
-      prepared.nativeText
-        ? `Проверка изображения на странице ${pageNumber}...`
-        : `Распознавание скана страницы ${pageNumber}...`,
+      nativeMarkdown
+        ? `Сборка native-сегментов страницы ${pageNumber}...`
+        : prepared.nativeText
+          ? `Проверка изображения на странице ${pageNumber}...`
+          : `Распознавание скана страницы ${pageNumber}...`,
       {
         currentPage: pageNumber,
         totalPages,
@@ -77,9 +85,20 @@ export async function processPreparedPages(
         currentPagePercent: 0.25,
       },
     );
-    const ocrText = await processImage(prepared.image, pageNumber, totalPages);
-    assertActive(options);
-    const pageText = mergeNativeAndOcrText(prepared.nativeText, ocrText);
+    let pageText: string;
+    if (nativeMarkdown) {
+      pageText = nativeMarkdown;
+    } else {
+      const ocrText = await processImage(
+        prepared.image,
+        pageNumber,
+        totalPages,
+      );
+      assertActive(options);
+      pageText = options.forceRaster
+        ? ocrText
+        : mergeNativeAndOcrText(prepared.nativeText, ocrText);
+    }
 
     if (pageText.trim()) {
       markdownParts.push(pageText);

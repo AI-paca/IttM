@@ -10,7 +10,9 @@ export function parseTextReviewerDecision(value: string): boolean | null {
   }
   if (
     label === "TEXT" ||
-    /\bMEANINGFUL (?:TEXT|WORD|NUMBER|IDENTIFIER|FORMULA)\b/.test(normalized)
+    /\bMEANINGFUL (?:TEXT|WORD|NUMBER|IDENTIFIER|FORMULA|SYMBOL)\b/.test(
+      normalized,
+    )
   ) {
     return true;
   }

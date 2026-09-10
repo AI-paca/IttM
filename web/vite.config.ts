@@ -16,10 +16,14 @@ const browserModelVendorRoute = "vendor/models";
 const browserModelRoot = path.resolve(repoRoot, ".models/browser");
 const browserModelIds = ["HuggingFaceTB/SmolLM2-135M-Instruct"];
 const tesseractCoreFiles = [
+  "tesseract-core.wasm.js",
+  "tesseract-core-simd.wasm.js",
+  "tesseract-core-relaxedsimd.wasm.js",
   "tesseract-core-lstm.wasm.js",
   "tesseract-core-simd-lstm.wasm.js",
   "tesseract-core-relaxedsimd-lstm.wasm.js",
 ];
+const tesseractLanguageFiles = ["eng", "rus", "chi_sim", "ell", "equ"];
 const pdfJsWasmFileNames = [
   "jbig2.wasm",
   "jbig2_nowasm_fallback.js",
@@ -43,6 +47,15 @@ function tesseractAssetFiles(): Map<string, string> {
     if (fs.existsSync(sourcePath)) {
       files.set(fileName, sourcePath);
     }
+  }
+
+  const tessdataRoot = path.resolve(
+    process.env.BROWSER_OCR_LANG_PATH ||
+      path.resolve(repoRoot, ".cache/tessdata"),
+  );
+  for (const language of tesseractLanguageFiles) {
+    const fileName = `${language}.traineddata`;
+    files.set(`lang/${fileName}`, path.resolve(tessdataRoot, fileName));
   }
 
   return files;
@@ -153,7 +166,9 @@ function tesseractAssetsPlugin(base: string): Plugin {
       const outDir = path.resolve(distRoot, tesseractVendorRoute);
       fs.mkdirSync(outDir, { recursive: true });
       for (const [fileName, sourcePath] of tesseractAssetFiles()) {
-        fs.copyFileSync(sourcePath, path.resolve(outDir, fileName));
+        const destination = path.resolve(outDir, fileName);
+        fs.mkdirSync(path.dirname(destination), { recursive: true });
+        fs.copyFileSync(sourcePath, destination);
       }
     },
   };
@@ -239,6 +254,9 @@ export default defineConfig(({ mode }) => {
       alias: {
         "@": path.resolve(webRoot, "src"),
       },
+    },
+    optimizeDeps: {
+      include: ["@huggingface/transformers"],
     },
     server: {
       hmr: process.env.DISABLE_HMR !== "true",

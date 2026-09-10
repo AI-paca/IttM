@@ -1,17 +1,21 @@
+import json
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 from app.chunking.vertical import LayoutRegion, TableCell, TableLayout
 from app.layout.contracts import ComponentFeature, LayoutDecision, LayoutFeatures, LayoutStageSpec, SeparatorCandidate
 from app.layout.features import ProjectionGeometryExtractor
 from app.layout.recursive_grid import (
+    RecursiveGridConfig,
     RecursiveGridLeaf,
     RegionDecision,
     SPARSE_SHADOW_CODES,
     SparseShadowProjection,
     SparseShadowSignature,
+    analyze_recursive_grid,
     classify_sparse_shadow,
     _deduplicate_leaves,
     _dominant_vertical_rule_tracks,
@@ -23,6 +27,8 @@ from app.layout.recursive_grid import (
     _vertical_lane_separator,
     group_recursive_leaves,
     project_sparse_shadow,
+    recursive_grid_trace,
+    segment_recursive_grid,
     sparse_shadow_signature,
 )
 from app.layout.selectors import select_layout_pipeline
@@ -36,9 +42,90 @@ from app.layout.stages import (
     _prefer_recursive_table_layout,
     _simple_track_table_layout,
     _simple_group_table_has_spanning_rules,
+    _is_decorative_narrow_table,
+    _is_decorative_partition_table,
+    _table_region_with_outer_bands,
     _vertical_cuts_for_band,
     execute_layout_decision,
 )
+
+
+def test_rejects_tall_narrow_two_column_decoration_as_table():
+    image = Image.new("RGB", (2550, 1626), "white")
+    table = TableLayout(
+        rows=68,
+        cols=2,
+        cells=(),
+        bbox=(0, 0, 192, 1626),
+        x_lines=(0, 96, 192),
+        y_lines=tuple(round(index * 1626 / 68) for index in range(69)),
+    )
+    try:
+        assert _is_decorative_narrow_table(image, table) is True
+        region = LayoutRegion(
+            kind="table",
+            image=image.crop(table.bbox),
+            bbox=table.bbox,
+            table=table,
+        )
+        try:
+            assert _is_decorative_partition_table(region, image.size) is True
+        finally:
+            region.image.close()
+        assert (
+            _is_decorative_narrow_table(
+                image,
+                TableLayout(
+                    rows=14,
+                    cols=10,
+                    cells=(),
+                    bbox=(90, 272, 2450, 1500),
+                    x_lines=tuple(range(11)),
+                    y_lines=tuple(range(15)),
+                ),
+            )
+            is False
+        )
+    finally:
+        image.close()
+
+
+def test_table_fast_path_preserves_visible_outer_bands():
+    image = Image.new("RGB", (600, 500), "white")
+    draw = ImageDraw.Draw(image)
+    draw.text((20, 20), "document heading", fill="black")
+    draw.rectangle((20, 100, 580, 400), outline="black", width=3)
+    draw.text((20, 460), "document footer", fill="black")
+    table_image = image.crop((20, 100, 580, 400))
+    table_region = LayoutRegion(
+        kind="table",
+        image=table_image,
+        bbox=(20, 100, 580, 400),
+        table=TableLayout(
+            rows=1,
+            cols=1,
+            cells=(TableCell(row=0, col=0, bbox=(0, 0, 560, 300)),),
+            bbox=(0, 0, 560, 300),
+            x_lines=(0, 560),
+            y_lines=(0, 300),
+        ),
+    )
+    regions = []
+    try:
+        regions = _table_region_with_outer_bands(image, table_region)
+        assert [(region.kind, region.bbox) for region in regions] == [
+            ("image", (0, 0, 600, 100)),
+            ("table", (20, 100, 580, 400)),
+            ("image", (0, 400, 600, 500)),
+        ]
+        assert regions[0].metadata == {
+            "layout_kind": "recursive_grid_outer_band",
+            "position": "above",
+        }
+    finally:
+        for region in regions:
+            region.image.close()
+        image.close()
 
 
 def _marker_page(columns: int, rows: int = 4):
@@ -91,6 +178,70 @@ def _marker_page(columns: int, rows: int = 4):
 
 def _colors(image: Image.Image):
     return {color for _, color in image.convert("RGB").getcolors(maxcolors=image.width * image.height)}
+
+
+def test_recursive_analysis_exposes_one_atomic_stage_handoff():
+    image, _, _ = _marker_page(columns=2, rows=2)
+    analysis = None
+    try:
+        analysis = analyze_recursive_grid(
+            image,
+            RecursiveGridConfig(
+                max_region_height=500,
+                deskew=False,
+                preprocess_steps=(),
+            ),
+        )
+
+        assert analysis.leaves
+        assert tuple(analysis.leaves) == tuple(
+            sorted(
+                analysis.leaves,
+                key=lambda leaf: (
+                    leaf.source_bbox[1],
+                    leaf.source_bbox[0],
+                    leaf.source_bbox[3],
+                ),
+            )
+        )
+        assert analysis.signature == sparse_shadow_signature(analysis.projection)
+        assert analysis.profile == classify_sparse_shadow(analysis.signature)
+        projected_leaves = tuple(item[0] for item in analysis.projection.leaf_projection)
+        assert projected_leaves == analysis.leaves
+    finally:
+        if analysis is not None:
+            for leaf in analysis.leaves:
+                leaf.image.close()
+        image.close()
+
+
+def test_recursive_analysis_trace_is_versioned_and_image_free():
+    image, _, _ = _marker_page(columns=2, rows=2)
+    analysis = None
+    try:
+        analysis = analyze_recursive_grid(
+            image,
+            RecursiveGridConfig(
+                max_region_height=500,
+                deskew=False,
+                preprocess_steps=(),
+            ),
+        )
+
+        trace = recursive_grid_trace(analysis)
+        payload = asdict(trace)
+        encoded = json.dumps(payload, sort_keys=True)
+
+        assert payload["version"] == 1
+        assert len(payload["leaves"]) == len(analysis.leaves)
+        assert len(payload["projections"]) == len(analysis.leaves)
+        assert "image" not in encoded
+        assert json.loads(encoded)["profile"]["kind"] == analysis.profile.kind
+    finally:
+        if analysis is not None:
+            for leaf in analysis.leaves:
+                leaf.image.close()
+        image.close()
 
 
 def _table_region(
@@ -344,6 +495,51 @@ def test_recursive_grid_groups_paragraph_lines_and_list_markers():
         ]
     finally:
         for leaf in leaves:
+            leaf.image.close()
+
+
+def test_recursive_grid_ignores_bright_annotation_overlay_for_row_splits():
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 18)
+    except OSError:
+        font = ImageFont.load_default()
+
+    def row_image(*, annotated: bool) -> Image.Image:
+        image = Image.new("RGB", (900, 150), "white")
+        draw = ImageDraw.Draw(image)
+        if annotated:
+            for box, color in (
+                ((0, 0, 900, 40), (238, 214, 252)),
+                ((0, 49, 900, 92), (254, 227, 166)),
+                ((0, 102, 900, 144), (205, 208, 255)),
+            ):
+                draw.rectangle(box, fill=color)
+            for y in (43, 96):
+                draw.rectangle((0, y, 900, y + 2), fill=(61, 207, 67))
+        for y, text in (
+            (10, "resolve_pipeline_profile в ocr/app/pipeline_config.py:"),
+            (58, "1. Если pipeline_profile не задан - взять default для engine_type"),
+            (111, "backend_tesseract_standard / backend_easyocr_standard"),
+        ):
+            draw.text((30, y), text, fill=(26, 26, 26), font=font)
+        return image
+
+    config = RecursiveGridConfig(
+        max_depth=12,
+        min_cell_height=16,
+        min_separator_gap=4,
+        overlap=4,
+        deskew=False,
+        preprocess_steps=(),
+    )
+    plain_leaves = segment_recursive_grid(row_image(annotated=False), config)
+    annotated_leaves = segment_recursive_grid(row_image(annotated=True), config)
+
+    try:
+        assert [leaf.source_bbox for leaf in annotated_leaves] == [leaf.source_bbox for leaf in plain_leaves]
+        assert len(annotated_leaves) == 3
+    finally:
+        for leaf in (*plain_leaves, *annotated_leaves):
             leaf.image.close()
 
 

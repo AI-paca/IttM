@@ -11,6 +11,7 @@ from app.recognition.languages import (
     ISOLATED_LANGUAGES,
     LANGUAGE_SCRIPTS,
     OPTIONAL_LANGUAGES,
+    REVIEWER_EMPTY_STATE,
     SCRIPT_PATTERNS,
     T9_RETRY_LANGUAGES,
     normalize_probabilities,
@@ -546,6 +547,7 @@ class TesseractEngine(OcrEngine):
             if words:
                 candidates.append((lang, words))
         if not candidates:
+            self._observe_language_candidate(REVIEWER_EMPTY_STATE, "")
             return []
         if len(candidates) == 1:
             selected_lang, words = candidates[0]
@@ -561,15 +563,143 @@ class TesseractEngine(OcrEngine):
         psm: int = 6,
         min_conf: int = 20,
     ) -> list[dict]:
-        if language not in self.installed_languages():
+        requested = tuple(item for item in language.split("+") if item)
+        installed = frozenset(self.installed_languages())
+        if not requested or any(item not in installed for item in requested):
             return []
         data = self.recognize_with_psm(
             image,
             psm=psm,
             mode="table",
-            lang=language,
+            lang="+".join(requested),
         )
-        return self._words_from_data(data, min_conf)
+        words = self._words_from_data(data, min_conf)
+        if words or psm in self.edge_word_fallback_psms or not self._edge_ink_touches_all_sides(image):
+            return words
+
+        bordered = self._add_ocr_border(image)
+        try:
+            candidates = []
+            for fallback_psm in self.edge_word_fallback_psms:
+                fallback_data = self.recognize_with_psm(
+                    bordered,
+                    psm=fallback_psm,
+                    mode="table",
+                    lang="+".join(requested),
+                )
+                fallback_words = self._words_from_data(fallback_data, min_conf)
+                projected = []
+                for word in fallback_words:
+                    left, top, right, bottom = word["bbox"]
+                    left = max(0, left - self.ocr_border_pixels)
+                    top = max(0, top - self.ocr_border_pixels)
+                    right = min(image.width, right - self.ocr_border_pixels)
+                    bottom = min(image.height, bottom - self.ocr_border_pixels)
+                    if right <= left or bottom <= top:
+                        continue
+                    projected.append({**word, "bbox": (left, top, right, bottom)})
+                if projected:
+                    candidates.append(projected)
+            if candidates:
+                return max(candidates, key=self._word_candidate_quality)
+        finally:
+            bordered.close()
+        return []
+
+    def recognize_word_candidate_passes(
+        self,
+        image,
+        psm: int = 6,
+        min_conf: int = 20,
+    ) -> tuple[tuple[str, list[dict]], ...]:
+        """Expose observed word passes without selecting or rewriting them."""
+
+        passes = []
+        for language in self._language_candidates():
+            words = self.recognize_words_for_language(
+                image,
+                language,
+                psm=psm,
+                min_conf=min_conf,
+            )
+            if words:
+                passes.append((language, words))
+        return tuple(passes)
+
+    def recognize_identifier_segment(
+        self,
+        image,
+    ) -> tuple[str, float]:
+        """Read one code segment with an ASCII-only OCR configuration."""
+
+        try:
+            import pytesseract
+
+            scaled = image.resize((max(1, image.width * 4), max(1, image.height * 4)))
+            try:
+                data = pytesseract.image_to_data(
+                    scaled,
+                    lang="eng",
+                    config=("--oem 1 --psm 8 " "-c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"),
+                    output_type=pytesseract.Output.DICT,
+                )
+            finally:
+                scaled.close()
+        except Exception:
+            return "", 0.0
+        candidates = [
+            (str(text).strip(), self._parse_confidence(confidence))
+            for text, confidence in zip(
+                data.get("text", ()),
+                data.get("conf", ()),
+            )
+            if str(text).strip()
+        ]
+        candidates = [(text, confidence) for text, confidence in candidates if confidence >= 0]
+        return max(candidates, key=lambda item: item[1], default=("", 0.0))
+
+    def recognize_cjk_phrase(
+        self,
+        image,
+    ) -> tuple[str, float]:
+        """Read a short CJK phrase and return its weakest glyph confidence."""
+
+        if "chi_sim" not in self.installed_languages():
+            return "", 0.0
+        try:
+            import pytesseract
+
+            scaled = image.resize((max(1, image.width * 4), max(1, image.height * 4)))
+            try:
+                data = pytesseract.image_to_data(
+                    scaled,
+                    lang="chi_sim",
+                    config="--oem 1 --psm 7",
+                    output_type=pytesseract.Output.DICT,
+                )
+            finally:
+                scaled.close()
+        except Exception:
+            return "", 0.0
+        candidates = [
+            (str(text).strip(), self._parse_confidence(confidence))
+            for text, confidence in zip(
+                data.get("text", ()),
+                data.get("conf", ()),
+            )
+            if str(text).strip()
+        ]
+        candidates = [
+            (text, confidence)
+            for text, confidence in candidates
+            if confidence >= 0 and script_counts(text).get("cjk", 0) == len(text)
+        ]
+        if not candidates:
+            return "", 0.0
+        return (
+            "".join(text for text, _confidence in candidates),
+            min(confidence for _text, confidence in candidates),
+        )
 
     def recognize(self, image, mode: str = "text_mode", psm: int = 6) -> str:
         """
@@ -622,6 +752,7 @@ class TesseractEngine(OcrEngine):
                     self._observe_language_candidate(selected_lang, text)
                     return text
 
+            self._observe_language_candidate(REVIEWER_EMPTY_STATE, "")
             return ""
 
         except Exception as e:

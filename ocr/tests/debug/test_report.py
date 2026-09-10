@@ -541,6 +541,28 @@ def test_table_debug_artifact_uses_markdown_pipes(tmp_path):
     assert list(tables.glob("*.table-*.md")) == []
 
 
+def test_table_debug_artifact_writes_segment_order_report(tmp_path):
+    debug_report = _load_debug_report()
+    result = tmp_path / "result.md"
+    reference = tmp_path / "reference.md"
+    result.write_text(
+        "Intro\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\nTail\n",
+        encoding="utf-8",
+    )
+    reference.write_text(
+        "Intro\n\nTail\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n",
+        encoding="utf-8",
+    )
+    tables = tmp_path / "tables"
+
+    assert debug_report.write_table_markdown_files(result, tables, reference) == 1
+    report = (tables / "result.segments.tsv").read_text(encoding="utf-8")
+
+    assert "kind_mismatch" in report
+    assert "actual_kind" in report
+    assert "reference_kind" in report
+
+
 def test_markdown_grammar_compares_control_symbols_without_text():
     debug_report = _load_debug_report()
     actual = (

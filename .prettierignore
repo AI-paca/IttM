@@ -3,6 +3,7 @@ node_modules/
 dist/
 build/
 ocr/tests/fixtures/
+ocr/tests/data/reference/
 .cache/
 .zoo/plan.md
 debug/private-report.md

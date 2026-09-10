@@ -9,7 +9,7 @@ export interface SourceOption {
   icon: React.ReactNode;
 }
 
-export const SOURCES: SourceOption[] = [
+const ALL_SOURCES: SourceOption[] = [
   {
     id: "auto",
     label: "Auto (Fallback)",
@@ -47,3 +47,5 @@ export const SOURCES: SourceOption[] = [
     icon: <Sparkles className="w-4 h-4" />,
   },
 ];
+
+export const SOURCES = ALL_SOURCES;

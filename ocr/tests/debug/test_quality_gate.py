@@ -118,3 +118,68 @@ def test_required_methods_fail_when_column_is_missing(tmp_path, capsys):
     output = capsys.readouterr().out
     assert "missing required method column: easyocr" in output
     assert "missing required method column: browser-tesseract" in output
+
+
+def test_incomplete_scoring_is_explicit_partial_by_default(tmp_path, capsys):
+    result = tmp_path / "result.csv"
+    result.write_text(
+        "file,threshold,tesseract %,tesseract gate\n"
+        "sample.pdf.page-001.raster.png,90,missing_reference,missing_reference\n",
+        encoding="utf-8",
+    )
+    gate = _load_gate_module()
+
+    assert gate.main(["--result", str(result)]) == 0
+    output = capsys.readouterr().out
+    assert "Debug quality gate PARTIAL:" in output
+    assert "tesseract=missing_reference" in output
+    assert "passed" not in output
+
+
+def test_required_complete_scoring_fails_missing_and_not_checked(
+    tmp_path,
+    capsys,
+):
+    result = tmp_path / "result.csv"
+    result.write_text(
+        "file,threshold,tesseract %,tesseract gate\n"
+        "sample.pdf.page-001.raster.png,90,missing_reference,missing_reference\n"
+        "missing.pdf.page-001.raster.png,90,not_checked,not_checked\n",
+        encoding="utf-8",
+    )
+    gate = _load_gate_module()
+
+    assert (
+        gate.main(
+            [
+                "--result",
+                str(result),
+                "--require-complete-scoring",
+            ]
+        )
+        == 1
+    )
+    output = capsys.readouterr().out
+    assert "tesseract=missing_reference" in output
+    assert "tesseract=not_checked" in output
+
+
+def test_required_complete_scoring_rejects_empty_corpus(tmp_path, capsys):
+    result = tmp_path / "result.csv"
+    result.write_text(
+        "file,threshold,tesseract %,tesseract gate\n",
+        encoding="utf-8",
+    )
+    gate = _load_gate_module()
+
+    assert (
+        gate.main(
+            [
+                "--result",
+                str(result),
+                "--require-complete-scoring",
+            ]
+        )
+        == 1
+    )
+    assert "result contains no corpus rows" in capsys.readouterr().out

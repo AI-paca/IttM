@@ -99,6 +99,39 @@ def test_recursive_cell_ocr_skips_uniform_slots_marked_empty_by_layout():
     assert rows == [["", "recognized"]]
 
 
+def test_recursive_cell_ocr_keeps_marked_empty_slot_with_visible_pixels():
+    image = Image.new("L", (120, 50), "white")
+    draw = ImageDraw.Draw(image)
+    draw.line((25, 12, 25, 28), fill=220, width=1)
+    table = TableLayout(
+        bbox=(0, 0, 120, 50),
+        rows=1,
+        cols=2,
+        x_lines=(0, 60, 120),
+        y_lines=(0, 50),
+        cells=(
+            TableCell(row=0, col=0, bbox=(0, 0, 60, 50), sparse_code=EMPTY_SLOT_CODE),
+            TableCell(row=0, col=1, bbox=(60, 0, 120, 50), sparse_code=EMPTY_SLOT_CODE),
+        ),
+    )
+    calls = 0
+
+    def recognize(_cell_image):
+        nonlocal calls
+        calls += 1
+        return "1"
+
+    rows = table_layout_to_rows(
+        image,
+        table,
+        recognize,
+        skip_blank_cells=False,
+    )
+
+    assert calls == 1
+    assert rows == [["1", ""]]
+
+
 def test_layout_does_not_mark_a_thin_digit_as_empty():
     image = Image.new("L", (120, 50), "white")
     draw = ImageDraw.Draw(image)
@@ -118,6 +151,67 @@ def test_layout_does_not_mark_a_thin_digit_as_empty():
 
     assert not marked.cells[0].is_empty
     assert marked.cells[1].is_empty
+
+
+def test_recursive_cell_ocr_keeps_faint_digit_after_non_uniform_check():
+    image = Image.new("L", (120, 50), "white")
+    draw = ImageDraw.Draw(image)
+    draw.line((25, 12, 25, 28), fill=230, width=1)
+    table = TableLayout(
+        bbox=(0, 0, 120, 50),
+        rows=1,
+        cols=2,
+        x_lines=(0, 60, 120),
+        y_lines=(0, 50),
+        cells=(
+            TableCell(row=0, col=0, bbox=(0, 0, 60, 50)),
+            TableCell(row=0, col=1, bbox=(60, 0, 120, 50)),
+        ),
+    )
+    marked = mark_table_empty_slots(image, table)
+    calls = 0
+
+    def recognize(_cell_image):
+        nonlocal calls
+        calls += 1
+        return "1"
+
+    rows = table_layout_to_rows(image, marked, recognize)
+
+    assert not marked.cells[0].is_empty
+    assert calls == 1
+    assert rows == [["1", ""]]
+
+
+def test_recursive_cell_ocr_keeps_chromatic_digit_with_flat_luma():
+    image = Image.new("RGB", (120, 50), (200, 200, 200))
+    draw = ImageDraw.Draw(image)
+    draw.line((25, 12, 25, 28), fill=(250, 164, 250), width=1)
+    table = TableLayout(
+        bbox=(0, 0, 120, 50),
+        rows=1,
+        cols=2,
+        x_lines=(0, 60, 120),
+        y_lines=(0, 50),
+        cells=(
+            TableCell(row=0, col=0, bbox=(0, 0, 60, 50)),
+            TableCell(row=0, col=1, bbox=(60, 0, 120, 50)),
+        ),
+    )
+    marked = mark_table_empty_slots(image, table)
+    calls = 0
+
+    def recognize(_cell_image):
+        nonlocal calls
+        calls += 1
+        return "1"
+
+    rows = table_layout_to_rows(image, marked, recognize)
+
+    assert not marked.cells[0].is_empty
+    assert marked.cells[1].is_empty
+    assert calls == 1
+    assert rows == [["1", ""]]
 
 
 def test_batched_cell_ocr_includes_a_thin_digit_candidate():
@@ -155,6 +249,42 @@ def test_batched_cell_ocr_includes_a_thin_digit_candidate():
 
     assert calls == 1
     assert [word["text"] for word in recovered] == ["11"]
+
+
+def test_batched_cell_ocr_keeps_marked_empty_slot_with_visible_pixels():
+    image = Image.new("L", (120, 50), "white")
+    draw = ImageDraw.Draw(image)
+    draw.line((25, 12, 25, 28), fill=220, width=1)
+    table = TableLayout(
+        bbox=(0, 0, 120, 50),
+        rows=1,
+        cols=2,
+        x_lines=(0, 60, 120),
+        y_lines=(0, 50),
+        cells=(
+            TableCell(row=0, col=0, bbox=(0, 0, 60, 50), sparse_code=EMPTY_SLOT_CODE),
+            TableCell(row=0, col=1, bbox=(60, 0, 120, 50), sparse_code=EMPTY_SLOT_CODE),
+        ),
+    )
+
+    class FakeEngine:
+        def recognize_words(self, _image, psm=6, min_conf=0):
+            return [
+                {
+                    "text": "1",
+                    "bbox": (30, 30, 50, 50),
+                    "conf": 90,
+                }
+            ]
+
+    recovered, calls = recognize_missing_table_cell_batches(
+        FakeEngine(),
+        image,
+        table,
+    )
+
+    assert calls == 1
+    assert [word["text"] for word in recovered] == ["1"]
 
 
 def test_batched_cell_ocr_retries_equ_for_numeric_rows():
@@ -212,6 +342,53 @@ def test_batched_cell_ocr_retries_equ_for_numeric_rows():
         image,
         table,
         seed_words=seed_words,
+    )
+
+    assert calls == 2
+    assert [word["text"] for word in recovered] == ["5"]
+
+
+def test_batched_cell_ocr_retries_equ_for_unseeded_symbol_cells():
+    image = Image.new("L", (120, 50), "white")
+    draw = ImageDraw.Draw(image)
+    draw.line((85, 12, 85, 28), fill=220, width=1)
+    table = TableLayout(
+        bbox=(0, 0, 120, 50),
+        rows=1,
+        cols=2,
+        x_lines=(0, 60, 120),
+        y_lines=(0, 50),
+        cells=(
+            TableCell(row=0, col=0, bbox=(0, 0, 60, 50)),
+            TableCell(row=0, col=1, bbox=(60, 0, 120, 50)),
+        ),
+    )
+    marked = mark_table_empty_slots(image, table)
+
+    class FakeEngine:
+        def recognize_words(self, _image, psm=6, min_conf=0):
+            return []
+
+        def recognize_words_for_language(
+            self,
+            _image,
+            language,
+            psm=6,
+            min_conf=0,
+        ):
+            assert language == "equ"
+            return [
+                {
+                    "text": "5",
+                    "bbox": (30, 30, 50, 50),
+                    "conf": 80,
+                }
+            ]
+
+    recovered, calls = recognize_missing_table_cell_batches(
+        FakeEngine(),
+        image,
+        marked,
     )
 
     assert calls == 2

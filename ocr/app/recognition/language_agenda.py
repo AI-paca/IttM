@@ -6,12 +6,15 @@ from collections.abc import Callable, Iterable
 from app.recognition.languages import (
     BASE_LANGUAGES,
     OPTIONAL_LANGUAGES,
+    REVIEWER_EMPTY_STATE,
     REVIEWER_EXTRA_LANGUAGES,
+    REVIEWER_STATE_TYPES,
     language_script,
     normalize_probabilities,
     ocr_language_string_for,
     script_counts,
 )
+from app.recognition.math_language import score_math_language
 
 
 def split_language_group(language_group: str | None) -> tuple[str, ...]:
@@ -33,6 +36,8 @@ def numeric_text_evidence(text: str) -> int:
         return 0
     digit_count = sum(character.isdigit() for character in text)
     letter_count = sum(character.isalpha() for character in text)
+    if letter_count == 0 and len(numeric_tokens) == 1:
+        return digit_count
     if len(numeric_tokens) < 2 and digit_count < max(2, letter_count):
         return 0
     return digit_count
@@ -43,10 +48,9 @@ class LanguageAgenda:
     Self-adjusting language/type agenda for retry OCR.
 
     The first OCR attempt still uses the profile's configured language group.
-    Retry attempts are single-language candidates ranked by document evidence,
-    local left/top context, and a small splay-style recency order. This keeps
-    early pages broad, then makes repeated segment OCR cheaper as the document
-    reveals its dominant scripts.
+    Retry attempts are single-language candidates ranked by accumulated
+    document evidence and local left/top context. Ranking is deterministic for
+    the same observations; no mutable recency order participates in scoring.
     """
 
     def __init__(
@@ -60,7 +64,6 @@ class LanguageAgenda:
         self.language_retry = language_retry
         self._installed_languages = installed_languages
         self._probabilities: dict[str, float] | None = None
-        self._splay_order: list[str] | None = None
 
     def configured_ocr_language_string(self) -> str:
         priority = self.language_priority or (BASE_LANGUAGES + OPTIONAL_LANGUAGES)
@@ -80,8 +83,14 @@ class LanguageAgenda:
         ]
         return tuple(dict.fromkeys(primary_languages or ["eng"]))
 
-    def initial_language_probabilities(self) -> dict[str, float]:
+    def reviewer_state_candidates(self) -> tuple[str, ...]:
         languages = self.single_language_candidates()
+        if self.language_retry != "t9_small":
+            return languages
+        return tuple(dict.fromkeys((*languages, *REVIEWER_STATE_TYPES)))
+
+    def initial_language_probabilities(self) -> dict[str, float]:
+        languages = self.reviewer_state_candidates()
         if not languages:
             return {"eng": 1.0}
         probability = 1.0 / len(languages)
@@ -92,15 +101,14 @@ class LanguageAgenda:
             self._probabilities = self.initial_language_probabilities()
         return dict(self._probabilities)
 
-    def _ensure_splay_order(self) -> list[str]:
-        if self._splay_order is None:
-            self._splay_order = list(self.single_language_candidates())
-        return self._splay_order
-
     def language_evidence(self, text: str) -> dict[str, float]:
         priors = self.probabilities()
+        if not text.strip() and REVIEWER_EMPTY_STATE in priors:
+            return {REVIEWER_EMPTY_STATE: 1.0}
+
         counts = script_counts(text)
         numeric_score = numeric_text_evidence(text)
+        sidecar_scores = score_math_language(text)
         weighted: dict[str, float] = {}
         for language in priors:
             script = language_script(language)
@@ -109,9 +117,11 @@ class LanguageAgenda:
                 score *= 3.0
             if script == "math":
                 score += numeric_score
+            score += sidecar_scores.get(language, 0.0)
             weighted[language] = score
 
-        if sum(weighted.values()) < 2:
+        has_alpha_evidence = any(counts.get(script, 0) for script in ("latin", "cyrillic", "cjk", "greek"))
+        if sum(weighted.values()) < 2 and not (weighted.get("equ", 0.0) > 0 and not has_alpha_evidence):
             return {}
         return normalize_probabilities(weighted)
 
@@ -131,29 +141,6 @@ class LanguageAgenda:
 
     def observe_candidate(self, language_group: str | None, text: str) -> None:
         self.observe_text(text)
-        languages = split_language_group(language_group)
-        if not languages:
-            return
-
-        evidence = self.language_evidence(text)
-        if evidence:
-            languages = tuple(
-                sorted(
-                    languages,
-                    key=lambda language: -evidence.get(language, 0.0),
-                )
-            )
-        self._promote_languages(languages)
-
-    def _promote_languages(self, languages: tuple[str, ...]) -> None:
-        if not languages:
-            return
-        order = self._ensure_splay_order()
-        for language in reversed(languages):
-            if language not in order:
-                continue
-            order.remove(language)
-            order.insert(0, language)
 
     def ranked_single_language_candidates(
         self,
@@ -161,15 +148,11 @@ class LanguageAgenda:
     ) -> tuple[str, ...]:
         priors = self.probabilities()
         languages = list(self.single_language_candidates())
-        splay_order = {language: index for index, language in enumerate(self._ensure_splay_order())}
         original_order = {language: index for index, language in enumerate(languages)}
         context_scores = self.context_evidence(context)
-        splay_size = max(1, len(splay_order))
 
         def candidate_score(language: str) -> float:
-            splay_rank = splay_order.get(language, splay_size)
-            splay_score = (splay_size - min(splay_rank, splay_size)) / splay_size
-            return (priors.get(language, 0.0) * 10.0) + (context_scores.get(language, 0.0) * 8.0) + (splay_score * 4.0)
+            return (priors.get(language, 0.0) * 10.0) + (context_scores.get(language, 0.0) * 8.0)
 
         ranked = sorted(
             languages,

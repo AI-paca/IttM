@@ -14,7 +14,7 @@ export function DiagnosticsPanel({ diagnostics }: DiagnosticsPanelProps) {
       <div className="flex justify-between items-center">
         <h3 className="text-sm font-bold text-[var(--color-text-primary)] flex items-center gap-2">
           <Activity className="w-4 h-4 text-[var(--color-info)]" /> Diagnostics
-          & System
+          &amp; System
         </h3>
 
         {/* Placeholder: Continuity Camera (Phase 5) */}

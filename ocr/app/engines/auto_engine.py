@@ -54,6 +54,20 @@ class AutoEngine(OcrEngine):
 
         return []
 
+    def recognize_words_for_language(
+        self,
+        image,
+        language: str,
+        psm: int = 6,
+        min_conf: int = 20,
+    ) -> list[dict]:
+        return self.tesseract.recognize_words_for_language(
+            image,
+            language,
+            psm=psm,
+            min_conf=min_conf,
+        )
+
     def available(self) -> bool:
         return self.tesseract.available() or self.easy.available()
 

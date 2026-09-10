@@ -1431,20 +1431,175 @@ def align_expected_tables_to_actual(
     return aligned_tables
 
 
+@dataclasses.dataclass(frozen=True)
+class MarkdownSegment:
+    kind: str
+    shape: str
+    preview: str
+
+
+def _segment_preview(parts: list[str], limit: int = 96) -> str:
+    preview = " ".join(part.strip() for part in parts if part.strip())
+    preview = " ".join(preview.split())
+    return preview[:limit]
+
+
+def ordered_markdown_segments(markdown: str) -> list[MarkdownSegment]:
+    segments: list[MarkdownSegment] = []
+    current_text: list[str] = []
+    current_table: list[list[str]] = []
+    current_table_loose = False
+    current_code: list[str] = []
+    in_fence = False
+
+    def flush_text() -> None:
+        nonlocal current_text
+        if not current_text:
+            return
+        segments.append(
+            MarkdownSegment(
+                kind="text",
+                shape=f"{len(current_text)} lines",
+                preview=_segment_preview(current_text),
+            )
+        )
+        current_text = []
+
+    def flush_table() -> None:
+        nonlocal current_table
+        if not current_table:
+            return
+        rows, cols = table_shape(current_table)
+        segments.append(
+            MarkdownSegment(
+                kind="table",
+                shape=f"{rows}x{cols}",
+                preview=_segment_preview(current_table[0] if current_table else []),
+            )
+        )
+        current_table = []
+
+    def flush_code() -> None:
+        nonlocal current_code
+        segments.append(
+            MarkdownSegment(
+                kind="code",
+                shape=f"{len(current_code)} lines",
+                preview=_segment_preview(current_code),
+            )
+        )
+        current_code = []
+
+    for line in markdown.splitlines():
+        stripped = line.strip()
+        if _is_fence_line(stripped):
+            if in_fence:
+                flush_code()
+            else:
+                flush_table()
+                flush_text()
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            current_code.append(stripped)
+            continue
+
+        parsed = _table_cells_for_line(stripped, include_loose=True)
+        if parsed is not None:
+            cells, loose = parsed
+            flush_text()
+            if current_table and loose != current_table_loose:
+                flush_table()
+            current_table_loose = loose
+            if not _is_table_separator_cells(cells):
+                current_table.append(cells)
+            continue
+
+        flush_table()
+        if stripped:
+            current_text.append(stripped)
+        else:
+            flush_text()
+
+    if in_fence:
+        flush_code()
+    flush_table()
+    flush_text()
+    return segments
+
+
+def _segment_status(
+    actual: MarkdownSegment | None,
+    reference: MarkdownSegment | None,
+) -> str:
+    if actual is None:
+        return "missing_actual"
+    if reference is None:
+        return "missing_reference"
+    if actual.kind != reference.kind:
+        return "kind_mismatch"
+    if actual.shape != reference.shape:
+        return "shape_mismatch"
+    if compact(actual.preview) != compact(reference.preview):
+        return "preview_mismatch"
+    return "kind_shape_match"
+
+
+def write_segment_order_file(
+    actual_markdown: str,
+    reference_markdown: str,
+    output_path: pathlib.Path,
+) -> None:
+    actual_segments = ordered_markdown_segments(actual_markdown)
+    reference_segments = ordered_markdown_segments(reference_markdown)
+    with output_path.open("w", encoding="utf-8", newline="") as output:
+        writer = csv.writer(output, delimiter="\t")
+        writer.writerow(
+            [
+                "index",
+                "status",
+                "actual_kind",
+                "actual_shape",
+                "actual_preview",
+                "reference_kind",
+                "reference_shape",
+                "reference_preview",
+            ]
+        )
+        for index in range(max(len(actual_segments), len(reference_segments))):
+            actual = actual_segments[index] if index < len(actual_segments) else None
+            reference = reference_segments[index] if index < len(reference_segments) else None
+            writer.writerow(
+                [
+                    index + 1,
+                    _segment_status(actual, reference),
+                    actual.kind if actual else "",
+                    actual.shape if actual else "",
+                    actual.preview if actual else "",
+                    reference.kind if reference else "",
+                    reference.shape if reference else "",
+                    reference.preview if reference else "",
+                ]
+            )
+
+
 def write_table_markdown_files(
     markdown_path: pathlib.Path,
     tables_root: pathlib.Path,
     reference_path: pathlib.Path | None = None,
 ) -> int:
     actual_body = result_body(markdown_path)
+    reference_body = (
+        reference_path.read_text(encoding="utf-8", errors="replace")
+        if reference_path is not None and reference_path.is_file()
+        else ""
+    )
     tables = markdown_table_rows(actual_body)
-    if not tables and reference_path is not None and reference_path.is_file():
+    if not tables and reference_body:
         tables = align_expected_tables_to_actual(
-            reference_path.read_text(encoding="utf-8", errors="replace"),
+            reference_body,
             actual_body,
         )
-    if not tables:
-        return 0
 
     tables_root.mkdir(parents=True, exist_ok=True)
     stem = markdown_path.name.removesuffix(".md")
@@ -1452,17 +1607,28 @@ def write_table_markdown_files(
         stale.unlink()
     for stale in tables_root.glob(f"{stem}.table-*.csv"):
         stale.unlink()
+    segment_path = tables_root / f"{stem}.segments.tsv"
+    if segment_path.exists():
+        segment_path.unlink()
 
-    table_path = tables_root / f"{stem}.tables.md"
-    with table_path.open("w", encoding="utf-8", newline="") as output:
-        for index, rows in enumerate(tables):
-            if index:
-                output.write("\n")
-            width = max((len(row) for row in rows), default=0)
-            for row in rows:
-                padded = row + [""] * (width - len(row))
-                cells = [escape_markdown(cell) for cell in padded]
-                output.write(f"| {' | '.join(cells)} |\n")
+    if reference_body:
+        write_segment_order_file(
+            actual_body,
+            reference_body,
+            segment_path,
+        )
+
+    if tables:
+        table_path = tables_root / f"{stem}.tables.md"
+        with table_path.open("w", encoding="utf-8", newline="") as output:
+            for index, rows in enumerate(tables):
+                if index:
+                    output.write("\n")
+                width = max((len(row) for row in rows), default=0)
+                for row in rows:
+                    padded = row + [""] * (width - len(row))
+                    cells = [escape_markdown(cell) for cell in padded]
+                    output.write(f"| {' | '.join(cells)} |\n")
     return len(tables)
 
 

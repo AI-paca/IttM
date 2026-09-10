@@ -1,0 +1,181 @@
+# IttM pipeline core
+
+`pipeline-core` is the single Rust source for the separated raster route and
+bounded deterministic decisions shared by the Python backend and browser. The
+same crate is compiled to `libittm_pipeline_core.so` for Python and
+`ittm_pipeline_core.wasm` for the browser; there is no second copy of those
+Rust decisions.
+
+Image/PDF decoding and the OCR engines remain platform-specific adapters. Rust
+owns the production raster stages, block geometry/order, and final assembly.
+The only production bypass is a trustworthy native PDF text layer unless the
+caller forces raster mode.
+
+## ABI v6
+
+Key C/WASM ABI exports include:
+
+- `ittm_pipeline_abi_version`;
+- `ittm_pipeline_route_id` (the same deterministic route marker in native and WASM builds);
+- `ittm_pipeline_recipe_mask`;
+- `ittm_sparse_add_signal`;
+- `ittm_is_isolated_heading`;
+- `ittm_span_evidence_score`;
+- `ittm_should_replace_primary`;
+- `ittm_should_drop_text_block`;
+- `ittm_alloc` / `ittm_dealloc`;
+- `ittm_separated_begin` / `ittm_separated_drop`;
+- `ittm_separated_job_count` / `ittm_separated_job_field`;
+- `ittm_separated_set_ocr`;
+- `ittm_separated_add_ocr_word`;
+- `ittm_separated_add_ocr_word_ppm`;
+- `ittm_separated_render_length` / `ittm_separated_render_copy`;
+- `ittm_separated_stage_mask`.
+
+The separated session executes `preprocess → geometry → topology → find-object
+→ separate-block → ocr-blocks → get-segment → generate-object`. Raster bytes
+and UTF-8 OCR results cross the ABI; platform engine objects do not.
+
+Python loads the native library through `ocr/app/pipeline_core/native.py`.
+Browser code loads the WASM module through
+`web/src/ocr/pipeline-core.ts`. The files under `web/src/wasm/ocr-core` belong
+to a separate generated grammar module; its wrapper exists, but the current
+production browser path does not call it.
+
+## Build and verification
+
+```bash
+npm run build:pipeline-core
+```
+
+This runs Rust tests, builds the native release library, checks Python/Rust
+parity, builds `wasm32-unknown-unknown`, and verifies the exported ABI in Node.
+
+Individual builds:
+
+```bash
+npm run build:pipeline-core:native
+npm run build:pipeline-core:wasm
+```
+
+Generated native files under `pipeline-core/target` and
+`web/public/wasm/ittm_pipeline_core.wasm` are ignored. Docker OCR builds compile
+and copy the native library into the runtime image; Lite builds generate the
+WASM module.
+
+Python `/readiness` reports `pipeline_core_abi6`. A missing or incompatible
+native library makes readiness fail; production raster conversion does not
+silently fall back to the old Python layout route.
+
+When changing ABI behavior, update the Rust tests, native wrapper, browser
+wrapper, parity verifier, WASM verifier, and this document together.
+
+### Frozen OCR stage inputs
+
+`export-python-ocr-checkpoint.py` exports the selected legacy Python OCR plan,
+words and complete matrix without executing OCR or reading recognized stage-06
+text. Selection metadata is an explicit input to this materialization check;
+it does not prove policy-selection parity.
+
+The block import accepts the original packed-u32 metadata version 1. Version 2
+appends a logical cell count followed by each cell's row, column, row/column
+span, source rectangle and a length-prefixed list of geometric source IDs.
+Empty source lists are valid. Version 3 appends a text-order mode (0 retains
+OCR text; 1 requests Python line ordering for a single membership unit).
+
+`ittm_separated_import_block_geometry` imports the same metadata and raster
+dimensions without loading pixels. It is for Python-05 → Rust-06 replay; it
+refuses to start OCR or import raster-coordinate OCR results. Raster-backed
+import remains available for earlier boundaries. Composite imported OCR
+results use transform code 2 and preserve Python's original crop extent and
+source-block offset interpretation. No word coordinates are clipped or
+replaced by geometry IDs. These entry points are compiled for native and WASM
+from the same Rust source.
+
+### Object boundary parity
+
+Object reconstruction now retains distinct crop and logical matrix rectangles,
+rule-lattice versus topology-slice provenance, and the `flow` kind. The staged
+ABI uses kind 4 for flow; its existing kinds 0–3 retain their meaning. The older
+packed diagnostic API retains its four-category encoding for compatibility.
+Finite mixed-axis cycles require both observed merge directions and independent
+rule-network evidence. Empty corridor chambers precede semantic classification;
+fragmented and stacked tables are joined using the same geometric witnesses as
+the frozen Python route. Source segments remain separately accounted, including
+structural edge residuals. Object-boundary agreement does not by itself prove
+local matrix cell construction, OCR block raster construction or OCR selection.
+
+Local matrices are now constructed in the shared Rust object stage from the
+page topology, rule lattice and original geometric source IDs. The complete
+row/cell representation preserves source-free empty cells, disconnected row
+intervals and conservative observed payload identity. Its logical spans feed
+the existing block planner; table OCR materialization receives all matrix
+cells, including empty edge cells that have no OCR job. Residual geometry keeps
+its source ownership but is excluded from OCR planning using Python's object
+extent and structural-residual rules. No ABI version change is required.
+
+The isolated matrix comparison covers 374 objects and 129937 cells from all
+28 frozen Python documents in native Rust and real Chromium/WASM. It compares
+every row interval and cell rectangle, topology code, and ordered source ID
+list. The diagnostic input contains saved Python03 objects and literal page
+topology, independently of Rust object reconstruction. Production integration
+retains the earlier 28/28 topology and object metadata agreement. OCR block
+planning, raster packing and language selection still require their own
+isolated comparisons; local-matrix agreement does not establish full-route
+quality.
+
+### Canonical block planning
+
+The splay route now uses the checkpoint's dyadic row/column masks for large
+tables, partitioning the original segment order into chunks of at most 256.
+The previously ported bounded-locality family and its tests remain available
+as a historical algorithm; it is not substituted into the splay route at the
+256-segment boundary. Candidate reduction is applied per stored object, so a
+large table elsewhere cannot suppress reduction for a small table. Paragraphs
+use overlapping matrix-line pairs; lists and fixed flow retain their object
+crop. OCR jobs now use each planned block's crop.
+
+On literal Python03 objects and matrices, all 1654 block plans from the 28
+frozen inputs match native Rust and real Chromium/WASM: per-object order,
+source/core/context IDs, crop bounds, matrix windows and packed logical shape.
+This comparison covers planning, not raster packing or adaptive OCR selection.
+
+Reading order first clusters rectangles into lines and then sorts by total
+keys. The old pair-dependent vertical-overlap comparator could form cycles
+and abort native Rust or trap in WASM; the shared ordering also retains the
+previously verified Python line-order behavior.
+
+Canonical stage04 raster parity (2026-09-08): the stored table raster no longer
+passes through the optional 4M-pixel/3300-edge reduction, and fallback crops do
+not mark their units as omitted. Production planning visits compacted blocks
+sequentially and stores immutable raster bytes with lossless run/literal coding;
+the public ABI still copies the exact decoded RGB plane. This preserves full
+resolution while avoiding a multi-gigabyte vector of decoded block rasters.
+
+Independent literal Python01 RGB/ownership + Python03 objects/matrices + Python04
+table plans match all 1208 table block rasters and placements in 28/28 documents,
+both native and Chromium/WASM. The largest fixture stores 5,243,629,368 decoded
+bytes in 514,717,157 bytes; diagnostic WASM linear memory was 961,544,192 bytes.
+These are the isolated compaction/storage measurements, not a full OCR memory
+peak. Evidence under worktrees/rust-pipeline-diagnostics-20260906:
+compact-v3, browser-compact-v3, compact-final-source-v3. Independent selected
+Python05 -> Rust06 and Python06 -> Rust07 still match 28/28 natively and in the
+browser (corpus-compact-v3, browser-late-compact-v3); 94 Rust tests pass.
+OCR input preparation, attempt selection and full-route quality remain separate
+requirements; this boundary proof does not establish their equivalence.
+
+Canonical OCR input preparation (2026-09-08): non-table contexts now use the
+checkpoint's minimum height 512 and maximum scale 8; tables retain 96/4.
+Ordinary attempts keep the existing crop border. Dark-small-text normalization
+returns at source scale before ordinary enlargement, as in the Python adapter.
+The optional context-border implementation is retained outside the canonical
+preparation path. Recognition-miss retries remain a separate adapter concern.
+
+On the first saved raw attempt of every available checkpoint object/policy,
+preparation changes from 0/256 to 256/256 exact decoded RGB planes and content-box
+coordinate transforms: 227 non-table and 29 table contexts. Native and real
+Chromium/WASM both pass. Evidence: worktrees/rust-pipeline-diagnostics-20260906/
+prepare-v1, prepare-v2, browser-prepare-v2; production source prepare-final-source-v2.
+94 Rust tests pass, and independent late native boundaries still match 28/28
+(corpus-prepare-v2). This verifies raw attempt preparation, not gamma-attempt
+selection, retries, scheduler parity, or final OCR quality.

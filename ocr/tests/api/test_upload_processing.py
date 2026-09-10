@@ -88,13 +88,13 @@ def test_pdf_render_dpi_only_downscales_oversized_pages(monkeypatch):
 def test_pdf_text_layer_bypasses_ocr_when_usable(monkeypatch):
     monkeypatch.setattr(
         convert_service,
-        "_extract_pdf_text_layer_pages",
+        "_extract_pdf_text_layer_page_candidates",
         lambda _content, _filename: ["Учебный план\nБ1.О.01 История России"],
     )
     monkeypatch.setattr(
         convert_service,
         "_create_engine",
-        lambda _engine_type: pytest.fail("OCR engine should not be created for usable PDF text layer"),
+        lambda _engine_type, _profile: pytest.fail("OCR engine should not be created for usable PDF text layer"),
     )
 
     markdown, meta = convert_service.convert_bytes(
@@ -108,13 +108,18 @@ def test_pdf_text_layer_bypasses_ocr_when_usable(monkeypatch):
     assert meta["engine_chain"] == ["pdf_text_layer"]
     assert meta["pages"] == 1
     assert meta["chunks"] == 0
+    assert meta["pdf_text_layer_pages"] == 1
     assert meta["pdf_mode"] == "auto"
+    assert "pdf_text_layer:all_pages" in meta["flags"]
+    assert all(not flag.startswith("layout_stage:") for flag in meta["flags"])
+    assert all(not flag.startswith("ocr_language_retry:") for flag in meta["flags"])
+    assert all(not flag.startswith("lexical_correction:") for flag in meta["flags"])
 
 
 def test_pdf_raster_mode_skips_usable_text_layer(monkeypatch):
     monkeypatch.setattr(
         convert_service,
-        "_extract_pdf_text_layer_pages",
+        "_extract_pdf_text_layer_page_candidates",
         lambda _content, _filename: pytest.fail("raster mode must not inspect the PDF text layer"),
     )
 
@@ -159,6 +164,60 @@ def test_pdf_raster_mode_skips_usable_text_layer(monkeypatch):
     assert meta["pdf_mode"] == "raster"
 
 
+def test_pdf_text_layer_falls_back_to_ocr_per_page(monkeypatch):
+    monkeypatch.setattr(
+        convert_service,
+        "_extract_pdf_text_layer_page_candidates",
+        lambda _content, _filename: ["Readable text page", None],
+    )
+
+    class FakeEngine:
+        def info(self):
+            return {"engine": "tesseract"}
+
+    monkeypatch.setattr(
+        convert_service,
+        "_create_engine",
+        lambda _engine_type, _profile: FakeEngine(),
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "_iter_document_pages",
+        lambda _content, _filename, _pipeline: iter(
+            [
+                (Image.new("RGB", (40, 30), "white"), 1, 2),
+                (Image.new("RGB", (40, 30), "white"), 2, 2),
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        convert_service,
+        "_convert_page",
+        lambda _image, _engine, _profile: (
+            "OCR page",
+            {
+                "chunks": 1,
+                "cards_found": 0,
+                "tables_found": 0,
+                "table_cells": 0,
+            },
+        ),
+    )
+
+    markdown, meta = convert_service.convert_bytes(
+        b"%PDF-mixed-layer",
+        filename="mixed.pdf",
+        engine_type="tesseract",
+    )
+
+    assert markdown == "Readable text page\n\n---\n\nOCR page"
+    assert meta["engine"] == "pdf_text_layer+ocr"
+    assert meta["engine_chain"] == ["pdf_text_layer", "tesseract"]
+    assert meta["pdf_text_layer_pages"] == 1
+    assert meta["chunks"] == 1
+    assert "pdf_text_layer:hybrid" in meta["flags"]
+
+
 def test_pdf_mode_rejects_unknown_values():
     with pytest.raises(ValueError, match="Known modes: auto, raster"):
         convert_service.normalize_pdf_mode("slow-magic")
@@ -166,9 +225,26 @@ def test_pdf_mode_rejects_unknown_values():
 
 def test_pdf_text_layer_requires_enough_usable_pages():
     good_page = " ".join(f"слово{i}" for i in range(40))
+    noisy_adobe_layer = " ".join(
+        [
+            "OnpegeneHHbiM",
+            "apTHKNb",
+            "MHOKECTBEHHOE",
+            "cYLIeCTBNTENbHOE",
+            "HAYYHOE",
+            "O6Pa3OBaHMe",
+            "npeAnoXKeHMe",
+            "MecToNMeHMe",
+            "Ha3BaHMe",
+            "COCTABHOE",
+            "TepMHHONOrNA",
+            "BbICLLiee",
+        ]
+    )
 
     assert convert_service._usable_pdf_text_pages(["", "D (D D", good_page, ""]) == []
     assert convert_service._usable_pdf_text_pages([good_page, good_page]) == [
         good_page,
         good_page,
     ]
+    assert not convert_service._pdf_text_page_is_usable(noisy_adobe_layer)

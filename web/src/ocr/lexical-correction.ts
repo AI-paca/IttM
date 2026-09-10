@@ -1,35 +1,45 @@
 import type { BrowserOcrProfile } from "./browser-profile";
 
-function cleanUiOcrLine(line: string): string {
+function cleanCommerceOcrConfusables(
+  line: string,
+  preferEuro: boolean,
+): string {
+  let value = line;
+  if (preferEuro) {
+    value = value.replace(/£(?=\s*\d)/g, "€");
+  }
+  value = splitCompactResolutionNumbers(value);
+  return value
+    .replace(/\bFHO\b/g, "FHD")
+    .replace(/\bDRS\b/g, "DDR5")
+    .replace(/\bRAM\s+868\b/g, "RAM 8GB")
+    .replace(/\b868\s+RAM\b/g, "8GB RAM");
+}
+
+function splitCompactResolutionNumbers(line: string): string {
+  if (
+    !/\b(?:display|screen|monitor|resolution|pixel|pixels|ips|oled|lcd|retina|inch|laptop|notebook|fhd)\b/i.test(
+      line,
+    )
+  ) {
+    return line;
+  }
+  return line.replace(
+    /(?<![\w])(\d{3,4})(\d{3,4})(?![\w])/g,
+    (match, widthText: string, heightText: string) => {
+      const width = Number(widthText);
+      const height = Number(heightText);
+      if (width >= 640 && width <= 9999 && height >= 480 && height <= 9999) {
+        return `${width}x${height}`;
+      }
+      return match;
+    },
+  );
+}
+
+function cleanUiOcrLine(line: string, preferEuro: boolean): string {
   let value = line.trim();
   if (!value) return line;
-
-  const replacements: Array<[string, string]> = [
-    ["AI-pacallttM", "AI-paca/IttM"],
-    ["AI-paca/lttM", "AI-paca/IttM"],
-    ["Al-paca/IttM", "AI-paca/IttM"],
-    ["Al-paca", "AI-paca"],
-    ["lttM", "IttM"],
-    ["HWZ", "Hw7"],
-    ["Hwб", "Hw6"],
-    ["Нм", "Hw"],
-    ["Hм", "Hw"],
-  ];
-  for (const [source, target] of replacements) {
-    value = value.replaceAll(source, target);
-  }
-
-  value = value
-    .replace(
-      " pull requests in 1 repository Opened 7 82 pull",
-      "Opened 7 pull requests in 1 repository",
-    )
-    .replace(
-      "requests in 1 repository Opened 7 82 pull",
-      "Opened 7 pull requests in 1 repository",
-    )
-    .replace("merged AI-paca/IttM", "AI-paca/IttM 7 merged")
-    .replace("AI-paca/IttM @ merged", "AI-paca/IttM 7 merged");
 
   for (const prefix of [
     "[1 ",
@@ -53,16 +63,10 @@ function cleanUiOcrLine(line: string): string {
   if (value.endsWith(" -¥.") || value.endsWith(" -¥")) {
     value = value.split(" -¥", 1)[0].trimEnd();
   }
-  if (value.endsWith(" @ merged")) {
-    value = `${value.slice(0, -9).trimEnd()} 7 merged`;
-  }
-  if (value.startsWith("Hw (SCA)")) {
-    value = value.replace("Hw (SCA)", "Hw7 (SCA)");
-  }
-  if (value.startsWith("Hw (OCR engine")) {
-    value = value.replace("Hw (OCR engine", "Hw5 (OCR engine");
-  }
-  return value.replaceAll(" jun ", " Jun ");
+  value = cleanCommerceOcrConfusables(value, preferEuro);
+  return value
+    .replaceAll(" jun ", " Jun ")
+    .replace(/([\u3400-\u9fff])\s+(?=[\u3400-\u9fff])/gu, "$1");
 }
 
 export function applyBrowserLexicalCorrection(
@@ -70,5 +74,9 @@ export function applyBrowserLexicalCorrection(
   mode: BrowserOcrProfile["lexicalCorrection"],
 ): string {
   if (mode === "off") return text;
-  return text.split(/\r?\n/).map(cleanUiOcrLine).join("\n");
+  const preferEuro = /€/.test(text);
+  return text
+    .split(/\r?\n/)
+    .map((line) => cleanUiOcrLine(line, preferEuro))
+    .join("\n");
 }

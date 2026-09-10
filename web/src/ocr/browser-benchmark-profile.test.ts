@@ -22,6 +22,13 @@ test("browser benchmark defaults to the same profile as browser UI source", () =
   ]);
   assert.equal(resolveBrowserBenchmarkProfile().ocrBorderPixels, 10);
   assert.equal(resolveBrowserBenchmarkProfile().edgeWordFallbackPsm, "7");
+  assert.equal(resolveBrowserBenchmarkProfile().lexicalCorrection, "t9_small");
+  assert.equal(resolveBrowserBenchmarkProfile().ocrLanguageRetry, "t9_small");
+  assert.equal(
+    resolveBrowserBenchmarkProfile().tableSlotBuilder,
+    "recursive_gaps_v1",
+  );
+  assert.equal(resolveBrowserBenchmarkProfile().tableSlotMaxColumns, 14);
 });
 
 test("browser benchmark accepts explicit diagnostic profiles", () => {

@@ -21,12 +21,9 @@ from app.layout.contracts import (
 from app.layout.recursive_grid import (
     RecursiveGridConfig,
     RegionDecision,
-    classify_sparse_shadow,
+    analyze_recursive_grid,
     group_recursive_leaves,
     prepare_recursive_region,
-    project_sparse_shadow,
-    segment_recursive_grid,
-    sparse_shadow_signature,
 )
 
 
@@ -97,6 +94,57 @@ def _crop_region(
         bbox=bbox,
         metadata=metadata,
     )
+
+
+def _table_region_with_outer_bands(
+    image: Image.Image,
+    table_region: LayoutRegion,
+    stage: LayoutStageSpec | None = None,
+) -> list[LayoutRegion]:
+    """Preserve visible content above and below a detected table bbox."""
+
+    _, top, _, bottom = table_region.bbox
+    regions: list[LayoutRegion] = []
+
+    def append_band(
+        bbox: tuple[int, int, int, int],
+        position: str,
+    ) -> None:
+        band = _crop_region(
+            image,
+            bbox,
+            metadata={"layout_kind": "recursive_grid_outer_band", "position": position},
+        )
+        if band is None:
+            return
+        if stage is None:
+            regions.append(band)
+            return
+        children = _recursive_grid_image_regions(band.image, stage)
+        if not children:
+            regions.append(band)
+            return
+        offset_x, offset_y = bbox[0], bbox[1]
+        for child in children:
+            left, child_top, right, child_bottom = child.bbox
+            regions.append(
+                LayoutRegion(
+                    kind=child.kind,
+                    image=child.image,
+                    bbox=(left + offset_x, child_top + offset_y, right + offset_x, child_bottom + offset_y),
+                    table=child.table,
+                    metadata=_shift_region_metadata(child.metadata, offset_x, offset_y),
+                )
+            )
+        if band.image is not image:
+            band.image.close()
+
+    if top > 0:
+        append_band((0, 0, image.width, top), "above")
+    regions.append(table_region)
+    if bottom < image.height:
+        append_band((0, bottom, image.width, image.height), "below")
+    return regions
 
 
 def _foreground_mask_numpy(image: Image.Image) -> np.ndarray:
@@ -400,24 +448,14 @@ def _recursive_grid_image_regions(
     image: Image.Image,
     stage: LayoutStageSpec,
 ) -> list[LayoutRegion]:
-    config = _recursive_grid_config(stage)
-    leaves = segment_recursive_grid(
-        image,
-        config,
-    )
-    if not leaves:
+    config = recursive_grid_config(stage)
+    analysis = analyze_recursive_grid(image, config)
+    if not analysis.leaves:
         return []
 
-    ordered = sorted(
-        leaves,
-        key=lambda leaf: (
-            leaf.source_bbox[1],
-            leaf.source_bbox[0],
-            leaf.source_bbox[3],
-        ),
-    )
-    shadow = project_sparse_shadow(ordered)
-    shadow_profile = classify_sparse_shadow(sparse_shadow_signature(shadow))
+    ordered = analysis.leaves
+    shadow = analysis.projection
+    shadow_profile = analysis.profile
     projection_by_leaf = {id(leaf): (anchor, codes) for leaf, anchor, codes in shadow.leaf_projection}
     y_lines = [0, image.height]
     for leaf in ordered:
@@ -605,7 +643,7 @@ def _is_structural_only_leaf(
     return thin_edge_ink or tiny_footer
 
 
-def _recursive_grid_config(
+def recursive_grid_config(
     stage: LayoutStageSpec,
 ) -> RecursiveGridConfig:
     parameters = dict(stage.parameters)
@@ -2046,13 +2084,23 @@ def _shift_region_metadata(
     return shifted
 
 
+def _is_decorative_narrow_table(
+    image: Image.Image,
+    table: TableLayout,
+) -> bool:
+    left, top, right, bottom = table.bbox
+    width_ratio = max(0, right - left) / max(1, image.width)
+    height_ratio = max(0, bottom - top) / max(1, image.height)
+    return table.cols <= 2 and table.rows >= 20 and width_ratio < 0.15 and height_ratio >= 0.70
+
+
 def _recursive_grid_regions(
     image: Image.Image,
     stage: LayoutStageSpec,
     *,
     min_confirmed_cell_ratio: float,
 ) -> list[LayoutRegion]:
-    config = _recursive_grid_config(stage)
+    config = recursive_grid_config(stage)
     simple_table = _simple_track_table_layout(image)
     if simple_table is not None:
         table = _prefer_recursive_table_layout(
@@ -2064,7 +2112,10 @@ def _recursive_grid_regions(
             image.size,
         )
         assert table is not None
-        if not _full_page_table_lacks_early_vertical_support(
+        if not _is_decorative_narrow_table(
+            image,
+            table,
+        ) and not _full_page_table_lacks_early_vertical_support(
             image,
             table,
         ):
@@ -2086,19 +2137,18 @@ def _recursive_grid_regions(
             if prepared_table is not table_crop:
                 table_crop.close()
                 table_crop = prepared_table
+            table_region = LayoutRegion(
+                kind="table",
+                image=table_crop,
+                bbox=source_table_bbox,
+                table=prepared_layout,
+                metadata={
+                    "layout_kind": "recursive_grid_table",
+                    "region_recursion": (table_decision.metadata(),),
+                },
+            )
             return _normalize_recursive_output_regions(
-                [
-                    LayoutRegion(
-                        kind="table",
-                        image=table_crop,
-                        bbox=source_table_bbox,
-                        table=prepared_layout,
-                        metadata={
-                            "layout_kind": "recursive_grid_table",
-                            "region_recursion": (table_decision.metadata(),),
-                        },
-                    )
-                ],
+                _table_region_with_outer_bands(image, table_region, stage),
                 image,
             )
 
@@ -2108,11 +2158,16 @@ def _recursive_grid_regions(
     )
     if not table_regions:
         return _recursive_grid_image_regions(image, stage)
+    if any(_is_decorative_partition_table(region, image.size) for region in table_regions if region.kind == "table"):
+        for region in table_regions:
+            if region.image is not image:
+                region.image.close()
+        return _recursive_grid_image_regions(image, stage)
 
     regions: list[LayoutRegion] = []
     for region in table_regions:
         if region.kind == "table":
-            if _is_unreliable_partition_table(region):
+            if _is_unreliable_partition_table(region, page_size=image.size):
                 child_regions = _recursive_grid_image_regions(
                     region.image,
                     stage,
@@ -2190,10 +2245,19 @@ def _recursive_grid_regions(
     return _normalize_recursive_output_regions(regions, image)
 
 
-def _is_unreliable_partition_table(region: LayoutRegion) -> bool:
+def _is_unreliable_partition_table(
+    region: LayoutRegion,
+    *,
+    page_size: tuple[int, int] | None = None,
+) -> bool:
     if region.table is None:
         return False
     table = region.table
+    if page_size is not None and _is_decorative_partition_table(
+        region,
+        page_size,
+    ):
+        return True
     if table.rows < 12 or table.cols < 4:
         return False
 
@@ -2245,6 +2309,22 @@ def _is_unreliable_partition_table(region: LayoutRegion) -> bool:
     strong_ratio = strong_rows / max(1, table.rows)
     median_ratio = float(np.median(row_ratios)) if row_ratios else 0.0
     return strong_ratio < 0.45 and median_ratio < 0.50
+
+
+def _is_decorative_partition_table(
+    region: LayoutRegion,
+    page_size: tuple[int, int],
+) -> bool:
+    if region.table is None:
+        return False
+    page_width, page_height = page_size
+    left, top, right, bottom = region.bbox
+    return (
+        region.table.cols <= 2
+        and region.table.rows >= 20
+        and (right - left) / max(1, page_width) < 0.15
+        and (bottom - top) / max(1, page_height) >= 0.70
+    )
 
 
 def _partition_around_tables(

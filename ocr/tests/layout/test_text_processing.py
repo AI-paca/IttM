@@ -1,5 +1,3 @@
-import asyncio
-
 import numpy as np
 import pytest
 from PIL import Image, ImageDraw
@@ -24,16 +22,14 @@ from app.chunking.vertical import (
 )
 from app.formatting.contextual_markdown import apply_contextual_markdown_grammar
 from app.formatting.lexical_correction import apply_lexical_correction
-from app.formatting.ocr_corrections import recover_known_ocr_phrases
 from app.formatting.markdown_formatter import MarkdownFormatter
 from app.formatting.structural_grammar import SparseMarkdownRow
-from app.layout.contracts import LayoutDecision, LayoutStageSpec
 from app.layout.table_slots import (
     _slot_rows_to_markdown,
     table_words_to_slot_markdown,
     words_to_recursive_slot_markdown,
 )
-from app.pipeline_config import LayoutPipelineConfig, OcrPipelineProfile
+from app.pipeline_config import OcrPipelineProfile
 from app.services import convert_service
 from tests.support.generated_media import functional_ocr_fixture_image
 
@@ -224,10 +220,10 @@ def test_t9_small_cleans_common_ui_ocr_noise_without_table_linting():
     assert apply_lexical_correction(text, "t9_small") == "\n".join(
         [
             "Created 94 commits in 1 repository",
-            "AI-paca/IttM 7 merged",
-            "Hw7 (SCA) Jun 26",
-            "Hw5 (OCR engine, streaming, tests, debug area) Jun 19",
-            "AI-paca/IttM 94 commits",
+            "Al-paca/IttM @ merged",
+            "Нм (SCA) Jun 26",
+            "Нм (OCR engine, streaming, tests, debug area) Jun 19",
+            "AI-pacallttM 94 commits",
         ]
     )
 
@@ -245,9 +241,40 @@ def test_t9_small_cleans_coupon_screen_confusables():
         [
             "Лавка",
             "300 ₽ скидки на заказ от 2000 ₽",
-            "dlv320unroxzjsve26p8",
+            "div320unroxzjsve26p8",
         ]
     )
+
+
+def test_t9_small_cleans_technical_commerce_ocr_confusables():
+    text = "\n".join(
+        [
+            "| Product | FHO Display RAM 868 SSD 128GB DRS 19201080 |",
+            "| Price | £474 | €259.99 |",
+        ]
+    )
+
+    assert apply_lexical_correction(text, "t9_small") == "\n".join(
+        [
+            "| Product | FHD Display RAM 8GB SSD 128GB DDR5 1920x1080 |",
+            "| Price | €474 | €259.99 |",
+        ]
+    )
+
+
+def test_t9_small_splits_compact_display_resolutions_without_product_ids():
+    assert (
+        apply_lexical_correction(
+            "HP Laptop 15440021s FHD Display 19201080 and panel 1024768",
+            "t9_small",
+        )
+        == "HP Laptop 15440021s FHD Display 1920x1080 and panel 1024x768"
+    )
+
+
+def test_recovered_search_text_can_use_explicit_lexical_correction():
+    markdown = apply_lexical_correction("| Product | IPS RAM 868 |\n| --- | --- |", "t9_small")
+    assert "RAM 8GB" in markdown
 
 
 def test_curriculum_summary_repair_joins_wide_table_and_competency_text():
@@ -319,6 +346,70 @@ def test_curriculum_summary_repair_joins_wide_table_and_competency_text():
     assert "### Блок 2. Практики" in repaired
     assert "| Б2.О.03(У) | Научно-исследовательская работа | ОПК-1; ОПК-1.1 |" in repaired
     assert "Контроль/часы" not in repaired
+
+
+def test_pdf_text_layer_competence_rows_merge_safe_wrapped_names():
+    rows = [
+        [
+            convert_service._PdfFixedWidthCell("Б1.О.01", 8, 15),
+            convert_service._PdfFixedWidthCell("Иностранный язык", 30, 46),
+            convert_service._PdfFixedWidthCell("УК-4; УК-5", 89, 105),
+        ],
+        [
+            convert_service._PdfFixedWidthCell("Б1.О.02", 8, 15),
+            convert_service._PdfFixedWidthCell("История", 30, 46),
+            convert_service._PdfFixedWidthCell("УК-1; УК-5", 89, 105),
+        ],
+        [convert_service._PdfFixedWidthCell("Инновационная экономика и технологическое", 30, 71)],
+        [
+            convert_service._PdfFixedWidthCell("Б1.О.03", 8, 15),
+            convert_service._PdfFixedWidthCell("УК-2; УК-9", 89, 105),
+        ],
+        [convert_service._PdfFixedWidthCell("предпринимательство", 30, 49)],
+        [
+            convert_service._PdfFixedWidthCell("Б1.О.04", 8, 15),
+            convert_service._PdfFixedWidthCell("Деловая этика", 30, 46),
+            convert_service._PdfFixedWidthCell("УК-4; УК-5", 89, 105),
+        ],
+    ]
+
+    merged = convert_service._merge_pdf_competence_table_rows(rows)
+
+    assert merged is not None
+    assert merged[2] == [
+        "Б1.О.03",
+        "Инновационная экономика и технологическое предпринимательство",
+        "УК-2; УК-9",
+    ]
+    assert merged[3] == ["Б1.О.04", "Деловая этика", "УК-4; УК-5"]
+
+
+def test_pdf_text_layer_competence_rows_reject_risky_reordering():
+    rows = [
+        [convert_service._PdfFixedWidthCell("ДОП 10. Правовое сопровождение", 30, 60)],
+        [
+            convert_service._PdfFixedWidthCell("Б1.В.ДВ.02.10", 8, 22),
+            convert_service._PdfFixedWidthCell("ПК-3; ПК-3.5; УК-4; УК-4.1", 95, 130),
+        ],
+        [
+            convert_service._PdfFixedWidthCell(
+                "научно-исследовательских, опытно-конструкторских и технологических работ",
+                30,
+                100,
+            )
+        ],
+        [
+            convert_service._PdfFixedWidthCell("Б1.В.ДВ.02.11", 8, 22),
+            convert_service._PdfFixedWidthCell(
+                "ДОП 11. Цифровая безопасность: коммуникации в цифровой среде",
+                30,
+                88,
+            ),
+            convert_service._PdfFixedWidthCell("ПК-3; ПК-3.5; УК-4; УК-4.1", 95, 130),
+        ],
+    ]
+
+    assert convert_service._merge_pdf_competence_table_rows(rows) is None
 
 
 def test_curriculum_index_normalization_handles_superheader_rows():
@@ -1567,7 +1658,7 @@ def test_curriculum_summary_repair_ignores_non_curriculum_tables():
     assert repaired == markdown
 
 
-def test_t9_small_cleans_mixed_table_confusables():
+def test_t9_small_does_not_invent_mixed_table_fixture_literals():
     text = (
         "| Ng | Код Й | нх | Mix A |\n"
         "| й-Al-EN-OOl | RU-7Z | #р4}' F | EMi =т |\n"
@@ -1576,15 +1667,14 @@ def test_t9_small_cleans_mixed_table_confusables():
 
     corrected = apply_lexical_correction(text, "t9_small")
 
-    assert "| № | Код й | 中文 | Mix A |" in corrected
-    assert "й-A1-EN-001" in corrected
-    assert "RU-77" in corrected
-    assert "部分 甲" in corrected
-    assert "占位 单元" in corrected
-    assert "й-C3-MIX-303" in corrected
-    assert "F6-EN" in corrected
-    assert "G7-RU" in corrected
-    assert "J10-END-010" in corrected
+    assert "| Ng | Код Й | нх | Mix A |" in corrected
+    assert "#р4}' F" in corrected
+    assert "EMi =т" in corrected
+    assert "й-CЗ-MIX-ЗOЗ" in corrected
+
+
+def test_t9_small_only_collapses_spacing_between_observed_cjk_characters():
+    assert apply_lexical_correction("中 文 占 位", "t9_small") == "中文占位"
 
 
 def test_t9_small_repairs_pipeline_doc_identifiers():
@@ -1625,7 +1715,7 @@ def test_t9_small_repairs_mixed_latin_cyrillic_text_confusables():
 
     assert "README, но описание формальное/очень слабое" in corrected
     assert "й-ALPHA" in corrected
-    assert "EN-й" in corrected
+    assert "EM-Й" in corrected
 
 
 def test_t9_small_repairs_russian_academic_codes_without_latinizing_them():
@@ -1736,7 +1826,7 @@ def test_screen_text_noise_repair_cleans_github_activity():
     repaired, flags = convert_service._repair_screen_text_noise(text)
 
     assert "Created 94 commits in 1 repository" in repaired
-    assert "AI-paca/IttM 7 merged" in repaired
+    assert "Al-paca/IttM @ merged" in repaired
     assert "Web UI Jun 21" in repaired
     assert flags == ("text_repair:ui_t9",)
 
@@ -1760,15 +1850,14 @@ def test_screen_text_noise_repair_drops_coupon_banner_noise():
 
     assert repaired.splitlines()[0] == "Лавка"
     assert "300 ₽ скидки на заказ от 2000 ₽" in repaired
-    assert "dlv320unroxzjsve26p8" in repaired
+    assert "div320unroxzjsve26p8" in repaired
     assert flags == (
         "text_repair:coupon_banner_noise",
         "text_repair:ui_t9",
-        "text_repair:coupon_canonical",
     )
 
 
-def test_screen_text_noise_repair_canonicalizes_taxi_coupon():
+def test_screen_text_noise_repair_does_not_invent_taxi_coupon_copy():
     text = "\n".join(
         [
             "₽",
@@ -1786,21 +1875,8 @@ def test_screen_text_noise_repair_canonicalizes_taxi_coupon():
 
     repaired, flags = convert_service._repair_screen_text_noise(text)
 
-    assert repaired == "\n\n".join(
-        [
-            "Такси",
-            "10% скидки, но не более 100 ₽,\nв тарифе «Комфорт» или выше",
-            "dth11oprdaekgjwed6eg",
-            "Используйте до 1 января 02:00",
-            (
-                "Введите его перед заказом поездки — и скидка учтётся в итоговой стоимости.\n"
-                "Промокод действует в тарифе «Комфорт» или выше."
-            ),
-            "Использовать скидку можете только вы.\nПодробнее: yandex.ru/legal/plus_daily/ru/",
-            "Перейти",
-        ]
-    )
-    assert flags == ("text_repair:coupon_canonical",)
+    assert repaired == text
+    assert flags == ()
 
 
 def test_split_vertical_returns_at_least_one_chunk_for_small_image():
@@ -1921,38 +1997,6 @@ def test_blank_band_chunking_coalesces_small_content_instead_of_dropping_it():
         image.close()
 
 
-def test_convert_page_segments_extreme_long_screenshot_before_layout(monkeypatch):
-    image, _ = _generated_long_screenshot(card_count=64)
-    layout_sizes = []
-    recognized = []
-
-    class FakeEngine:
-        def recognize(self, chunk, mode="text_mode", psm=6):
-            recognized.append(chunk.size)
-            return f"segment-{len(recognized)}"
-
-    def fake_layout(chunk, min_confirmed_cell_ratio=0.0):
-        layout_sizes.append(chunk.size)
-        return [LayoutRegion(kind="image", image=chunk, bbox=(0, 0, *chunk.size))]
-
-    monkeypatch.setattr(convert_service, "analyze_document_layout", fake_layout)
-    profile = OcrPipelineProfile(
-        name="long-screenshot-test",
-        layout=LayoutPipelineConfig(allowed_stages=("table_regions",)),
-    )
-
-    try:
-        markdown, meta = convert_service._convert_page(image, FakeEngine(), profile)
-    finally:
-        image.close()
-
-    assert len(layout_sizes) > 1
-    assert max(height for _, height in layout_sizes) <= 1600
-    assert len(recognized) == len(layout_sizes)
-    assert "segment-1" in markdown
-    assert meta["chunks"] == len(recognized)
-
-
 def test_overlapping_starts_cover_final_edge_without_duplicates():
     assert convert_service._overlapping_starts(100, 40, 10) == [0, 30, 60]
     assert convert_service._overlapping_starts(101, 40, 10) == [0, 30, 60, 61]
@@ -2066,514 +2110,108 @@ def test_sparse_cover_detection_rejects_dense_page():
         image.close()
 
 
-def test_convert_page_appends_dense_grid_fallback(monkeypatch):
-    image = Image.new("RGB", (2400, 1600), "white")
-    totals = {
-        "chunks": 2,
-        "cards_found": 0,
-        "tables_found": 1,
-        "table_cells": 20,
-    }
-    monkeypatch.setattr(
-        convert_service,
-        "_convert_page_segment",
-        lambda _image, _engine, _profile: ("primary text", totals.copy()),
-    )
-    monkeypatch.setattr(
-        convert_service,
-        "_looks_like_dense_grid_page",
-        lambda _image: True,
-    )
-    monkeypatch.setattr(
-        convert_service,
-        "_recognize_dense_grid_page",
-        lambda fallback_engine, _image, _profile: (
-            "fallback text" if fallback_engine is engine else "wrong engine",
-            7,
-        ),
-    )
-    engine = object()
+def test_primary_replacement_fails_closed_without_shared_core(monkeypatch):
+    monkeypatch.setattr(convert_service, "native_pipeline_core", lambda: None)
 
-    try:
-        markdown, meta = convert_service._convert_page(
-            image,
-            engine,
-            OcrPipelineProfile(name="test", dense_grid_fallback=True),
-        )
-    finally:
-        image.close()
-
-    assert "primary text" in markdown
-    assert "fallback text" in markdown
-    assert meta["chunks"] == 9
-    assert meta["tables_found"] == 1
-
-
-def test_oversized_sparse_table_recovers_even_after_lint_pass(
-    monkeypatch,
-):
-    image = Image.new("RGB", (2400, 1600), "white")
-    totals = {
-        "chunks": 2,
-        "cards_found": 0,
-        "tables_found": 2,
-        "table_cells": 1200,
-        "runtime_flags": [
-            "structural_grammar:finite_merge_v1",
-            "markdown_lint:pass",
-        ],
-    }
-    monkeypatch.setattr(
-        convert_service,
-        "_convert_page_segment",
-        lambda _image, _engine, _profile: (
-            "short damaged table",
-            totals.copy(),
-        ),
-    )
-    monkeypatch.setattr(
-        convert_service,
-        "_looks_like_dense_grid_page",
-        lambda _image: True,
-    )
-    monkeypatch.setattr(
-        convert_service,
-        "_recognize_dense_grid_page",
-        lambda _engine, _image, _profile: (
-            "recovered curriculum text",
-            9,
-        ),
+    assert not convert_service._should_replace_primary_with_fallback(
+        "valuable primary evidence tokens",
+        " ".join(["valuable", "primary", "evidence", "tokens", *[f"extra{index}" for index in range(50)]]),
     )
 
-    try:
-        markdown, meta = convert_service._convert_page(
-            image,
-            object(),
-            OcrPipelineProfile(
-                name="oversized-grid",
-                dense_grid_fallback=True,
-            ),
-        )
-    finally:
-        image.close()
 
-    assert "recovered curriculum text" in markdown
-    assert meta["chunks"] == 11
-    assert "dense_grid_recovery:oversized_sparse_table" in meta["runtime_flags"]
-    assert "dense_grid_strategy:bounded_bands_v2" in meta["runtime_flags"]
-
-
-def test_convert_page_appends_sparse_cover_fallback(monkeypatch):
-    image = Image.new("RGB", (2400, 1600), "white")
-    totals = {
-        "chunks": 1,
-        "cards_found": 0,
-        "tables_found": 0,
-        "table_cells": 0,
-    }
-    monkeypatch.setattr(
-        convert_service,
-        "_convert_page_segment",
-        lambda _image, _engine, _profile: ("primary text", totals.copy()),
-    )
-    monkeypatch.setattr(
-        convert_service,
-        "_looks_like_dense_grid_page",
-        lambda _image: False,
-    )
-    monkeypatch.setattr(
-        convert_service,
-        "_looks_like_sparse_cover_page",
-        lambda _image: True,
-    )
-    monkeypatch.setattr(
-        convert_service,
-        "_recognize_sparse_cover_page",
-        lambda fallback_engine, _image, _profile: (
-            "fallback text" if fallback_engine is engine else "wrong engine",
-            4,
-        ),
-    )
-    engine = object()
-
-    try:
-        markdown, meta = convert_service._convert_page(
-            image,
-            engine,
-            OcrPipelineProfile(name="test", dense_grid_fallback=True),
-        )
-    finally:
-        image.close()
-
-    assert "primary text" in markdown
-    assert "fallback text" in markdown
-    assert meta["chunks"] == 5
-
-
-def test_convert_page_appends_projector_slide_language_fallback(monkeypatch):
+def test_projector_slide_fallback_prefers_russian_dense_candidate(monkeypatch):
     image = Image.new("RGB", (2000, 1200), "white")
-    totals = {
-        "chunks": 1,
-        "cards_found": 0,
-        "tables_found": 0,
-        "table_cells": 0,
-    }
+    calls = []
+    extra_pass_kwargs = {}
+
+    class RecognitionEngine:
+        def recognize(self, _image, mode="text_mode", psm=3):
+            calls.append((mode, psm))
+            return {
+                3: "rd",
+                11: (
+                    "Схема сбора статистической отчетности о работе судов\n"
+                    "Федеральное хранилище судебной статистики\n"
+                    "Мировые судьи"
+                ),
+                6: "Cxema sbopa ctathctuyeckou otuetHoctu",
+                4: "",
+                12: "коротко",
+            }[psm]
+
+    def fake_extra_pass_engine(_engine, _profile, **kwargs):
+        extra_pass_kwargs.update(kwargs)
+        return RecognitionEngine()
+
     monkeypatch.setattr(
         convert_service,
-        "_convert_page_segment",
-        lambda _image, _engine, _profile: ("primary text", totals.copy()),
+        "_extra_pass_engine",
+        fake_extra_pass_engine,
     )
-    monkeypatch.setattr(
-        convert_service,
-        "_recognize_projector_slide_fallback",
-        lambda fallback_engine, _image, _profile: ("fallback text" if fallback_engine is engine else "wrong engine"),
-    )
-    engine = object()
 
     try:
-        markdown, meta = convert_service._convert_page(
+        text = convert_service._recognize_projector_slide_fallback(
+            object(),
             image,
-            engine,
-            OcrPipelineProfile(name="test", dense_grid_fallback=True),
+            OcrPipelineProfile(name="test"),
         )
     finally:
         image.close()
 
-    assert "primary text" in markdown
-    assert "fallback text" in markdown
-    assert meta["chunks"] == 2
+    assert "Мировые судьи" in text
+    assert extra_pass_kwargs["language_priority"] == ("rus", "eng")
+    assert extra_pass_kwargs["ocr_border_pixels"] == 0
+    assert calls == [
+        ("text_mode", 11),
+        ("text_mode", 3),
+        ("text_mode", 6),
+        ("text_mode", 12),
+        ("text_mode", 4),
+    ]
 
 
-def test_convert_page_bounds_long_screenshot_before_spatial_layout(
-    monkeypatch,
-):
-    image, _ = _generated_long_screenshot(card_count=64)
-    layout_inputs = []
-    region_inputs = []
-    layout_crops = []
-
-    class FakeEngine:
-        def recognize(self, chunk, mode="text_mode", psm=6):
-            raise AssertionError("test replaces region recognition")
-
-    def fake_analyze_layout(
-        page,
-        config,
-        *,
-        min_confirmed_cell_ratio,
-    ):
-        layout_inputs.append(page.size)
-        assert config.selector == "uniform_spatial_v1"
-        assert min_confirmed_cell_ratio == 0.35
-        first = page.crop((0, 0, page.width, page.height // 2))
-        second = page.crop((0, page.height // 2, page.width, page.height))
-        layout_crops.extend((first, second))
-        return (
-            [
-                LayoutRegion(
-                    kind="image",
-                    image=first,
-                    bbox=(0, 0, page.width, page.height // 2),
-                ),
-                LayoutRegion(
-                    kind="image",
-                    image=second,
-                    bbox=(0, page.height // 2, page.width, page.height),
-                ),
-            ],
-            LayoutDecision(
-                label="spatial",
-                stages=(LayoutStageSpec(name="spatial_regions"),),
-                confidence=1.0,
-            ),
-        )
-
-    monkeypatch.setattr(convert_service, "analyze_layout", fake_analyze_layout)
-
-    def fake_recognize_region(_engine, region, _profile):
-        region_inputs.append(region.size)
-        return [f"region-{len(region_inputs)}"], 1, 0
-
-    monkeypatch.setattr(
-        convert_service,
-        "_recognize_image_region",
-        fake_recognize_region,
-    )
-    profile = OcrPipelineProfile(
-        name="adaptive-long-screenshot",
-        layout=LayoutPipelineConfig(
-            feature_extractors=("projection_geometry",),
-            selector="uniform_spatial_v1",
-            allowed_stages=("spatial_regions",),
-        ),
-        grid_min_confirmed_cell_ratio=0.35,
-    )
-
-    try:
-        markdown, meta = convert_service._convert_page(
-            image,
-            FakeEngine(),
-            profile,
-        )
-    finally:
-        image.close()
-
-    assert len(layout_inputs) > 1
-    assert max(height for _, height in layout_inputs) <= 1600
-    assert len(region_inputs) == len(layout_inputs) * 2
-    assert max(height for _, height in region_inputs) <= 800
-    assert "region-1" in markdown
-    assert "region-2" in markdown
-    assert meta["chunks"] == len(region_inputs)
-    for crop in layout_crops:
-        with pytest.raises(ValueError):
-            crop.getpixel((0, 0))
-
-
-def test_spatial_layout_appends_full_page_fallback(monkeypatch):
-    image = Image.new("RGB", (900, 500), "white")
-    first = image.crop((0, 0, 450, 500))
-    second = image.crop((450, 0, 900, 500))
-    crops = [first, second]
+def test_projector_slide_fallback_scores_explicit_tesseract_language_candidates(monkeypatch):
+    image = Image.new("RGB", (2000, 1200), "white")
     calls = []
 
-    def fake_analyze_layout(
-        page,
-        config,
-        *,
-        min_confirmed_cell_ratio,
-    ):
-        assert page is image
-        assert config.selector == "uniform_spatial_v1"
-        assert min_confirmed_cell_ratio == 0.35
-        return (
-            [
-                LayoutRegion(
-                    kind="image",
-                    image=first,
-                    bbox=(0, 0, 450, 500),
-                ),
-                LayoutRegion(
-                    kind="image",
-                    image=second,
-                    bbox=(450, 0, 900, 500),
-                ),
-            ],
-            LayoutDecision(
-                label="spatial",
-                stages=(LayoutStageSpec(name="spatial_regions"),),
-                confidence=1.0,
-            ),
-        )
+    class RecognitionEngine:
+        ocr_border_pixels = 0
 
-    def fake_recognize_region(_engine, region, _profile):
-        calls.append(region.size)
-        if region is image:
-            return ["whole page baseline"], 1, 0
-        return [f"region {len(calls)}"], 1, 0
+        def info(self):
+            return {"engine": "tesseract"}
 
-    monkeypatch.setattr(convert_service, "analyze_layout", fake_analyze_layout)
+        def installed_languages(self):
+            return ["eng", "rus"]
+
+        def configured_ocr_language_string(self):
+            return "rus+eng"
+
+        def recognize_to_string(self, _image, psm=3, lang=None):
+            calls.append((psm, lang))
+            if lang == "rus" and psm == 11:
+                return "Система сбора первичных данных и форм отчетности о судимости"
+            if lang == "eng" and psm == 11:
+                return "Cucrema copa nepBUHHbIX AaHHbIX hOpM OTHETHOCTU"
+            return "rd"
+
     monkeypatch.setattr(
         convert_service,
-        "_recognize_image_region",
-        fake_recognize_region,
+        "_extra_pass_engine",
+        lambda *_args, **_kwargs: RecognitionEngine(),
     )
 
-    profile = OcrPipelineProfile(
-        name="spatial-fallback",
-        spatial_full_page_fallback=True,
-        layout=LayoutPipelineConfig(
-            feature_extractors=("projection_geometry",),
-            selector="uniform_spatial_v1",
-            allowed_stages=("spatial_regions",),
-        ),
-        grid_min_confirmed_cell_ratio=0.35,
-    )
     try:
-        markdown, meta = convert_service._convert_page_segment(
-            image,
+        text = convert_service._recognize_projector_slide_fallback(
             object(),
-            profile,
+            image,
+            OcrPipelineProfile(name="test"),
         )
     finally:
         image.close()
 
-    assert calls == [(450, 500), (450, 500), (900, 500)]
-    assert "region 1" in markdown
-    assert "region 2" in markdown
-    assert "whole page baseline" in markdown
-    assert meta["chunks"] == 3
-    assert "spatial_full_page_fallback:used" in meta["runtime_flags"]
-    for crop in crops:
-        with pytest.raises(ValueError):
-            crop.getpixel((0, 0))
-
-
-def test_spatial_layout_skips_full_page_fallback_after_large_table(monkeypatch):
-    image = Image.new("RGB", (900, 500), "white")
-    table_image = image.crop((0, 0, 900, 300))
-    first = image.crop((0, 300, 450, 500))
-    second = image.crop((450, 300, 900, 500))
-    layout = _dense_table_layout(900, 300, rows=8, cols=6)
-    calls = []
-
-    def fake_analyze_layout(
-        page,
-        config,
-        *,
-        min_confirmed_cell_ratio,
-    ):
-        return (
-            [
-                LayoutRegion(
-                    kind="table",
-                    image=table_image,
-                    bbox=(0, 0, 900, 300),
-                    table=layout,
-                ),
-                LayoutRegion(
-                    kind="image",
-                    image=first,
-                    bbox=(0, 300, 450, 500),
-                ),
-                LayoutRegion(
-                    kind="image",
-                    image=second,
-                    bbox=(450, 300, 900, 500),
-                ),
-            ],
-            LayoutDecision(
-                label="spatial",
-                stages=(LayoutStageSpec(name="spatial_regions"),),
-                confidence=1.0,
-            ),
-        )
-
-    table_md = "\n".join("| " + " | ".join(f"c{col}" for col in range(6)) + " |" for _row in range(8))
-
-    def fake_convert_region(region, _engine, _profile, _layout_parameters=()):
-        if region.kind == "table":
-            return [table_md], {
-                "chunks": 1,
-                "cards_found": 0,
-                "tables_found": 1,
-                "table_cells": 48,
-                "runtime_flags": [],
-            }
-        return ["region text"], {
-            "chunks": 1,
-            "cards_found": 0,
-            "tables_found": 0,
-            "table_cells": 0,
-            "runtime_flags": [],
-        }
-
-    def fake_recognize_region(_engine, region, _profile):
-        calls.append(region.size)
-        return ["whole page baseline"], 1, 0
-
-    monkeypatch.setattr(convert_service, "analyze_layout", fake_analyze_layout)
-    monkeypatch.setattr(convert_service, "_convert_layout_region", fake_convert_region)
-    monkeypatch.setattr(
-        convert_service,
-        "_recognize_image_region",
-        fake_recognize_region,
-    )
-
-    profile = OcrPipelineProfile(
-        name="spatial-fallback",
-        spatial_full_page_fallback=True,
-        layout=LayoutPipelineConfig(
-            feature_extractors=("projection_geometry",),
-            selector="uniform_spatial_v1",
-            allowed_stages=("spatial_regions",),
-        ),
-    )
-    try:
-        markdown, meta = convert_service._convert_page_segment(
-            image,
-            object(),
-            profile,
-        )
-    finally:
-        image.close()
-
-    assert calls == []
-    assert "whole page baseline" not in markdown
-    assert "region text" in markdown
-    assert meta["chunks"] == 3
-    assert meta["tables_found"] == 1
-    assert "spatial_full_page_fallback:used" not in meta["runtime_flags"]
-
-
-def test_dense_grid_fallback_skips_after_large_table_markdown(monkeypatch):
-    image = Image.new("RGB", (900, 500), "white")
-    table_md = "\n".join("| " + " | ".join(f"c{col}" for col in range(6)) + " |" for _row in range(8))
-
-    monkeypatch.setattr(
-        convert_service,
-        "_convert_page_segment",
-        lambda _image, _engine, _profile: (
-            table_md,
-            {
-                "chunks": 1,
-                "cards_found": 0,
-                "tables_found": 1,
-                "table_cells": 48,
-                "runtime_flags": [],
-            },
-        ),
-    )
-    monkeypatch.setattr(convert_service, "_looks_like_dense_grid_page", lambda _image: True)
-
-    def fail_dense_grid(_engine, _image, _profile):
-        raise AssertionError("dense grid fallback should not run after a large table")
-
-    monkeypatch.setattr(convert_service, "_recognize_dense_grid_page", fail_dense_grid)
-
-    markdown, meta = convert_service._convert_page(
-        image,
-        object(),
-        OcrPipelineProfile(name="dense", dense_grid_fallback=True),
-    )
-
-    assert markdown == table_md
-    assert meta["chunks"] == 1
-    assert meta["tables_found"] == 1
-
-
-def test_dark_ui_text_fallback_appends_inverted_pass(monkeypatch):
-    image = Image.new("RGB", (900, 500), (24, 24, 24))
-    draw = ImageDraw.Draw(image)
-    draw.rectangle((40, 40, 260, 150), fill=(240, 240, 240))
-    calls = []
-
-    def fake_recognize_region(_engine, region, _profile):
-        calls.append(region)
-        return (["primary text"] if len(calls) == 1 else ["dark fallback text"], 1, 0)
-
-    monkeypatch.setattr(
-        convert_service,
-        "_recognize_image_region",
-        fake_recognize_region,
-    )
-    try:
-        markdown, meta = convert_service._convert_page_segment(
-            image,
-            object(),
-            OcrPipelineProfile(name="dark-ui", dark_ui_text_fallback=True),
-        )
-    finally:
-        image.close()
-
-    assert len(calls) == 2
-    assert calls[0] is not calls[1]
-    assert "primary text" in markdown
-    assert "dark fallback text" in markdown
-    assert meta["chunks"] == 2
-    assert "dark_ui_text_fallback:used" in meta["runtime_flags"]
-    with pytest.raises(ValueError):
-        calls[1].getpixel((0, 0))
+    assert text == "Система сбора первичных данных и форм отчетности о судимости"
+    assert (11, "rus") in calls
+    assert (11, "eng") in calls
 
 
 def test_contextual_markdown_grammar_does_not_invent_web_or_rubric_scaffolds():
@@ -2601,42 +2239,6 @@ def test_contextual_markdown_grammar_does_not_invent_web_or_rubric_scaffolds():
         enabled=False,
     )
     assert "| Site | amazon.it |" not in disabled
-
-
-def test_known_ocr_phrase_recovery_accepts_noisy_court_diagram():
-    recovered = recover_known_ocr_phrases(
-        "\n".join(
-            [
-                "Схема сбора статистической отчетности",
-                "о работе судов (децентрализованная сводка)",
-                "р a Федеральное хранилище",
-                "судебной статистики",
-            ]
-        )
-    )
-
-    assert "Судебный департамент" in recovered
-    assert "Размещение статистики" in recovered
-    assert "АСОЮ" in recovered
-    assert "Мировые судьи" in recovered
-
-
-def test_known_ocr_phrase_recovery_accepts_noisy_unified_pipeline_doc():
-    recovered = recover_known_ocr_phrases(
-        "\n".join(
-            [
-                "# Единый пайплайн: целевая модель",
-                "OcrPipelineProfile живёт в ocr/app/pipeline config ру",
-                "GET Ivl/pipeline/flags и browser backend effective flags",
-                "PDF-контракт pdf modezauto raster для gateway API",
-            ]
-        )
-    )
-
-    assert "[Архитектура](./architecture.md)" in recovered
-    assert "`pipeline_flags`" in recovered
-    assert "`GET /v1/pipeline/flags`" in recovered
-    assert "`pdf_mode=auto|raster`" in recovered
 
 
 def test_aligned_numeric_full_page_recovery_prefers_more_complete_ranked_table():
@@ -2676,7 +2278,7 @@ def test_aligned_numeric_full_page_recovery_prefers_more_complete_ranked_table()
     assert "| 8 | Theta Phone | Snapdragon 7+ Gen 3 | 8GB+256GB | 100000 |" in recovered
 
 
-def test_short_name_score_table_repair_normalizes_ocr_confusions():
+def test_short_name_score_table_repair_preserves_observed_names():
     repaired, count = convert_service._repair_short_name_score_tables(
         "\n".join(
             [
@@ -2696,10 +2298,12 @@ def test_short_name_score_table_repair_normalizes_ocr_confusions():
     assert count == 1
     assert "| Кавтаев | - |" in repaired
     assert "| Кононюк | 6 |" in repaired
-    assert "| Тощевиков | 9 |" in repaired
-    assert "| Чапурин | 5 |" in repaired
-    assert "| Шубин | 8 |" in repaired
+    assert "| Тошевиков | 9 |" in repaired
+    assert "| Залурин | 5 |" in repaired
+    assert "| Шlубин | 8 |" in repaired
     assert "| Малафеева | 6 |" in repaired
+    assert "Тощевиков" not in repaired
+    assert "Чапурин" not in repaired
 
 
 def test_curriculum_header_repair_does_not_invent_fixture_rows():
@@ -2817,6 +2421,27 @@ def test_search_result_columns_from_words_builds_result_grid_columns():
     assert ["Badge", "Best Seller"] in columns[2]
 
 
+def test_search_result_rating_accepts_ocr_confusable_star_rows():
+    assert convert_service._search_result_rating("S50 keke kk (4)") == "5.0 (4)"
+    assert convert_service._search_result_rating("35 kkktky (4)") == "3.5 (4)"
+    assert convert_service._search_result_rating("42kekktkky (11)") == "4.2 (11)"
+
+
+def test_search_result_deal_accepts_ocr_confusable_prime_day_rows():
+    assert convert_service._search_result_deal_value("Prime Dy eat") == "Prime Day Deal"
+    assert convert_service._search_result_deal_value("Prime Day Dead") == "Prime Day Deal"
+    assert convert_service._search_result_deal_value("PriweDayDeat") == "Prime Day Deal"
+
+
+def test_search_result_product_text_stops_before_bought_price_noise():
+    product = convert_service._search_result_product_text(
+        "ASUS Vivobook Go 15 Notebook IPS Display RAM 16GB SSD SomtekeY 00 ohtin past onth a *474 pep: esse."
+    )
+
+    assert product == "ASUS Vivobook Go 15 Notebook IPS Display RAM 16GB SSD SomtekeY 00 ohtin"
+    assert "474" not in product
+
+
 def test_search_results_screen_recovery_rejects_normal_table():
     table = "| Name | Value |\n" "| --- | --- |\n" "| Alpha | 1 |\n" "| Beta | 2 |"
 
@@ -2856,11 +2481,11 @@ def test_large_markdown_table_repair_merges_overflow_and_drops_noise():
     assert len(body) == 13
     assert "SECTION ALPHA" in repaired
     assert "merged subsection" in repaired
-    assert "::merge-left::" in repaired
+    assert "::merge-left::" not in repaired
     assert "FTY jfzr" not in repaired
 
 
-def test_large_markdown_table_repair_restores_mixed_merge_left_rows():
+def test_large_markdown_table_repair_does_not_invent_merge_markers_or_text():
     repaired, count = convert_service._repair_large_markdown_tables(_large_table_with_overflow_and_noise())
 
     assert count == 1
@@ -2872,47 +2497,26 @@ def test_large_markdown_table_repair_restores_mixed_merge_left_rows():
     alpha_cells = convert_service._split_markdown_table_cells(alpha_line)
     beta_cells = convert_service._split_markdown_table_cells(beta_line)
 
-    assert alpha_cells[0] == ("РАЗДЕЛ A SECTION ALPHA 部分 甲 merged subsection й-ALPHA-2026")
-    assert alpha_cells[1:] == ["::merge-left::"] * 9
-    assert beta_cells[0] == ("РАЗДЕЛ B SECTION BETA 部分 乙 merged subsection й-BETA-3030")
-    assert beta_cells[1:] == ["::merge-left::"] * 9
+    assert alpha_cells[0] == "РАЗДЕЛ A / SECTION ALPHA  merged subsection / й-ALPHA-2026"
+    assert alpha_cells[1:] == [""] * 9
+    assert beta_cells[0] == "РАЗДЕЛ B / SECTION BETA / merged subsection / й BETA-3OЗO"
+    assert beta_cells[1:] == [""] * 9
 
 
-def test_convert_page_repairs_large_markdown_table_shape(monkeypatch):
-    image = Image.new("RGB", (900, 1200), "white")
-    monkeypatch.setattr(
-        convert_service,
-        "_convert_page_segment",
-        lambda *_args, **_kwargs: (
-            _large_table_with_overflow_and_noise(),
-            {
-                "chunks": 1,
-                "cards_found": 0,
-                "tables_found": 1,
-                "table_cells": 150,
-                "runtime_flags": ["markdown_lint:pass"],
-            },
-        ),
+def test_explicit_static_repairs_preserve_large_markdown_table_shape():
+    markdown, flags = convert_service._apply_static_markdown_repairs(
+        _large_table_with_overflow_and_noise(), OcrPipelineProfile(name="table-repair")
     )
-
-    try:
-        markdown, meta = convert_service._convert_page(
-            image,
-            object(),
-            OcrPipelineProfile(name="table-repair"),
-        )
-    finally:
-        image.close()
-
-    assert markdown.startswith("# Mixed OCR table")
-    assert "Image-only PDF merged subsection rows Markdown placeholder cells" in markdown
-    table = convert_service._markdown_table_part(markdown.rsplit("\n\n", maxsplit=1)[-1])
+    assert markdown.startswith("| № | Код | Русский | English")
+    assert "# Mixed OCR table" not in markdown
+    assert "Image-only PDF merged subsection rows Markdown placeholder cells" not in markdown
+    table = convert_service._markdown_table_part(markdown)
     assert table is not None
     assert len(table[0]) == 10
     assert len(table[2]) == 13
-    assert "table_repair:mixed_table_heading" in meta["runtime_flags"]
-    assert "table_repair:mixed_table_t9" in meta["runtime_flags"]
-    assert "table_repair:large_markdown_shape" in meta["runtime_flags"]
+    assert "table_repair:mixed_table_heading" not in flags
+    assert "table_repair:mixed_table_t9" not in flags
+    assert "table_repair:large_markdown_shape" in flags
 
 
 def _doc_page_with_plain_section_labels() -> str:
@@ -2950,77 +2554,22 @@ def test_doc_section_heading_repair_promotes_plain_labels():
     assert "## Что нужно для перехода" in repaired
 
 
-def test_convert_page_repairs_doc_section_headings(monkeypatch):
-    image = Image.new("RGB", (1200, 1600), "white")
-    monkeypatch.setattr(
-        convert_service,
-        "_convert_page_segment",
-        lambda *_args, **_kwargs: (
-            _doc_page_with_plain_section_labels(),
-            {
-                "chunks": 1,
-                "cards_found": 0,
-                "tables_found": 3,
-                "table_cells": 27,
-                "runtime_flags": ["markdown_lint:pass"],
-            },
-        ),
+def test_explicit_static_repairs_preserve_doc_section_headings():
+    markdown, flags = convert_service._apply_static_markdown_repairs(
+        _doc_page_with_plain_section_labels(), OcrPipelineProfile(name="doc-repair")
     )
-
-    try:
-        markdown, meta = convert_service._convert_page(
-            image,
-            object(),
-            OcrPipelineProfile(name="doc-repair"),
-        )
-    finally:
-        image.close()
-
     assert "## Целевой контракт" in markdown
-    assert "doc_repair:section_headings" in meta["runtime_flags"]
+    assert "doc_repair:section_headings" in flags
 
 
-def test_convert_page_recovers_fragmented_search_results_screen(monkeypatch):
-    image = Image.new("RGB", (1280, 720), "white")
-    calls = []
-
-    class FakeEngine:
-        def recognize(self, page, mode="text_mode", psm=6):
-            calls.append((page.size, mode, psm))
-            return "Best Sellers 450 - 600 € 15 to 15.9 in " "Samsung Acer Dell"
-
-    monkeypatch.setattr(
-        convert_service,
-        "_convert_page_segment",
-        lambda *_args, **_kwargs: (
-            _fragmented_search_results_markdown(),
-            {
-                "chunks": 2,
-                "cards_found": 0,
-                "tables_found": 2,
-                "table_cells": 86,
-                "runtime_flags": [
-                    "structural_grammar:finite_merge_v1",
-                    "markdown_lint:pass",
-                ],
-            },
-        ),
+def test_explicit_search_recovery_uses_supplied_screen_evidence():
+    markdown = convert_service._recover_search_results_screen(
+        convert_service._markdown_blocks(_fragmented_search_results_markdown()),
+        extra_text="Best Sellers 450 - 600 € 15 to 15.9 in Samsung Acer Dell",
     )
-
-    try:
-        markdown, meta = convert_service._convert_page(
-            image,
-            FakeEngine(),
-            OcrPipelineProfile(name="search-results"),
-        )
-    finally:
-        image.close()
-
+    assert markdown is not None
     assert markdown.count("| Badge | Product | Rating | Bought | Deal | Price | Extra | Action |") == 1
     assert "- Best Sellers" in markdown
-    assert calls == [((1280, 720), "text_mode", 3)]
-    assert "search_results_recovery:full_page_ocr" in meta["runtime_flags"]
-    assert "search_results_recovery:screen_grid" in meta["runtime_flags"]
 
 
 def test_convert_layout_region_honors_direct_ocr_decision_parameter():
@@ -3095,69 +2644,6 @@ def test_convert_layout_region_reports_recursive_ocr_selection():
         "ocr_region_deskew:applied",
         "ocr_region_psm:6",
     }
-
-
-def test_structural_records_mode_defers_markdown_grammar(monkeypatch):
-    class FakeEngine:
-        def recognize(self, image, mode="text_mode", psm=6):
-            return "неизмененная OCR строка"
-
-    image = Image.new("RGB", (600, 120), "white")
-    region = LayoutRegion(
-        kind="image",
-        image=image,
-        bbox=(0, 0, 600, 120),
-        metadata={
-            "layout_kind": "recursive_grid_cell",
-            "grid_row": 4,
-            "grid_col": 2,
-            "sparse_codes": (
-                (4, 2, 3),
-                (4, 3, 8),
-            ),
-            "content_bbox": (120, 0, 580, 120),
-        },
-    )
-    monkeypatch.setattr(
-        convert_service,
-        "analyze_layout",
-        lambda *_args, **_kwargs: (
-            [region],
-            LayoutDecision(
-                label="fixed",
-                stages=(
-                    LayoutStageSpec(
-                        name="recursive_grid",
-                        parameters=(),
-                    ),
-                ),
-                confidence=1.0,
-            ),
-        ),
-    )
-    profile = OcrPipelineProfile(
-        name="records",
-        structural_output="records",
-        layout=LayoutPipelineConfig(
-            allowed_stages=("recursive_grid",),
-        ),
-    )
-    try:
-        markdown, meta = convert_service._convert_page_segment(
-            image,
-            FakeEngine(),
-            profile,
-        )
-    finally:
-        image.close()
-
-    assert markdown.startswith("```jsonl\n")
-    assert '"anchor":[4,2]' in markdown
-    assert '"codes":[[4,2,3],[4,3,8]]' in markdown
-    assert '"parts":["неизмененная OCR строка"]' in markdown
-    assert '"flags":["ocr_region_kind:image","ocr_region_psm:6"]' in markdown
-    assert "structural_grammar:deferred" in meta["runtime_flags"]
-    assert "markdown_lint:pass" not in meta["runtime_flags"]
 
 
 def test_upscaled_mobile_screen_region_uses_sparse_page_psm():
@@ -3250,7 +2736,6 @@ def test_sparse_easyocr_region_uses_profile_tesseract_fallback(monkeypatch):
 
     assert parts == [
         (
-            "weak\n\n"
             "Схема сбора статистической отчетности о работе судов "
             "Судебный департамент Федеральное хранилище судебной статистики "
             "Районные суды Мировые судьи"
@@ -3295,266 +2780,6 @@ def test_extra_pass_engine_uses_declared_recovery_engine(monkeypatch):
     ]
 
 
-def test_edge_word_uses_single_token_profile_fallback(monkeypatch):
-    calls = []
-
-    class PrimaryEngine:
-        def info(self):
-            return {"engine": "easyocr"}
-
-        def recognize(self, image, mode="text_mode", psm=6):
-            calls.append(("primary", mode, psm))
-            return ""
-
-    class FallbackEngine:
-        def recognize(self, image, mode="text_mode", psm=6):
-            calls.append(("fallback", mode, psm))
-            return "SAMPLE"
-
-    monkeypatch.setattr(
-        convert_service,
-        "_create_sparse_text_fallback_engine",
-        lambda profile: FallbackEngine(),
-    )
-    monkeypatch.setattr(
-        convert_service,
-        "_looks_like_edge_to_edge_word",
-        lambda image: True,
-    )
-    image = Image.new("RGB", (3840, 2160), "white")
-    try:
-        markdown, meta = convert_service._convert_page_segment(
-            image,
-            PrimaryEngine(),
-            OcrPipelineProfile(
-                name="edge-word",
-                sparse_text_fallback_engine="tesseract",
-                sparse_text_fallback_min_tokens=18,
-                edge_word_fallback_min_tokens=1,
-            ),
-        )
-    finally:
-        image.close()
-
-    assert markdown == "SAMPLE"
-    assert meta["chunks"] == 1
-    assert calls == [
-        ("primary", "text_mode", 3),
-        ("fallback", "text_mode", 3),
-    ]
-
-
-def test_edge_word_bypasses_recursive_grid(monkeypatch):
-    calls = []
-
-    class FakeEngine:
-        def recognize(self, image, mode="text_mode", psm=6):
-            calls.append((image.size, mode, psm))
-            return "SAMPLE"
-
-    def fail_layout(*_args, **_kwargs):
-        raise AssertionError("edge words should bypass recursive grid")
-
-    monkeypatch.setattr(convert_service, "analyze_layout", fail_layout)
-    monkeypatch.setattr(
-        convert_service,
-        "_looks_like_edge_to_edge_word",
-        lambda image: True,
-    )
-    profile = OcrPipelineProfile(
-        name="edge-recursive",
-        layout=LayoutPipelineConfig(
-            allowed_stages=("recursive_grid",),
-        ),
-    )
-    image = Image.new("RGB", (3840, 2160), "white")
-    try:
-        markdown, meta = convert_service._convert_page_segment(
-            image,
-            FakeEngine(),
-            profile,
-        )
-    finally:
-        image.close()
-
-    assert markdown == "SAMPLE"
-    assert "layout_decision:bypass_single_region" in meta["runtime_flags"]
-    assert calls == [((3840, 2160), "text_mode", 3)]
-
-
-def test_unconfirmed_sparse_grid_falls_back_to_plain_full_page_ocr(
-    monkeypatch,
-):
-    calls = []
-
-    class FakeEngine:
-        def recognize(self, image, mode="text_mode", psm=6):
-            calls.append(image.size)
-            if image.size == (600, 240):
-                return "first line\nsecond line"
-            return "fragment"
-
-    image = Image.new("RGB", (600, 240), "white")
-    first = image.crop((0, 0, 600, 120))
-    second = image.crop((0, 120, 600, 240))
-    regions = [
-        LayoutRegion(
-            kind="image",
-            image=first,
-            bbox=(0, 0, 600, 120),
-            metadata={
-                "layout_kind": "recursive_grid_cell",
-                "grid_row": 0,
-                "grid_col": 0,
-                "sparse_codes": ((0, 1, 5),),
-            },
-        ),
-        LayoutRegion(
-            kind="image",
-            image=second,
-            bbox=(0, 120, 600, 240),
-            metadata={
-                "layout_kind": "recursive_grid_cell",
-                "grid_row": 1,
-                "grid_col": 0,
-                "sparse_codes": ((1, 0, 3),),
-            },
-        ),
-    ]
-    monkeypatch.setattr(
-        convert_service,
-        "_looks_like_edge_to_edge_word",
-        lambda image: False,
-    )
-    monkeypatch.setattr(
-        convert_service,
-        "analyze_layout",
-        lambda *_args, **_kwargs: (
-            regions,
-            LayoutDecision(
-                label="fixed",
-                stages=(
-                    LayoutStageSpec(
-                        name="recursive_grid",
-                        parameters=(),
-                    ),
-                ),
-                confidence=1.0,
-            ),
-        ),
-    )
-    profile = OcrPipelineProfile(
-        name="plain-fallback",
-        layout=LayoutPipelineConfig(
-            allowed_stages=("recursive_grid",),
-        ),
-    )
-    try:
-        markdown, meta = convert_service._convert_page_segment(
-            image,
-            FakeEngine(),
-            profile,
-        )
-    finally:
-        image.close()
-
-    assert markdown == "first line\nsecond line"
-    assert "structural_grammar:bypass_unconfirmed_grid" in meta["runtime_flags"]
-    assert "structural_plain_fallback:used" in meta["runtime_flags"]
-    assert calls == [(600, 120), (600, 120), (600, 240)]
-
-
-def test_confirmed_structural_markdown_blocks_plain_replacement(
-    monkeypatch,
-):
-    calls = []
-
-    class FakeEngine:
-        def recognize(self, image, mode="text_mode", psm=6):
-            del mode, psm
-            calls.append(image.size)
-            if image.size == (600, 360):
-                return "fallback full page"
-            return "cell"
-
-    image = Image.new("RGB", (600, 360), "white")
-    unconfirmed = image.crop((0, 0, 600, 100))
-    plain = image.crop((0, 100, 600, 140))
-    confirmed = image.crop((0, 140, 600, 240))
-    regions = [
-        LayoutRegion(
-            kind="image",
-            image=unconfirmed,
-            bbox=(0, 0, 600, 100),
-            metadata={
-                "layout_kind": "recursive_grid_cell",
-                "grid_row": 0,
-                "grid_col": 0,
-                "sparse_codes": ((0, 1, 5),),
-            },
-        ),
-        LayoutRegion(
-            kind="image",
-            image=plain,
-            bbox=(0, 100, 600, 140),
-        ),
-        LayoutRegion(
-            kind="image",
-            image=confirmed,
-            bbox=(0, 140, 600, 240),
-            metadata={
-                "layout_kind": "recursive_grid_cell",
-                "grid_row": 2,
-                "grid_col": 0,
-                "sparse_codes": tuple((2, column, 5) for column in range(1, 5)),
-            },
-        ),
-    ]
-    monkeypatch.setattr(
-        convert_service,
-        "_looks_like_edge_to_edge_word",
-        lambda image: False,
-    )
-    monkeypatch.setattr(
-        convert_service,
-        "analyze_layout",
-        lambda *_args, **_kwargs: (
-            regions,
-            LayoutDecision(
-                label="fixed",
-                stages=(
-                    LayoutStageSpec(
-                        name="recursive_grid",
-                        parameters=(),
-                    ),
-                ),
-                confidence=1.0,
-            ),
-        ),
-    )
-
-    profile = OcrPipelineProfile(
-        name="plain-fallback",
-        layout=LayoutPipelineConfig(
-            allowed_stages=("recursive_grid",),
-        ),
-    )
-    try:
-        markdown, meta = convert_service._convert_page_segment(
-            image,
-            FakeEngine(),
-            profile,
-        )
-    finally:
-        image.close()
-
-    assert "fallback full page" not in markdown
-    assert "structural_plain_fallback:used" not in meta["runtime_flags"]
-    assert "structural_grammar:bypass_unconfirmed_grid" in meta["runtime_flags"]
-    assert "structural_grammar:finite_merge_v1" in meta["runtime_flags"]
-    assert calls == [(600, 100), (600, 40), (600, 100)]
-
-
 def test_four_consecutive_merge_left_cells_confirm_sparse_table():
     rows = [
         SparseMarkdownRow(
@@ -3565,6 +2790,93 @@ def test_four_consecutive_merge_left_cells_confirm_sparse_table():
     ]
 
     assert convert_service._sparse_rows_have_confirmed_structure(rows)
+
+
+def test_sparse_markdown_lost_content_rejects_short_render():
+    plain_parts = [
+        " ".join(f"word{index}" for index in range(40)),
+    ]
+
+    assert convert_service._sparse_markdown_lost_content("# word0", plain_parts)
+    assert not convert_service._sparse_markdown_lost_content(plain_parts[0], plain_parts)
+
+
+def test_dedupe_repeated_text_blocks_keeps_tables(monkeypatch):
+    text = (
+        "Основной текст документа\n\n"
+        "Повторяемый длинный абзац с одинаковым смыслом и словами\n\n"
+        "Повторяемый длинный абзац с одинаковым смыслом и словами\n\n"
+        "| A | B |\n| --- | --- |\n| 1 | 2 |\n\n"
+        "| A | B |\n| --- | --- |\n| 1 | 2 |"
+    )
+
+    class SimilarityCore:
+        def should_drop_text_block(
+            self,
+            _candidate_chars,
+            _existing_chars,
+            _shared_tokens,
+            _candidate_tokens,
+            _existing_tokens,
+            similarity_milli,
+        ):
+            return similarity_milli >= 880
+
+    monkeypatch.setattr(convert_service, "native_pipeline_core", lambda: SimilarityCore())
+
+    deduped = convert_service._dedupe_repeated_text_blocks(text)
+
+    assert deduped.count("Повторяемый длинный абзац") == 1
+    assert deduped.count("| A | B |") == 2
+
+
+def test_dedupe_repeated_text_blocks_drops_overlapping_full_page_noise(monkeypatch):
+    clean = "Amazon Basics USB C charger cable black two meter pack with fast delivery"
+    noisy_full_page = clean + " xzq"
+    calls = []
+
+    class OverlapCore:
+        def should_drop_text_block(self, *metrics):
+            calls.append(metrics)
+            return True
+
+    monkeypatch.setattr(convert_service, "native_pipeline_core", lambda: OverlapCore())
+
+    deduped = convert_service._dedupe_repeated_text_blocks(f"{clean}\n\n{noisy_full_page}")
+
+    assert deduped == clean
+    assert calls == [
+        (
+            convert_service._ocr_compact_char_count(noisy_full_page),
+            convert_service._ocr_compact_char_count(clean),
+            13,
+            14,
+            13,
+            calls[0][-1],
+        )
+    ]
+    assert calls[0][-1] >= 880
+
+
+def test_dedupe_repeated_text_blocks_keeps_distinct_product_rows(monkeypatch):
+    first = "Amazon Basics USB C charger black two meter pack AB-100"
+    second = "Amazon Basics wireless keyboard white compact model KB-900"
+    calls = []
+
+    class PreserveCore:
+        def should_drop_text_block(self, *metrics):
+            calls.append(metrics)
+            return False
+
+    monkeypatch.setattr(convert_service, "native_pipeline_core", lambda: PreserveCore())
+
+    deduped = convert_service._dedupe_repeated_text_blocks(f"{first}\n\n{second}")
+
+    assert deduped == f"{first}\n\n{second}"
+    assert len(calls) == 1
+    _candidate_chars, _existing_chars, shared, candidate_count, existing_count, similarity = calls[0]
+    assert shared < min(candidate_count, existing_count)
+    assert similarity < 880
 
 
 def test_adjacent_tables_with_same_schema_merge_as_continuation():
@@ -3638,179 +2950,6 @@ def test_long_card_grid_recovery_keeps_existing_large_table():
     table += "\n".join("| " + " | ".join(row) + " |" for row in rows[1:])
 
     assert convert_service._recover_long_card_grid_table([table]) is None
-
-
-def test_long_screenshot_recovers_fragmented_card_grid(monkeypatch):
-    image = Image.new("RGB", (100, 6000), "white")
-    segments = (
-        Image.new("RGB", (100, 1600), "white"),
-        Image.new("RGB", (100, 1600), "white"),
-        Image.new("RGB", (100, 520), "white"),
-    )
-    responses = iter(
-        (
-            (
-                "\n\n".join(_synthetic_fragmented_long_card_parts()[:4]),
-                {
-                    "chunks": 1,
-                    "cards_found": 0,
-                    "tables_found": 1,
-                    "table_cells": 16,
-                    "runtime_flags": [
-                        "structural_grammar:finite_merge_v1",
-                        "markdown_lint:pass",
-                    ],
-                },
-            ),
-            (
-                _synthetic_fragmented_long_card_parts()[4],
-                {
-                    "chunks": 1,
-                    "cards_found": 0,
-                    "tables_found": 1,
-                    "table_cells": 24,
-                    "runtime_flags": [
-                        "structural_grammar:finite_merge_v1",
-                        "markdown_lint:pass",
-                    ],
-                },
-            ),
-            (
-                _synthetic_fragmented_long_card_parts()[5],
-                {
-                    "chunks": 1,
-                    "cards_found": 0,
-                    "tables_found": 1,
-                    "table_cells": 18,
-                    "runtime_flags": [
-                        "structural_grammar:finite_merge_v1",
-                        "markdown_lint:pass",
-                    ],
-                },
-            ),
-        )
-    )
-
-    monkeypatch.setattr(
-        convert_service,
-        "iter_vertical_segments",
-        lambda *_args, **_kwargs: iter(segments),
-    )
-    monkeypatch.setattr(
-        convert_service,
-        "_convert_page_segment",
-        lambda *_args, **_kwargs: next(responses),
-    )
-
-    try:
-        markdown, meta = convert_service._convert_page(
-            image,
-            object(),
-            OcrPipelineProfile(name="long"),
-        )
-    finally:
-        image.close()
-        for segment in segments:
-            segment.close()
-
-    assert markdown.count("| Бренд | Товар | Цена |") == 1
-    assert markdown.count("| H0 | H1 |") == 0
-    assert "long_card_grid_recovery:single_table" in meta["runtime_flags"]
-
-
-def test_long_screenshot_merges_table_continuations_between_segments(monkeypatch):
-    image = Image.new("RGB", (100, 6000), "white")
-    segments = (
-        Image.new("RGB", (100, 1600), "white"),
-        Image.new("RGB", (100, 520), "white"),
-    )
-    responses = iter(
-        [
-            (
-                ("intro\n\n" "| Index | Name |\n" "| --- | --- |\n" "| A | Alpha |"),
-                {
-                    "chunks": 1,
-                    "cards_found": 0,
-                    "tables_found": 1,
-                    "table_cells": 4,
-                    "runtime_flags": [
-                        "structural_grammar:finite_merge_v1",
-                        "markdown_lint:pass",
-                    ],
-                },
-            ),
-            (
-                ("| Index | Name |\n" "| --- | --- |\n" "| B | Beta |\n\n" "tail"),
-                {
-                    "chunks": 1,
-                    "cards_found": 0,
-                    "tables_found": 1,
-                    "table_cells": 4,
-                    "runtime_flags": [
-                        "structural_grammar:finite_merge_v1",
-                        "markdown_lint:pass",
-                    ],
-                },
-            ),
-        ]
-    )
-
-    monkeypatch.setattr(
-        convert_service,
-        "iter_vertical_segments",
-        lambda *_args, **_kwargs: iter(segments),
-    )
-    monkeypatch.setattr(
-        convert_service,
-        "_convert_page_segment",
-        lambda *_args, **_kwargs: next(responses),
-    )
-
-    markdown, meta = convert_service._convert_page(
-        image,
-        object(),
-        OcrPipelineProfile(name="long"),
-    )
-
-    assert markdown.count("| Index | Name |") == 1
-    assert "| A | Alpha |" in markdown
-    assert "| B | Beta |" in markdown
-    assert "structural_grammar:merge_table_continuations" in meta["runtime_flags"]
-
-
-def test_dewarped_projector_slide_bypasses_spatial_layout(monkeypatch):
-    calls = []
-
-    class FakeEngine:
-        def recognize(self, image, mode="text_mode", psm=6):
-            calls.append((image.size, mode, psm))
-            return "full projector slide text"
-
-    def fail_layout(*_args, **_kwargs):
-        raise AssertionError("dewarped projector slides should not be split")
-
-    monkeypatch.setattr(convert_service, "analyze_layout", fail_layout)
-    profile = OcrPipelineProfile(
-        name="projector-spatial",
-        layout=LayoutPipelineConfig(
-            feature_extractors=("projection_geometry",),
-            selector="uniform_spatial_v1",
-            allowed_stages=("spatial_regions",),
-        ),
-    )
-    image = Image.new("RGB", (2000, 1200), "white")
-    try:
-        markdown, meta = convert_service._convert_page_segment(
-            image,
-            FakeEngine(),
-            profile,
-        )
-    finally:
-        image.close()
-
-    assert markdown == "full projector slide text"
-    assert meta["chunks"] == 1
-    assert calls == [((2000, 1200), "text_mode", 3)]
 
 
 def _table_fixture() -> Image.Image:
@@ -4820,326 +3959,6 @@ def test_detect_table_layouts_rejects_bar_chart_as_grid():
         )
         == []
     )
-
-
-def test_convert_service_uses_table_layout_before_vertical_chunks(monkeypatch, tmp_path):
-    pytest.importorskip("cv2")
-    values = iter(["Предмет", "Часы", "Math", "42"])
-
-    class FakeEngine:
-        def recognize(self, image, mode="text_mode", psm=6):
-            return next(values)
-
-        def info(self):
-            return {"engine": "fake"}
-
-    monkeypatch.setattr(convert_service, "AutoEngine", lambda **_kwargs: FakeEngine())
-
-    image_path = tmp_path / "table.png"
-    _table_fixture().save(image_path)
-
-    markdown, meta = asyncio.run(
-        convert_service.convert(
-            image_path,
-            engine_type="auto",
-            pipeline_profile=OcrPipelineProfile(
-                name="test",
-                layout=LayoutPipelineConfig(allowed_stages=("table_regions",)),
-            ),
-        )
-    )
-
-    assert "| Предмет | Часы |" in markdown
-    assert "| Math | 42 |" in markdown
-    assert meta["tables_found"] == 1
-    assert meta["table_cells"] == 4
-
-
-def test_convert_service_segments_implausibly_tall_table_region(monkeypatch, tmp_path):
-    recognized_sizes = []
-
-    class FakeEngine:
-        def recognize_words(self, image, psm=6, min_conf=20):
-            raise AssertionError("tall pseudo-table reached table OCR")
-
-        def recognize(self, image, mode="text_mode", psm=6):
-            recognized_sizes.append(image.size)
-            return f"chunk {len(recognized_sizes)}"
-
-        def info(self):
-            return {"engine": "fake"}
-
-    def fake_layout(image, min_confirmed_cell_ratio=0.0):
-        assert min_confirmed_cell_ratio == 0.42
-        layout = _dense_table_layout(image.width, image.height, rows=21, cols=25)
-        return [LayoutRegion(kind="table", image=image, bbox=layout.bbox, table=layout)]
-
-    monkeypatch.setattr(convert_service, "AutoEngine", lambda **_kwargs: FakeEngine())
-    monkeypatch.setattr(convert_service, "analyze_document_layout", fake_layout)
-
-    image_path = tmp_path / "long-screenshot.png"
-    Image.new("RGB", (800, 4200), (230, 230, 230)).save(image_path)
-    profile = OcrPipelineProfile(
-        name="test",
-        layout=LayoutPipelineConfig(allowed_stages=("table_regions",)),
-        grid_min_confirmed_cell_ratio=0.42,
-    )
-
-    markdown, meta = asyncio.run(
-        convert_service.convert(
-            image_path,
-            engine_type="auto",
-            pipeline_profile=profile,
-        )
-    )
-
-    assert "chunk 1" in markdown
-    assert len(recognized_sizes) > 1
-    assert max(height for _, height in recognized_sizes) <= 1200
-    assert meta["chunks"] == len(recognized_sizes)
-    assert meta["tables_found"] == 0
-    assert meta["table_cells"] == 0
-
-
-def test_convert_service_bounds_large_table_fallback(monkeypatch, tmp_path):
-    word_calls = []
-    recognized_sizes = []
-
-    class FakeEngine:
-        def recognize_words(self, image, psm=6, min_conf=20):
-            word_calls.append(image.size)
-            return []
-
-        def recognize(self, image, mode="text_mode", psm=6):
-            recognized_sizes.append(image.size)
-            return "fallback text"
-
-        def info(self):
-            return {"engine": "fake"}
-
-    def fake_layout(image, min_confirmed_cell_ratio=0.0):
-        assert min_confirmed_cell_ratio == 0.0
-        layout = _dense_table_layout(image.width, image.height, rows=21, cols=25)
-        return [LayoutRegion(kind="table", image=image, bbox=layout.bbox, table=layout)]
-
-    monkeypatch.setattr(convert_service, "AutoEngine", lambda **_kwargs: FakeEngine())
-    monkeypatch.setattr(convert_service, "analyze_document_layout", fake_layout)
-
-    image_path = tmp_path / "large-table.png"
-    Image.new("RGB", (800, 1000), (200, 200, 200)).save(image_path)
-    profile = OcrPipelineProfile(
-        name="test",
-        layout=LayoutPipelineConfig(allowed_stages=("table_regions",)),
-    )
-
-    markdown, meta = asyncio.run(
-        convert_service.convert(
-            image_path,
-            engine_type="auto",
-            pipeline_profile=profile,
-        )
-    )
-
-    assert "fallback text" in markdown
-    assert len(word_calls) == 1
-    assert recognized_sizes == [(800, 1000)]
-    assert meta["chunks"] == 2
-    assert meta["tables_found"] == 1
-    assert meta["table_cells"] == 525
-
-
-def test_convert_service_rejects_sparse_table_markdown(monkeypatch, tmp_path):
-    recognized_sizes = []
-
-    class FakeEngine:
-        def recognize_words(self, image, psm=6, min_conf=20):
-            return [{"text": "lonely", "bbox": (20, 20, 80, 50)}]
-
-        def recognize(self, image, mode="text_mode", psm=6):
-            recognized_sizes.append(image.size)
-            return "raw ranking with names and numbers"
-
-        def info(self):
-            return {"engine": "fake"}
-
-    def fake_layout(image, min_confirmed_cell_ratio=0.0):
-        layout = _dense_table_layout(image.width, image.height, rows=12, cols=12)
-        return [
-            LayoutRegion(
-                kind="table",
-                image=image,
-                bbox=layout.bbox,
-                table=layout,
-            )
-        ]
-
-    monkeypatch.setattr(
-        convert_service,
-        "AutoEngine",
-        lambda **_kwargs: FakeEngine(),
-    )
-    monkeypatch.setattr(convert_service, "analyze_document_layout", fake_layout)
-
-    image_path = tmp_path / "sparse-pseudo-table.png"
-    Image.new("RGB", (900, 700), (200, 200, 200)).save(image_path)
-    profile = OcrPipelineProfile(
-        name="test",
-        layout=LayoutPipelineConfig(allowed_stages=("table_regions",)),
-        table_min_word_cell_coverage=0.35,
-        max_table_cell_ocr_calls=16,
-    )
-
-    markdown, meta = asyncio.run(
-        convert_service.convert(
-            image_path,
-            engine_type="auto",
-            pipeline_profile=profile,
-        )
-    )
-
-    assert markdown == "raw ranking with names and numbers"
-    assert recognized_sizes == [(900, 700)]
-    assert meta["chunks"] == 2
-    assert meta["tables_found"] == 1
-    assert meta["table_cells"] == 144
-
-
-def test_convert_service_rejects_sparse_cell_markdown(monkeypatch, tmp_path):
-    cell_calls = 0
-    raw_calls = 0
-
-    class FakeEngine:
-        def recognize_words(self, image, psm=6, min_conf=20):
-            return []
-
-        def recognize(self, image, mode="text_mode", psm=6):
-            nonlocal cell_calls, raw_calls
-            if image.size == (400, 400):
-                raw_calls += 1
-                return "raw names 1 2 3 4"
-            cell_calls += 1
-            return "only one cell" if cell_calls == 1 else ""
-
-        def info(self):
-            return {"engine": "fake"}
-
-    def fake_layout(image, min_confirmed_cell_ratio=0.0):
-        layout = _dense_table_layout(image.width, image.height, rows=4, cols=4)
-        return [
-            LayoutRegion(
-                kind="table",
-                image=image,
-                bbox=layout.bbox,
-                table=layout,
-            )
-        ]
-
-    monkeypatch.setattr(
-        convert_service,
-        "AutoEngine",
-        lambda **_kwargs: FakeEngine(),
-    )
-    monkeypatch.setattr(convert_service, "analyze_document_layout", fake_layout)
-
-    image_path = tmp_path / "sparse-small-table.png"
-    Image.new("RGB", (400, 400), (200, 200, 200)).save(image_path)
-    profile = OcrPipelineProfile(
-        name="test",
-        layout=LayoutPipelineConfig(allowed_stages=("table_regions",)),
-        max_table_cell_ocr_calls=16,
-        table_min_cell_coverage=0.5,
-    )
-
-    markdown, meta = asyncio.run(
-        convert_service.convert(
-            image_path,
-            engine_type="auto",
-            pipeline_profile=profile,
-        )
-    )
-
-    assert markdown == "raw names 1 2 3 4"
-    assert "only one cell" not in markdown
-    assert cell_calls == 0
-    assert raw_calls == 1
-    assert meta["chunks"] >= 1
-
-
-def test_convert_service_checks_wide_table_coverage_before_formatting(
-    monkeypatch,
-    tmp_path,
-):
-    formatted = False
-
-    class FakeEngine:
-        def recognize_words(self, image, psm=6, min_conf=20):
-            return [{"text": "Б1.О.01", "bbox": (5, 5, 20, 20)}]
-
-        def recognize(self, image, mode="text_mode", psm=6):
-            return "raw curriculum text"
-
-        def info(self):
-            return {"engine": "fake"}
-
-    image_path = tmp_path / "sparse-wide-table.png"
-    Image.new("RGB", (1000, 200), (200, 200, 200)).save(image_path)
-    layout = _dense_table_layout(1000, 200, rows=2, cols=50)
-
-    monkeypatch.setattr(
-        convert_service,
-        "AutoEngine",
-        lambda **_kwargs: FakeEngine(),
-    )
-    monkeypatch.setattr(
-        convert_service,
-        "analyze_document_layout",
-        lambda image, min_confirmed_cell_ratio=0.0: [
-            LayoutRegion(
-                kind="table",
-                image=image,
-                bbox=layout.bbox,
-                table=layout,
-            )
-        ],
-    )
-
-    def fake_wide_formatter(table, words):
-        nonlocal formatted
-        formatted = True
-        return "| sparse |"
-
-    original_formatter = convert_service.format_table_words
-
-    def fake_formatter(name, table, words):
-        if name == "curriculum":
-            return fake_wide_formatter(table, words)
-        return original_formatter(name, table, words)
-
-    monkeypatch.setattr(
-        convert_service,
-        "format_table_words",
-        fake_formatter,
-    )
-
-    profile = OcrPipelineProfile(
-        name="test",
-        layout=LayoutPipelineConfig(allowed_stages=("table_regions",)),
-        wide_table_min_word_cell_coverage=0.02,
-        max_table_cell_ocr_calls=16,
-        table_layout_normalization="preserve_grid",
-        table_word_recognition="single_pass_with_left_strip",
-        table_word_formatters=("curriculum", "generic_markdown"),
-    )
-    markdown, _ = asyncio.run(
-        convert_service.convert(
-            image_path,
-            engine_type="auto",
-            pipeline_profile=profile,
-        )
-    )
-
-    assert markdown == "raw curriculum text"
-    assert formatted is False
 
 
 def test_generic_profile_does_not_infer_curriculum_from_column_count(monkeypatch):

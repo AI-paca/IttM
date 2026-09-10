@@ -73,6 +73,15 @@ test("CLI returns stable usage and input exit codes", async () => {
   assert.match(unreadable.stderr.join(""), /Input error/);
 });
 
+test("CLI help prints usage to stdout and exits successfully", async () => {
+  for (const flag of ["--help", "-h"]) {
+    const help = fakeIo();
+    assert.equal(await runCli([flag], help.io), 0);
+    assert.match(help.stdout.join(""), /Usage/);
+    assert.deepEqual(help.stderr, []);
+  }
+});
+
 test("CLI maps cancellation to conventional exit code 130", async () => {
   const { io } = fakeIo();
   const controller = new AbortController();

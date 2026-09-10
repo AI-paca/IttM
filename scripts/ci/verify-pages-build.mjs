@@ -8,6 +8,7 @@ const distRoot = path.resolve(process.argv[2] || "dist");
 const expectedBase = normalizeBase(process.argv[3] || "/IttM/");
 const tesseractVendorRoot = path.join(distRoot, "vendor", "tesseract");
 const pdfJsWasmVendorRoot = path.join(distRoot, "vendor", "pdfjs", "wasm");
+const pipelineCorePath = path.join(distRoot, "wasm", "ittm_pipeline_core.wasm");
 const textReviewerModelId = "HuggingFaceTB/SmolLM2-135M-Instruct";
 const textReviewerModelRoot = path.join(
   distRoot,
@@ -18,9 +19,17 @@ const textReviewerModelRoot = path.join(
 const textReviewerOnnxBytes = 137147981;
 const requiredTesseractAssets = [
   "worker.min.js",
+  "tesseract-core.wasm.js",
+  "tesseract-core-simd.wasm.js",
+  "tesseract-core-relaxedsimd.wasm.js",
   "tesseract-core-lstm.wasm.js",
   "tesseract-core-simd-lstm.wasm.js",
   "tesseract-core-relaxedsimd-lstm.wasm.js",
+  "lang/eng.traineddata",
+  "lang/rus.traineddata",
+  "lang/chi_sim.traineddata",
+  "lang/ell.traineddata",
+  "lang/equ.traineddata",
 ];
 const requiredPdfJsWasmAssets = [
   "jbig2.wasm",
@@ -143,6 +152,33 @@ for (const asset of requiredTesseractAssets) {
 for (const asset of requiredPdfJsWasmAssets) {
   await assertNonEmpty(path.join(pdfJsWasmVendorRoot, asset));
 }
+await assertNonEmpty(pipelineCorePath);
+const pipelineCoreBytes = await readFile(pipelineCorePath);
+const pipelineCore = await WebAssembly.instantiate(pipelineCoreBytes, {});
+assert.equal(pipelineCore.instance.exports.ittm_pipeline_abi_version(), 6);
+for (const name of [
+  "memory",
+  "ittm_alloc",
+  "ittm_dealloc",
+  "ittm_separated_begin",
+  "ittm_separated_plan_begin",
+  "ittm_separated_start_ocr",
+  "ittm_separated_run_get_segment",
+  "ittm_separated_job_count",
+  "ittm_separated_job_field",
+  "ittm_separated_set_ocr",
+  "ittm_separated_add_ocr_word",
+  "ittm_separated_add_ocr_word_ppm",
+  "ittm_separated_render_length",
+  "ittm_separated_render_copy",
+  "ittm_separated_stage_mask",
+  "ittm_separated_drop",
+]) {
+  assert.ok(
+    pipelineCore.instance.exports[name],
+    `Pages pipeline core misses ABI 6 export ${name}`,
+  );
+}
 await assertNonEmpty(path.join(textReviewerModelRoot, "config.json"));
 await assertFileSize(
   path.join(textReviewerModelRoot, "onnx", "model_quantized.onnx"),
@@ -192,9 +228,10 @@ await verifyServedPagesAssets([
   ...requiredPdfJsWasmAssets.map(
     (asset) => `${expectedBase}vendor/pdfjs/wasm/${asset}`,
   ),
+  `${expectedBase}wasm/ittm_pipeline_core.wasm`,
   `${expectedBase}vendor/models/${textReviewerModelId}/config.json`,
 ]);
 
 console.log(
-  `Pages build verified over HTTP: ${requiredTesseractAssets.length} Tesseract assets, ${requiredPdfJsWasmAssets.length} PDF.js decoder assets, and ${textReviewerModelId}`,
+  `Pages build verified over HTTP: shared pipeline core, ${requiredTesseractAssets.length} Tesseract assets, ${requiredPdfJsWasmAssets.length} PDF.js decoder assets, and ${textReviewerModelId}`,
 );

@@ -143,3 +143,53 @@ test("processPreparedPages stops before starting the next cancelled page", async
   );
   assert.equal(preparedPages, 1);
 });
+
+test("trusted native topology bypasses raster OCR", async () => {
+  let ocrCalls = 0;
+  const result = await processPreparedPages(
+    1,
+    1,
+    {},
+    () => {},
+    async () => ({
+      nativeText: "flattened text",
+      nativeOracle: {
+        assembled: {
+          markdown: "| A | B |\n| --- | --- |\n| C | D |",
+        },
+      } as never,
+      image: new Blob(["unused"]),
+    }),
+    async () => {
+      ocrCalls += 1;
+      return "raster";
+    },
+  );
+
+  assert.equal(ocrCalls, 0);
+  assert.equal(result, "| A | B |\n| --- | --- |\n| C | D |");
+});
+
+test("forceRaster ignores PDF text layers and returns raster OCR", async () => {
+  let ocrCalls = 0;
+  const result = await processPreparedPages(
+    1,
+    1,
+    { forceRaster: true },
+    () => {},
+    async () => ({
+      nativeText: "flattened text",
+      nativeOracle: {
+        assembled: { markdown: "native markdown" },
+      } as never,
+      image: new Blob(["page"]),
+    }),
+    async () => {
+      ocrCalls += 1;
+      return "raster OCR";
+    },
+  );
+
+  assert.equal(ocrCalls, 1);
+  assert.equal(result, "raster OCR");
+});

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent, ReactNode } from "react";
 import { useMotionValueEvent, useScroll } from "motion/react";
+import { IS_LITE_RUNTIME } from "../runtime-mode";
 import { noticeFromError, requestApiJson } from "./api-client";
 import { getBrowserDiagnostics, isSupportedOcrFile } from "./file-utils";
 import { EXTERNAL_LLM_CONSENT_ERROR } from "./llm-consent";
@@ -133,6 +134,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
   const [externalLlmConsent, setExternalLlmConsent] = useState(false);
   const [lexicalCorrectionEnabled, setLexicalCorrectionEnabled] =
     useState(false);
+  const [pdfRasterMode, setPdfRasterMode] = useState(false);
   const [themeLevel, setThemeLevel] = useState<ThemeLevel>(() => {
     if (typeof window !== "undefined") {
       const saved = Number(localStorage.getItem("theme-level"));
@@ -151,9 +153,19 @@ export function OcrProvider({ children }: { children: ReactNode }) {
   const [easyOcrInstallProgress, setEasyOcrInstallProgress] = useState(0);
   const [lastExtractedPage, setLastExtractedPage] = useState(1);
   const [totalPdfPages, setTotalPdfPages] = useState<number | null>(null);
-  const [diagnostics, setDiagnostics] = useState<AppDiagnostics | null>(null);
+  const [diagnostics, setDiagnostics] = useState<AppDiagnostics | null>(() =>
+    IS_LITE_RUNTIME
+      ? { backend: null, browser: getBrowserDiagnostics() }
+      : null,
+  );
   const [notice, setNotice] = useState<Notice | null>(null);
   const [triggerCount, setTriggerCount] = useState(0);
+
+  const isPdfFile = Boolean(
+    file &&
+    (file.type === "application/pdf" ||
+      file.name.toLowerCase().endsWith(".pdf")),
+  );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { scrollY } = useScroll();
@@ -169,6 +181,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
+    if (IS_LITE_RUNTIME) return;
     const browserInfo = getBrowserDiagnostics();
 
     requestApiJson<BackendDiagnostics>("/api/diagnostics", "Diagnostics")
@@ -281,6 +294,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       }
 
       setFile(selected);
+      setPdfRasterMode(false);
       setActiveSource(null);
       setDocumentProgress(null);
       if (autoStart) {
@@ -333,6 +347,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
   const handleNewFile = useCallback(() => {
     setAppState("upload");
     setFile(null);
+    setPdfRasterMode(false);
     setActiveSource(null);
     setDocumentProgress(null);
   }, []);
@@ -427,6 +442,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
     llmModel,
     llmProvider,
     pingUrl,
+    pdfRasterMode,
     selectedSource,
     triggerCount,
     setAppState,
@@ -458,10 +474,12 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       easyOcrInstallProgress,
       easyOcrInstalling,
       externalLlmConsent,
+      isPdfFile,
       lexicalCorrectionEnabled,
       llmKey,
       llmModel,
       llmProvider,
+      pdfRasterMode,
       pingUrl,
       rememberChoice,
       selectedSource,
@@ -469,6 +487,7 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       themeAuto,
       onInstallEasyOcr: handleInstallEasyOcr,
       onLexicalCorrectionChange: setLexicalCorrectionEnabled,
+      onPdfRasterModeChange: setPdfRasterMode,
       onLlmProviderChange: handleLlmProviderChange,
       onRememberChange: handleRememberChange,
       onSourceSelect: handleSourceSelect,
@@ -488,10 +507,12 @@ export function OcrProvider({ children }: { children: ReactNode }) {
       handleLlmProviderChange,
       handleRememberChange,
       handleSourceSelect,
+      isPdfFile,
       lexicalCorrectionEnabled,
       llmKey,
       llmModel,
       llmProvider,
+      pdfRasterMode,
       pingUrl,
       rememberChoice,
       selectedSource,

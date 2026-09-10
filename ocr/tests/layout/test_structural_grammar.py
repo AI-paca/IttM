@@ -3,6 +3,7 @@ from app.formatting.structural_grammar import (
     SparseMarkdownRow,
     lint_markdown_structure,
     render_sparse_markdown_rows,
+    render_isolated_sparse_headings,
 )
 from app.formatting.structural_journal import (
     encode_structural_record,
@@ -714,6 +715,7 @@ def test_structural_record_contains_matrix_and_unmodified_ocr_parts():
     record = encode_structural_record(
         kind="sparse",
         parts=("OCR строка",),
+        bbox=(10, 20, 300, 80),
         anchor=(4, 2),
         codes=((4, 2, 3), (4, 3, 8)),
         list_marker=True,
@@ -725,6 +727,7 @@ def test_structural_record_contains_matrix_and_unmodified_ocr_parts():
     )
 
     assert '"anchor":[4,2]' in record
+    assert '"bbox":[10,20,300,80]' in record
     assert '"codes":[[4,2,3],[4,3,8]]' in record
     assert '"parts":["OCR строка"]' in record
     assert '"flags":["ocr_region_psm:6","ocr_region_mask:local_dark"]' in record
@@ -948,3 +951,45 @@ def test_empty_structural_row_does_not_break_anchor_list_transition():
     )
 
     assert "- пункт без распознанного тире" in result.markdown
+
+
+def test_unconfirmed_grid_marks_only_short_isolated_run_as_heading():
+    rows = [
+        SparseMarkdownRow(parts=(), anchor=(0, 0), codes=()),
+        SparseMarkdownRow(parts=(") Артикль",), anchor=(1, 1), codes=()),
+        SparseMarkdownRow(parts=("(Der Artikel)",), anchor=(2, 1), codes=()),
+        SparseMarkdownRow(parts=(), anchor=(3, 0), codes=()),
+        SparseMarkdownRow(parts=("Первый абзац текста.",), anchor=(4, 0), codes=()),
+        SparseMarkdownRow(parts=("Продолжение абзаца.",), anchor=(5, 0), codes=()),
+        SparseMarkdownRow(parts=("Ещё одна строка.",), anchor=(6, 0), codes=()),
+        SparseMarkdownRow(parts=(), anchor=(7, 0), codes=()),
+    ]
+
+    assert render_isolated_sparse_headings(rows) == [
+        "## ) Артикль",
+        "(Der Artikel)",
+        "Первый абзац текста.",
+        "Продолжение абзаца.",
+        "Ещё одна строка.",
+    ]
+
+
+def test_isolated_heading_filter_ignores_ocr_case_and_long_text():
+    long_line = "обычный длинный текст " * 6
+    rows = [
+        SparseMarkdownRow(parts=(), anchor=(0, 0), codes=()),
+        SparseMarkdownRow(parts=(long_line,), anchor=(1, 0), codes=()),
+        SparseMarkdownRow(parts=(), anchor=(2, 0), codes=()),
+    ]
+
+    assert render_isolated_sparse_headings(rows) == [long_line]
+
+
+def test_isolated_heading_filter_rejects_short_ocr_noise():
+    rows = [
+        SparseMarkdownRow(parts=(), anchor=(20, 0), codes=()),
+        SparseMarkdownRow(parts=("РА",), anchor=(21, 0), codes=()),
+        SparseMarkdownRow(parts=(), anchor=(22, 0), codes=()),
+    ]
+
+    assert render_isolated_sparse_headings(rows) == ["РА"]

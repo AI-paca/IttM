@@ -31,6 +31,10 @@ THRESHOLD_OVERRIDES: dict[str, float] = {}
 
 BROWSER_TESSERACT_METHOD = "browser-tesseract"
 DEFAULT_BROWSER_TESSERACT_PROFILE = "browser_tesseract_dewarp"
+RASTER_PAGE = re.compile(
+    r"^(?P<pdf>.+\.pdf)\.page-(?P<page>\d{3})\.raster\.(?P<format>png|jpg)$",
+    re.I,
+)
 
 
 def _float_or_none(value: str) -> float | None:
@@ -235,9 +239,273 @@ def _browser_comparison_rows(
                 "engine": BROWSER_TESSERACT_METHOD,
                 "pipeline": profile_name,
                 "flags": row.get("flags", ""),
+                "exit": row.get("exit", ""),
             }
         )
     return comparison_rows, summary_rows
+
+
+def _aggregate_name(file_name: str) -> str | None:
+    match = RASTER_PAGE.fullmatch(file_name)
+    if match is None:
+        return None
+    return f"{match.group('pdf')}.raster.{match.group('format').lower()}"
+
+
+def _actual_markdown_path(
+    benchmark_root: Path,
+    browser_root: Path | None,
+    method: str,
+    file_name: str,
+) -> Path | None:
+    if method == BROWSER_TESSERACT_METHOD:
+        return browser_root / f"{file_name}.md" if browser_root is not None else None
+    return benchmark_root / method / f"{file_name}.md"
+
+
+def _page_failure(
+    summary: dict[str, str] | None,
+    actual_path: Path | None,
+) -> str | None:
+    if summary is None:
+        return "missing_summary"
+    if "exit" in summary and summary.get("exit") != "0":
+        return f"exit={summary.get('exit') or 'missing'}"
+    if "curl_exit" in summary and summary.get("curl_exit") != "0":
+        return f"curl_exit={summary.get('curl_exit') or 'missing'}"
+    if "http_status" in summary and summary.get("http_status") != "200":
+        return f"http_status={summary.get('http_status') or 'missing'}"
+    if actual_path is None or not actual_path.is_file():
+        return "missing_output"
+    return None
+
+
+def _aggregate_score_row(
+    file_name: str,
+    method: str,
+    wall_seconds: str,
+    actual_body: str,
+    reference_body: str,
+) -> dict[str, str]:
+    score = scored_expected_match(actual_body, reference_body)
+    return {
+        "file": file_name,
+        "method": method,
+        "wall_seconds": wall_seconds,
+        "match_percent": score.match_percent,
+        "matched_expected_lines": score.matched_lines,
+        "total_expected_lines": score.total_lines,
+        "text_match_percent": score.text_match_percent,
+        "compact_quality_percent": score.compact_quality_percent,
+        "compact_quality_gate": score.compact_quality_gate,
+        "lexical_t9_percent": score.lexical_t9_percent,
+        "lexical_t9_gate": score.lexical_t9_gate,
+        "markdown_grammar_percent": score.markdown_grammar_percent,
+        "markdown_grammar_gate": score.markdown_grammar_gate,
+        "markdown_grammar_notes": score.markdown_grammar_notes,
+        "success_probability_percent": score.success_probability_percent,
+        "success_probability_gate": score.success_probability_gate,
+        "failure_kind": score.failure_kind,
+        "table_markdown_files": "0",
+    }
+
+
+def _partial_aggregate_row(
+    file_name: str,
+    method: str,
+    wall_seconds: str,
+    failures: list[str],
+) -> dict[str, str]:
+    reason = "aggregate_partial: " + ", ".join(failures)
+    return {
+        "file": file_name,
+        "method": method,
+        "wall_seconds": wall_seconds,
+        "match_percent": NOT_CHECKED,
+        "matched_expected_lines": "",
+        "total_expected_lines": "",
+        "text_match_percent": NOT_CHECKED,
+        "compact_quality_percent": NOT_CHECKED,
+        "compact_quality_gate": NOT_CHECKED,
+        "lexical_t9_percent": NOT_CHECKED,
+        "lexical_t9_gate": NOT_CHECKED,
+        "markdown_grammar_percent": NOT_CHECKED,
+        "markdown_grammar_gate": NOT_CHECKED,
+        "markdown_grammar_notes": reason,
+        "success_probability_percent": NOT_CHECKED,
+        "success_probability_gate": NOT_CHECKED,
+        "failure_kind": reason,
+        "table_markdown_files": "0",
+    }
+
+
+def _aggregate_raster_comparisons(
+    comparison_rows: list[dict[str, str]],
+    summary_rows: list[dict[str, str]],
+    *,
+    benchmark_root: Path,
+    expected_root: Path,
+    browser_root: Path | None,
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    page_names_by_aggregate: dict[str, set[str]] = defaultdict(set)
+    for row in comparison_rows:
+        aggregate_name = _aggregate_name(row["file"])
+        if aggregate_name is not None:
+            page_names_by_aggregate[aggregate_name].add(row["file"])
+    fixtures_root = benchmark_root / "fixtures"
+    if fixtures_root.is_dir():
+        for path in fixtures_root.iterdir():
+            aggregate_name = _aggregate_name(path.name)
+            if aggregate_name is not None:
+                page_names_by_aggregate[aggregate_name].add(path.name)
+
+    aggregate_families = {
+        aggregate_name: tuple(
+            sorted(
+                page_names,
+                key=lambda name: int(RASTER_PAGE.fullmatch(name).group("page")),
+            )
+        )
+        for aggregate_name, page_names in page_names_by_aggregate.items()
+        if (expected_root / f"{aggregate_name}.md").is_file()
+        and not any(
+            (expected_root / f"{page_name}.md").is_file()
+            for page_name in page_names
+        )
+    }
+    if not aggregate_families:
+        return comparison_rows, summary_rows
+
+    aggregate_page_names = {
+        page_name
+        for page_names in aggregate_families.values()
+        for page_name in page_names
+    }
+    comparison_index = {
+        (row["file"], row["method"]): row for row in comparison_rows
+    }
+    summary_index = _summary_index(summary_rows)
+    methods_by_aggregate: dict[str, set[str]] = defaultdict(set)
+    for row in comparison_rows:
+        aggregate_name = _aggregate_name(row["file"])
+        if aggregate_name in aggregate_families:
+            methods_by_aggregate[aggregate_name].add(row["method"])
+
+    aggregate_comparisons: list[dict[str, str]] = []
+    aggregate_summaries: list[dict[str, str]] = []
+    for aggregate_name, page_names in aggregate_families.items():
+        reference_body = (expected_root / f"{aggregate_name}.md").read_text(
+            encoding="utf-8",
+            errors="replace",
+        )
+        for method in sorted(methods_by_aggregate[aggregate_name]):
+            bodies: list[str] = []
+            failures: list[str] = []
+            elapsed = 0.0
+            page_summaries: list[dict[str, str]] = []
+            for page_name in page_names:
+                page_match = RASTER_PAGE.fullmatch(page_name)
+                page_label = f"page-{page_match.group('page')}"
+                comparison = comparison_index.get((page_name, method))
+                summary = summary_index.get((page_name, method))
+                actual_path = _actual_markdown_path(
+                    benchmark_root,
+                    browser_root,
+                    method,
+                    page_name,
+                )
+                failure = _page_failure(summary, actual_path)
+                if comparison is None and failure is None:
+                    failure = "missing_comparison"
+                if failure is not None:
+                    failures.append(f"{page_label}({failure})")
+                else:
+                    bodies.append(result_body(actual_path).rstrip())
+                if comparison is not None:
+                    parsed_seconds = _float_or_none(
+                        comparison.get("wall_seconds", "")
+                    )
+                    if parsed_seconds is not None:
+                        elapsed += parsed_seconds
+                if summary is not None:
+                    page_summaries.append(summary)
+
+            aggregate_body = "\n\n".join(bodies).rstrip() + "\n"
+            candidate_path = _actual_markdown_path(
+                benchmark_root,
+                browser_root,
+                method,
+                aggregate_name,
+            )
+            if candidate_path is not None:
+                candidate_path.write_text(aggregate_body, encoding="utf-8")
+                status_path = candidate_path.with_suffix(
+                    candidate_path.suffix + ".aggregate-status.txt"
+                )
+                status_path.write_text(
+                    (
+                        "status=partial\nmissing_pages="
+                        + ",".join(failures)
+                        + "\n"
+                        if failures
+                        else f"status=complete\npages={len(page_names)}\n"
+                    ),
+                    encoding="utf-8",
+                )
+            elapsed_text = f"{elapsed:.3f}"
+            if failures:
+                aggregate_comparisons.append(
+                    _partial_aggregate_row(
+                        aggregate_name,
+                        method,
+                        elapsed_text,
+                        failures,
+                    )
+                )
+            else:
+                aggregate_comparisons.append(
+                    _aggregate_score_row(
+                        aggregate_name,
+                        method,
+                        elapsed_text,
+                        aggregate_body,
+                        reference_body,
+                    )
+                )
+
+            profiles = {
+                row.get("pipeline", "") for row in page_summaries
+                if row.get("pipeline")
+            }
+            flags = {
+                flag.strip()
+                for row in page_summaries
+                for flag in row.get("flags", "").split(";")
+                if flag.strip()
+            }
+            aggregate_summaries.append(
+                {
+                    "file": aggregate_name,
+                    "engine": method,
+                    "pipeline": (
+                        next(iter(profiles))
+                        if len(profiles) == 1
+                        else "aggregate:mixed"
+                    ),
+                    "flags": "; ".join(sorted(flags)),
+                }
+            )
+
+    retained_comparisons = [
+        row for row in comparison_rows if row["file"] not in aggregate_page_names
+    ]
+    retained_summaries = [
+        row for row in summary_rows if row["file"] not in aggregate_page_names
+    ]
+    return (
+        [*retained_comparisons, *aggregate_comparisons],
+        [*retained_summaries, *aggregate_summaries],
+    )
 
 
 def build_tables(
@@ -255,6 +523,13 @@ def build_tables(
     )
     comparison_rows.extend(browser_comparison_rows)
     summary_rows.extend(browser_summary_rows)
+    comparison_rows, summary_rows = _aggregate_raster_comparisons(
+        comparison_rows,
+        summary_rows,
+        benchmark_root=benchmark_root,
+        expected_root=expected_root,
+        browser_root=browser_root,
+    )
 
     summary_by_file_method = _summary_index(summary_rows)
     methods = _method_order(comparison_rows, include_auto)

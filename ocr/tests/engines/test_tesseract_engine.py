@@ -2,6 +2,10 @@ from PIL import Image, ImageDraw
 
 from app.engines.tesseract_engine import TesseractEngine
 from app.recognition.candidates import LanguageCandidateSelector
+from app.recognition.quality import (
+    code_path_quality_score,
+    looks_like_mixed_script_ocr_noise,
+)
 
 
 def test_tesseract_language_order_isolates_kazakh_from_default_multiscript_ocr(
@@ -123,6 +127,25 @@ def test_tesseract_language_retry_learns_numeric_rows(monkeypatch):
     assert engine._language_candidates()[1] == "equ"
 
 
+def test_tesseract_language_retry_learns_single_numeric_cells(monkeypatch):
+    monkeypatch.setattr(
+        TesseractEngine,
+        "installed_languages",
+        staticmethod(lambda: ["eng", "rus", "chi_sim", "kir", "ell", "equ"]),
+    )
+
+    engine = TesseractEngine(
+        language_priority=("rus", "eng", "kir", "chi_sim", "equ"),
+        language_retry="t9_small",
+    )
+    initial = engine.language_probabilities()
+
+    engine._update_language_probabilities("5")
+
+    assert engine.language_probabilities()["equ"] > initial["equ"]
+    assert engine._language_candidates()[1] == "equ"
+
+
 def test_tesseract_language_retry_does_not_treat_a_date_as_math(monkeypatch):
     monkeypatch.setattr(
         TesseractEngine,
@@ -142,7 +165,7 @@ def test_tesseract_language_retry_does_not_treat_a_date_as_math(monkeypatch):
     assert engine._language_candidates()[1] == "rus"
 
 
-def test_tesseract_language_retry_splays_successful_single_candidate(monkeypatch):
+def test_tesseract_language_retry_does_not_promote_by_recency(monkeypatch):
     monkeypatch.setattr(
         TesseractEngine,
         "installed_languages",
@@ -158,7 +181,29 @@ def test_tesseract_language_retry_splays_successful_single_candidate(monkeypatch
     assert engine._language_candidates()[1] == "eng"
 
     engine._observe_language_candidate("rus", "учебный план кафедра")
-    assert engine._language_candidates()[1] == "rus"
+    assert engine._language_candidates()[1] == "eng"
+
+
+def test_tesseract_language_retry_tracks_empty_without_ocr_language(monkeypatch):
+    monkeypatch.setattr(
+        TesseractEngine,
+        "installed_languages",
+        staticmethod(lambda: ["eng", "rus", "chi_sim", "kir", "ell", "equ"]),
+    )
+
+    engine = TesseractEngine(
+        language_priority=("rus", "eng", "kir", "chi_sim"),
+        language_retry="t9_small",
+    )
+    initial_empty = engine.language_probabilities()["empty"]
+
+    assert "empty" in engine.language_probabilities()
+    assert "empty" not in engine._language_candidates()
+
+    engine._observe_language_candidate("empty", "")
+
+    assert engine.language_probabilities()["empty"] > initial_empty
+    assert "empty" not in engine._language_candidates()
 
 
 def test_tesseract_t9_retry_considers_math_and_greek_candidates(monkeypatch):
@@ -204,6 +249,126 @@ def test_tesseract_t9_candidate_selection_keeps_plausible_primary():
 
     assert lang == "rus+eng"
     assert text == "Directum www.directum.ru"
+
+
+def test_tesseract_t9_candidate_selection_prefers_clean_code_path_leaf():
+    engine = TesseractEngine(language_retry="t9_small")
+
+    lang, text = engine._select_text_candidate(
+        [
+            ("rus+eng", r"resolve pipeline profile в осг/арр/р1ре\1пе_соп?19.ру:"),
+            ("eng", "resolve pipeline profile B ocr/app/pipeline_config.py:"),
+        ]
+    )
+
+    assert lang == "eng"
+    assert text == "resolve pipeline profile B ocr/app/pipeline_config.py:"
+
+
+def test_tesseract_t9_does_not_score_numeric_slashes_as_code_paths():
+    text = "Формат 90x60/32. Заказ № 936/1. Технический регламент 007/2011."
+
+    assert code_path_quality_score(text) == 0.0
+
+
+def test_tesseract_t9_does_not_penalize_transliterated_hyphenated_words():
+    text = "Издание для 21-yй школы, 1-kypылыc, 705-бeлme, 7-kaбat."
+
+    assert code_path_quality_score(text) == 0.0
+
+
+def test_tesseract_t9_candidate_selection_keeps_mixed_language_sentence():
+    engine = TesseractEngine(language_retry="t9_small")
+
+    lang, text = engine._select_text_candidate(
+        [
+            ("rus+eng", "1. Если pipeline profile не задан - взять default для engine type (backend auto standard /"),
+            ("eng", "1. Ecnm pipeline profile He 3agaH - B3aTb default gna engine type (backend auto standard /"),
+        ]
+    )
+
+    assert lang == "rus+eng"
+    assert text == "1. Если pipeline profile не задан - взять default для engine type (backend auto standard /"
+
+
+def test_tesseract_t9_keeps_cyrillic_prose_with_foreign_parenthetical():
+    engine = TesseractEngine(language_retry="t9_small")
+    primary = (
+        "Артикль — служебная часть речи, которая является грамматическим "
+        "признаком существительного. В немецком языке он изменяется по родам "
+        "и падежам (DER ARTIKEL)."
+    )
+    transliteration = (
+        "Artikl — sluzhebnaya chast rechi, kotoraya yavlyaetsya " "grammaticheskim priznakom (DER ARTIKEL)."
+    )
+
+    assert not looks_like_mixed_script_ocr_noise(primary)
+    lang, text = engine._select_text_candidate(
+        [
+            ("rus+eng", primary),
+            ("eng", transliteration),
+        ]
+    )
+
+    assert lang == "rus+eng"
+    assert text == primary
+
+
+def test_tesseract_t9_candidate_selection_rejects_latin_tech_cyrillic_noise():
+    engine = TesseractEngine(language_retry="t9_small")
+
+    lang, text = engine._select_text_candidate(
+        [
+            ("rus+eng", "backend tesseract standard / БасКепа easyocr standard)."),
+            ("eng", "backend tesseract standard /backend easyocr standard)."),
+        ]
+    )
+
+    assert lang == "eng"
+    assert text == "backend tesseract standard /backend easyocr standard)."
+
+
+def test_tesseract_t9_candidate_selection_rejects_cyrillic_tech_confusables():
+    engine = TesseractEngine(language_retry="t9_small")
+
+    lang, text = engine._select_text_candidate(
+        [
+            ("rus+eng", "© backend tesseract standard / БасКепа easyocr standard)."),
+            ("eng", "9 backend tesseract standard /backend easyocr standard)."),
+            ("rus", "© БасКепа тес5егас? 5Хапдага / БасКепа еазуосг 5Хапдага)."),
+        ]
+    )
+
+    assert lang == "eng"
+    assert text == "9 backend tesseract standard /backend easyocr standard)."
+
+
+def test_tesseract_t9_empty_candidate_can_replace_punctuation_noise():
+    engine = TesseractEngine(language_retry="t9_small")
+
+    lang, text = engine._select_text_candidate(
+        [
+            ("rus+eng", "..."),
+            ("eng", "|_';"),
+        ]
+    )
+
+    assert lang == "empty"
+    assert text == ""
+
+
+def test_tesseract_t9_empty_candidate_does_not_hide_single_digit():
+    engine = TesseractEngine(language_retry="t9_small")
+
+    lang, text = engine._select_text_candidate(
+        [
+            ("rus+eng", "5"),
+            ("eng", ""),
+        ]
+    )
+
+    assert lang == "rus+eng"
+    assert text == "5"
 
 
 def test_language_candidate_selector_uses_injected_reviewer():
@@ -270,6 +435,68 @@ def test_tesseract_t9_word_retry_uses_quality_not_only_count():
 
     assert TesseractEngine._should_retry_word_languages(noisy_words) is True
     assert TesseractEngine._should_retry_word_languages(clean_words) is False
+
+
+def test_tesseract_t9_word_retry_detects_latin_table_with_cyrillic_ocr_noise():
+    words = [
+        {"text": "ASUS", "bbox": (0, 0, 30, 10), "conf": 60},
+        {"text": "Vivobook", "bbox": (32, 0, 90, 10), "conf": 60},
+        {"text": "15", "bbox": (92, 0, 110, 10), "conf": 60},
+        {"text": "АЗИЗ", "bbox": (112, 0, 150, 10), "conf": 60},
+        {"text": "Laptop", "bbox": (0, 12, 40, 22), "conf": 60},
+        {"text": "Intel", "bbox": (42, 12, 72, 22), "conf": 60},
+        {"text": "Core", "bbox": (74, 12, 104, 22), "conf": 60},
+        {"text": "SSD", "bbox": (106, 12, 134, 22), "conf": 60},
+        {"text": "ВОВ", "bbox": (136, 12, 166, 22), "conf": 60},
+    ]
+
+    assert looks_like_mixed_script_ocr_noise(TesseractEngine._words_to_text(words))
+    assert TesseractEngine._should_retry_word_languages(words) is True
+
+
+def test_tesseract_t9_word_retry_keeps_balanced_real_mixed_language_text():
+    words = [
+        {"text": "Directum", "bbox": (0, 0, 45, 10), "conf": 60},
+        {"text": "www.directum.ru", "bbox": (48, 0, 130, 10), "conf": 60},
+        {"text": "ПРОКРАСТИНАЦИЯ", "bbox": (0, 12, 110, 22), "conf": 60},
+        {"text": "составь", "bbox": (112, 12, 160, 22), "conf": 60},
+        {"text": "слова", "bbox": (162, 12, 198, 22), "conf": 60},
+    ]
+
+    assert not looks_like_mixed_script_ocr_noise(TesseractEngine._words_to_text(words))
+    assert TesseractEngine._should_retry_word_languages(words) is False
+
+
+def test_tesseract_t9_candidate_selection_escapes_latin_dominant_noisy_primary():
+    engine = TesseractEngine(language_retry="t9_small")
+    noisy_primary = [
+        {"text": "ASUS", "bbox": (0, 0, 30, 10), "conf": 60},
+        {"text": "Vivobook", "bbox": (32, 0, 90, 10), "conf": 60},
+        {"text": "15", "bbox": (92, 0, 110, 10), "conf": 60},
+        {"text": "АЗИЗ", "bbox": (112, 0, 150, 10), "conf": 60},
+        {"text": "Laptop", "bbox": (0, 12, 40, 22), "conf": 60},
+        {"text": "Intel", "bbox": (42, 12, 72, 22), "conf": 60},
+        {"text": "Core", "bbox": (74, 12, 104, 22), "conf": 60},
+        {"text": "SSD", "bbox": (106, 12, 134, 22), "conf": 60},
+        {"text": "ВОВ", "bbox": (136, 12, 166, 22), "conf": 60},
+    ]
+    english = [
+        {**word, "text": text}
+        for word, text in zip(
+            noisy_primary,
+            ("ASUS", "Vivobook", "15", "Laptop", "Intel", "Core", "i5", "SSD", "8GB"),
+        )
+    ]
+
+    lang, words = engine._select_word_candidate(
+        [
+            ("rus+eng+chi_sim", noisy_primary),
+            ("eng", english),
+        ]
+    )
+
+    assert lang == "eng"
+    assert words == english
 
 
 def test_tesseract_t9_word_retry_selects_one_language_hypothesis():

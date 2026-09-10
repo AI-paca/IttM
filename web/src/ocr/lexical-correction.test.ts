@@ -15,10 +15,44 @@ test("browser t9 small cleans common UI OCR noise without table linting", () => 
     applyBrowserLexicalCorrection(text, "t9_small"),
     [
       "Created 94 commits in 1 repository",
-      "AI-paca/IttM 7 merged",
-      "Hw7 (SCA) Jun 26",
-      "Hw5 (OCR engine, streaming, tests, debug area) Jun 19",
-      "AI-paca/IttM 94 commits",
+      "Al-paca/IttM @ merged",
+      "Нм (SCA) Jun 26",
+      "Нм (OCR engine, streaming, tests, debug area) Jun 19",
+      "AI-pacallttM 94 commits",
     ].join("\n"),
+  );
+});
+
+test("browser t9 small cleans technical commerce OCR confusables", () => {
+  const text = [
+    "| Product | FHO Display RAM 868 SSD 128GB DRS 19201080 |",
+    "| Price | £474 | €259.99 |",
+  ].join("\n");
+
+  assert.equal(
+    applyBrowserLexicalCorrection(text, "t9_small"),
+    [
+      "| Product | FHD Display RAM 8GB SSD 128GB DDR5 1920x1080 |",
+      "| Price | €474 | €259.99 |",
+    ].join("\n"),
+  );
+});
+
+test("browser t9 small splits compact display resolutions without product-id rewrites", () => {
+  const text = "HP Laptop 15440021s FHD Display 19201080 and panel 1024768";
+
+  assert.equal(
+    applyBrowserLexicalCorrection(text, "t9_small"),
+    "HP Laptop 15440021s FHD Display 1920x1080 and panel 1024x768",
+  );
+});
+
+test("browser t9 small removes OCR spacing only between adjacent CJK characters", () => {
+  assert.equal(
+    applyBrowserLexicalCorrection(
+      "CHINESE: \u4e2d \u6587 \u6d4b\u8bd5\nMIXED LATIN Д 12345 中 \u6587",
+      "t9_small",
+    ),
+    "CHINESE: \u4e2d\u6587\u6d4b\u8bd5\nMIXED LATIN Д 12345 中\u6587",
   );
 });

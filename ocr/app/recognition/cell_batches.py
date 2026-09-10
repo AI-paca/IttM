@@ -9,6 +9,7 @@ from app.chunking.vertical import (
     TableCell,
     TableLayout,
     prepare_table_cell_image,
+    table_cell_is_visually_empty,
     table_words_to_rows,
 )
 from app.recognition.contracts import TextOcrEngine
@@ -32,6 +33,16 @@ def _seed_words_expect_numbers(seed_words: list[dict]) -> bool:
         return False
     numeric = sum(_is_numeric_text(text) for text in texts)
     return numeric > 0 and numeric / len(texts) >= 0.20
+
+
+def _packed_cell_looks_symbolic(cell: _PackedCell) -> bool:
+    width = max(1, cell.bbox[2] - cell.bbox[0])
+    height = max(1, cell.bbox[3] - cell.bbox[1])
+    return width <= height * 3
+
+
+def _packed_cells_expect_symbols(packed: list[_PackedCell]) -> bool:
+    return any(_packed_cell_looks_symbolic(cell) for cell in packed)
 
 
 def _word_confidence(word: dict) -> float:
@@ -82,7 +93,7 @@ def recognize_missing_table_cell_batches(
         "recognize_words_for_language",
         None,
     )
-    numeric_retry = (
+    seed_numeric_retry = (
         callable(recognize_numeric_words) and table.cols >= 2 and _seed_words_expect_numbers(seed_words or [])
     )
     target_width = min(target_width, max_batch_pixels)
@@ -111,6 +122,11 @@ def recognize_missing_table_cell_batches(
             words = recognize_words(sheet, psm=11, min_conf=5)
             batch_calls += 1
             mapped_words = _map_batch_words(words, packed)
+            numeric_retry = (
+                callable(recognize_numeric_words)
+                and table.cols >= 2
+                and (seed_numeric_retry or _packed_cells_expect_symbols(packed))
+            )
             if numeric_retry:
                 numeric_words = recognize_numeric_words(
                     sheet,
@@ -131,7 +147,7 @@ def recognize_missing_table_cell_batches(
             packed = []
 
     for cell in table.cells:
-        if cell.is_empty:
+        if table_cell_is_visually_empty(image, cell):
             continue
         if seed_rows[cell.row][cell.col].strip():
             continue

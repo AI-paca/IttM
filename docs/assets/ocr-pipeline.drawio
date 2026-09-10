@@ -1,0 +1,119 @@
+<mxfile host="app.diagrams.net" agent="IttM" version="24.0.0">
+  <diagram id="ocr-pipeline" name="Pipeline internals">
+    <mxGraphModel dx="2200" dy="860" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="860" math="0" shadow="0" background="#111820">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="background" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#111820;strokeColor=none;movable=0;resizable=0;connectable=0;" vertex="1" parent="1">
+          <mxGeometry x="0" y="0" width="2200" height="860" as="geometry"/>
+        </mxCell>
+        <mxCell id="title" value="IttM — inside the PIPELINE ENGINE black box" style="text;html=1;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;fontColor=#DCE7F3;" vertex="1" parent="1">
+          <mxGeometry x="470" y="18" width="1260" height="38" as="geometry"/>
+        </mxCell>
+        <mxCell id="pipeline-shell" value="" style="rounded=1;arcSize=5;whiteSpace=wrap;html=1;fillColor=#171A27;strokeColor=#7961C8;strokeWidth=3;container=1;connectable=0;" vertex="1" parent="1">
+          <mxGeometry x="20" y="75" width="2160" height="730" as="geometry"/>
+        </mxCell>
+        <mxCell id="pipeline-title" value="ONE ORDERED RASTER PIPELINE · eight separated boundaries" style="text;html=1;align=center;verticalAlign=middle;fontSize=14;fontStyle=1;fontColor=#DCCFFF;" vertex="1" parent="pipeline-shell">
+          <mxGeometry x="30" y="15" width="2100" height="28" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="artifact" value="&lt;b&gt;PipelineArtifact&lt;/b&gt;&lt;br&gt;payload · capabilities&lt;br&gt;runtime · profile" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#28214A;strokeColor=#9A77E8;strokeWidth=2;fontColor=#F0EAFE;fontSize=10;" vertex="1" parent="pipeline-shell">
+          <mxGeometry x="25" y="285" width="170" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="recipe" value="&lt;b&gt;begin ABI 6 session&lt;/b&gt;&lt;br&gt;ordered stage mask" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#342865;strokeColor=#A887F4;strokeWidth=2;fontColor=#F0EAFE;fontSize=10;" vertex="1" parent="pipeline-shell">
+          <mxGeometry x="225" y="295" width="170" height="90" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="geometry-phase" value="" style="rounded=1;arcSize=7;whiteSpace=wrap;html=1;fillColor=#202B34;strokeColor=#42A5BD;strokeWidth=2;container=1;connectable=0;" vertex="1" parent="pipeline-shell">
+          <mxGeometry x="440" y="90" width="330" height="510" as="geometry"/>
+        </mxCell>
+        <mxCell id="geometry-title" value="GEOMETRY" style="text;html=1;align=center;verticalAlign=middle;fontSize=13;fontStyle=1;fontColor=#BFE6FF;" vertex="1" parent="geometry-phase">
+          <mxGeometry x="15" y="12" width="300" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="align" value="&lt;b&gt;0 · preprocess&lt;/b&gt;&lt;br&gt;inspect raster plane" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#283847;strokeColor=#42A5BD;strokeWidth=2;fontColor=#E5F8FC;fontSize=10;" vertex="1" parent="geometry-phase">
+          <mxGeometry x="45" y="75" width="240" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="segment" value="&lt;b&gt;1 · geometry&lt;/b&gt;&lt;br&gt;derive bounded regions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#283847;strokeColor=#42A5BD;strokeWidth=2;fontColor=#E5F8FC;fontSize=10;" vertex="1" parent="geometry-phase">
+          <mxGeometry x="45" y="205" width="240" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="project-sparse" value="&lt;b&gt;2 · topology&lt;/b&gt;&lt;br&gt;attach topology evidence" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#46341D;strokeColor=#D3A747;strokeWidth=2;fontColor=#FFF0C6;fontSize=10;" vertex="1" parent="geometry-phase">
+          <mxGeometry x="45" y="335" width="240" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="recognition-phase" value="" style="rounded=1;arcSize=7;whiteSpace=wrap;html=1;fillColor=#302126;strokeColor=#E4565B;strokeWidth=2;container=1;connectable=0;" vertex="1" parent="pipeline-shell">
+          <mxGeometry x="815" y="70" width="530" height="550" as="geometry"/>
+        </mxCell>
+        <mxCell id="recognition-title" value="RECOGNITION" style="text;html=1;align=center;verticalAlign=middle;fontSize=13;fontStyle=1;fontColor=#FFE1E1;" vertex="1" parent="recognition-phase">
+          <mxGeometry x="15" y="12" width="500" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="recognize" value="&lt;b&gt;3 · find-object&lt;/b&gt;&lt;br&gt;derive ordered objects" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;fillColor=#3C262A;strokeColor=#E4565B;strokeWidth=2;fontColor=#FFE1E1;fontSize=10;" vertex="1" parent="recognition-phase">
+          <mxGeometry x="35" y="80" width="200" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="adapter-group" value="" style="rounded=1;arcSize=8;whiteSpace=wrap;html=1;fillColor=#202A30;strokeColor=#66788A;strokeWidth=2;container=1;connectable=0;" vertex="1" parent="recognition-phase">
+          <mxGeometry x="295" y="60" width="205" height="210" as="geometry"/>
+        </mxCell>
+        <mxCell id="adapter-title" value="OCR ADAPTERS" style="text;html=1;align=center;verticalAlign=middle;fontSize=10;fontStyle=1;fontColor=#C7D2DE;" vertex="1" parent="adapter-group">
+          <mxGeometry x="15" y="10" width="175" height="22" as="geometry"/>
+        </mxCell>
+        <mxCell id="browser-adapter" value="browser&lt;br&gt;&lt;b&gt;Tesseract.js&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#183C4B;strokeColor=#42A5BD;strokeWidth=2;fontColor=#E5F8FC;fontSize=9;" vertex="1" parent="adapter-group">
+          <mxGeometry x="25" y="50" width="155" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="python-adapter" value="Python&lt;br&gt;&lt;b&gt;Tesseract · EasyOCR · auto&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#203B32;strokeColor=#46B37B;strokeWidth=2;fontColor=#D8F4E4;fontSize=9;" vertex="1" parent="adapter-group">
+          <mxGeometry x="25" y="130" width="155" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="recognized" value="&lt;b&gt;ObjectPlan[]&lt;/b&gt;&lt;br&gt;boxes · order · evidence" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#28402F;strokeColor=#63C58A;strokeWidth=2;fontColor=#E3F7E9;fontSize=10;" vertex="1" parent="recognition-phase">
+          <mxGeometry x="55" y="315" width="220" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="select-language" value="&lt;b&gt;4 · separate-block&lt;/b&gt;&lt;br&gt;emit bounded OCR jobs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#46341D;strokeColor=#D3A747;strokeWidth=2;fontColor=#FFF0C6;fontSize=10;" vertex="1" parent="recognition-phase">
+          <mxGeometry x="55" y="435" width="420" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="assembly-phase" value="" style="rounded=1;arcSize=7;whiteSpace=wrap;html=1;fillColor=#263528;strokeColor=#63C58A;strokeWidth=2;container=1;connectable=0;" vertex="1" parent="pipeline-shell">
+          <mxGeometry x="1390" y="135" width="300" height="420" as="geometry"/>
+        </mxCell>
+        <mxCell id="assembly-title" value="ASSEMBLY" style="text;html=1;align=center;verticalAlign=middle;fontSize=13;fontStyle=1;fontColor=#E3F7E9;" vertex="1" parent="assembly-phase">
+          <mxGeometry x="15" y="12" width="270" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="lexical" value="&lt;b&gt;5 · ocr-blocks&lt;/b&gt;&lt;br&gt;call runtime adapter" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#28402F;strokeColor=#63C58A;strokeWidth=2;fontColor=#E3F7E9;fontSize=10;" vertex="1" parent="assembly-phase">
+          <mxGeometry x="35" y="90" width="230" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="group" value="&lt;b&gt;6 · get-segment&lt;/b&gt;&lt;br&gt;restore source order" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#28402F;strokeColor=#63C58A;strokeWidth=2;fontColor=#E3F7E9;fontSize=10;" vertex="1" parent="assembly-phase">
+          <mxGeometry x="35" y="235" width="230" height="75" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="output-phase" value="" style="rounded=1;arcSize=7;whiteSpace=wrap;html=1;fillColor=#21363A;strokeColor=#2A8EA4;strokeWidth=2;container=1;connectable=0;" vertex="1" parent="pipeline-shell">
+          <mxGeometry x="1735" y="205" width="235" height="280" as="geometry"/>
+        </mxCell>
+        <mxCell id="output-title" value="OUTPUT" style="text;html=1;align=center;verticalAlign=middle;fontSize=13;fontStyle=1;fontColor=#DDF9F2;" vertex="1" parent="output-phase">
+          <mxGeometry x="15" y="12" width="205" height="24" as="geometry"/>
+        </mxCell>
+        <mxCell id="render" value="&lt;b&gt;7 · generate-object&lt;/b&gt;&lt;br&gt;serialize result" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#18474A;strokeColor=#2A8EA4;strokeWidth=2;fontColor=#DDF9F2;fontSize=10;" vertex="1" parent="output-phase">
+          <mxGeometry x="25" y="90" width="185" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="result" value="&lt;b&gt;PipelineResult&lt;/b&gt;&lt;br&gt;Markdown&lt;br&gt;meta · events&lt;br&gt;debug evidence" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#18474A;strokeColor=#2A8EA4;strokeWidth=2;fontColor=#DDF9F2;fontSize=10;" vertex="1" parent="pipeline-shell">
+          <mxGeometry x="2005" y="285" width="130" height="115" as="geometry"/>
+        </mxCell>
+        <mxCell id="footer" value="Current handler placement and debug artifacts: architecture-unified-pipeline.md · debug/EXAMPLE.md" style="text;html=1;align=center;verticalAlign=middle;fontSize=10;fontColor=#AAB8C8;" vertex="1" parent="pipeline-shell">
+          <mxGeometry x="440" y="655" width="1530" height="24" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e-artifact-recipe" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#9A77E8;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="pipeline-shell" source="artifact" target="recipe"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-recipe-align" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#9A77E8;strokeWidth=2;endArrow=block;endFill=1;entryX=0;entryY=0.5;" edge="1" parent="pipeline-shell" source="recipe" target="align"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-align-segment" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#42A5BD;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="geometry-phase" source="align" target="segment"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-segment-sparse" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#D3A747;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="geometry-phase" source="segment" target="project-sparse"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-sparse-recognize" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#E4565B;strokeWidth=2;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="pipeline-shell" source="project-sparse" target="recognize"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e-recognize-call" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#E4565B;strokeWidth=2;endArrow=block;endFill=1;exitX=1;exitY=0.25;entryX=0;entryY=0.25;" edge="1" parent="pipeline-shell" source="lexical" target="adapter-group"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-adapter-return" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#63C58A;strokeWidth=2;dashed=1;endArrow=block;endFill=1;exitX=0;exitY=0.75;entryX=1;entryY=0.75;" edge="1" parent="pipeline-shell" source="adapter-group" target="lexical"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-recognize-output" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#63C58A;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="recognition-phase" source="recognize" target="recognized"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="135" y="290"/></Array></mxGeometry></mxCell>
+        <mxCell id="e-output-language" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#D3A747;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="recognition-phase" source="recognized" target="select-language"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <mxCell id="e-language-lexical" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#63C58A;strokeWidth=2;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="pipeline-shell" source="select-language" target="lexical"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-lexical-group" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#63C58A;strokeWidth=2;endArrow=block;endFill=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="assembly-phase" source="lexical" target="group"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-group-render" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#2A8EA4;strokeWidth=2;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="pipeline-shell" source="group" target="render"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e-render-result" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#2A8EA4;strokeWidth=2;endArrow=block;endFill=1;" edge="1" parent="pipeline-shell" source="render" target="result"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-trivy_image="${TRIVY_IMAGE:-aquasec/trivy@sha256:53570e6911c2361ebe7995228088cf83a6b9b73e7f3cdca44bd8f8f425e80fa7}"
+trivy_image="${TRIVY_IMAGE:-aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969}"
 output="${SCA_OUTPUT_DIR:-.sca}"
 accepted_risk_file="$repo_root/.sca/accepted-risk.json"
 cache="${TRIVY_CACHE_DIR:-$HOME/.cache/trivy/sca-$(id -u)}"
@@ -11,6 +11,8 @@ gateway_image="${SCA_GATEWAY_IMAGE:-ittm-gateway-sca:local}"
 nginx_image="${SCA_NGINX_IMAGE:-ittm-nginx-sca:local}"
 ocr_image="${SCA_OCR_IMAGE:-ittm-ocr-sca:local}"
 ocr_ci_image="${SCA_OCR_CI_IMAGE:-ittm-ocr-ci-sca:local}"
+security_refresh="${SCA_SECURITY_REFRESH:-$(date -u +%Y-%m-%d)}"
+pip_vendor_sbom="usr/local/lib/python3.10/site-packages/pip/_vendor/bom.cdx.json"
 
 if [[ "$output" = /* || "$output" == *".."* ]]; then
   echo "SCA_OUTPUT_DIR must be a repository-relative path without '..'." >&2
@@ -88,25 +90,57 @@ verify_accepted_risk() {
   fi
 }
 
+verify_cargo_component() {
+  local report="$1"
+  local component="$2"
+
+  if ! jq -e --arg component "$component" '
+    .components[]?
+    | select(
+        .name == $component
+        and ((.purl // "") | startswith("pkg:cargo/"))
+      )
+  ' "$repo_root/$output/$report" >/dev/null; then
+    echo "Missing Rust component '$component' in $report." >&2
+    return 1
+  fi
+}
+
+verify_rust_sbom_coverage() {
+  local status=0
+
+  verify_cargo_component source.cdx.json ittm-ocr-core || status=1
+  verify_cargo_component source.cdx.json ittm-pipeline-core || status=1
+  verify_cargo_component nginx.cdx.json ittm-pipeline-core || status=1
+  verify_cargo_component ocr.cdx.json ittm-pipeline-core || status=1
+  verify_cargo_component ocr-ci.cdx.json ittm-pipeline-core || status=1
+
+  return "$status"
+}
+
 if [[ "${SCA_SKIP_BUILD:-0}" != "1" ]]; then
   docker build --pull --network "$network" \
+    --build-arg "SECURITY_REFRESH=$security_refresh" \
     -f "$repo_root/docker/gateway.Dockerfile" \
     -t "$gateway_image" \
     "$repo_root"
   docker build --pull --network "$network" \
+    --build-arg "SECURITY_REFRESH=$security_refresh" \
     -f "$repo_root/docker/nginx.Dockerfile" \
     -t "$nginx_image" \
     "$repo_root"
   docker build --pull --network "$network" \
+    --build-arg "SECURITY_REFRESH=$security_refresh" \
     -f "$repo_root/docker/ocr.Dockerfile" \
     -t "$ocr_image" \
-    "$repo_root/ocr"
+    "$repo_root"
   docker build --pull --network "$network" \
     --target test \
+    --build-arg "SECURITY_REFRESH=$security_refresh" \
     --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt \
     -f "$repo_root/docker/ocr.Dockerfile" \
     -t "$ocr_ci_image" \
-    "$repo_root/ocr"
+    "$repo_root"
 fi
 
 gate_status=0
@@ -139,14 +173,20 @@ for image_spec in \
 
   run_trivy image \
     --scanners vuln \
+    --skip-files "$pip_vendor_sbom" \
     --format json \
     --output "/work/$output/$name-vuln.json" \
     "$image_name"
   run_trivy image \
+    --skip-files "$pip_vendor_sbom" \
     --format cyclonedx \
     --output "/work/$output/$name.cdx.json" \
     "$image_name"
 done
+
+if ! verify_rust_sbom_coverage; then
+  gate_status=1
+fi
 
 if ! verify_accepted_risk; then
   gate_status=1
@@ -169,6 +209,7 @@ for image_name in "$gateway_image" "$nginx_image" "$ocr_image" "$ocr_ci_image"; 
   if ! run_trivy image \
     --quiet \
     --scanners vuln \
+    --skip-files "$pip_vendor_sbom" \
     --ignore-unfixed \
     --severity MEDIUM,HIGH,CRITICAL \
     --format json \

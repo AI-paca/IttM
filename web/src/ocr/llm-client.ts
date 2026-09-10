@@ -9,6 +9,7 @@ import {
   blobToBase64OffMainThread,
   prepareImageForLlm,
 } from "./document-encoding";
+import { runBrowserSeparatedPipeline } from "./browser-separated";
 import { assertExternalLlmConsent, runExternalLlmRequest } from "./llm-consent";
 import type {
   LlmProvider,
@@ -16,6 +17,16 @@ import type {
   ProgressDetail,
   ProgressSink,
 } from "./types";
+
+function recognizedBlockResult(markdown: string): OcrResult {
+  return { markdown, meta: { stage: "ocr-blocks" } };
+}
+
+function blockFile(block: Blob): File {
+  return new File([block], "ocr-block.png", {
+    type: block.type || "image/png",
+  });
+}
 
 const OCR_PROMPT =
   "Extract all text from this image/document. Preserve tables as Markdown tables. Output only the extracted content, no markdown fences.";
@@ -102,6 +113,7 @@ export async function executeLlmOcrForImage(
         `Gemini: сеть недоступна или ключ ограничен политиками браузера (${
           normalizePlatformError(error).message
         })`,
+        { cause: error },
       );
     }
 
@@ -116,7 +128,7 @@ export async function executeLlmOcrForImage(
 
     const data = await response.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (text) return { markdown: text };
+    if (text) return recognizedBlockResult(text);
 
     const finishReason = data?.candidates?.[0]?.finishReason;
     if (finishReason)
@@ -157,6 +169,7 @@ export async function executeLlmOcrForImage(
   } catch (error) {
     throw new Error(
       `OpenRouter: сеть недоступна или запрос заблокирован (${normalizePlatformError(error).message})`,
+      { cause: error },
     );
   }
 
@@ -164,7 +177,7 @@ export async function executeLlmOcrForImage(
 
   const data = await response.json();
   const text = data?.choices?.[0]?.message?.content;
-  if (text) return { markdown: text };
+  if (text) return recognizedBlockResult(text);
   throw new Error("Пустой ответ от OpenRouter или неизвестный формат ответа.");
 }
 
@@ -193,6 +206,7 @@ export async function executeOllamaOcrForImage(
   } catch (error) {
     throw new Error(
       `Ollama: сеть недоступна или CORS заблокировал запрос (${normalizePlatformError(error).message})`,
+      { cause: error },
     );
   }
 
@@ -200,8 +214,73 @@ export async function executeOllamaOcrForImage(
 
   const data = await response.json();
   const text = data?.response;
-  if (typeof text === "string" && text.trim()) return { markdown: text };
+  if (typeof text === "string" && text.trim())
+    return recognizedBlockResult(text);
   throw new Error("Пустой ответ от Ollama или неизвестный формат ответа.");
+}
+
+async function runSeparatedOllamaImage(
+  image: Blob,
+  settings: { baseUrl: string; model: string },
+  activeContent: { current: boolean },
+  onProgress: ProgressSink,
+): Promise<OcrResult> {
+  const result = await runBrowserSeparatedPipeline(
+    image,
+    async (block) => {
+      const prepared = await prepareImageForLlm(blockFile(block));
+      const b64 = await blobToBase64OffMainThread(prepared);
+      const recognized = await executeOllamaOcrForImage(
+        b64,
+        settings,
+        activeContent,
+        onProgress,
+      );
+      return recognized.markdown;
+    },
+    onProgress,
+  );
+  return {
+    markdown: result.markdown,
+    meta: {
+      pipeline: "rust_separated_v1",
+      pipeline_stages: result.stages,
+      segments: result.jobs.length,
+    },
+  };
+}
+
+async function runSeparatedLlmImage(
+  image: Blob,
+  mimeType: string,
+  settings: LlmSettings,
+  activeContent: { current: boolean },
+  onProgress: ProgressSink,
+): Promise<OcrResult> {
+  const result = await runBrowserSeparatedPipeline(
+    image,
+    async (block) => {
+      const prepared = await prepareImageForLlm(blockFile(block));
+      const b64 = await blobToBase64OffMainThread(prepared);
+      const recognized = await executeLlmOcrForImage(
+        b64,
+        mimeType,
+        settings,
+        activeContent,
+        onProgress,
+      );
+      return recognized.markdown;
+    },
+    onProgress,
+  );
+  return {
+    markdown: result.markdown,
+    meta: {
+      pipeline: "rust_separated_v1",
+      pipeline_stages: result.stages,
+      segments: result.jobs.length,
+    },
+  };
 }
 
 export async function executeOllamaOcr(
@@ -213,6 +292,7 @@ export async function executeOllamaOcr(
   startPage = 1,
   onTotalPages?: (total: number) => void,
   pdfRenderScale?: number,
+  forcePdfRaster = false,
 ): Promise<OcrResult> {
   if (activeContent.current) onProgress("Подготовка файла...");
 
@@ -236,9 +316,8 @@ export async function executeOllamaOcr(
           };
           onProgress(message, percent, progressDetail);
         };
-        const b64 = await blobToBase64OffMainThread(image);
-        const res = await executeOllamaOcrForImage(
-          b64,
+        const res = await runSeparatedOllamaImage(
+          image,
           settings,
           activeContent,
           pageProgress,
@@ -251,16 +330,15 @@ export async function executeOllamaOcr(
       {
         renderScale: pdfRenderScale,
         cropMode: effectivePdfCropMode(readCropMode()),
+        forceRaster: forcePdfRaster,
         shouldContinue: () => activeContent.current,
       },
     );
-    return { markdown: md };
+    return { markdown: md, meta: { pipeline: "pdf_native_or_rust_separated" } };
   }
 
-  const prepared = await prepareImageForLlm(targetFile);
-  const b64 = await blobToBase64OffMainThread(prepared);
-  return await executeOllamaOcrForImage(
-    b64,
+  return await runSeparatedOllamaImage(
+    targetFile,
     settings,
     activeContent,
     onProgress,
@@ -276,6 +354,7 @@ export async function executeLlmOcr(
   startPage = 1,
   onTotalPages?: (total: number) => void,
   pdfRenderScale?: number,
+  forcePdfRaster = false,
 ): Promise<OcrResult> {
   assertExternalLlmConsent(settings.externalConsent);
   if (activeContent.current) onProgress("Подготовка файла...");
@@ -300,9 +379,8 @@ export async function executeLlmOcr(
           };
           onProgress(message, percent, progressDetail);
         };
-        const b64 = await blobToBase64OffMainThread(image);
-        const res = await executeLlmOcrForImage(
-          b64,
+        const res = await runSeparatedLlmImage(
+          image,
           "image/jpeg",
           settings,
           activeContent,
@@ -316,17 +394,16 @@ export async function executeLlmOcr(
       {
         renderScale: pdfRenderScale,
         cropMode: effectivePdfCropMode(readCropMode()),
+        forceRaster: forcePdfRaster,
         shouldContinue: () => activeContent.current,
       },
     );
-    return { markdown: md };
+    return { markdown: md, meta: { pipeline: "pdf_native_or_rust_separated" } };
   }
 
-  const prepared = await prepareImageForLlm(targetFile);
-  const b64 = await blobToBase64OffMainThread(prepared);
-  const result = await executeLlmOcrForImage(
-    b64,
-    "image/jpeg",
+  const result = await runSeparatedLlmImage(
+    targetFile,
+    targetFile.type || "image/jpeg",
     settings,
     activeContent,
     onProgress,

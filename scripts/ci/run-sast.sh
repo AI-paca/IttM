@@ -26,6 +26,7 @@ if [[ -n "${SAST_TARGETS:-}" ]]; then
 else
   targets=(
     docker-compose.yml
+    docker-compose.python.yml
     .github/workflows
     gateway/nginx.conf
     gateway/src
@@ -33,6 +34,7 @@ else
     edge/cloudflare-worker.ts
     ocr/app
     pipeline-core/src
+    ocr-runtime/src
     scripts/ci
     scripts/runtime
     scripts/cli

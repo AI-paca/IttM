@@ -1,0 +1,28 @@
+# Optional compatibility backend for Python-specific engines and reference tools.
+services:
+  ocr:
+    image: ittm-ocr-python
+    build:
+      dockerfile: docker/ocr.Dockerfile
+      target: runtime
+      args:
+        PYTHON_REQUIREMENTS: ${OCR_REQUIREMENTS:-requirements-light.txt}
+    environment:
+      PYTHONPATH: /opt/ittm-python-packages
+      EASY_INSTALL_TARGET: /opt/ittm-python-packages
+      EASYOCR_MODULE_PATH: /models/easyocr
+      DISABLE_RUNTIME_EASYOCR_INSTALL: ${DISABLE_RUNTIME_EASYOCR_INSTALL:-0}
+    volumes:
+      - ocr-python-packages:/opt/ittm-python-packages
+      - ocr-easyocr-models:/models/easyocr
+    command: sh -c 'uvicorn app.main:app --host 0.0.0.0 --port "$$PORT"'
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import json,os,urllib.request; d=json.load(urllib.request.urlopen(''http://127.0.0.1:%s/readiness'' % os.environ.get(''PORT'',''8000''),timeout=3)); raise SystemExit(0 if d.get(''ready'') else 1)"',
+        ]
+
+volumes:
+  ocr-python-packages:
+  ocr-easyocr-models:

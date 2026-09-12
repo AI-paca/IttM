@@ -12,6 +12,9 @@ mod object_matrix;
 mod pdf_native;
 mod separated;
 mod topology;
+pub mod session;
+
+pub use assembler::StructuralObjectKind;
 
 pub use pdf_native::{
     NativePdfArtifact, NativePdfSegment, NativeTextCell, NativeTextObject, PdfTextGeometryItem,

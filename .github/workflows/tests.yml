@@ -14,6 +14,33 @@ env:
   ONNXRUNTIME_NODE_INSTALL: skip
 
 jobs:
+  native-ocr:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.1"
+      - name: Install native OCR and comparison dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libtesseract-dev libleptonica-dev tesseract-ocr-eng tesseract-ocr-rus poppler-utils fonts-dejavu-core python3-venv
+          python3 -m venv /tmp/ittm-native-tests
+          /tmp/ittm-native-tests/bin/python -m pip install -r ocr/requirements-ci.txt
+      - name: Shared core and native runtime tests
+        run: |
+          cargo test --locked --manifest-path pipeline-core/Cargo.toml
+          cargo test --locked --manifest-path ocr-runtime/Cargo.toml
+      - name: Build native executables and Python comparison library
+        run: |
+          cargo build --locked --release --manifest-path pipeline-core/Cargo.toml
+          cargo build --locked --release --manifest-path ocr-runtime/Cargo.toml
+      - name: Native/Python OCR parity, PDF, checkpoint and HTTP regression
+        run: |
+          /tmp/ittm-native-tests/bin/python scripts/ci/verify-native-profiles.py
+          /tmp/ittm-native-tests/bin/python scripts/ci/test-native-runtime.py
+
   sast:
     runs-on: ubuntu-24.04
     steps:
@@ -38,8 +65,9 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Set up shared Rust core toolchain
-        uses: dtolnay/rust-toolchain@1.96.1
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.96.1"
           targets: wasm32-unknown-unknown
 
       - uses: actions/setup-node@v7
@@ -91,7 +119,7 @@ jobs:
         run: npm ci
 
       - name: Build OCR test image
-        run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci .
+        run: docker build --network "${DOCKER_BUILD_NETWORK:-default}" -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci .
 
       - name: Contract tests
         env:
@@ -112,7 +140,7 @@ jobs:
         run: npm ci
 
       - name: Build OCR test image
-        run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci .
+        run: docker build --network "${DOCKER_BUILD_NETWORK:-default}" -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci .
 
       - name: Smoke tests
         env:
@@ -125,7 +153,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Build OCR test image
-        run: docker build -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci .
+        run: docker build --network "${DOCKER_BUILD_NETWORK:-default}" -f docker/ocr.Dockerfile --target test --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt --build-arg OCR_INSTALL_CJK_FONTS=1 -t ittm-ocr-ci .
 
       - name: Python style checks
         run: |
@@ -148,4 +176,6 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Validate Docker Compose config
-        run: docker compose config --quiet
+        run: |
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.python.yml config --quiet

@@ -6,6 +6,7 @@ on:
     types: [completed]
 
 permissions:
+  actions: read
   contents: write
   pull-requests: write
 
@@ -19,11 +20,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.event.workflow_run.id }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           pr_json="$(
-            gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/pull_requests" \
-              --jq 'map(select(.user.login == "dependabot[bot]")) | first'
+            gh api "/repos/${GITHUB_REPOSITORY}/commits/${TESTED_SHA}/pulls" \
+              --jq 'map(select(.user.login == "dependabot[bot]" and .state == "open")) | first'
           )"
 
           if [ -z "$pr_json" ] || [ "$pr_json" = "null" ]; then
@@ -32,7 +33,16 @@ jobs:
           fi
 
           number="$(jq -r '.number' <<<"$pr_json")"
-          pr="$(gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json url)"
+          pr="$(gh pr view "$number" --repo "$GITHUB_REPOSITORY" --json url,headRefOid,baseRefName,isCrossRepository)"
+
+          # The head may have changed while the previous Tests run completed.
+          # Never merge an untested update or execute code from the PR here.
+          if [ "$(jq -r '.headRefOid' <<<"$pr")" != "$TESTED_SHA" ] ||
+             [ "$(jq -r '.baseRefName' <<<"$pr")" != "main" ] ||
+             [ "$(jq -r '.isCrossRepository' <<<"$pr")" != "false" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "url=$(jq -r '.url' <<<"$pr")" >> "$GITHUB_OUTPUT"
@@ -43,4 +53,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR_URL: ${{ steps.pr.outputs.url }}
-        run: gh pr merge --auto --squash "$PR_URL"
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: gh pr merge --auto --squash --match-head-commit "$TESTED_SHA" "$PR_URL"

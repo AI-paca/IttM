@@ -7,6 +7,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
 
+if [ "${OCR_RUNTIME:-rust}" = "rust" ]; then
+    exec bash "$SCRIPT_DIR/run-native.sh" "$@"
+fi
+if [ "${OCR_RUNTIME:-}" != "python" ]; then
+    echo "OCR_RUNTIME must be rust or python" >&2
+    exit 1
+fi
+
 PYTHON_ENV_DIR="${PYTHON_ENV_DIR:-ocr/.venv}"
 HOST_PYTHON="${HOST_PYTHON:-${PYTHON_BIN:-}}"
 VENV_PYTHON="$PYTHON_ENV_DIR/bin/python"

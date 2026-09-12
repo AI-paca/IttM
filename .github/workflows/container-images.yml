@@ -22,4 +22,4 @@ jobs:
         run: docker build -f docker/nginx.Dockerfile -t ittm-nginx-ci .
 
       - name: Build OCR production image
-        run: docker build -f docker/ocr.Dockerfile -t ittm-ocr-ci .
+        run: docker build -f docker/ocr-native.Dockerfile -t ittm-ocr-native-ci .

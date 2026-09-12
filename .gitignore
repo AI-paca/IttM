@@ -171,6 +171,7 @@ PR_SAMPLE.md
 scripts/debug/run-v*-full.sh
 scripts/debug/monitor-restart-v*-if-empty.sh
 pipeline-core/target/
+ocr-runtime/target/
 web/public/wasm/*.wasm
 
 # Local generated OCR evidence and Rust build output

@@ -25,15 +25,16 @@ entry routes, очереди и output adapters здесь намеренно н
 
 Entry routes заканчиваются на artifact contract. Они определяют способ
 доставки и доступный runtime, но не являются владельцами OCR engine.
-Runtime adapters вложены только в `ocr-blocks`. Tesseract.js либо Python
-Tesseract/EasyOCR получают crop jobs от Rust и возвращают UTF-8; Rust сохраняет
+Runtime adapters вложены только в `ocr-blocks`. Tesseract.js, нативный
+Tesseract C API либо Python EasyOCR получают crop jobs от Rust и возвращают
+текст и word evidence; Rust сохраняет
 source order и выполняет `get-segment`/`generate-object`.
 
-| Stage contracts              | Browser runtime       | Python runtime         |
-| ---------------------------- | --------------------- | ---------------------- |
-| preprocess … separate-block  | `pipeline-core` WASM  | native `pipeline-core` |
-| ocr-blocks                   | Tesseract.js/provider | Tesseract/EasyOCR      |
-| get-segment, generate-object | `pipeline-core` WASM  | native `pipeline-core` |
+| Stage contracts              | Browser runtime       | Native runtime                   |
+| ---------------------------- | --------------------- | -------------------------------- |
+| preprocess … separate-block  | `pipeline-core` WASM  | native `pipeline-core`           |
+| ocr-blocks                   | Tesseract.js/provider | Tesseract C API / EasyOCR worker |
+| get-segment, generate-object | `pipeline-core` WASM  | native `pipeline-core`           |
 
 ## Что действительно общее
 
@@ -42,6 +43,11 @@ source order и выполняет `get-segment`/`generate-object`.
 
 - `libittm_pipeline_core.so`, который загружает Python;
 - `ittm_pipeline_core.wasm`, который загружает browser runtime.
+
+`ocr-runtime` также подключает ядро как Rust crate через безопасный `Session`.
+Он владеет HTTP/NDJSON, загрузкой изображений/PDF, циклом OCR jobs и debug CLI.
+Это backend по умолчанию в Compose и `run-local.sh`; прежний Python backend
+сохранён для совместимости и сравнительных тестов.
 
 Общими являются stage controller, raster block geometry, source order и
 сборка результата, а также bounded recipe/evidence helpers. Сборка проверяет
@@ -67,6 +73,8 @@ provider path. Web UI вызывает Ollama прямым browser `fetch`, по
 
 - browser OCR: отдельный worker pool на вкладку, общей очереди между вкладками
   нет;
+- Rust backend: `OCR_CONCURRENCY=1` по умолчанию, при занятости возвращает 429;
+  закрытие NDJSON stream отменяет обработку;
 - compatibility backend stream: отдельный Python thread на запрос, общего OCR
   concurrency cap нет;
 - Task API: один worker и очередь до 32 ожидающих задач;

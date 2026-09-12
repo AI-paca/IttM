@@ -15,6 +15,8 @@ ocr/.pytest_cache
 ocr/.ruff_cache
 ocr/tests/fixtures
 node_modules
+pipeline-core/target
+ocr-runtime/target
 web/node_modules
 gateway/node_modules
 dist

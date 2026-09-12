@@ -5,29 +5,22 @@ services:
     image: ittm-ocr
     build:
       context: .
-      dockerfile: docker/ocr.Dockerfile
+      dockerfile: docker/ocr-native.Dockerfile
       network: ${DOCKER_BUILD_NETWORK:-default}
       target: ${OCR_BUILD_TARGET:-runtime}
       args:
-        PYTHON_REQUIREMENTS: ${OCR_REQUIREMENTS:-requirements-light.txt}
         OCR_INSTALL_CJK_FONTS: ${OCR_INSTALL_CJK_FONTS:-0}
     environment:
       PORT: ${OCR_INTERNAL_PORT:-8000}
-      PYTHONPATH: /opt/ittm-python-packages
-      EASY_INSTALL_TARGET: /opt/ittm-python-packages
-      EASYOCR_MODULE_PATH: /models/easyocr
-      DISABLE_RUNTIME_EASYOCR_INSTALL: ${DISABLE_RUNTIME_EASYOCR_INSTALL:-0}
-    volumes:
-      - ocr-python-packages:/opt/ittm-python-packages
-      - ocr-easyocr-models:/models/easyocr
+      OCR_CONCURRENCY: ${OCR_CONCURRENCY:-1}
     expose:
       - "${OCR_INTERNAL_PORT:-8000}"
-    command: sh -c 'uvicorn app.main:app --host 0.0.0.0 --port "$$PORT"'
+    command: ["ittm-ocr", "serve"]
     healthcheck:
       test:
         - CMD-SHELL
         - >-
-          python -c "import json, os, urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:%s/readiness' % os.environ.get('PORT', '8000'), timeout=3)); raise SystemExit(0 if data.get('ready') else 1)"
+          curl --fail --silent --max-time 3 "http://127.0.0.1:$${PORT:-8000}/readiness"
       interval: 10s
       timeout: 5s
       retries: 12
@@ -81,7 +74,3 @@ services:
       timeout: 5s
       retries: 12
     restart: unless-stopped
-
-volumes:
-  ocr-python-packages:
-  ocr-easyocr-models:

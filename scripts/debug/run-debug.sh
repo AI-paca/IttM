@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=scripts/debug/workspace-paths.sh
+source "$(dirname "${BASH_SOURCE[0]}")/workspace-paths.sh"
+
 source_root="."
 fixtures_root=""
 expected_root=""
@@ -46,25 +49,14 @@ has_supported_fixtures() {
   return 1
 }
 
-if [[ -z "$fixtures_root" ]]; then
-  if has_supported_fixtures "$default_fixtures_root"; then
-    fixtures_root="$default_fixtures_root"
-  elif has_supported_fixtures "debug"; then
-    fixtures_root="debug"
-  elif [[ -d testtables ]] && has_supported_fixtures "testtables"; then
-    fixtures_root="testtables"
-  else
-    fixtures_root="$default_fixtures_root"
-  fi
-fi
+fixtures_root="$(debug_data_path "${fixtures_root:-debug/fixtures}")"
+source_root="$(debug_source_path "$source_root")"
 
-if [[ "$fixtures_root" == "debug" ]] &&
-  ! has_supported_fixtures "$fixtures_root" &&
-  [[ -d testtables ]]; then
-  fixtures_root="testtables"
-fi
 
 output_root="${output_root:-debug/tmp}"
+
+output_root="$(debug_data_path "$output_root")"
+expected_root="$(debug_workspace_path "$expected_root")"
 
 exec scripts/benchmark/benchmark-testtables.sh \
   --source "$source_root" \

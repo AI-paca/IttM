@@ -127,6 +127,7 @@ def test_legacy_two_field_table_recovery_reconstructs_rows(
         segment_lines,
         result_text,
         (("Metric", "Value"), ("Brain %", "2%")),
+        {},
     )
 
 
@@ -192,7 +193,7 @@ def test_sparse_table_coordinates_project_to_logical_rows_with_evidence(
     projected = stage._table_handoff_segments(
         stored,
         rows,
-        ocr_job_ids=("ocr-job-0",),
+        ocr_job_ids_by_cell={(row, column): ("ocr-job-0",) for row in range(5) for column in range(2)},
     )
 
     assert len(projected) == 10
@@ -244,7 +245,7 @@ def test_sparse_table_handoff_keeps_empty_rows_and_cell_provenance(
             ("", ""),
             ("Recognized", ""),
         ),
-        ocr_job_ids=("ocr-job-0",),
+        ocr_job_ids_by_cell={(row, column): ("ocr-job-0",) for row in range(5) for column in range(2)},
     )
 
     by_coordinate = {
@@ -254,7 +255,7 @@ def test_sparse_table_handoff_keeps_empty_rows_and_cell_provenance(
         ): segment
         for segment in projected
     }
-    assert set(by_coordinate) == {(row, column) for row in range(3) for column in range(2)}
+    assert set(by_coordinate) == {(row, column) for row in range(3) for column in range(2)} - {(2, 1)}
     assert by_coordinate[(1, 0)]["text"] == ""
     assert by_coordinate[(1, 0)]["source_segment_ids"] == ("segment-empty-source",)
     assert by_coordinate[(1, 1)]["text"] == ""
@@ -262,8 +263,8 @@ def test_sparse_table_handoff_keeps_empty_rows_and_cell_provenance(
         "segment-empty-value",
         "segment-noise-source",
     )
-    assert by_coordinate[(2, 1)]["text"] == ""
-    assert by_coordinate[(2, 1)]["source_segment_ids"] == ()
+    # An empty coordinate with no source segment must not invent a cell.
+    assert (2, 1) not in by_coordinate
     projected_source_ids = {segment_id for segment in projected for segment_id in segment["source_segment_ids"]}
     assert len({segment["segment_id"] for segment in projected}) == len(projected)
     assert projected_source_ids == {cell.segment_id for cell in cells}

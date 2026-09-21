@@ -163,7 +163,8 @@ def test_generated_functional_ocr_quality_matrix(case: FunctionalQualityCase):
     assert spec.tier == "quality"
     assert meta["engine"] in {"tesseract", "easyocr"}
     assert meta["pages"] == case.expected_pages
-    assert meta["pipeline"] == case.profile
+    assert meta["pipeline"] == "rust_separated_v1"
+    assert meta["pipeline_profile"] == case.profile
     assert markdown.strip(), f"{spec.id} produced empty markdown with meta {meta}"
 
     recall = token_recall(list(spec.expected_tokens), markdown)
@@ -260,5 +261,9 @@ def test_backend_tesseract_long_cart_keeps_top_middle_and_bottom():
         template.image.close()
 
     assert ordered_phrase_recall(list(template.expected_phrases), markdown) >= 0.8
-    assert name_value_pair_recall(list(template.expected_pairs), markdown) >= 2 / 3
+    expected_tokens = [token for pair in template.expected_pairs for token in pair]
+    assert token_recall(expected_tokens, markdown) == 1.0, (
+        f"long cart lost edge or middle values: {missing_tokens(expected_tokens, markdown)}\n"
+        f"OCR output:\n{markdown}"
+    )
     assert meta["chunks"] > 1

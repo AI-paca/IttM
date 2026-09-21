@@ -20,9 +20,10 @@ const OBJECT_UNKNOWN: u32 = 3;
 const OBJECT_FLOW: u32 = 4;
 const SPLIT_CALIBRATION_SAMPLES: usize = 3;
 const SPLIT_CALIBRATION_MIN_SUCCESSES: usize = 2;
-#[allow(dead_code)] // Explicit context policy, not canonical OCR preparation.
 const OCR_CONTEXT_BORDER: u32 = 8;
-const OCR_PARAGRAPH_UPSCALE_MIN_HEIGHT: usize = 512;
+// Paragraph crops only need surrounding whitespace. Enlarging them damages
+// Cyrillic diacritics and CJK strokes, especially after PDF rasterization.
+const OCR_PARAGRAPH_UPSCALE_MIN_HEIGHT: usize = 1;
 const OCR_PARAGRAPH_UPSCALE_MAX_FACTOR: usize = 8;
 const OCR_TABLE_UPSCALE_MIN_HEIGHT: usize = 96;
 const OCR_TABLE_UPSCALE_MAX_FACTOR: usize = 4;
@@ -232,17 +233,20 @@ fn raster_for_request(
     } else {
         raw.clone()
     };
-    if let Some(gray) = normalize_dark_small_text_rgb(
+    let transformed = if let Some(gray) = normalize_dark_small_text_rgb(
         &transformed.pixels.decoded(),
         transformed.width as usize,
         transformed.height as usize,
     ) {
-        // Python returns normalized dark text at its original geometry before
-        // considering height-based enlargement.
-        return grayscale(&transformed, gray);
-    }
-    // The frozen adapter adds a border only for recognition-miss retries.
-    // Ordinary attempts preserve the canonical crop's border and coordinates.
+        grayscale(&transformed, gray)
+    } else {
+        transformed
+    };
+    // Canonical blocks are tight foreground crops. Tesseract needs background
+    // around edge glyphs even when recognition succeeds: without it diacritics
+    // and CJK strokes can be misread with high confidence. Move crop placements
+    // with the padding so word evidence still maps to the original source.
+    let transformed = add_ocr_context_border(transformed);
     let (minimum_height, maximum_factor) = if object_kind == OBJECT_TABLE {
         (
             OCR_TABLE_UPSCALE_MIN_HEIGHT,
@@ -295,7 +299,6 @@ fn raster_for_request(
     }
 }
 
-#[allow(dead_code)] // Kept for callers explicitly requesting context padding.
 fn add_ocr_context_border(source: JobRaster) -> JobRaster {
     let Some(width) = source.width.checked_add(OCR_CONTEXT_BORDER.saturating_mul(2)) else {
         return source;
@@ -4539,7 +4542,7 @@ mod tests {
     }
 
     #[test]
-    fn canonical_paragraph_preparation_scales_without_inventing_a_border() {
+    fn paragraph_ocr_padding_preserves_source_geometry_and_moves_crop_placements() {
         let width = 100_u32;
         let height = 120_u32;
         let mut pixels = vec![255_u8; (width * height * 3) as usize];
@@ -4573,15 +4576,15 @@ mod tests {
             },
             OBJECT_PARAGRAPH,
         );
-        assert_eq!((raster.width, raster.height, raster.stride), (500, 600, 1500));
+        assert_eq!((raster.width, raster.height, raster.stride), (116, 136, 348));
         assert_eq!(raster.placements[0].source_rect, Rect { left: 10, top: 20, right: 110, bottom: 140 });
         assert_eq!(
             raster.placements[0].crop_rect,
             Rect {
-                left: 0,
-                top: 0,
-                right: 500,
-                bottom: 600,
+                left: 8,
+                top: 8,
+                right: 108,
+                bottom: 128,
             }
         );
     }

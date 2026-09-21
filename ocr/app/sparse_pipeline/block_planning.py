@@ -416,6 +416,9 @@ class RecognitionBlock:
                 "context-bridge",
                 "structural-singleton",
                 "dyadic-mask",
+                # Stored compatibility crops still use the locality renderer.
+                "polar-local-full",
+                "polar-local-signature",
             }:
                 raise ValueError("matrix window kind is invalid")
             if (

@@ -8,6 +8,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 from app.pipeline_config import OcrPipelineProfile
+from app.pipeline_core.separated import SeparatedRecognition
 from app.services import convert_service
 from tests.support.generated_media import (
     animated_gif_bytes,
@@ -200,13 +201,9 @@ def test_pdf_spool_ignores_traversal_filename_and_cleans_up_on_failure(
 def test_generated_long_receipt_reaches_engine_as_bounded_segments(monkeypatch):
     calls = []
 
-    class FakeEngine:
-        def recognize(self, image, mode="text_mode", psm=6):
-            calls.append(image.size)
-            return f"segment-{len(calls)}"
-
-        def info(self):
-            return {"engine": "fake"}
+    def recognize(crop, job, engine, profile, fallback):
+        calls.append(crop.size)
+        return SeparatedRecognition(f"segment-{job.index}", 1000)
 
     image = Image.new("RGB", (500, 12_000), "white")
     draw = ImageDraw.Draw(image)
@@ -223,8 +220,8 @@ def test_generated_long_receipt_reaches_engine_as_bounded_segments(monkeypatch):
     image.close()
     monkeypatch.setattr(
         convert_service,
-        "_create_engine",
-        lambda _engine_type, _profile: FakeEngine(),
+        "recognize_separated_block",
+        recognize,
     )
 
     events = list(

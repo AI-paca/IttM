@@ -28,14 +28,19 @@ The Python fast command used by CI is:
 docker run --rm \
   -v "$PWD/scripts:/scripts:ro" \
   -v "$PWD/debug:/debug:ro" \
-  -v "$PWD/LLM-OCR:/LLM-OCR:ro" \
   ittm-ocr-ci \
   python -m pytest \
-    tests/api tests/engines tests/layout tests/pipeline tests/debug -q
+    tests -q
 ```
 
-It intentionally does not include `tests/quality`, `tests/recognition` or
-`tests/sparse_pipeline`; choose those explicitly when their code changes.
+All test directories are collected, including `recognition`, `sparse_pipeline`
+and lightweight quality contracts. Real OCR accuracy tests require
+`RUN_OCR_QUALITY=1`; generated resource soak uses `RUN_GENERATED_FUZZ=1`.
+Those expensive modes also run in the scheduled/manual workflows. Pytest uses
+importlib mode so identical module basenames in different suites do not collide.
+
+`npm test` discovers root and nested test files recursively without depending
+on shell glob expansion. Browser OCR quality remains a separate command.
 
 ### Shared Rust route
 

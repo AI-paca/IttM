@@ -71,6 +71,8 @@ COPY pipeline-core/Cargo.toml pipeline-core/Cargo.lock /opt/ittm-pipeline-core/
 COPY ocr/app ./app
 
 FROM app-base AS test
+# Debug tools and subprocess tests use the repository layout /ocr/app.
+RUN ln -s /app /ocr
 COPY ocr/pyproject.toml ./
 COPY ocr/.flake8 ./
 COPY ocr/tests ./tests

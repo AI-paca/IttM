@@ -14,11 +14,11 @@ use_ocr_stub="${COMPOSE_SMOKE_OCR_STUB:-1}"
 compose_files=(-f docker-compose.yml)
 
 if [[ "$use_prebuilt" == "1" ]]; then
-  compose_files+=(-f docker-compose.smoke.yml)
+  compose_files+=(-f docker/compose.smoke.yml)
 fi
 
 if [[ "$use_ocr_stub" == "1" ]]; then
-  compose_files+=(-f docker-compose.ocr-smoke.yml)
+  compose_files+=(-f docker/compose.ocr-smoke.yml)
 fi
 
 cleanup() {

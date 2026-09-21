@@ -50,7 +50,16 @@ def write_quality_fixtures() -> Path:
     img.save(FIXTURE_DIR / "multilingual.png", format="PNG")
     img.save(FIXTURE_DIR / "multilingual.jpg", format="JPEG", quality=96)
     img.save(FIXTURE_DIR / "multilingual.webp", format="WEBP", quality=96)
-    img.save(FIXTURE_DIR / "multilingual.pdf", format="PDF", resolution=150.0)
+    # Pillow embeds the raster as JPEG in PDF. Preserve the small Cyrillic
+    # breve and CJK strokes so this fixture measures the OCR pipeline rather
+    # than lossy PDF fixture generation.
+    img.save(
+        FIXTURE_DIR / "multilingual.pdf",
+        format="PDF",
+        resolution=300.0,
+        quality=100,
+        subsampling=0,
+    )
     (FIXTURE_DIR / "multilingual.txt").write_text("\n".join(QUALITY_TEXT.values()), encoding="utf-8")
     return FIXTURE_DIR
 

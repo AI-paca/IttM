@@ -1,21 +1,60 @@
-# Полный пример отладки OCR pipeline
+# Проверка движков и пример отладки OCR pipeline
 
 [Сопровождение pipeline](../docs/ru/pipeline/README.md) |
 [Архитектура](../docs/ru/architecture.md)
 
-Это полная инструкция по stage-debug. Она находится рядом со скриптами и
-изображениями, потому что debug artifacts не являются архитектурой или
-публичным API. В документации сопровождения оставлены только краткие значения
-этапов, кодов и флагов со ссылкой сюда.
+## Текущие движки и файлы
 
-Пример ниже получен текущим
-[`debug-all-separated.sh`](../scripts/debug/debug-all-separated.sh) из tracked
+Все команды выполняются из корня текущей рабочей области. Входы берутся из
+`debug/fixtures`: `SAMPLE_4k.png` и `SAMPLE_mixed_ru_en_zh_table_image.pdf`.
+Выходы пишутся в `debug/tmp` и `debug/artifacts`; ссылки на соседние worktree
+и домашние каталоги не нужны. Shell runners проверяют границы рабочей области,
+включая переходы через символьные ссылки.
+
+```bash
+# Production Rust runtime + Tesseract: PNG и PDF, ошибка любого файла завершает run с ошибкой.
+npm run debug:native
+npm run debug:native -- auto
+
+# Один файл того же debug-каталога.
+npm run debug:native -- tesseract debug/fixtures/SAMPLE_4k.png
+
+# Browser Tesseract.js + WASM.
+bash scripts/debug/run-browser-debug.sh --fixture SAMPLE_4k.png
+
+# Python compatibility engines; EasyOCR требует установленной модели.
+bash scripts/debug/run-debug.sh --engines tesseract --fixture SAMPLE_4k.png
+```
+
+Для native нужны Rust, pkg-config, Tesseract development libraries,
+языки `eng`, `rus` и Poppler. Browser runner требует npm dependencies и Rust
+с target `wasm32-unknown-unknown`. EasyOCR выбирается явно:
+`npm run debug:native -- easyocr`, после настройки `ITTM_EASYOCR_PYTHON`.
+Отсутствующий движок/модель — ошибка, а не успешный пропуск.
+
+`run-native-debug.sh` проверяет исполнение и непустой результат. Точность
+проверяют quality workflows и эталонные тексты в `ocr/tests/data/reference`.
+Не смешивайте успешную конвертацию с прохождением проверки точности.
+
+Удалены одноразовые `export-python-ocr-checkpoint.py` (зависел от чужого
+зафиксированного worktree), `audit_saved_versions.py` (читал результаты из
+соседних репозиториев), старый v9 screenshot review и v16 matrix lab. Рабочие
+stage diagnostics оставлены для локализации ошибок; опциональные модели
+используют `.cache/easyocr`, `.models/GLM-OCR` и `ocr/.venv/bin/python`
+текущего проекта.
+
+Аудит ошибок документации: [code-docs-audit-20260904.md](../docs/ru/code-docs-audit-20260904.md).
+Compose overrides лежат в `docker/compose.*.yml`; workflows — в `.github/workflows`.
+
+## Сохранённый stage-debug пример
+
+Ниже сохранены PNG и числа исторического Python stage-debug прогона из
 [`SAMPLE_mixed_ru_en_zh_table_image.pdf`](./fixtures/SAMPLE_mixed_ru_en_zh_table_image.pdf).
-Это не нарисованная схема: все PNG и числа скопированы из одного завершённого
-прогона.
+Это диагностический снимок, а не обещание побайтового совпадения с текущим Rust
+runtime. Для актуального результата запускайте команды выше.
 
-Artifacts содержат исходные изображения и распознанный текст. Для инцидента
-используйте обезличенный минимальный raster и не коммитьте каталог `debug/tmp`.
+Artifacts содержат исходные изображения и распознанный текст. Не коммитьте
+каталог `debug/tmp`.
 
 ## Воспроизвести пример
 
@@ -31,10 +70,10 @@ scripts/debug/debug-all-separated.sh \
   --source debug/tmp/sample-table/page-001.png \
   --run-id sample-table \
   --languages eng,rus \
-  --diagnostic-batch
+  --runtime legacy-python
 ```
 
-Default languages — `eng,chi_sim,rus`. Передавайте `--languages` только после
+Default languages — `rus,eng`. Передавайте `--languages` только после
 проверки `tesseract --list-langs`: отсутствие одного language pack останавливает
 OCR boundary до обработки. В этом сохранённом запуске использованы `eng,rus`,
 поэтому китайский текст ожидаемо распознан плохо; пример проверяет структуру, а
@@ -637,7 +676,7 @@ scripts/debug/debug-all-separated.sh \
 scripts/debug/debug-all.sh \
   --engines tesseract \
   --fixture 'problem.png' \
-  --expected-root /absolute/path/references \
+  --expected-root ocr/tests/data/reference \
   --tmp-root debug/tmp/incident-42-benchmark \
   --output-root debug/artifacts/incident-42
 ```

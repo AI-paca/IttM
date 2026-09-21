@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=scripts/debug/workspace-paths.sh
+source "$(dirname "${BASH_SOURCE[0]}")/workspace-paths.sh"
+
 STAGES=(
   preprocess
   geometry
@@ -66,7 +69,7 @@ Examples:
   scripts/debug/debug-all-separated.sh \
     --resume debug/tmp/debug-all-separated/image10-find \
     --only-stage separate-block \
-    --input separate-block=/path/to/good-run/items/{item}/03-find-object
+    --input separate-block=debug/tmp/good-run/items/{item}/03-find-object
 
 Execution:
   --runtime RUNTIME          legacy-python (reference only), rust-native, or
@@ -262,6 +265,19 @@ while [[ $# -gt 0 ]]; do
       exit 2
       ;;
   esac
+done
+
+fixtures_root="$(debug_data_path "$fixtures_root")"
+reference_root="$(debug_workspace_path "$reference_root")"
+output_root="$(debug_data_path "$output_root")"
+if [[ -n "$resume_dir" ]]; then
+  resume_dir="$(debug_data_path "$resume_dir")"
+fi
+for index in "${!explicit_sources[@]}"; do
+  explicit_sources[$index]="$(debug_data_path "${explicit_sources[$index]}")"
+done
+for stage in "${!INPUT_OVERRIDES[@]}"; do
+  INPUT_OVERRIDES[$stage]="$(debug_data_path "${INPUT_OVERRIDES[$stage]}")"
 done
 
 case "$runtime" in
@@ -798,22 +814,6 @@ overall_failed=0
       )
     else
       browser_lang_path="$runtime_lang_path"
-      if [[ -z "$browser_lang_path" ]]; then
-        common_git_dir="$(realpath "$(git rev-parse --git-common-dir)")"
-        workspace_parent="$(dirname "$(dirname "$common_git_dir")")"
-        while IFS= read -r candidate; do
-          if find "$candidate" -maxdepth 1 -type f -name '*.traineddata' \
-            -print -quit 2>/dev/null | grep -q .; then
-            browser_lang_path="$candidate"
-            break
-          fi
-        done < <(
-          printf '%s\n' "$PWD/.cache/tessdata" /usr/share/tessdata
-          find "$workspace_parent" -maxdepth 5 -type f \
-            -path '*/.cache/tessdata/rus.traineddata' -printf '%h\n' \
-            2>/dev/null | sort -u
-        )
-      fi
       if [[ -z "$browser_lang_path" ]]; then
         echo "Could not resolve browser tessdata with at least one traineddata model" >"$item_dir/logs/runtime.log"
         overall_failed=1

@@ -72,10 +72,9 @@ wrapper, parity verifier, WASM verifier, and this document together.
 
 ### Frozen OCR stage inputs
 
-`export-python-ocr-checkpoint.py` exports the selected legacy Python OCR plan,
-words and complete matrix without executing OCR or reading recognized stage-06
-text. Selection metadata is an explicit input to this materialization check;
-it does not prove policy-selection parity.
+The one-off legacy Python checkpoint exporter was removed because it depended
+on an external frozen worktree. Current replay inputs must be produced inside
+this repository and passed to the native import API explicitly.
 
 The block import accepts the original packed-u32 metadata version 1. Version 2
 appends a logical cell count followed by each cell's row, column, row/column

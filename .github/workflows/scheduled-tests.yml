@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+env:
+  ONNXRUNTIME_NODE_INSTALL: skip
+
 jobs:
   compose-smoke:
     runs-on: ubuntu-24.04
@@ -19,6 +22,8 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Prepare browser OCR languages
+        run: npm run model:browser-tessdata
       - run: npm run test:compose
 
   resource-soak:

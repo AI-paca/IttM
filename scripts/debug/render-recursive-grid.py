@@ -50,7 +50,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("/tmp/ittm-recursive-grid"),
+        default=Path("debug/tmp/recursive-grid"),
     )
     parser.add_argument("--occupied-alpha", type=int, default=104)
     parser.add_argument("--empty-alpha", type=int, default=32)

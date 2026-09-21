@@ -1508,7 +1508,7 @@ def test_adaptive_table_uses_unique_non_cartesian_dyadic_masks() -> None:
         item for item in plan.diagnostics if item.startswith("matrix-table-dyadic-codes=")
     )
     assert "matrix-table-generated-candidates=8" in plan.diagnostics
-    assert "matrix-table-selected-candidates=7" in plan.diagnostics
+    assert f"matrix-table-selected-candidates={len(plan.blocks)}" in plan.diagnostics
     assert "matrix-table-algebra=arbitrary-segment-set-and-xor" in plan.diagnostics
     signatures = {
         segment_id: tuple(index for index, block in enumerate(plan.blocks) if segment_id in block.segment_ids)

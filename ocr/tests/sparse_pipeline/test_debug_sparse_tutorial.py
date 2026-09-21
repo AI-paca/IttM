@@ -485,13 +485,8 @@ def test_v20_wrapper_passes_the_same_engine_and_easyocr_configuration() -> None:
     source = (repository_root / "scripts" / "debug" / "run-sparse-v20.sh").read_text(encoding="utf-8")
 
     assert source.count('--engines "${V20_ENGINES:-tesseract}"') == 2
-    assert (
-        source.count(
-            '--easy-python "${V20_EASY_PYTHON:-/home/alpaca/GitHub/' 'IttM-engine-original/ocr/.venv/bin/python}"'
-        )
-        == 2
-    )
-    assert source.count('--easy-models "${V20_EASY_MODELS:-/home/alpaca/.EasyOCR/model}"') == 2
+    assert source.count('--easy-python "${V20_EASY_PYTHON:-ocr/.venv/bin/python}"') == 2
+    assert source.count('--easy-models "${V20_EASY_MODELS:-.cache/easyocr}"') == 2
     assert source.count('--easy-device "${V20_EASY_DEVICE:-cuda}"') == 2
     assert '--tesseract-psm "${V20_SINGLE_CONTEXT_PSM:-6}"' in source
     assert '--single-context-psm "${V20_SINGLE_CONTEXT_PSM:-6}"' in source

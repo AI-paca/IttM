@@ -368,7 +368,7 @@ def test_low_first_block_sweeps_short_profiles_and_sets_provisional_lock(
         )
 
 
-def test_low_locked_full_block_uses_chinese_fallback_without_recursion(
+def test_confirmed_lock_does_not_sweep_unrelated_languages_on_later_paragraph(
     monkeypatch: object,
 ) -> None:
     plan, crops = _fixtures((_png(1), _png(4)))
@@ -386,13 +386,8 @@ def test_low_locked_full_block_uses_chinese_fallback_without_recursion(
         )
 
         assert session.state.locked_profile_id == "rus-eng"
-        assert result.jobs[1].lane_id == "chi_sim"
-        assert _profile_order("block-000001", "full-block", tuple(session.state.attempts)) == (
-            "rus-eng",
-            "rus",
-            "eng",
-            "chi_sim",
-        )
+        assert result.jobs[1].lane_id == "rus-eng"
+        assert _profile_order("block-000001", "full-block", tuple(session.state.attempts)) == ("rus-eng",)
         assert all(attempt.unit_id == "full-block" for attempt in session.state.attempts)
 
 
@@ -731,6 +726,8 @@ def test_only_mixed_script_branch_descends_below_16_context(
 
     with _session(monkeypatch, {}, max_workers=4) as session:
         session.state.locked_profile_id = "rus-eng"
+        # Exercise subdivision when a geometry-preserving native patch cannot be built.
+        monkeypatch.setattr(session, "_patch_missing_native_units", lambda *_args: None)
         _Worker.score_hook = lambda _key, _payload: 96
         _Worker.text_hook = lambda key, _payload: ("中文96" if key[0] == "chi_sim" else "score96")
         monkeypatch.setattr(
@@ -766,6 +763,9 @@ def test_missing_native_script_selects_specialized_profile_only_at_leaf(
 
     with _session(monkeypatch, {}, max_workers=1) as session:
         session.state.locked_profile_id = "rus-eng"
+        # Exercise subdivision when a geometry-preserving native patch cannot be built.
+        patch_native_units = session._patch_missing_native_units
+        monkeypatch.setattr(session, "_patch_missing_native_units", lambda *_args: None)
         _Worker.score_hook = lambda _key, _payload: 96
         _Worker.text_hook = lambda key, _payload: ("中文50" if key[0] == "chi_sim" else "score96")
         _Worker.confidence = 0.70
@@ -787,10 +787,10 @@ def test_missing_native_script_selects_specialized_profile_only_at_leaf(
         output=_output("score96"),
         assessment=GrammarAssessment(96, False, ()),
     )
-    patched = session._patch_missing_native_units(
+    patched = patch_native_units(
         full_candidate,
         candidate,
-        compaction,
+        compaction.placements,
         ("chi_sim",),
     )
     assert patched is not None
@@ -1287,6 +1287,8 @@ def test_recursion_blocks_overlap_without_exceeding_max_workers(
         synchronized_recursive,
     )
     with _session(monkeypatch, {}, max_workers=2) as session:
+        monkeypatch.setattr(session, "_uses_specialized_context_recursion", lambda _full: True)
+        monkeypatch.setattr(session, "_should_recurse_full_block", lambda *_args, **_kwargs: True)
         _Worker.score_hook = lambda _key, _payload: 96
         _Worker.confidence = 0.80
         result = session.run_with_compaction(
@@ -1896,7 +1898,7 @@ def _isolated_recursive(
     )
 
 
-def test_ineffective_local_split_is_learned_and_skipped(
+def test_membership_calibration_only_splits_first_block(
     monkeypatch: object,
 ) -> None:
     plan, crops = _fixtures(tuple(_png(210 + index) for index in range(6)))
@@ -1925,14 +1927,15 @@ def test_ineffective_local_split_is_learned_and_skipped(
 
         monkeypatch.setattr(session, "_recognize_recursive_isolated", recognize)
         results = session._recognize_recursive_blocks(
+            allow_membership_calibration=True,
             plan=plan,
             crops=crops,
             compaction_by_id={item.block_id: item for item in _compactions_for(plan)},
             recognized=full,
         )
 
-    assert sorted(called) == [block.block_id for block in plan.blocks[:3]]
-    assert tuple(results) == (0, 1, 2)
+    assert sorted(called) == [block.block_id for block in plan.blocks[:1]]
+    assert tuple(results) == (0,)
 
 
 def test_native_script_evidence_bypasses_local_split_learning(
@@ -1965,6 +1968,7 @@ def test_native_script_evidence_bypasses_local_split_learning(
 
         monkeypatch.setattr(session, "_recognize_recursive_isolated", recognize)
         results = session._recognize_recursive_blocks(
+            allow_membership_calibration=True,
             plan=plan,
             crops=crops,
             compaction_by_id={item.block_id: item for item in _compactions_for(plan)},
@@ -1987,6 +1991,7 @@ def test_local_split_parallel_results_are_deterministic(
                 text="weak full block",
                 grammar_percent=70,
                 confidence=0.50,
+                fallback_profile_ids=("chi_sim",),
             )
             for _ in plan.blocks
         )
@@ -2015,6 +2020,7 @@ def test_local_split_parallel_results_are_deterministic(
 
         monkeypatch.setattr(session, "_recognize_recursive_isolated", recognize)
         results = session._recognize_recursive_blocks(
+            allow_membership_calibration=True,
             plan=plan,
             crops=crops,
             compaction_by_id={item.block_id: item for item in _compactions_for(plan)},
@@ -2028,7 +2034,7 @@ def test_local_split_parallel_results_are_deterministic(
     )
 
 
-def test_local_split_learning_resets_for_new_object(
+def test_membership_calibration_can_restart_for_new_object(
     monkeypatch: object,
 ) -> None:
     plan, crops = _fixtures(tuple(_png(240 + index) for index in range(4)))
@@ -2058,6 +2064,7 @@ def test_local_split_learning_resets_for_new_object(
 
         monkeypatch.setattr(session, "_recognize_recursive_isolated", recognize)
         kwargs = {
+            "allow_membership_calibration": True,
             "plan": plan,
             "crops": crops,
             "compaction_by_id": {item.block_id: item for item in _compactions_for(plan)},
@@ -2066,9 +2073,9 @@ def test_local_split_learning_resets_for_new_object(
         first = session._recognize_recursive_blocks(**kwargs)
         second = session._recognize_recursive_blocks(**kwargs)
 
-    assert tuple(first) == (0, 1, 2)
-    assert tuple(second) == (0, 1, 2)
-    assert calls == 6
+    assert tuple(first) == (0,)
+    assert tuple(second) == (0,)
+    assert calls == 2
 
 
 def test_ineffective_local_full_sweep_learns_primary_only(
@@ -2136,6 +2143,7 @@ def test_low_quality_contextual_composite_does_not_replace_full_block(
             text="full block evidence",
             grammar_percent=70,
             confidence=0.50,
+            fallback_profile_ids=("chi_sim",),
         )
         recursive = _contextual_candidate(
             session,
@@ -2156,7 +2164,7 @@ def test_low_quality_contextual_composite_does_not_replace_full_block(
         monkeypatch.setattr(
             session,
             "_should_recurse_full_block",
-            lambda _full: True,
+            lambda _full, **_kwargs: True,
         )
         monkeypatch.setattr(
             session,
@@ -2205,7 +2213,7 @@ def test_contextual_composite_output_is_not_mapped_twice(
         monkeypatch.setattr(
             session,
             "_should_recurse_full_block",
-            lambda _full: True,
+            lambda _full, **_kwargs: True,
         )
 
         def unexpected_mapping(*_args, **_kwargs):
@@ -2222,7 +2230,7 @@ def test_contextual_composite_output_is_not_mapped_twice(
     assert result.jobs[0].output == recursive.output
 
 
-def test_high_confidence_full_block_below_97_skips_membership_recursion(
+def test_membership_recursion_requires_explicit_calibration(
     monkeypatch: object,
 ) -> None:
     with _session(monkeypatch, {}) as session:
@@ -2233,7 +2241,8 @@ def test_high_confidence_full_block_below_97_skips_membership_recursion(
             confidence=0.90,
         )
 
-        assert session._should_recurse_full_block(full_block) is False
+        assert session._should_recurse_full_block(full_block, allow_membership_calibration=False) is False
+        assert session._should_recurse_full_block(full_block, allow_membership_calibration=True) is True
 
 
 def test_low_confidence_full_block_recurses(
@@ -2247,7 +2256,7 @@ def test_low_confidence_full_block_recurses(
             confidence=0.84,
         )
 
-        assert session._should_recurse_full_block(full_block) is True
+        assert session._should_recurse_full_block(full_block, allow_membership_calibration=True) is True
 
 
 def test_missing_evidenced_cjk_recurses_for_mixed_language_path(
@@ -2262,7 +2271,7 @@ def test_missing_evidenced_cjk_recurses_for_mixed_language_path(
             fallback_profile_ids=("chi_sim",),
         )
 
-        assert session._should_recurse_full_block(full_block) is True
+        assert session._should_recurse_full_block(full_block, allow_membership_calibration=True) is True
 
 
 def test_visible_greek_and_math_evidence_do_not_force_recursion(
@@ -2277,7 +2286,7 @@ def test_visible_greek_and_math_evidence_do_not_force_recursion(
             fallback_profile_ids=("ell", "equ"),
         )
 
-        assert session._should_recurse_full_block(full_block) is False
+        assert session._should_recurse_full_block(full_block, allow_membership_calibration=True) is False
 
 
 def test_full_block_at_97_skips_recursion_even_with_low_confidence(
@@ -2292,7 +2301,7 @@ def test_full_block_at_97_skips_recursion_even_with_low_confidence(
             fallback_profile_ids=("chi_sim",),
         )
 
-        assert session._should_recurse_full_block(full_block) is False
+        assert session._should_recurse_full_block(full_block, allow_membership_calibration=True) is False
 
 
 def test_context_group_cache_includes_ordered_units_policy_and_transform(
@@ -2342,7 +2351,7 @@ def test_context_group_cache_includes_ordered_units_policy_and_transform(
     assert primary_only is not None
     assert primary_only.profile.profile_id == "rus-eng"
     assert chinese is not None
-    assert chinese.profile.profile_id == "chi_sim"
+    assert "测试数据" in chinese.output.text
     assert english is not None
     assert english.profile.profile_id == "eng"
     assert {
@@ -2463,8 +2472,8 @@ def test_parallel_local_calibration_applies_winner_before_second_phase(
     calls = [key[0] for key in _Worker.calls]
     assert calls.count("eng-rus") == 6
     assert calls.count("rus-eng") == 3
-    assert calls.count("rus") == 3
-    assert calls.count("eng") == 3
+    assert "rus" not in calls
+    assert "eng" not in calls
 
 
 def test_new_unsupported_unicode_resets_order_and_fallback_guards(

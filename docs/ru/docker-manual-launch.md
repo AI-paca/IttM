@@ -18,7 +18,7 @@ docker compose port nginx 80
 Прежний Python backend с установкой EasyOCR доступен через override:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.python.yml up -d --build
+docker compose -f docker-compose.yml -f docker/compose.python.yml up -d --build
 ```
 
 Порт назначается из диапазона `3000–3099`, если

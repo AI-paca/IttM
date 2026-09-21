@@ -73,7 +73,7 @@ def test_numeric_cycle_without_independent_lattice_is_not_a_table() -> None:
     )
 
     assert len(result) == 1
-    assert result[0].kind == "flow"
+    assert result[0].kind == "paragraph"
     assert result[0].matrix_basis is PartitionMatrixBasis.TOPOLOGY_SLICE
     assert "finite-mixed-axis-cycle" not in result[0].evidence
 
@@ -363,7 +363,7 @@ def test_long_numeric_empty_wall_forms_header_flank_and_table() -> None:
         ),
     )
 
-    assert tuple(item.kind for item in result) == ("flow", "paragraph", "table")
+    assert tuple(item.kind for item in result) == ("paragraph", "paragraph", "table")
     assert result[0].segment_ids == ("header",)
     assert result[1].segment_ids == (
         "filter-0",

@@ -37,6 +37,7 @@ elif [[ "$tier" != "resource" ]]; then
 fi
 
 docker build \
+  --network "${DOCKER_BUILD_NETWORK:-default}" \
   -f docker/ocr.Dockerfile \
   --target test \
   --build-arg PYTHON_REQUIREMENTS=requirements-ci.txt \

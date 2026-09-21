@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=scripts/debug/workspace-paths.sh
+source "$(dirname "${BASH_SOURCE[0]}")/workspace-paths.sh"
+
 usage() {
   cat <<'EOF'
 Usage:
   scripts/debug/debug-all.sh [options]
 
 Defaults:
-  - fixtures: debug/fixtures/, then debug/ or testtables/ fallback
+  - fixtures: debug/fixtures/ in the current workspace
   - engines: tesseract,easyocr,browser-tesseract
   - backend flags: automatic per engine
   - output: debug/result.csv and debug/time.csv
@@ -39,8 +42,7 @@ Options:
   --output-root DIR              Final CSV directory; default debug.
   --require-complete-scoring     Fail on missing_reference/not_checked corpus rows.
 
-API engines are scaffolded as tmp folders but are not implemented yet:
-api-ollama, api-openrouter, api-gemini.
+Only implemented local engines are accepted.
 EOF
 }
 
@@ -56,7 +58,7 @@ gpu_mode="${OCR_BENCHMARK_GPU:-auto}"
 timeout_seconds=900
 fixture_patterns=()
 backend_profile_args=()
-backend_page_args=(--fixture-max-pages 'Adobe Scan Oct 26, 2022 (1).pdf=5')
+backend_page_args=()
 resume_arg=()
 pdf_raster=1
 pdf_raster_only=0
@@ -179,14 +181,17 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+source_root="$(debug_source_path "$source_root")"
+expected_root="$(debug_workspace_path "$expected_root")"
+tmp_root="$(debug_data_path "$tmp_root")"
+output_root="$(debug_data_path "$output_root")"
+fixtures_root="$(debug_data_path "${fixtures_root:-debug/fixtures}")"
+
 mkdir -p \
   "$tmp_root" \
   "$tmp_root/tesseract" \
   "$tmp_root/easyocr" \
   "$tmp_root/browser-tesseract" \
-  "$tmp_root/api-ollama" \
-  "$tmp_root/api-openrouter" \
-  "$tmp_root/api-gemini" \
   "$output_root"
 
 if [[ ! "$pdf_raster_max_pages" =~ ^[1-9][0-9]*$ ]]; then
@@ -207,23 +212,9 @@ has_supported_fixtures() {
     -print -quit | grep -q .
 }
 
-if [[ -z "$fixtures_root" ]]; then
-  if has_supported_fixtures "$default_fixtures_root"; then
-    fixtures_root="$default_fixtures_root"
-  elif has_supported_fixtures "debug"; then
-    fixtures_root="debug"
-  elif [[ -d testtables ]] && has_supported_fixtures "testtables"; then
-    fixtures_root="testtables"
-  else
-    fixtures_root="$default_fixtures_root"
-  fi
-fi
+fixtures_root="$(debug_data_path "${fixtures_root:-debug/fixtures}")"
+source_root="$(debug_source_path "$source_root")"
 
-if [[ "$fixtures_root" == "debug" ]] &&
-  ! has_supported_fixtures "$fixtures_root" &&
-  [[ -d testtables ]]; then
-  fixtures_root="testtables"
-fi
 
 IFS=',' read -r -a requested_engines <<< "$engines_csv"
 backend_engines=()

@@ -25,7 +25,7 @@
     "extract": "tsx scripts/cli/ittm-extract.ts",
     "lint": "eslint . && npm run typecheck",
     "typecheck": "tsc --project web/tsconfig.json --noEmit && tsc --project gateway/tsconfig.json --noEmit && tsc --project edge/tsconfig.json --noEmit",
-    "test": "node --import tsx --test web/src/**/*.test.ts gateway/src/**/*.test.ts edge/**/*.test.ts",
+    "test": "node scripts/ci/run-unit-tests.mjs",
     "test:contract": "bash scripts/ci/run-contract-tests.sh",
     "test:smoke": "bash scripts/ci/run-smoke-tests.sh",
     "test:sast": "bash scripts/ci/run-sast.sh",
@@ -42,7 +42,7 @@
     "start": "NODE_ENV=production node dist/server.js",
     "build:ocr-runtime": "cargo build --locked --release --manifest-path ocr-runtime/Cargo.toml",
     "test:ocr-runtime": "cargo test --locked --manifest-path ocr-runtime/Cargo.toml",
-    "debug:native": "ocr-runtime/target/release/ittm-ocr debug"
+    "debug:native": "bash scripts/debug/run-native-debug.sh"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
@@ -53,13 +53,13 @@
     "remark-gfm": "^4.0.1"
   },
   "overrides": {
-    "adm-zip": "0.6.0",
+    "adm-zip": "0.6.1",
     "body-parser": "2.3.0",
     "brace-expansion": "5.0.9",
     "nanoid": "3.3.18",
     "postcss": "8.5.25",
     "qs": "6.16.0",
-    "sharp": "0.35.3"
+    "sharp": "0.35.4"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

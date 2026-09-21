@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=scripts/debug/workspace-paths.sh
+source "$(dirname "${BASH_SOURCE[0]}")/workspace-paths.sh"
+
 usage() {
   cat <<'EOF'
 Usage:
   scripts/debug/debug-image-engines-parallel.sh [options]
 
 Defaults:
-  - fixture block: image.png, photo_2026-06-20_15-38-09.jpg, photo_2026-06-26_19-56-47.jpg
+  - fixture block: SAMPLE_4k.png
   - engines: tesseract,easyocr,auto,browser-tesseract
   - output: debug/artifacts/parallel-reference-block
   - tmp: debug/tmp/parallel-reference-block
@@ -48,9 +51,7 @@ backend_flag_args=()
 gpu_mode="${OCR_BENCHMARK_GPU:-auto}"
 timeout_seconds=1200
 fixture_patterns=(
-  "image.png"
-  "photo_2026-06-20_15-38-09.jpg"
-  "photo_2026-06-26_19-56-47.jpg"
+  "SAMPLE_4k.png"
 )
 using_default_fixture_patterns=1
 resume_arg=()
@@ -138,14 +139,16 @@ if [[ ! "$timeout_seconds" =~ ^[1-9][0-9]*$ ]]; then
   exit 2
 fi
 
-source_root="$(realpath "$source_root")"
-fixtures_root="$(realpath "$fixtures_root")"
-expected_root="$(realpath "$expected_root")"
+source_root="$(debug_source_path "$source_root")"
+fixtures_root="$(debug_data_path "$fixtures_root")"
+expected_root="$(debug_workspace_path "$expected_root")"
+tmp_root="$(debug_data_path "$tmp_root")"
+output_root="$(debug_data_path "$output_root")"
+case "$output_root" in
+  debug/artifacts/*|debug/tmp/*) ;;
+  *) echo "--output-root must be a run directory under debug/artifacts or debug/tmp" >&2; exit 2 ;;
+esac
 mkdir -p "$tmp_root" "$output_root"
-tmp_root="$(realpath "$tmp_root")"
-output_root="$(realpath "$output_root")"
-rm -rf "$output_root"
-mkdir -p "$output_root"
 
 fixture_args=()
 for pattern in "${fixture_patterns[@]}"; do

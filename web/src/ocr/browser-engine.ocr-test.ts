@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   createCanvas,
   DOMMatrix,
@@ -47,54 +47,20 @@ const expectedTokens = [
 ];
 
 function resolveTessdataPath(): string {
-  let sharedWorktreeCache: string | undefined;
-  try {
-    const commonGitDir = execFileSync(
-      "git",
-      ["rev-parse", "--git-common-dir"],
-      { encoding: "utf8" },
-    ).trim();
-    sharedWorktreeCache = resolve(
-      dirname(resolve(commonGitDir)),
-      ".cache/tessdata",
-    );
-  } catch {
-    sharedWorktreeCache = undefined;
-  }
-  const siblingCaches: string[] = [];
-  try {
-    const workspaceParents = new Set([
-      dirname(process.cwd()),
-      dirname(dirname(process.cwd())),
-    ]);
-    for (const parent of workspaceParents) {
-      for (const entry of readdirSync(parent, { withFileTypes: true })) {
-        if (entry.isDirectory()) {
-          siblingCaches.push(resolve(parent, entry.name, ".cache/tessdata"));
-        }
-      }
-    }
-  } catch {
-    // Explicit, shared-worktree and system paths below remain available.
-  }
   const candidates = [
     process.env.BROWSER_OCR_LANG_PATH,
-    sharedWorktreeCache,
-    ...siblingCaches,
-    "/usr/share/tesseract-ocr/5/tessdata",
-    "/usr/share/tesseract-ocr/4.00/tessdata",
     resolve(".cache/tessdata"),
   ].filter((value): value is string => Boolean(value));
 
   const tessdataPath = candidates.find((candidate) =>
-    ["eng", "rus", "chi_sim"].every((lang) =>
+    ["eng", "rus", "chi_sim", "ell", "equ"].every((lang) =>
       existsSync(resolve(candidate, `${lang}.traineddata`)),
     ),
   );
 
   assert.ok(
     tessdataPath,
-    "Browser OCR quality test requires local Tesseract traineddata for eng/rus/chi_sim. Install tesseract-ocr-eng, tesseract-ocr-rus, tesseract-ocr-chi-sim or set BROWSER_OCR_LANG_PATH.",
+    "Browser OCR quality test requires eng/rus/chi_sim/ell/equ. Run npm run model:browser-tessdata or set BROWSER_OCR_LANG_PATH.",
   );
   return tessdataPath;
 }
@@ -126,25 +92,13 @@ async function withTimeout<T>(
 test(
   "browser OCR recognizes strict English/Russian/Chinese fixture",
   { timeout: 180_000 },
-  async (context) => {
+  async () => {
     const tessdataPath = resolveTessdataPath();
     const fixture = resolve(fixtureRoot, "multilingual.png");
     if (!existsSync(fixture)) {
-      try {
-        execFileSync("python3", ["ocr/tests/support/quality_fixtures.py"], {
-          stdio: "pipe",
-        });
-      } catch (error) {
-        const stderr = String((error as { stderr?: Buffer }).stderr ?? "");
-        const stdout = String((error as { stdout?: Buffer }).stdout ?? "");
-        if (`${stdout}\n${stderr}`.includes("Noto CJK fonts")) {
-          context.skip(
-            "Noto CJK fonts are required to generate strict OCR fixtures.",
-          );
-          return;
-        }
-        throw error;
-      }
+      execFileSync("python3", ["ocr/tests/support/quality_fixtures.py"], {
+        stdio: "pipe",
+      });
     }
     const data = readFileSync(fixture);
     const pipelineCore = readFileSync(

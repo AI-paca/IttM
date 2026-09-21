@@ -26,7 +26,7 @@ if [[ -n "${SAST_TARGETS:-}" ]]; then
 else
   targets=(
     docker-compose.yml
-    docker-compose.python.yml
+    docker/compose.python.yml
     .github/workflows
     gateway/nginx.conf
     gateway/src

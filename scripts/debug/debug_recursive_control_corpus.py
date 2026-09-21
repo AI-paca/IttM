@@ -17,7 +17,6 @@ def find_python_root() -> Path:
         REPOSITORY_ROOT / "ocr",
         Path.cwd() / "ocr",
         Path.cwd(),
-        Path("/app"),
     )
     for candidate in candidates:
         if (candidate / "app").is_dir():

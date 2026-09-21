@@ -127,7 +127,7 @@ fn content_ink_mask(
         .max_by_key(|(value, count)| (**count, std::cmp::Reverse(*value)))
         .map(|(value, _)| value)?;
     let dark_on_light = background >= 128;
-    let mut ink: Vec<bool> = unit_mask
+    let ink: Vec<bool> = unit_mask
         .iter()
         .enumerate()
         .map(|(index, selected)| {
@@ -139,27 +139,8 @@ fn content_ink_mask(
                 }
         })
         .collect();
-    let minimum_horizontal_rule = 32.max((width * 65).div_ceil(100));
-    let minimum_vertical_rule = 32.max((height * 65).div_ceil(100));
-    let horizontal_rules: Vec<bool> = (0..height)
-        .map(|y| {
-            ink[y * width..(y + 1) * width]
-                .iter()
-                .filter(|value| **value)
-                .count()
-                >= minimum_horizontal_rule
-        })
-        .collect();
-    let vertical_rules: Vec<bool> = (0..width)
-        .map(|x| (0..height).filter(|y| ink[*y * width + x]).count() >= minimum_vertical_rule)
-        .collect();
-    for y in 0..height {
-        for x in 0..width {
-            if horizontal_rules[y] || vertical_rules[x] {
-                ink[y * width + x] = false;
-            }
-        }
-    }
+    // Rule evidence comes from page geometry. A dense row/column inside a
+    // tight text crop can be a glyph stroke (E/T/I), not a table rule.
     Some((ink, dark_on_light))
 }
 
@@ -743,7 +724,9 @@ pub(crate) fn visit_compacted_blocks(
                 for x in analysis_bbox[0]..analysis_bbox[2] {
                     let owner = analysis.materialized_segments.ownership[y * width + x];
                     unit_mask[(y - analysis_bbox[1]) * unit_width + x - analysis_bbox[0]] =
-                        owner >= 0 && group.contains(&(owner as usize));
+                        owner >= 0
+                            && group.contains(&(owner as usize))
+                            && analysis.rule_mask[y * width + x] == 0;
                 }
             }
             let (ink, dark_on_light) =
@@ -909,7 +892,27 @@ pub(crate) fn visit_compacted_blocks(
 
 #[cfg(test)]
 mod tests {
-    use super::{OCR_RASTER_MAX_EDGE, OCR_RASTER_MAX_PIXELS, bounded_ocr_dimensions};
+    use super::{
+        OCR_RASTER_MAX_EDGE, OCR_RASTER_MAX_PIXELS, bounded_ocr_dimensions, content_ink_mask,
+    };
+
+    #[test]
+    fn owned_text_strokes_are_not_reclassified_as_table_rules() {
+        let (width, height) = (100, 64);
+        let mut pixels = vec![255; width * height * 3];
+        let mut mask = vec![false; width * height];
+        for y in 5..55 {
+            for x in 10..90 {
+                if x < 14 || (20..24).contains(&y) {
+                    mask[y * width + x] = true;
+                    pixels[(y * width + x) * 3..(y * width + x) * 3 + 3].fill(0);
+                }
+            }
+        }
+        let (ink, dark_on_light) = content_ink_mask(&pixels, width, height, &mask).unwrap();
+        assert!(dark_on_light);
+        assert_eq!(ink, mask, "compaction must preserve every owned glyph pixel");
+    }
 
     #[test]
     fn bounded_dimensions_limit_large_ocr_rasters_without_changing_aspect_ratio() {

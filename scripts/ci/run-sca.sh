@@ -43,6 +43,17 @@ run_trivy() {
   docker run "${docker_args[@]}" "$trivy_image" --cache-dir /trivy-cache "$@"
 }
 
+# Write reports from the job shell instead of asking the nested Trivy
+# container to write through its /work bind mount. Under act the Docker
+# daemon and the job container can resolve the same absolute checkout path
+# to different mounts, so files created by the nested container are not
+# guaranteed to become visible inside the job container.
+write_trivy_report() {
+  local report="$1"
+  shift
+  run_trivy "$@" >"$repo_root/$output/$report"
+}
+
 verify_accepted_risk() {
   if [[ ! -f "$accepted_risk_file" ]]; then
     echo "Missing tracked accepted-risk policy: $accepted_risk_file" >&2
@@ -109,7 +120,7 @@ verify_cargo_component() {
 verify_rust_sbom_coverage() {
   local status=0
 
-  verify_cargo_component source.cdx.json ittm-ocr-core || status=1
+  verify_cargo_component source.cdx.json ittm-ocr-runtime || status=1
   verify_cargo_component source.cdx.json ittm-pipeline-core || status=1
   verify_cargo_component nginx.cdx.json ittm-pipeline-core || status=1
   verify_cargo_component ocr.cdx.json ittm-pipeline-core || status=1
@@ -149,18 +160,16 @@ if ! npm audit --json >"$repo_root/$output/npm-audit.json"; then
   gate_status=1
 fi
 
-run_trivy fs \
+write_trivy_report source-vuln.json fs \
   --scanners vuln \
   --include-dev-deps \
   --skip-dirs "/work/$output" \
   --format json \
-  --output "/work/$output/source-vuln.json" \
   /work
-run_trivy fs \
+write_trivy_report source.cdx.json fs \
   --include-dev-deps \
   --skip-dirs "/work/$output" \
   --format cyclonedx \
-  --output "/work/$output/source.cdx.json" \
   /work
 
 for image_spec in \
@@ -171,16 +180,14 @@ for image_spec in \
   name="${image_spec%%:*}"
   image_name="${image_spec#*:}"
 
-  run_trivy image \
+  write_trivy_report "$name-vuln.json" image \
     --scanners vuln \
     --skip-files "$pip_vendor_sbom" \
     --format json \
-    --output "/work/$output/$name-vuln.json" \
     "$image_name"
-  run_trivy image \
+  write_trivy_report "$name.cdx.json" image \
     --skip-files "$pip_vendor_sbom" \
     --format cyclonedx \
-    --output "/work/$output/$name.cdx.json" \
     "$image_name"
 done
 
@@ -199,9 +206,8 @@ if ! run_trivy fs \
   --skip-dirs "/work/$output" \
   --severity HIGH,CRITICAL \
   --format json \
-  --output /tmp/source-gate.json \
   --exit-code 1 \
-  /work; then
+  /work >/dev/null; then
   gate_status=1
 fi
 
@@ -213,9 +219,8 @@ for image_name in "$gateway_image" "$nginx_image" "$ocr_image" "$ocr_ci_image"; 
     --ignore-unfixed \
     --severity MEDIUM,HIGH,CRITICAL \
     --format json \
-    --output /tmp/image-gate.json \
     --exit-code 1 \
-    "$image_name"; then
+    "$image_name" >/dev/null; then
     gate_status=1
   fi
 done

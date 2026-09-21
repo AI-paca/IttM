@@ -161,14 +161,13 @@ jobs:
           docker run --rm ittm-ocr-ci python -m black --check .
           docker run --rm ittm-ocr-ci python -m ruff check .
 
-      - name: Python API, engine, and layout tests
+      - name: All Python suites (real OCR and soak run in scheduled jobs)
         run: |
           docker run --rm \
             -v "${PWD}/scripts:/scripts:ro" \
             -v "${PWD}/debug:/debug:ro" \
-            -v "${PWD}/LLM-OCR:/LLM-OCR:ro" \
             ittm-ocr-ci \
-            python -m pytest tests/api tests/engines tests/layout tests/pipeline tests/debug -q
+            python -m pytest tests -q
 
   compose-config:
     runs-on: ubuntu-24.04
@@ -178,4 +177,4 @@ jobs:
       - name: Validate Docker Compose config
         run: |
           docker compose config --quiet
-          docker compose -f docker-compose.yml -f docker-compose.python.yml config --quiet
+          docker compose -f docker-compose.yml -f docker/compose.python.yml config --quiet

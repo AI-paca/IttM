@@ -1,3 +1,7 @@
+[tool.pytest.ini_options]
+# Different suites intentionally contain test_quality_metrics.py.
+addopts = "--import-mode=importlib"
+
 [tool.black]
 line-length = 120
 target-version = ['py310']

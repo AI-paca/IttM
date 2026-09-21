@@ -50,7 +50,7 @@ installation UI, optional providers and reference diagnostics:
 
 ```bash
 OCR_RUNTIME=python bash scripts/runtime/run-local.sh
-docker compose -f docker-compose.yml -f docker-compose.python.yml up -d --build
+docker compose -f docker-compose.yml -f docker/compose.python.yml up -d --build
 ```
 
 ## Diagnostic checkpoints

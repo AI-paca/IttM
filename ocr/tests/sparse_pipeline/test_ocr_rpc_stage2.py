@@ -5,6 +5,7 @@ import json
 import os
 import struct
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -213,7 +214,7 @@ def _spec(
     request_timeout: float = 2.0,
 ) -> rpc.ExternalOcrSpec:
     return rpc.ExternalOcrSpec(
-        python_executable=Path("/usr/bin/python"),
+        python_executable=Path(sys.executable),
         engine=engine,
         config=(("fixture", "hermetic"),),
         startup_timeout_seconds=startup_timeout,
@@ -237,7 +238,7 @@ def helper_launcher(
             original = tuple(str(value) for value in command)  # type: ignore[arg-type]
             calls.append((original, kwargs.copy()))
             replacement = (
-                str(Path("/usr/bin/python").resolve()),
+                str(Path(sys.executable).resolve()),
                 "-u",
                 str(helper),
                 original[original.index("--engine") + 1],
@@ -310,7 +311,7 @@ def test_real_rpc_worker_child_maps_startup_failure_without_loading_ocr(
 ) -> None:
     missing_models = tmp_path / "definitely-missing"
     spec = rpc.ExternalOcrSpec(
-        python_executable=Path("/usr/bin/python"),
+        python_executable=Path(sys.executable),
         engine="easyocr",
         config=(
             ("languages", ("en", "ru")),
@@ -483,7 +484,7 @@ def test_spawn_preserves_an_absolute_venv_python_symlink(
 ) -> None:
     venv_python = tmp_path / "venv" / "bin" / "python"
     venv_python.parent.mkdir(parents=True)
-    venv_python.symlink_to(Path("/usr/bin/python"))
+    venv_python.symlink_to(Path(sys.executable))
     calls = helper_launcher("normal")
     spec = rpc.ExternalOcrSpec(
         python_executable=venv_python,
@@ -517,7 +518,7 @@ def test_adapter_external_hooks_freeze_exact_easy_and_glm_specs(
         gpu=True,
         decoder="beamsearch",
         batch_size=3,
-        python_executable=Path("/usr/bin/python"),
+        python_executable=Path(sys.executable),
         rpc_startup_timeout_seconds=11.0,
         rpc_request_timeout_seconds=12.0,
     )
@@ -527,7 +528,7 @@ def test_adapter_external_hooks_freeze_exact_easy_and_glm_specs(
         dtype="float16",
         prompt="Text Recognition:",
         max_new_tokens=321,
-        python_executable=Path("/usr/bin/python"),
+        python_executable=Path(sys.executable),
         rpc_startup_timeout_seconds=21.0,
         rpc_request_timeout_seconds=22.0,
     )
@@ -539,7 +540,7 @@ def test_adapter_external_hooks_freeze_exact_easy_and_glm_specs(
     glm_lane.worker_factory()
     assert len(observed) == 2
     easy_spec, glm_spec = observed
-    assert easy_spec.python_executable == Path("/usr/bin/python")
+    assert easy_spec.python_executable == Path(sys.executable)
     assert easy_spec.engine == "easyocr"
     assert dict(easy_spec.config) == {
         "languages": ("en", "ru"),
@@ -552,7 +553,7 @@ def test_adapter_external_hooks_freeze_exact_easy_and_glm_specs(
         easy_spec.startup_timeout_seconds,
         easy_spec.request_timeout_seconds,
     ) == (11.0, 12.0)
-    assert glm_spec.python_executable == Path("/usr/bin/python")
+    assert glm_spec.python_executable == Path(sys.executable)
     assert glm_spec.engine == "glm_ocr"
     assert dict(glm_spec.config) == {
         "model_directory": str(model_directory.resolve()),
@@ -576,7 +577,7 @@ def test_external_adapter_capability_keeps_distinct_venv_symlink_identity(
     second_python = tmp_path / "second-venv" / "bin" / "python"
     for executable in (first_python, second_python):
         executable.parent.mkdir(parents=True)
-        executable.symlink_to(Path("/usr/bin/python"))
+        executable.symlink_to(Path(sys.executable))
     first = adapters.make_easyocr_lane(
         "easy-first-venv",
         config=adapters.EasyOcrConfig(

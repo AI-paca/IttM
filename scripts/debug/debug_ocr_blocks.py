@@ -656,27 +656,25 @@ def parse_args() -> argparse.Namespace:
         "--easy-python",
         type=Path,
         default=Path(
-            "/home/alpaca/GitHub/IttM-engine-original/ocr/.venv/bin/python"
+            "ocr/.venv/bin/python"
         ),
     )
     parser.add_argument(
         "--easy-models",
         type=Path,
-        default=Path("/home/alpaca/.EasyOCR/model"),
+        default=Path(".cache/easyocr"),
     )
     parser.add_argument("--easy-device", choices=("cuda", "cpu"), default="cuda")
     parser.add_argument(
         "--glm-python",
         type=Path,
-        default=Path("/home/alpaca/tmp-translate/.glmocr-venv/bin/python"),
+        default=Path("ocr/.venv/bin/python"),
     )
     parser.add_argument(
         "--glm-model",
         type=Path,
         default=Path(
-            "/home/alpaca/.cache/huggingface/hub/"
-            "models--zai-org--GLM-OCR/snapshots/"
-            "ca5d8b3e287e52589e37c28385d9655ee4372f9d"
+            ".models/GLM-OCR"
         ),
     )
     parser.add_argument("--glm-device", default="cuda:0")

@@ -1,6 +1,6 @@
 black==26.5.1
 fastapi
-flake8==7.3.0
+flake8==7.4.1
 httpx
 numpy
 opencv-python-headless
@@ -9,5 +9,5 @@ pillow
 pytest==9.1.1
 python-multipart
 pytesseract
-ruff==0.16.6
+ruff==0.16.9
 uvicorn

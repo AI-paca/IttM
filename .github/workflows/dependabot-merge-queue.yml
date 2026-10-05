@@ -1,0 +1,93 @@
+name: Dependabot merge queue
+
+on:
+  schedule:
+    # Process at most one pull request per hour, leaving room for Tests to finish.
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: dependabot-merge-queue
+  cancel-in-progress: false
+
+jobs:
+  update-oldest-pr:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Update the oldest waiting Dependabot branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          pr="$(
+            gh api "/repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" |
+              jq -c --arg repo "$GITHUB_REPOSITORY" '
+                [.[] |
+                  select(
+                    .user.login == "dependabot[bot]" and
+                    .base.ref == "main" and
+                    .head.repo.full_name == $repo and
+                    .auto_merge != null and
+                    .draft == false
+                  )
+                ] | sort_by(.created_at) | first // empty
+              '
+          )"
+
+          if [ -z "$pr" ]; then
+            echo "No queued Dependabot pull request."
+            exit 0
+          fi
+
+          number="$(jq -r '.number' <<<"$pr")"
+          branch="$(jq -r '.head.ref' <<<"$pr")"
+          head_sha="$(jq -r '.head.sha' <<<"$pr")"
+          behind="$(
+            gh api "/repos/${GITHUB_REPOSITORY}/compare/main...${head_sha}" --jq '.behind_by'
+          )"
+
+          if [ "$behind" -eq 0 ]; then
+            echo "PR #$number is current with main; waiting for checks or auto-merge."
+            exit 0
+          fi
+
+          echo "Updating PR #$number ($branch), $behind commit(s) behind main."
+          gh api -X PUT "/repos/${GITHUB_REPOSITORY}/pulls/${number}/update-branch" \
+            -f "expected_head_sha=$head_sha"
+
+          updated_sha=""
+          for attempt in {1..30}; do
+            current_sha="$(
+              gh api "/repos/${GITHUB_REPOSITORY}/pulls/${number}" --jq '.head.sha'
+            )"
+            if [ "$current_sha" != "$head_sha" ]; then
+              updated_sha="$current_sha"
+              break
+            fi
+            sleep 2
+          done
+
+          if [ -z "$updated_sha" ]; then
+            echo "Timed out waiting for GitHub to update PR #$number." >&2
+            exit 1
+          fi
+
+          remaining="$(
+            gh api "/repos/${GITHUB_REPOSITORY}/compare/main...${updated_sha}" --jq '.behind_by'
+          )"
+          if [ "$remaining" -ne 0 ]; then
+            echo "PR #$number is still behind main; retry next hour." >&2
+            exit 1
+          fi
+
+          # GITHUB_TOKEN updates do not reliably start regular PR checks.
+          # workflow_dispatch does, and Tests already accepts that event.
+          gh workflow run tests.yml --ref "$branch"
+          echo "Dispatched Tests for PR #$number at $updated_sha."

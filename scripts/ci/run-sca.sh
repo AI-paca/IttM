@@ -20,7 +20,8 @@ if [[ "$output" = /* || "$output" == *".."* ]]; then
 fi
 
 mkdir -p "$repo_root/$output" "$cache"
-find "$repo_root/$output" -maxdepth 1 -type f -name "*.json" ! -name "accepted-risk.json" -delete
+find "$repo_root/$output" -maxdepth 1 -type f \
+  \( \( -name "*.json" ! -name "accepted-risk.json" \) -o -name "*.txt" \) -delete
 
 docker_args=(
   --rm
